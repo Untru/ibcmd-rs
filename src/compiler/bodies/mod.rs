@@ -12,7 +12,13 @@ pub mod dcs;
 pub mod dynamic_list;
 pub mod form;
 pub mod form_chart;
-pub mod form_native;
+/// Writer for the managed-form item records a native 8.3.27 body stores.
+///
+/// The code is the `ibcmd-form-native` crate; this module keeps its
+/// crate-internal path `compiler::bodies::form_native` for the root.
+pub mod form_native {
+    pub(crate) use ibcmd_form_native::*;
+}
 pub mod form_planner;
 pub mod interface_assets;
 pub mod mxl;

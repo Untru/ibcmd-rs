@@ -1,17 +1,23 @@
 //! Writer for the managed-form item records a native 8.3.27 body stores.
 //!
-//! The base-free creator in `module_blob` writes the smallest record that
-//! names an item and leaves the platform to fill the rest; a body it produces
-//! is loadable but is not the body the platform would have stored. This module
-//! is the other direction: each function returns the record the platform
-//! itself writes, byte for byte, so a loaded configuration exports back to the
-//! tree it came from.
+//! The base-free creator in the root crate's `module_blob` writes the
+//! smallest record that names an item and leaves the platform to fill the
+//! rest; a body it produces is loadable but is not the body the platform would
+//! have stored. This crate is the other direction: each function returns the
+//! record the platform itself writes, byte for byte, so a loaded
+//! configuration exports back to the tree it came from.
 //!
 //! Every record here is measured against bodies read out of
 //! `ibcmd_rs_uha_8327_parity2_20260920` with `mssql-dump-config --inflate`,
 //! and the tests below hold the exact strings those bodies carry. A property
-//! this module cannot yet write is not defaulted: the caller keeps refusing
+//! this crate cannot yet write is not defaulted: the caller keeps refusing
 //! the item, which is what the blocker model already does.
+//!
+//! The root crate reaches it as `compiler::bodies::form_native`: the form
+//! packer in `module_blob`, `compiler::bodies::form_chart`, `metadata_model`
+//! and `load::seed` use it. The crate depends on nothing in the root, so a
+//! root rebuild reuses it, and a clean build compiles it beside the root's
+//! other dependencies.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -21,7 +27,7 @@ use std::sync::Arc;
 /// One uuid across all 3 971 item records of the four ERP УХ 3.3.3.3 form
 /// bodies read for this module, from four unrelated families. Form attributes
 /// live in a different one, which is why this is an item-only constant.
-pub(crate) const FORM_ITEM_NAMESPACE_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
+pub const FORM_ITEM_NAMESPACE_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
 
 /// The palette reference every default appearance slot carries.
 const DEFAULT_APPEARANCE_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
@@ -31,7 +37,7 @@ const DEFAULT_APPEARANCE_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
 /// One uuid per record wrapper, with no overlap, over the child lists of the
 /// first 400 ERP УХ form bodies: 2 353 fields, 2 198 groups, 1 309 buttons,
 /// 677 decorations, 180 tables and 8 search additions.
-pub(crate) const fn child_kind_uuid(wrapper: u8) -> Option<&'static str> {
+pub const fn child_kind_uuid(wrapper: u8) -> Option<&'static str> {
     Some(match wrapper {
         37 => "77ffcc29-7f2d-4223-b22f-19666e7250ba",
         22 => "cd5394d0-7dda-4b56-8927-93ccbe967a01",
@@ -63,7 +69,7 @@ fn quoted(value: &str) -> String {
 ///
 /// A spelling this cannot place is refused rather than defaulted: writing the
 /// wrong colour would load a body the export reads back differently.
-pub(crate) fn format_native_color(
+pub fn format_native_color(
     value: Option<&str>,
     style_item_uuid: impl FnOnce(&str) -> Option<String>,
 ) -> Option<String> {
@@ -115,7 +121,7 @@ pub(crate) fn format_native_color(
 }
 
 /// The platform 8.5 palette, by the index a colour tuple stores.
-pub(crate) const PALETTE_COLORS_8_5_1: &[(&str, u8)] = &[
+pub const PALETTE_COLORS_8_5_1: &[(&str, u8)] = &[
     ("FirstBrand", 0),
     ("SecondBrand", 1),
     ("Red", 2),
@@ -129,7 +135,7 @@ pub(crate) const PALETTE_COLORS_8_5_1: &[(&str, u8)] = &[
 
 /// The codes the platform's own style colours carry, as the corpus spells
 /// them.
-pub(crate) const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
+pub const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
     ("AccentColor", "-46"),
     ("ActivityColor", "-44"),
     ("AuxiliaryNavigationColor", "-43"),
@@ -166,7 +172,7 @@ pub(crate) const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
 /// `Num 0`..`Num 9` 96..105, `Num *` 106, `Num +` 107, `Num -` 109, `Num .`
 /// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Any other key is
 /// refused.
-pub(crate) fn format_native_shortcut(text: &str) -> Option<String> {
+pub fn format_native_shortcut(text: &str) -> Option<String> {
     let text = text.trim();
     // `Num +` ends in the separator itself, so it is split off first.
     let (modifiers, key) = if let Some(prefix) = text.strip_suffix("Num +") {
@@ -227,7 +233,7 @@ pub(crate) fn format_native_shortcut(text: &str) -> Option<String> {
 
 /// The web colours, with the index a body stores: the ones measured on form
 /// items, and the rest of the table the exporter reads the index back with.
-pub(crate) const WEB_COLOR_CODES: &[(&str, &str)] = &[
+pub const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("AliceBlue", "1"),
     ("Beige", "6"),
     ("Black", "8"),
@@ -314,7 +320,7 @@ pub(crate) const WEB_COLOR_CODES: &[(&str, &str)] = &[
 
 /// The Windows system colours the corpus names, with the index a body stores
 /// under `{3,1,{n}}` -- the ones the form exporter reads back.
-pub(crate) const WINDOWS_COLOR_CODES: &[(&str, &str)] = &[
+pub const WINDOWS_COLOR_CODES: &[(&str, &str)] = &[
     ("ActiveTitleBar", "2"),
     ("ButtonDarkShadow", "21"),
     ("ButtonText", "18"),
@@ -329,12 +335,12 @@ pub(crate) const WINDOWS_COLOR_CODES: &[(&str, &str)] = &[
 
 /// One `<Event>` of an item, as the source names it.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct NativeEvent<'a> {
+pub struct NativeEvent<'a> {
     /// The event's name, such as `OnChange`; a form the platform could not
     /// spell writes the event's uuid here instead, and it stands for itself.
-    pub(crate) name: &'a str,
+    pub name: &'a str,
     /// The procedure the event calls.
-    pub(crate) handler: &'a str,
+    pub handler: &'a str,
 }
 
 /// The event bindings of one owner, in the shape a body stores them.
@@ -357,7 +363,7 @@ pub(crate) struct NativeEvent<'a> {
 /// is what picks the form extension declaring it -- `BeforeWrite` of a document
 /// form and of every other form are two different events. A name the table does
 /// not hold is refused rather than guessed.
-pub(crate) fn format_native_events(
+pub fn format_native_events(
     owner_tag: &str,
     main_attribute_class: &str,
     events: &[NativeEvent<'_>],
@@ -1519,7 +1525,7 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
 /// Only the first two are written. The third is refused rather than guessed:
 /// 33 records of that corpus carry it, which is not enough to say what the
 /// mask counts.
-pub(crate) fn format_native_font(
+pub fn format_native_font(
     attributes: &BTreeMap<String, String>,
     style_item_uuid: impl FnOnce(&str) -> Option<String>,
 ) -> Option<String> {
@@ -1689,7 +1695,7 @@ fn native_font_flag(value: &str) -> Option<bool> {
 /// The five platform fonts a `style:` reference can name, which no
 /// `StyleItems\<name>.xml` declares. Their codes are a table of their own --
 /// none of them collides with [`PLATFORM_STYLE_COLOR_CODES`].
-pub(crate) const PLATFORM_STYLE_FONT_CODES: &[(&str, &str)] = &[
+pub const PLATFORM_STYLE_FONT_CODES: &[(&str, &str)] = &[
     ("ExtraLargeTextFont", "-33"),
     ("LargeTextFont", "-32"),
     ("NormalTextFont", "-31"),
@@ -1722,7 +1728,7 @@ pub(crate) const PLATFORM_STYLE_FONT_CODES: &[(&str, &str)] = &[
 /// ([`native_display_importance`]); the empty tooltip writes `0`. Монитор's
 /// `Catalogs/Запросы/Forms/ФормаАнализа` carries a `VeryHigh` on a tooltip
 /// with nothing else, which the constant used to drop.
-pub(crate) fn format_extended_tooltip(id: &str, name: &str, display_importance: &str) -> String {
+pub fn format_extended_tooltip(id: &str, name: &str, display_importance: &str) -> String {
     format!(
         "{{12,{{{id},{ns}}},0,0,0,0,{name},{{1,0}},{{1,0}},1,0,0,2,2,{{3,4,{{0}}}},\
          {{7,3,0,1,100}},{{0,0,0}},1,{{5,0,0,3,0,{{0,1,0}},{{3,4,{{0}}}},{{3,4,{{0}}}},\
@@ -1736,7 +1742,7 @@ pub(crate) fn format_extended_tooltip(id: &str, name: &str, display_importance: 
 
 /// The `{22,…}` record of a field's `<ContextMenu>`, as the platform stores it
 /// when the menu carries nothing but its own name.
-pub(crate) fn format_field_context_menu(
+pub fn format_field_context_menu(
     id: &str,
     name: &str,
     autofill: Option<bool>,
@@ -1779,96 +1785,96 @@ pub(crate) fn format_field_context_menu(
 /// the members that name a configuration object come from the caller -- the
 /// id, the name, the titles, the data paths, the pictures, the colours, the
 /// font, the payload, the events, the context menu and the extended tooltip.
-pub(crate) struct NativeFieldItem<'a> {
-    pub(crate) id: &'a str,
+pub struct NativeFieldItem<'a> {
+    pub id: &'a str,
     /// Which field this is -- see [`native_field_kind`].
-    pub(crate) kind: u8,
+    pub kind: u8,
     /// The functional-options block, when the field restricts itself.
-    pub(crate) functional_options: Option<&'a str>,
-    pub(crate) name: &'a str,
+    pub functional_options: Option<&'a str>,
+    pub name: &'a str,
     /// `<TitleLocation>`: `None`, `Left`, `Top`, `Right` or `Bottom`.
-    pub(crate) title_location: Option<&'a str>,
+    pub title_location: Option<&'a str>,
     /// `<TitleHeight>`.
-    pub(crate) title_height: Option<&'a str>,
+    pub title_height: Option<&'a str>,
     /// Already formatted -- the title and the tooltip title.
-    pub(crate) title: &'a str,
-    pub(crate) tooltip_title: &'a str,
+    pub title: &'a str,
+    pub tooltip_title: &'a str,
     /// The binding the item's `<DataPath>` resolves to, already formatted --
     /// `{1,{2}}` for a form attribute, `{2,{1},{3}}` for a dynamic-list column.
-    pub(crate) data_path: &'a str,
+    pub data_path: &'a str,
     /// `<FooterDataPath>`, `{0}` when the field has none.
-    pub(crate) footer_data_path: &'a str,
-    pub(crate) enabled: bool,
-    pub(crate) read_only: bool,
+    pub footer_data_path: &'a str,
+    pub enabled: bool,
+    pub read_only: bool,
     /// `<SkipOnInput>`: 2 when the field names neither value.
-    pub(crate) skip_on_input: Option<bool>,
-    pub(crate) default_item: bool,
+    pub skip_on_input: Option<bool>,
+    pub default_item: bool,
     /// `<WarningOnEditRepresentation>`: `Show` or `DontShow`.
-    pub(crate) warning_on_edit: Option<&'a str>,
+    pub warning_on_edit: Option<&'a str>,
     /// The header's and the footer's titles, already formatted.
-    pub(crate) header_title: &'a str,
-    pub(crate) footer_title: &'a str,
-    pub(crate) show_in_header: bool,
-    pub(crate) show_in_footer: bool,
-    pub(crate) cell_hyperlink: bool,
+    pub header_title: &'a str,
+    pub footer_title: &'a str,
+    pub show_in_header: bool,
+    pub show_in_footer: bool,
+    pub cell_hyperlink: bool,
     /// `<HorizontalAlign>`, `<HeaderHorizontalAlign>`, `<FooterHorizontalAlign>`
     /// and `<VerticalAlign>`.
-    pub(crate) horizontal_align: Option<&'a str>,
-    pub(crate) header_horizontal_align: Option<&'a str>,
-    pub(crate) footer_horizontal_align: Option<&'a str>,
-    pub(crate) vertical_align: Option<&'a str>,
+    pub horizontal_align: Option<&'a str>,
+    pub header_horizontal_align: Option<&'a str>,
+    pub footer_horizontal_align: Option<&'a str>,
+    pub vertical_align: Option<&'a str>,
     /// `<EditMode>`: `Directly`, `EnterOnInput` or `Enter`.
-    pub(crate) edit_mode: Option<&'a str>,
-    pub(crate) auto_cell_height: bool,
+    pub edit_mode: Option<&'a str>,
+    pub auto_cell_height: bool,
     /// The header's and footer's pictures, already formatted.
-    pub(crate) header_picture: &'a str,
-    pub(crate) footer_picture: &'a str,
+    pub header_picture: &'a str,
+    pub footer_picture: &'a str,
     /// The five appearance blocks and two fonts the field carries, already
     /// formatted -- see [`format_native_color`] and [`format_native_font`] --
     /// and last the block that closes the field's formats, `{0}` when it
     /// names none.
-    pub(crate) appearance: [&'a str; 7],
+    pub appearance: [&'a str; 7],
     /// The picture index tuple, `{0,0,0}` when the field names none.
-    pub(crate) picture_index: &'a str,
+    pub picture_index: &'a str,
     /// The tuple that carries this kind's own properties: `{11,…}` for a
     /// label, `{36,…}` for an input, `{13,…}` for a spreadsheet document,
     /// `{10,…}` for a picture, and so on -- one structure per kind.
-    pub(crate) payload: &'a str,
+    pub payload: &'a str,
     /// The field's own event bindings -- see [`format_native_events`].
-    pub(crate) events: &'a str,
-    pub(crate) context_menu: &'a str,
+    pub events: &'a str,
+    pub context_menu: &'a str,
     /// `<Visible>`, on unless the field turns it off.
-    pub(crate) visible: bool,
+    pub visible: bool,
     /// The two format patterns and the two format strings.
-    pub(crate) formats: [&'a str; 2],
-    pub(crate) format_strings: [&'a str; 2],
+    pub formats: [&'a str; 2],
+    pub format_strings: [&'a str; 2],
     /// `<FixingInTable>`: `Left` or `Right`.
-    pub(crate) fixing_in_table: Option<&'a str>,
+    pub fixing_in_table: Option<&'a str>,
     /// `<ToolTipRepresentation>`.
-    pub(crate) tooltip_representation: Option<&'a str>,
-    pub(crate) extended_tooltip: &'a str,
+    pub tooltip_representation: Option<&'a str>,
+    pub extended_tooltip: &'a str,
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
-    pub(crate) group_horizontal_align: Option<&'a str>,
-    pub(crate) group_vertical_align: Option<&'a str>,
+    pub group_horizontal_align: Option<&'a str>,
+    pub group_vertical_align: Option<&'a str>,
     /// Member 55, see [`native_display_importance`].
-    pub(crate) display_importance: &'a str,
+    pub display_importance: &'a str,
     /// The additions a field carries in its tail, `<n>` then the records:
     /// `0` for every field but a PDF document's, whose `<ViewStatusAddition>`
     /// is `1,{…}` (8 of 8).
-    pub(crate) additions: &'a str,
+    pub additions: &'a str,
     /// Member 58, the count of the items nested behind the shared layout,
     /// then the items: `0` for every field but a Gantt chart's, whose
     /// `<Table>` is `1,{55,…}` (form_schema.rs: 17 of the 20 stand items
     /// carry one, and slot 58 counts it on all 366 field records of their
     /// bodies).
-    pub(crate) nested_items: &'a str,
+    pub nested_items: &'a str,
 }
 
 /// The `DisplayImportance` XML attribute an item may carry, as every item
 /// record stores it: absent 0, `VeryHigh` 1, `High` 2, `Usual` 3, `Low` 4,
 /// `VeryLow` 5 -- pure over the button, field, decoration and group records
 /// of BSP. A spelling outside those is refused.
-pub(crate) fn native_display_importance(value: Option<&str>) -> Option<&'static str> {
+pub fn native_display_importance(value: Option<&str>) -> Option<&'static str> {
     match value {
         None => Some("0"),
         Some("VeryHigh") => Some("1"),
@@ -1943,7 +1949,7 @@ impl Default for NativeFieldItem<'_> {
 /// correspondence is exact over the 122 767 field records of ERP УХ: every
 /// `LabelField` writes 1, every `InputField` 2, and so on, with no kind
 /// sharing a number.
-pub(crate) fn native_field_kind(tag: &str) -> Option<u8> {
+pub fn native_field_kind(tag: &str) -> Option<u8> {
     Some(match tag {
         "LabelField" => 1,
         "InputField" => 2,
@@ -1976,7 +1982,7 @@ fn native_tristate(value: Option<bool>) -> &'static str {
 }
 
 /// The `{37,…}` record of a field.
-pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
+pub fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
     let options = match item.functional_options {
         Some(block) => format!("1,{block}"),
         None => "0".to_string(),
@@ -2115,7 +2121,7 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
 /// The `{11,…}` payload of a label or input field that carries no appearance
 /// of its own, with the one slot that separates a field the user edits from
 /// one that only shows.
-pub(crate) fn format_plain_field_payload(editable: bool) -> String {
+pub fn format_plain_field_payload(editable: bool) -> String {
     format_label_payload(&NativeLabelPayload::plain(editable))
 }
 
@@ -2126,49 +2132,49 @@ pub(crate) fn format_plain_field_payload(editable: bool) -> String {
 /// copies the rest reproduces **all 37 078** label payloads of every ERP УХ
 /// form body exactly, with no record left over. The other members are the
 /// appearance blocks and the event bindings, which are shapes of their own.
-pub(crate) struct NativeLabelPayload<'a> {
+pub struct NativeLabelPayload<'a> {
     /// Slot 1, `0` when the item names no width.
-    pub(crate) width: &'a str,
+    pub width: &'a str,
     /// Slot 2, `0` when it names no height.
-    pub(crate) height: &'a str,
+    pub height: &'a str,
     /// Slot 3: `false` -> 0, `true` -> 1, absent -> 2.
-    pub(crate) horizontal_stretch: Option<bool>,
+    pub horizontal_stretch: Option<bool>,
     /// Slot 4, `<VerticalStretch>`, read the same way.
-    pub(crate) vertical_stretch: Option<bool>,
+    pub vertical_stretch: Option<bool>,
     /// Slot 5, `<MarkNegatives>`, read the same way.
-    pub(crate) mark_negatives: Option<bool>,
+    pub mark_negatives: Option<bool>,
     /// Slot 6, `{1,0}` when the item names no format.
-    pub(crate) format: &'a str,
+    pub format: &'a str,
     /// Slot 7 is `<Hiperlink>` -- the corpus spells it with one `p` -- on when
     /// the item says so and off otherwise. The partition test named it over
     /// all 37 005 label payloads; it was a guess before.
-    pub(crate) hyperlink: bool,
+    pub hyperlink: bool,
     /// Slot 8, the text colour.
-    pub(crate) text_color: &'a str,
+    pub text_color: &'a str,
     /// Slot 9, the background colour.
-    pub(crate) back_color: &'a str,
+    pub back_color: &'a str,
     /// Slot 10, the font.
-    pub(crate) font: &'a str,
+    pub font: &'a str,
     /// Slot 11, `<PasswordMode>`, tri-state like the stretches.
-    pub(crate) password_mode: Option<bool>,
+    pub password_mode: Option<bool>,
     /// Slot 12, the item's own event bindings.
-    pub(crate) events: &'a str,
+    pub events: &'a str,
     /// Slot 13, `<BorderColor>`.
-    pub(crate) border_color: &'a str,
+    pub border_color: &'a str,
     /// Slot 14, the `<Border>`.
-    pub(crate) border: &'a str,
+    pub border: &'a str,
     /// Slot 15: `0` exactly when the item says `AutoMaxWidth` is false.
-    pub(crate) auto_max_width: bool,
+    pub auto_max_width: bool,
     /// Slot 16, `0` when the item names no maximum width.
-    pub(crate) max_width: &'a str,
+    pub max_width: &'a str,
     /// Slot 18 and slot 19, the height's pair of the two above.
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: &'a str,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
 }
 
 impl NativeLabelPayload<'_> {
     /// What a label that names no property of its own carries.
-    pub(crate) const fn plain(hyperlink: bool) -> Self {
+    pub const fn plain(hyperlink: bool) -> Self {
         Self {
             width: "0",
             height: "0",
@@ -2192,7 +2198,7 @@ impl NativeLabelPayload<'_> {
     }
 }
 
-pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
+pub fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
     let tristate = |value: Option<bool>| match value {
         Some(true) => "1",
         Some(false) => "0",
@@ -2232,7 +2238,8 @@ pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
 /// rest is constant over the 5 such fields of both corpora. Member 1 is
 /// `<MultipleValuesHyperlink>` (`true` 1, else 2), member 5 `<MultipleValuesFont>`
 /// and member 7 `<MultipleValuesBackColor>` (exporter reads in form_body.rs).
-pub(crate) fn format_input_drop_list_settings(
+#[allow(clippy::too_many_arguments)]
+pub fn format_input_drop_list_settings(
     allow_empty_multiple_values: bool,
     show_check_boxes: Option<bool>,
     value_path: &str,
@@ -2261,7 +2268,7 @@ pub(crate) fn format_input_drop_list_settings(
 /// 1, `<Edit>` 1 unless `false`, then the events, `<AutoMaxWidth>` (slot 7 of
 /// the exporter's `FORM_DOCUMENT_FIELD_GEOMETRY` row for the kind: `1`
 /// unless the field says `false`) and the constants.
-pub(crate) fn format_graphical_schema_payload(
+pub fn format_graphical_schema_payload(
     width: &str,
     height: &str,
     output: Option<&str>,
@@ -2286,7 +2293,7 @@ pub(crate) fn format_graphical_schema_payload(
 /// 3.0 planner fields), the independent `<EnableStartDrag>` and `<EnableDrag>`
 /// flags (`0` unless `true`), the events and three constants. ServiceDesk's
 /// Kanban planner stores both flags as 1; the ordinary corpus leaves both off.
-pub(crate) fn format_planner_payload(
+pub fn format_planner_payload(
     width: &str,
     height: &str,
     enable_start_drag: bool,
@@ -2301,7 +2308,7 @@ pub(crate) fn format_planner_payload(
 }
 
 /// The `{1,…}` payload of a `<ChartField>` (rt-fields2.md §3, 9 of 9).
-pub(crate) fn format_chart_payload(
+pub fn format_chart_payload(
     width: &str,
     height: &str,
     horizontal_stretch: bool,
@@ -2322,7 +2329,7 @@ pub(crate) fn format_chart_payload(
 /// (`form_schema::FormSpecialFieldSchema::gantt_dimension` and
 /// `gantt_stretch` read the first four; 18 of 18 ERP УХ records spell the
 /// bag at revision 3).
-pub(crate) fn format_gantt_chart_payload(
+pub fn format_gantt_chart_payload(
     width: &str,
     height: &str,
     horizontal_stretch: bool,
@@ -2343,7 +2350,7 @@ pub(crate) fn format_gantt_chart_payload(
 
 /// The `{1,…}` payload of a `<PDFDocumentField>` (rt-fields2.md §4, 8 of 8):
 /// only the size varies.
-pub(crate) fn format_pdf_document_payload(width: &str, height: &str) -> String {
+pub fn format_pdf_document_payload(width: &str, height: &str) -> String {
     format!("{{1,{width},{height},{{3,4,{{0}}}},0,{{0,1,0}},1,0,0,1,0,1,1,0}}")
 }
 
@@ -2355,128 +2362,128 @@ pub(crate) fn format_pdf_document_payload(width: &str, height: &str) -> String {
 /// exactly, and the three it does not are a mask that carries a `;`, which the
 /// measurement's own property separator truncated -- not a rule this writer
 /// gets wrong.
-pub(crate) struct NativeInputPayload<'a> {
+pub struct NativeInputPayload<'a> {
     /// Slot 2, `0` when the item names no width.
-    pub(crate) width: &'a str,
+    pub width: &'a str,
     /// Slot 3, `0` when it names no height.
-    pub(crate) height: &'a str,
+    pub height: &'a str,
     /// Slot 4: `false` -> 0, `true` -> 1, absent -> 2.
-    pub(crate) horizontal_stretch: Option<bool>,
+    pub horizontal_stretch: Option<bool>,
     /// Slot 5, the same three ways for `VerticalStretch`.
-    pub(crate) vertical_stretch: Option<bool>,
+    pub vertical_stretch: Option<bool>,
     /// Slot 6, `<Wrap>`, on unless the item turns it off.
-    pub(crate) wrap: bool,
+    pub wrap: bool,
     /// Slots 7 to 15, each a tri-state read the same way as the stretches:
     /// `<PasswordMode>`, `<MultiLine>`, `<ExtendedEdit>`, `<MarkNegatives>`,
     /// `<ChoiceListButton>`, `<ChoiceButton>`, `<ClearButton>`,
     /// `<SpinButton>` and `<OpenButton>`.
-    pub(crate) password_mode: Option<bool>,
-    pub(crate) multi_line: Option<bool>,
-    pub(crate) extended_edit: Option<bool>,
-    pub(crate) mark_negatives: Option<bool>,
-    pub(crate) choice_list_button: Option<bool>,
-    pub(crate) choice_button: Option<bool>,
-    pub(crate) clear_button: Option<bool>,
-    pub(crate) spin_button: Option<bool>,
-    pub(crate) open_button: Option<bool>,
+    pub password_mode: Option<bool>,
+    pub multi_line: Option<bool>,
+    pub extended_edit: Option<bool>,
+    pub mark_negatives: Option<bool>,
+    pub choice_list_button: Option<bool>,
+    pub choice_button: Option<bool>,
+    pub clear_button: Option<bool>,
+    pub spin_button: Option<bool>,
+    pub open_button: Option<bool>,
     /// Slots 16 and 17, `<MinValue>` and `<MaxValue>` as typed values,
     /// `{"U"}` when the item names neither.
-    pub(crate) min_value: &'a str,
-    pub(crate) max_value: &'a str,
+    pub min_value: &'a str,
+    pub max_value: &'a str,
     /// Slot 19, `<ListChoiceMode>`.
-    pub(crate) list_choice_mode: bool,
+    pub list_choice_mode: bool,
     /// Slot 20, the item's picture.
-    pub(crate) picture: &'a str,
+    pub picture: &'a str,
     /// Slots 21 and 22, `<ChoiceListHeight>` and `<DropListWidth>`.
-    pub(crate) choice_list_height: &'a str,
-    pub(crate) drop_list_width: &'a str,
+    pub choice_list_height: &'a str,
+    pub drop_list_width: &'a str,
     /// Slot 23, `<QuickChoice>`.
-    pub(crate) quick_choice: Option<bool>,
+    pub quick_choice: Option<bool>,
     /// Slot 24, `<ChoiceFoldersAndItems>`: `Items` 0, `Folders` 1,
     /// `FoldersAndItems` 2, and 3 when the item names none.
-    pub(crate) choice_folders_and_items: Option<&'a str>,
+    pub choice_folders_and_items: Option<&'a str>,
     /// Slot 25, the uuid of the `<ChoiceForm>`, which only the configuration
     /// can give.
-    pub(crate) choice_form: &'a str,
+    pub choice_form: &'a str,
     /// Slot 28, `<AutoChoiceIncomplete>`.
-    pub(crate) auto_choice_incomplete: Option<bool>,
+    pub auto_choice_incomplete: Option<bool>,
     /// Slot 31, `<AutoMarkIncomplete>`.
-    pub(crate) auto_mark_incomplete: Option<bool>,
+    pub auto_mark_incomplete: Option<bool>,
     /// Slot 32, `<ChooseType>`, on unless the item turns it off.
-    pub(crate) choose_type: bool,
+    pub choose_type: bool,
     /// Slot 33, `<IncompleteChoiceMode>`: `OnActivate` 1.
-    pub(crate) incomplete_choice_mode: Option<&'a str>,
+    pub incomplete_choice_mode: Option<&'a str>,
     /// Slot 41, `<TextEdit>`, on unless the item turns it off.
-    pub(crate) text_edit: bool,
+    pub text_edit: bool,
     /// Slot 43, `<EditTextUpdate>`: `DontUse` 1, `OnValueChange` 2,
     /// `Always` 3.
-    pub(crate) edit_text_update: Option<&'a str>,
+    pub edit_text_update: Option<&'a str>,
     /// Slot 44, `<InputHint>`, a localized string, `{1,0}` by default.
-    pub(crate) input_hint: &'a str,
+    pub input_hint: &'a str,
     /// Slot 1, `<ChoiceList>`, `{3,0}` by default.
-    pub(crate) choice_list: &'a str,
+    pub choice_list: &'a str,
     /// Slots 26 and 64, `<ChoiceParameterLinks>`, `{5006,0}` and `{5007,0}`.
-    pub(crate) choice_parameter_links: &'a str,
-    pub(crate) choice_parameter_links_again: &'a str,
+    pub choice_parameter_links: &'a str,
+    pub choice_parameter_links_again: &'a str,
     /// Slot 42, `<TypeLink>`, `{3,0,0}` by default.
-    pub(crate) type_link: &'a str,
+    pub type_link: &'a str,
     /// Slot 27, `<ChoiceParameters>`, `{0,0}` by default.
-    pub(crate) choice_parameters: &'a str,
+    pub choice_parameters: &'a str,
     /// Slot 34, `<AvailableTypes>` as a type pattern, `{"Pattern"}` by default.
-    pub(crate) available_types: &'a str,
+    pub available_types: &'a str,
     /// Slots 55 to 60: `<AutoShowClearButtonMode>`, `<AutoShowOpenButtonMode>`,
     /// `<AutoCorrectionOnTextInput>`, `<SpellCheckingOnTextInput>`, a constant,
     /// `<SpecialTextInputMode>` -- already coded.
-    pub(crate) text_input_tail: [&'a str; 8],
+    pub text_input_tail: [&'a str; 8],
     /// Slot 45, `<CreateButton>`.
-    pub(crate) create_button: Option<bool>,
+    pub create_button: Option<bool>,
     /// Slot 46, `<ChoiceButtonRepresentation>`: `ShowInDropList` 1,
     /// `ShowInDropListAndInInputField` 2, `ShowInInputField` 3.
-    pub(crate) choice_button_representation: Option<&'a str>,
+    pub choice_button_representation: Option<&'a str>,
     /// Slot 47, `<DropListButton>`.
-    pub(crate) drop_list_button: Option<bool>,
+    pub drop_list_button: Option<bool>,
     /// Slot 48, `<ChoiceHistoryOnInput>`: `DontUse` 1.
-    pub(crate) choice_history_on_input: Option<&'a str>,
+    pub choice_history_on_input: Option<&'a str>,
     /// Slots 52, 53 and 54: `<AutoMaxHeight>`, `<MaxHeight>` and
     /// `<HeightControlVariant>`.
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: &'a str,
-    pub(crate) height_control_variant: Option<&'a str>,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
+    pub height_control_variant: Option<&'a str>,
     /// Slot 35, `<TypeDomainEnabled>`: absent 1, `false` 0. A bare literal
     /// until now, and the corpus contradicts it on 25 records.
-    pub(crate) type_domain_enabled: bool,
+    pub type_domain_enabled: bool,
     /// Slot 65, `<ExtendedEditMultipleValues>`: absent 0, `true` 1. The same,
     /// on 3 354.
-    pub(crate) extended_edit_multiple_values: bool,
+    pub extended_edit_multiple_values: bool,
     /// Slot 62, the drop-list settings: `{0}` unless the item names
     /// `<ShowCheckBoxesInDropList>` or a multiple-value data path -- see
     /// [`format_input_drop_list_settings`].
-    pub(crate) drop_list_settings: &'a str,
+    pub drop_list_settings: &'a str,
     /// Slot 18, the input mask, `""` when the item names none.
-    pub(crate) mask: &'a str,
+    pub mask: &'a str,
     /// Slot 49: `0` exactly when the item says `AutoMaxWidth` is false.
-    pub(crate) auto_max_width: bool,
+    pub auto_max_width: bool,
     /// Slot 50, `0` when the item names no maximum width.
-    pub(crate) max_width: &'a str,
+    pub max_width: &'a str,
     /// Slot 29, the format, `{1,0}` by default.
-    pub(crate) format: &'a str,
+    pub format: &'a str,
     /// Slot 30, the edit format, `{1,0}` by default.
-    pub(crate) edit_format: &'a str,
+    pub edit_format: &'a str,
     /// Slot 36, the item's own event bindings.
-    pub(crate) events: &'a str,
+    pub events: &'a str,
     /// Slots 37, 38 and 39: the text colour, the background colour and the
     /// border, `{3,4,{0}}` by default.
-    pub(crate) text_color: &'a str,
-    pub(crate) back_color: &'a str,
-    pub(crate) border_color: &'a str,
+    pub text_color: &'a str,
+    pub back_color: &'a str,
+    pub border_color: &'a str,
     /// Slot 40, the font.
-    pub(crate) font: &'a str,
+    pub font: &'a str,
 }
 
 impl NativeInputPayload<'_> {
     /// What an input field that names no property of its own carries -- the
     /// payload 24 361 of the corpus's records carry unchanged.
-    pub(crate) const fn plain() -> Self {
+    pub const fn plain() -> Self {
         Self {
             width: "0",
             height: "0",
@@ -2539,7 +2546,7 @@ impl NativeInputPayload<'_> {
     }
 }
 
-pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<String> {
+pub fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<String> {
     let tristate = |value: Option<bool>| match value {
         Some(true) => "1",
         Some(false) => "0",
@@ -2655,32 +2662,32 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
 /// 10 385 check boxes of ERP УХ. `<CheckBoxType>` is written twice: slot 4
 /// tells `CheckBox` and `Tumbler` apart, and slot 12 also tells `Switcher`
 /// from `Auto`.
-pub(crate) struct NativeCheckBoxPayload<'a> {
+pub struct NativeCheckBoxPayload<'a> {
     /// Slot 1, `<ThreeState>`.
-    pub(crate) three_state: bool,
+    pub three_state: bool,
     /// Slots 4 and 12.
-    pub(crate) check_box_type: Option<&'a str>,
+    pub check_box_type: Option<&'a str>,
     /// Slot 2, the text colour.
-    pub(crate) text_color: &'a str,
+    pub text_color: &'a str,
     /// Slot 3, the background colour.
-    pub(crate) back_color: &'a str,
+    pub back_color: &'a str,
     /// Slot 5, the format.
-    pub(crate) format: &'a str,
+    pub format: &'a str,
     /// Slot 6, the border.
-    pub(crate) border_color: &'a str,
+    pub border_color: &'a str,
     /// Slot 7, the font.
-    pub(crate) font: &'a str,
+    pub font: &'a str,
     /// Slots 8, 9 and 10: `<ItemTitleHeight>`, `<ItemWidth>` and
     /// `<ItemHeight>`, 0 when the field names none.
-    pub(crate) item_title_height: &'a str,
-    pub(crate) item_width: &'a str,
-    pub(crate) item_height: &'a str,
+    pub item_title_height: &'a str,
+    pub item_width: &'a str,
+    pub item_height: &'a str,
     /// Slot 11, `<EqualItemsWidth>`: `false` 0, `true` 1, absent 2.
-    pub(crate) equal_items_width: Option<&'a str>,
+    pub equal_items_width: Option<&'a str>,
 }
 
 impl NativeCheckBoxPayload<'_> {
-    pub(crate) const fn plain() -> Self {
+    pub const fn plain() -> Self {
         Self {
             three_state: false,
             check_box_type: None,
@@ -2697,7 +2704,7 @@ impl NativeCheckBoxPayload<'_> {
     }
 }
 
-pub(crate) fn format_check_box_payload(payload: &NativeCheckBoxPayload<'_>) -> Option<String> {
+pub fn format_check_box_payload(payload: &NativeCheckBoxPayload<'_>) -> Option<String> {
     let kind = root_code(
         payload.check_box_type,
         &[
@@ -2741,30 +2748,30 @@ pub(crate) fn format_check_box_payload(payload: &NativeCheckBoxPayload<'_>) -> O
 ///
 /// Six of its twelve members carry an XML property, named by the partition
 /// test over all 2 282 radio buttons of ERP УХ.
-pub(crate) struct NativeRadioButtonPayload<'a> {
+pub struct NativeRadioButtonPayload<'a> {
     /// Slot 2, `<ColumnsCount>`, 0 when the field names none.
-    pub(crate) columns: &'a str,
+    pub columns: &'a str,
     /// Slot 7, `<RadioButtonType>`.
-    pub(crate) radio_button_type: Option<&'a str>,
+    pub radio_button_type: Option<&'a str>,
     /// Slot 1, the choice list the field offers.
-    pub(crate) choice_list: &'a str,
+    pub choice_list: &'a str,
     /// Slot 3, the text colour; slot 5, the background; slot 8, the border.
-    pub(crate) text_color: &'a str,
-    pub(crate) back_color: &'a str,
-    pub(crate) border_color: &'a str,
+    pub text_color: &'a str,
+    pub back_color: &'a str,
+    pub border_color: &'a str,
     /// Slot 4, the font.
-    pub(crate) font: &'a str,
+    pub font: &'a str,
     /// Slots 6, 9 and 10: `<ItemHeight>`, `<ItemTitleHeight>` and
     /// `<ItemWidth>`, 0 when the field names none.
-    pub(crate) item_height: &'a str,
-    pub(crate) item_title_height: &'a str,
-    pub(crate) item_width: &'a str,
+    pub item_height: &'a str,
+    pub item_title_height: &'a str,
+    pub item_width: &'a str,
     /// Slot 11, `<EqualColumnsWidth>`: `false` 0, `true` 1, absent 2.
-    pub(crate) equal_columns_width: Option<&'a str>,
+    pub equal_columns_width: Option<&'a str>,
 }
 
 impl NativeRadioButtonPayload<'_> {
-    pub(crate) const fn plain() -> Self {
+    pub const fn plain() -> Self {
         Self {
             columns: "0",
             radio_button_type: None,
@@ -2805,7 +2812,7 @@ const CHOICE_LIST_ACCOUNT_TYPE_UUID: &str = "872f7198-7083-4e3e-b57e-a2a9802c769
 /// and the picture is the same constant in every one. Absence is a pure
 /// partition: a field with no `<ChoiceList>` stores `{3,0}` in all 110
 /// records that lack one, and no record with a list stores it.
-pub(crate) fn format_native_choice_list(values: &[String]) -> String {
+pub fn format_native_choice_list(values: &[String]) -> String {
     if values.is_empty() {
         return "{3,0}".to_string();
     }
@@ -2824,7 +2831,7 @@ pub(crate) fn format_native_choice_list(values: &[String]) -> String {
 
 /// The literal a choice-list item stores, by the `xsi:type` of its inner
 /// `<Value>`.
-pub(crate) enum NativeChoiceListLiteral<'a> {
+pub enum NativeChoiceListLiteral<'a> {
     /// `xs:decimal` -- 2 280 items.
     Number(&'a str),
     /// `xs:string` -- 1 047 items.
@@ -2862,7 +2869,7 @@ impl NativeChoiceListLiteral<'_> {
 /// uuids are the owner's Ref `<xr:TypeId>` and the referenced value's id for
 /// a reference, and zero for a literal; the title is the item's **inner**
 /// `<Presentation>`, not its outer one.
-pub(crate) fn format_native_choice_list_value(
+pub fn format_native_choice_list_value(
     design_time_ref: bool,
     literal: &NativeChoiceListLiteral<'_>,
     type_id: &str,
@@ -2876,9 +2883,7 @@ pub(crate) fn format_native_choice_list_value(
     )
 }
 
-pub(crate) fn format_radio_button_payload(
-    payload: &NativeRadioButtonPayload<'_>,
-) -> Option<String> {
+pub fn format_radio_button_payload(payload: &NativeRadioButtonPayload<'_>) -> Option<String> {
     let kind = root_code(
         payload.radio_button_type,
         &[("Auto", "0"), ("RadioButtons", "1"), ("Tumbler", "2")],
@@ -2915,33 +2920,33 @@ pub(crate) fn format_radio_button_payload(
 /// are **two**-valued, not three: absent writes 1, the same as `true`, where a
 /// label's absent stretch writes 2. And `<FileDragMode>` is inverted the way
 /// the table tail's is -- 1 when the field names none, 0 for `AsFile`.
-pub(crate) struct NativePicturePayload<'a> {
-    pub(crate) width: &'a str,
-    pub(crate) height: &'a str,
-    pub(crate) horizontal_stretch: bool,
-    pub(crate) vertical_stretch: bool,
+pub struct NativePicturePayload<'a> {
+    pub width: &'a str,
+    pub height: &'a str,
+    pub horizontal_stretch: bool,
+    pub vertical_stretch: bool,
     /// `<PictureSize>`: `Stretch` 1, `Proportionally` 2, `AutoSize` 4,
     /// `AutoSizeIgnoreScale` 6, `ByFontSize` 7.
-    pub(crate) picture_size: Option<&'a str>,
-    pub(crate) hyperlink: bool,
-    pub(crate) auto_max_width: bool,
-    pub(crate) max_width: &'a str,
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: &'a str,
+    pub picture_size: Option<&'a str>,
+    pub hyperlink: bool,
+    pub auto_max_width: bool,
+    pub max_width: &'a str,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
     /// `<FileDragMode>`, of which only `AsFile` is ever stored.
-    pub(crate) file_drag_mode: Option<&'a str>,
+    pub file_drag_mode: Option<&'a str>,
     /// Slot 7, `<Zoomable>`, and slot 15, `<EnableDrag>`.
-    pub(crate) zoomable: bool,
-    pub(crate) enable_drag: bool,
+    pub zoomable: bool,
+    pub enable_drag: bool,
     /// Already formatted -- the picture, the title, the colours, the font,
     /// the border and the events.
-    pub(crate) picture: &'a str,
-    pub(crate) title: &'a str,
-    pub(crate) text_color: &'a str,
-    pub(crate) back_color: &'a str,
-    pub(crate) font: &'a str,
-    pub(crate) border: &'a str,
-    pub(crate) events: &'a str,
+    pub picture: &'a str,
+    pub title: &'a str,
+    pub text_color: &'a str,
+    pub back_color: &'a str,
+    pub font: &'a str,
+    pub border: &'a str,
+    pub events: &'a str,
 }
 
 impl Default for NativePicturePayload<'_> {
@@ -2971,7 +2976,7 @@ impl Default for NativePicturePayload<'_> {
     }
 }
 
-pub(crate) fn format_picture_payload(payload: &NativePicturePayload<'_>) -> Option<String> {
+pub fn format_picture_payload(payload: &NativePicturePayload<'_>) -> Option<String> {
     let size = root_code(
         payload.picture_size,
         &[
@@ -3018,51 +3023,51 @@ pub(crate) fn format_picture_payload(payload: &NativePicturePayload<'_>) -> Opti
 /// written twice under two codings: both scroll bars, where the later slot
 /// tells "names none" from `true`, and `<SelectionShowMode>`, where the later
 /// slot tells all four spellings apart.
-pub(crate) struct NativeSpreadsheetPayload<'a> {
+pub struct NativeSpreadsheetPayload<'a> {
     /// Slots 1 and 2, `<Width>` and `<Height>`, 50 and 10 by default.
-    pub(crate) width: &'a str,
-    pub(crate) height: &'a str,
+    pub width: &'a str,
+    pub height: &'a str,
     /// Slots 3 and 4, the two stretches, on unless the field turns them off.
-    pub(crate) horizontal_stretch: bool,
-    pub(crate) vertical_stretch: bool,
+    pub horizontal_stretch: bool,
+    pub vertical_stretch: bool,
     /// Slots 5 and 6, `<ShowGrid>` and `<ShowHeaders>`.
-    pub(crate) show_grid: bool,
-    pub(crate) show_headers: bool,
+    pub show_grid: bool,
+    pub show_headers: bool,
     /// Slots 7 and 28, and 8 and 29: the two scroll bars.
-    pub(crate) vertical_scroll_bar: Option<&'a str>,
-    pub(crate) horizontal_scroll_bar: Option<&'a str>,
+    pub vertical_scroll_bar: Option<&'a str>,
+    pub horizontal_scroll_bar: Option<&'a str>,
     /// Slot 10, `<Protection>`.
-    pub(crate) protection: bool,
+    pub protection: bool,
     /// Slots 11 and 30, `<SelectionShowMode>`.
-    pub(crate) selection_show_mode: Option<&'a str>,
+    pub selection_show_mode: Option<&'a str>,
     /// Slot 12, `<Output>`: `Enable` 1, `Disable` 2, absent 0.
-    pub(crate) output: Option<&'a str>,
+    pub output: Option<&'a str>,
     /// Slots 13 and 14, `<Edit>` and `<ShowGroups>`.
-    pub(crate) edit: bool,
-    pub(crate) show_groups: bool,
+    pub edit: bool,
+    pub show_groups: bool,
     /// Slot 15, the border colour.
-    pub(crate) border_color: &'a str,
+    pub border_color: &'a str,
     /// Slots 16 and 17, `<EnableStartDrag>` and `<EnableDrag>`.
-    pub(crate) enable_start_drag: bool,
-    pub(crate) enable_drag: bool,
+    pub enable_start_drag: bool,
+    pub enable_drag: bool,
     /// Slot 18, the field's events.
-    pub(crate) events: &'a str,
+    pub events: &'a str,
     /// Slot 19, `<ViewScalingMode>`: `Normal` 1, absent 0.
-    pub(crate) view_scaling_mode: Option<&'a str>,
+    pub view_scaling_mode: Option<&'a str>,
     /// Slots 20, 21, 23 and 24: the two maxima and their flags.
-    pub(crate) auto_max_width: bool,
-    pub(crate) max_width: &'a str,
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: &'a str,
+    pub auto_max_width: bool,
+    pub max_width: &'a str,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
     /// Slots 25 and 26, `<ShowCellNames>` and `<ShowRowAndColumnNames>`.
-    pub(crate) show_cell_names: bool,
-    pub(crate) show_row_and_column_names: bool,
+    pub show_cell_names: bool,
+    pub show_row_and_column_names: bool,
     /// Slot 31, `<DrawingSelectionShowMode>`: absent 2, `Show` 0 (1 of 1).
-    pub(crate) drawing_selection_show_mode: Option<&'a str>,
+    pub drawing_selection_show_mode: Option<&'a str>,
 }
 
 impl NativeSpreadsheetPayload<'_> {
-    pub(crate) const fn plain() -> Self {
+    pub const fn plain() -> Self {
         Self {
             width: "50",
             height: "10",
@@ -3093,7 +3098,7 @@ impl NativeSpreadsheetPayload<'_> {
     }
 }
 
-pub(crate) fn format_spreadsheet_payload(payload: &NativeSpreadsheetPayload<'_>) -> Option<String> {
+pub fn format_spreadsheet_payload(payload: &NativeSpreadsheetPayload<'_>) -> Option<String> {
     let bar = |value| root_code(value, &[("false", "0"), ("true", "1")], "1");
     let bar_tail = |value| root_code(value, &[("false", "0"), ("true", "1")], "2");
     let vertical = bar(payload.vertical_scroll_bar)?;
@@ -3156,12 +3161,7 @@ pub(crate) fn format_spreadsheet_payload(payload: &NativeSpreadsheetPayload<'_>)
 /// slots 1 and 2 in all three, with 50 and 10 the values a field that names
 /// neither carries. All 135, 94 and 47 records of the corpus are reproduced
 /// exactly, first time.
-pub(crate) fn format_document_payload(
-    wrapper: u8,
-    width: &str,
-    height: &str,
-    tail: &str,
-) -> String {
+pub fn format_document_payload(wrapper: u8, width: &str, height: &str, tail: &str) -> String {
     format!("{{{wrapper},{width},{height},{tail}}}")
 }
 
@@ -4768,7 +4768,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
 ///
 /// One key is not answered by this table: `(cfg:DynamicList, "Delete")` is
 /// two uuids, and the list's `<MainTable>` decides. See
-/// [`form_excluded_command_uuid`](crate::module_blob).
+/// `form_excluded_command_uuid` in the root crate's `module_blob`.
 const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("", "Cancel", "679b62d9-ff72-4329-bf3a-c0c32b311dd2"),
     ("", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
@@ -5587,7 +5587,7 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
 /// binding splits (rt-uuids.md §1): `Ungroup` on a settings-structure table
 /// (`….Settings`) is `23802256-…` and on a filter `82b88a24-…`; `Choose` on a
 /// table of available fields is `d77e5787-…` and elsewhere `8969c93a-…`.
-pub(crate) fn table_item_standard_command_uuid(
+pub fn table_item_standard_command_uuid(
     tag: &str,
     dynamic_list: bool,
     data_path: Option<&str>,
@@ -5609,7 +5609,7 @@ pub(crate) fn table_item_standard_command_uuid(
     item_standard_command_uuid(tag, dynamic_list, name)
 }
 
-pub(crate) fn item_standard_command_uuid(
+pub fn item_standard_command_uuid(
     tag: &str,
     dynamic_list: bool,
     name: &str,
@@ -5632,9 +5632,7 @@ pub(crate) fn item_standard_command_uuid(
 /// `Delete` is the direct-delete command.
 ///
 /// A kind outside those seven is unmeasured and gets no answer.
-pub(crate) fn dynamic_list_delete_command_uuid(
-    main_table_kind: Option<&str>,
-) -> Option<&'static str> {
+pub fn dynamic_list_delete_command_uuid(main_table_kind: Option<&str>) -> Option<&'static str> {
     match main_table_kind {
         Some("InformationRegister") => Some("1cc781aa-f32b-4dc7-996a-6c38c3deda5c"),
         None
@@ -5659,7 +5657,7 @@ pub(crate) fn dynamic_list_delete_command_uuid(
 /// mark stores `ec576e13-…` in 344 of 344.
 ///
 /// A kind outside those measured gets no answer.
-pub(crate) fn dynamic_list_item_delete_command_uuid(
+pub fn dynamic_list_item_delete_command_uuid(
     main_table_kind: Option<&str>,
 ) -> Option<&'static str> {
     match main_table_kind {
@@ -5679,7 +5677,7 @@ pub(crate) fn dynamic_list_item_delete_command_uuid(
 
 /// Whether any form's class stores a uuid for a standard command of this
 /// name, which is what tells a spelling the corpus knows from one it does not.
-pub(crate) fn is_form_standard_command(name: &str) -> bool {
+pub fn is_form_standard_command(name: &str) -> bool {
     FORM_STANDARD_COMMAND_UUIDS
         .iter()
         .any(|(_, command, _)| *command == name)
@@ -5692,10 +5690,7 @@ pub(crate) fn is_form_standard_command(name: &str) -> bool {
 /// class that does show the name stores one uuid for it -- `Write` is
 /// `fe558fde-…` on all nine classes that have it, and a `ConstantsSet` form's
 /// button stores the same. A name whose classes disagree gets no answer.
-pub(crate) fn form_standard_command_uuid(
-    main_attribute_class: &str,
-    name: &str,
-) -> Option<&'static str> {
+pub fn form_standard_command_uuid(main_attribute_class: &str, name: &str) -> Option<&'static str> {
     if let Some(uuid) = FORM_STANDARD_COMMAND_UUIDS
         .iter()
         .find_map(|(candidate, command, uuid)| {
@@ -5717,7 +5712,7 @@ pub(crate) fn form_standard_command_uuid(
 ///
 /// One shape across every such button of the bodies read for this module: only
 /// the id, the name, the command uuid and the tooltip differ.
-pub(crate) fn format_standard_command_button(
+pub fn format_standard_command_button(
     id: &str,
     name: &str,
     command_uuid: &str,
@@ -5742,7 +5737,7 @@ pub(crate) fn format_standard_command_button(
 /// inserted after the id -- the common `UserVisible` prefix the reader already
 /// normalises away. 49 of the 1 602 tooltip records read for this module carry
 /// it; the other 1 475 do not.
-pub(crate) fn format_visible_extended_tooltip(id: &str, name: &str) -> String {
+pub fn format_visible_extended_tooltip(id: &str, name: &str) -> String {
     format!(
         "{{12,{{{id},{ns}}},0,0,1,{{0,{{0,{{\"B\",1}},0}}}},0,{name},{{1,0}},{{1,0}},1,0,0,2,2,\
          {{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{5,0,0,3,0,{{0,1,0}},{{3,4,{{0}}}},\
@@ -5755,7 +5750,7 @@ pub(crate) fn format_visible_extended_tooltip(id: &str, name: &str) -> String {
 
 /// A `<Title>` that declares one Russian line, in the shape a body stores it.
 /// An empty title is `{1,0}`.
-pub(crate) fn format_russian_title(text: &str) -> String {
+pub fn format_russian_title(text: &str) -> String {
     if text.is_empty() {
         return "{1,0}".to_string();
     }
@@ -5763,17 +5758,17 @@ pub(crate) fn format_russian_title(text: &str) -> String {
 }
 
 /// What a `<LabelDecoration>` record needs beyond its own name.
-pub(crate) struct NativeLabelDecoration<'a> {
-    pub(crate) id: &'a str,
-    pub(crate) name: &'a str,
+pub struct NativeLabelDecoration<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
     /// Already formatted -- see [`format_russian_title`].
-    pub(crate) title: &'a str,
+    pub title: &'a str,
     /// The picture the decoration shows, when it shows one.
-    pub(crate) picture_uuid: Option<&'a str>,
-    pub(crate) context_menu_id: &'a str,
-    pub(crate) context_menu_name: &'a str,
-    pub(crate) extended_tooltip_id: &'a str,
-    pub(crate) extended_tooltip_name: &'a str,
+    pub picture_uuid: Option<&'a str>,
+    pub context_menu_id: &'a str,
+    pub context_menu_name: &'a str,
+    pub extended_tooltip_id: &'a str,
+    pub extended_tooltip_name: &'a str,
 }
 
 /// The `{12,…}` record of a `<LabelDecoration>` that carries its name, its
@@ -5781,7 +5776,7 @@ pub(crate) struct NativeLabelDecoration<'a> {
 ///
 /// Measured against `Catalogs/ШаблонЦепочкиПлатежей/Forms/ПомощникСозданияШаблонов`,
 /// whose decorations are exactly this shape.
-pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) -> String {
+pub fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) -> String {
     let picture = match decoration.picture_uuid {
         Some(uuid) => format!("{{4,1,{{0,{uuid}}},\"\",-1,-1,0,0,\"\"}}"),
         None => "{4,0,{0},\"\",-1,-1,1,0,\"\"}".to_string(),
@@ -5813,7 +5808,7 @@ pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) ->
 }
 
 /// The namespace a form *command* id lives in, which is not the item one.
-pub(crate) const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
+pub const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
 
 /// What a table says about itself before its columns -- the 54 members that
 /// open a `{55,…}` record.
@@ -5828,72 +5823,72 @@ pub(crate) const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33
 /// Measured over all 6 903 table records of ERP УХ: **6 900 of the 54 fixed
 /// members rebuild byte for byte (99.96%)**. The three that differ carry a
 /// `<Shortcut>` at member 51, which the caller supplies.
-pub(crate) struct NativeTableHead<'a> {
-    pub(crate) id: &'a str,
+pub struct NativeTableHead<'a> {
+    pub id: &'a str,
     /// `<Representation>`: `List` 0, `Tree` 2, and 1 when the table says
     /// nothing.
-    pub(crate) representation: Option<&'a str>,
+    pub representation: Option<&'a str>,
     /// The functional-options block, when the table restricts itself.
-    pub(crate) functional_options: Option<&'a str>,
-    pub(crate) name: &'a str,
+    pub functional_options: Option<&'a str>,
+    pub name: &'a str,
     /// `<TitleLocation>` and `<TitleHeight>`.
-    pub(crate) title_location: Option<&'a str>,
-    pub(crate) title_height: Option<&'a str>,
+    pub title_location: Option<&'a str>,
+    pub title_height: Option<&'a str>,
     /// `<CommandBarLocation>`: `None` 0, `Auto` 1, `Top` 2, `Bottom` 3.
-    pub(crate) command_bar_location: Option<&'a str>,
+    pub command_bar_location: Option<&'a str>,
     /// Already formatted -- the title, the tooltip title and the data path.
-    pub(crate) title: &'a str,
-    pub(crate) tooltip_title: &'a str,
-    pub(crate) data_path: &'a str,
-    pub(crate) autofill: bool,
-    pub(crate) enabled: bool,
-    pub(crate) read_only: bool,
-    pub(crate) default_item: bool,
+    pub title: &'a str,
+    pub tooltip_title: &'a str,
+    pub data_path: &'a str,
+    pub autofill: bool,
+    pub enabled: bool,
+    pub read_only: bool,
+    pub default_item: bool,
     /// `<ChangeRowSet>` and `<ChangeRowOrder>`, on unless turned off.
-    pub(crate) change_row_set: bool,
-    pub(crate) change_row_order: bool,
-    pub(crate) width: Option<&'a str>,
-    pub(crate) height: Option<&'a str>,
+    pub change_row_set: bool,
+    pub change_row_order: bool,
+    pub width: Option<&'a str>,
+    pub height: Option<&'a str>,
     /// `<HeightInTableRows>`.
-    pub(crate) height_in_table_rows: Option<&'a str>,
-    pub(crate) choice_mode: bool,
+    pub height_in_table_rows: Option<&'a str>,
+    pub choice_mode: bool,
     /// `<RowInputMode>`: `EndOfWindow` 1, `AfterCurrentRow` 2.
-    pub(crate) row_input_mode: Option<&'a str>,
+    pub row_input_mode: Option<&'a str>,
     /// `<SelectionMode>`: `SingleRow` 0, anything else 1.
-    pub(crate) selection_mode: Option<&'a str>,
+    pub selection_mode: Option<&'a str>,
     /// `<RowSelectionMode>`: `Row` 1.
-    pub(crate) row_selection_mode: Option<&'a str>,
+    pub row_selection_mode: Option<&'a str>,
     /// `<Header>` and `<Footer>`, with their heights.
-    pub(crate) header: bool,
-    pub(crate) header_height: Option<&'a str>,
-    pub(crate) footer: bool,
-    pub(crate) footer_height: Option<&'a str>,
+    pub header: bool,
+    pub header_height: Option<&'a str>,
+    pub footer: bool,
+    pub footer_height: Option<&'a str>,
     /// `<HorizontalScrollBar>` and `<VerticalScrollBar>`: `DontUse` 0,
     /// `UseAlways` 1, and 2 when the table says nothing.
-    pub(crate) horizontal_scroll_bar: Option<&'a str>,
-    pub(crate) vertical_scroll_bar: Option<&'a str>,
+    pub horizontal_scroll_bar: Option<&'a str>,
+    pub vertical_scroll_bar: Option<&'a str>,
     /// `<HorizontalLines>` and `<VerticalLines>`, on unless turned off.
-    pub(crate) horizontal_lines: bool,
-    pub(crate) vertical_lines: bool,
-    pub(crate) use_alternation_row_color: bool,
-    pub(crate) auto_insert_new_row: bool,
+    pub horizontal_lines: bool,
+    pub vertical_lines: bool,
+    pub use_alternation_row_color: bool,
+    pub auto_insert_new_row: bool,
     /// `<InitialListView>`: `Beginning` 0, `End` 1, and 2 when unnamed.
-    pub(crate) initial_list_view: Option<&'a str>,
+    pub initial_list_view: Option<&'a str>,
     /// `<InitialTreeView>`: `ExpandTopLevel` 1, `ExpandAllLevels` 2.
-    pub(crate) initial_tree_view: Option<&'a str>,
+    pub initial_tree_view: Option<&'a str>,
     /// `<Output>`: `Enable` 1, `Disable` 2.
-    pub(crate) output: Option<&'a str>,
-    pub(crate) horizontal_stretch: bool,
-    pub(crate) vertical_stretch: bool,
+    pub output: Option<&'a str>,
+    pub horizontal_stretch: bool,
+    pub vertical_stretch: bool,
     /// The row picture's data path, the picture, the five appearance blocks
     /// and the two fonts, already formatted.
-    pub(crate) row_picture_data_path: &'a str,
-    pub(crate) row_picture: &'a str,
-    pub(crate) appearance: [&'a str; 6],
+    pub row_picture_data_path: &'a str,
+    pub row_picture: &'a str,
+    pub appearance: [&'a str; 6],
     /// Member 51: the `<Shortcut>` block, `{0,0,0}` when the table names none.
-    pub(crate) shortcut: &'a str,
-    pub(crate) enable_start_drag: bool,
-    pub(crate) enable_drag: bool,
+    pub shortcut: &'a str,
+    pub enable_start_drag: bool,
+    pub enable_drag: bool,
 }
 
 impl Default for NativeTableHead<'_> {
@@ -5955,7 +5950,7 @@ impl Default for NativeTableHead<'_> {
 }
 
 /// The 54 members that open a `{55,…}` table record.
-pub(crate) fn format_table_head(head: &NativeTableHead<'_>) -> Option<String> {
+pub fn format_table_head(head: &NativeTableHead<'_>) -> Option<String> {
     let options = match head.functional_options {
         Some(block) => format!("1,{block}"),
         None => "0".to_string(),
@@ -6066,7 +6061,8 @@ pub(crate) fn format_table_head(head: &NativeTableHead<'_>) -> Option<String> {
 }
 
 /// The `{55,…}` record of a table, whole.
-pub(crate) fn format_table_record(
+#[allow(clippy::too_many_arguments)]
+pub fn format_table_record(
     head: &str,
     properties: &[(&str, String)],
     events: &str,
@@ -6112,52 +6108,52 @@ pub(crate) fn format_table_record(
 /// 0 and every one of the 2 310 that do not writes 1, with nothing in between.
 /// Reading it as a drag flag, which three witnesses suggested, made the
 /// measurement worse rather than better.
-pub(crate) struct NativeTableTail<'a> {
+pub struct NativeTableTail<'a> {
     /// `<AutoMarkIncomplete>` and `<AutoAddIncomplete>`: 2 when unnamed.
-    pub(crate) auto_mark_incomplete: Option<bool>,
-    pub(crate) auto_add_incomplete: Option<bool>,
-    pub(crate) visible: bool,
-    pub(crate) multiple_choice: bool,
+    pub auto_mark_incomplete: Option<bool>,
+    pub auto_add_incomplete: Option<bool>,
+    pub visible: bool,
+    pub multiple_choice: bool,
     /// `<SkipOnInput>`: 2 when unnamed.
-    pub(crate) skip_on_input: Option<bool>,
+    pub skip_on_input: Option<bool>,
     /// `<SearchOnInput>`: `Use` or `DontUse`.
-    pub(crate) search_on_input: Option<&'a str>,
+    pub search_on_input: Option<&'a str>,
     /// `<ToolTipRepresentation>`.
-    pub(crate) tooltip_representation: Option<&'a str>,
+    pub tooltip_representation: Option<&'a str>,
     /// The table's extended tooltip, already formatted.
-    pub(crate) extended_tooltip: &'a str,
+    pub extended_tooltip: &'a str,
     /// Where the table shows its search string, its view status and its search
     /// control.
-    pub(crate) search_string_location: Option<&'a str>,
-    pub(crate) view_status_location: Option<&'a str>,
-    pub(crate) search_control_location: Option<&'a str>,
+    pub search_string_location: Option<&'a str>,
+    pub view_status_location: Option<&'a str>,
+    pub search_control_location: Option<&'a str>,
     /// The three `{5,…}` additions, always present, already formatted.
-    pub(crate) additions: [&'a str; 3],
+    pub additions: [&'a str; 3],
     /// `<RefreshRequest>`, of which only `PullFromTop` is ever stored.
-    pub(crate) refresh_request: Option<&'a str>,
-    pub(crate) auto_max_width: bool,
-    pub(crate) max_width: Option<&'a str>,
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: Option<&'a str>,
+    pub refresh_request: Option<&'a str>,
+    pub auto_max_width: bool,
+    pub max_width: Option<&'a str>,
+    pub auto_max_height: bool,
+    pub max_height: Option<&'a str>,
     /// `<HeightControlVariant>`: `UseHeightInFormRows`, `UseHeightInTableRows`
     /// or `UseContentHeight`.
-    pub(crate) height_control_variant: Option<&'a str>,
-    pub(crate) auto_max_rows_count: bool,
-    pub(crate) max_rows_count: Option<&'a str>,
+    pub height_control_variant: Option<&'a str>,
+    pub auto_max_rows_count: bool,
+    pub max_rows_count: Option<&'a str>,
     /// `<CurrentRowUse>`: `Choice`, `SelectionPresentation` or
     /// `SelectionPresentationAndChoice`.
-    pub(crate) current_row_use: Option<&'a str>,
+    pub current_row_use: Option<&'a str>,
     /// The member after it, `<BehaviorOnHorizontalCompression>`: absent 0,
     /// `HideItemsByImportance` 1, `MoveItemsByImportance` 2 (the exporter's
     /// reverse offset 4).
-    pub(crate) behavior_on_horizontal_compression: Option<&'a str>,
+    pub behavior_on_horizontal_compression: Option<&'a str>,
     /// `<FileDragMode>`, of which only `AsFile` is ever stored.
-    pub(crate) file_drag_mode: Option<&'a str>,
+    pub file_drag_mode: Option<&'a str>,
     /// Tail members 27, 28 and 34: `<GroupHorizontalAlign>`,
     /// `<GroupVerticalAlign>` and the `DisplayImportance` attribute.
-    pub(crate) group_horizontal_align: Option<&'a str>,
-    pub(crate) group_vertical_align: Option<&'a str>,
-    pub(crate) display_importance: &'a str,
+    pub group_horizontal_align: Option<&'a str>,
+    pub group_vertical_align: Option<&'a str>,
+    pub display_importance: &'a str,
 }
 
 impl Default for NativeTableTail<'_> {
@@ -6194,7 +6190,7 @@ impl Default for NativeTableTail<'_> {
 }
 
 /// The 37 members that close a `{55,…}` table record.
-pub(crate) fn format_table_tail(tail: &NativeTableTail<'_>) -> Option<String> {
+pub fn format_table_tail(tail: &NativeTableTail<'_>) -> Option<String> {
     let tooltip_representation = root_code(
         tail.tooltip_representation,
         &[
@@ -6313,39 +6309,39 @@ pub(crate) fn format_table_tail(tail: &NativeTableTail<'_>) -> Option<String> {
 /// Member 4 is a flag that 38 records set, for a `UserVisible` tuple that no
 /// property of the source decides -- the same class of fact as the navigator
 /// record. It is written as 0, which is what the other 32 568 carry.
-pub(crate) struct NativeTableAddition<'a> {
-    pub(crate) id: &'a str,
+pub struct NativeTableAddition<'a> {
+    pub id: &'a str,
     /// Member 5: search string 0, view status 1, search control 2.
-    pub(crate) kind: u8,
-    pub(crate) name: &'a str,
+    pub kind: u8,
+    pub name: &'a str,
     /// Already formatted -- `{1,0}` when the addition names neither.
-    pub(crate) title: &'a str,
-    pub(crate) tooltip_title: &'a str,
+    pub title: &'a str,
+    pub tooltip_title: &'a str,
     /// `<Visible>` and `<Enabled>`, on unless the addition turns them off.
-    pub(crate) visible: bool,
-    pub(crate) enabled: bool,
+    pub visible: bool,
+    pub enabled: bool,
     /// `<ToolTipRepresentation>`: `None` 1, `Button` 3, `ShowTop` 5.
-    pub(crate) tooltip_representation: Option<&'a str>,
+    pub tooltip_representation: Option<&'a str>,
     /// Member 13, by kind -- see [`format_search_string_addition_payload`] and
     /// its two siblings.
-    pub(crate) payload: &'a str,
+    pub payload: &'a str,
     /// Members 15 and 17, the `<ContextMenu>` and the `<ExtendedTooltip>`.
-    pub(crate) context_menu: &'a str,
-    pub(crate) extended_tooltip: &'a str,
+    pub context_menu: &'a str,
+    pub extended_tooltip: &'a str,
     /// Member 19: the id of the item `<AdditionSource><Item>` names.
-    pub(crate) source_item: &'a str,
+    pub source_item: &'a str,
     /// Member 20: the count of the addition's own children, then a
     /// `<kind uuid>,<record>` pair per child -- the group child grammar (1 of
     /// 1; `0` in 36 349).
-    pub(crate) children: &'a str,
+    pub children: &'a str,
     /// Member 21, `<GroupHorizontalAlign>`: `Left` 0, `Right` 2, absent 3.
-    pub(crate) group_horizontal_align: Option<&'a str>,
+    pub group_horizontal_align: Option<&'a str>,
     /// Member 23, the `DisplayImportance` **attribute** -- not a child
     /// element, which is why no census of children finds it.
-    pub(crate) display_importance: Option<&'a str>,
+    pub display_importance: Option<&'a str>,
 }
 
-pub(crate) fn format_table_addition(addition: &NativeTableAddition<'_>) -> Option<String> {
+pub fn format_table_addition(addition: &NativeTableAddition<'_>) -> Option<String> {
     let tooltip_representation = root_code(
         addition.tooltip_representation,
         // The whole table the exporter decodes (form_schema.rs
@@ -6406,7 +6402,7 @@ pub(crate) fn format_table_addition(addition: &NativeTableAddition<'_>) -> Optio
 }
 
 /// Member 13 of a `<SearchStringAddition>` -- eleven slots, four of them read.
-pub(crate) fn format_search_string_addition_payload(
+pub fn format_search_string_addition_payload(
     width: &str,
     horizontal_stretch: Option<bool>,
     auto_max_width: bool,
@@ -6421,7 +6417,7 @@ pub(crate) fn format_search_string_addition_payload(
 }
 
 /// Member 13 of a `<SearchControlAddition>` -- eleven slots, one of them read.
-pub(crate) fn format_search_control_addition_payload(auto_max_width: bool) -> String {
+pub fn format_search_control_addition_payload(auto_max_width: bool) -> String {
     format!(
         "{{1,0,{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,1,0}},\
          {auto_max_width},0,0,2}}",
@@ -6430,7 +6426,7 @@ pub(crate) fn format_search_control_addition_payload(auto_max_width: bool) -> St
 }
 
 /// Member 13 of a `<ViewStatusAddition>` -- sixteen slots, two of them read.
-pub(crate) fn format_view_status_addition_payload(
+pub fn format_view_status_addition_payload(
     horizontal_location: Option<&str>,
     auto_max_width: bool,
     horizontal_stretch: Option<bool>,
@@ -6467,59 +6463,59 @@ pub(crate) fn format_view_status_addition_payload(
 /// behind its own flag -- a context menu after the payload, and an extended
 /// tooltip of their own after the content. Read as one layout, the writer
 /// rebuilds **464 526 of the 464 539** decoration records of ERP УХ.
-pub(crate) struct NativeDecorationItem<'a> {
-    pub(crate) id: &'a str,
+pub struct NativeDecorationItem<'a> {
+    pub id: &'a str,
     /// The functional-options block, when the decoration restricts itself.
-    pub(crate) functional_options: Option<&'a str>,
+    pub functional_options: Option<&'a str>,
     /// Member 5: 0 for a label or a tooltip, 1 for a picture.
-    pub(crate) kind: u8,
-    pub(crate) name: &'a str,
+    pub kind: u8,
+    pub name: &'a str,
     /// Already formatted -- the title and the tooltip title.
-    pub(crate) title: &'a str,
-    pub(crate) tooltip_title: &'a str,
-    pub(crate) width: Option<&'a str>,
-    pub(crate) height: Option<&'a str>,
+    pub title: &'a str,
+    pub tooltip_title: &'a str,
+    pub width: Option<&'a str>,
+    pub height: Option<&'a str>,
     /// `<HorizontalStretch>` and `<VerticalStretch>`: 2 when unnamed.
-    pub(crate) horizontal_stretch: Option<bool>,
-    pub(crate) vertical_stretch: Option<bool>,
+    pub horizontal_stretch: Option<bool>,
+    pub vertical_stretch: Option<bool>,
     /// Member 14, `<TextColor>`, and the font, already formatted. The colour
     /// is the text's, not the background's: over the 8 033 label decorations
     /// of ERP УХ that carry one, `web:FireBrick` is stored there as
     /// `{3,2,{44}}` and `style:SpecialTextColor` as `{3,3,{-16}}`.
-    pub(crate) text_color: &'a str,
-    pub(crate) font: &'a str,
+    pub text_color: &'a str,
+    pub font: &'a str,
     /// Member 18: the payload that carries the decoration's own properties.
     /// A label and a tooltip carry a nine-member `{5,…}` -- see
     /// `format_label_decoration_payload` -- and a picture a thirteen-member
     /// `{4,…}`, which `format_picture_decoration_payload` writes. The default
     /// below is the `{5,…}` a tooltip carries; a caller that writes a picture
     /// and leaves it would store a payload of the wrong shape.
-    pub(crate) payload: &'a str,
+    pub payload: &'a str,
     /// The `{1,…}` block that carries what the decoration shows.
-    pub(crate) content: &'a str,
+    pub content: &'a str,
     /// `<Enabled>`, on unless the decoration turns it off.
-    pub(crate) enabled: bool,
+    pub enabled: bool,
     /// The decoration's context menu, which a tooltip never has.
-    pub(crate) context_menu: Option<&'a str>,
+    pub context_menu: Option<&'a str>,
     /// `<Visible>`, on unless the decoration turns it off.
-    pub(crate) visible: bool,
+    pub visible: bool,
     /// `<SkipOnInput>`: 2 when the decoration names neither value.
-    pub(crate) skip_on_input: Option<bool>,
+    pub skip_on_input: Option<bool>,
     /// `<ToolTipRepresentation>`.
-    pub(crate) tooltip_representation: Option<&'a str>,
+    pub tooltip_representation: Option<&'a str>,
     /// The decoration's own extended tooltip, which a tooltip never has.
-    pub(crate) extended_tooltip: Option<&'a str>,
-    pub(crate) auto_max_width: bool,
-    pub(crate) max_width: Option<&'a str>,
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: Option<&'a str>,
+    pub extended_tooltip: Option<&'a str>,
+    pub auto_max_width: bool,
+    pub max_width: Option<&'a str>,
+    pub auto_max_height: bool,
+    pub max_height: Option<&'a str>,
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
-    pub(crate) group_horizontal_align: Option<&'a str>,
-    pub(crate) group_vertical_align: Option<&'a str>,
+    pub group_horizontal_align: Option<&'a str>,
+    pub group_vertical_align: Option<&'a str>,
     /// Member 34, see [`native_display_importance`].
-    pub(crate) display_importance: &'a str,
+    pub display_importance: &'a str,
     /// Member 16, `<Shortcut>`, `{0,0,0}` by default.
-    pub(crate) shortcut: &'a str,
+    pub shortcut: &'a str,
 }
 
 impl Default for NativeDecorationItem<'_> {
@@ -6561,7 +6557,7 @@ impl Default for NativeDecorationItem<'_> {
 }
 
 /// The `{12,…}` record of a decoration.
-pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> Option<String> {
+pub fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> Option<String> {
     let options = match decoration.functional_options {
         Some(block) => format!("1,{block}"),
         None => "0".to_string(),
@@ -6645,7 +6641,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
 /// Those eight, and the two whose `<Border>` names neither a width nor a style
 /// and stores `{3,1,{-18},1,1,0}` -- a six-member tuple of a different shape
 /// entirely -- are refused by the caller rather than written with width 1.
-pub(crate) fn format_native_control_border(style: Option<&str>, width: &str) -> Option<String> {
+pub fn format_native_control_border(style: Option<&str>, width: &str) -> Option<String> {
     let code = root_code(
         style,
         &[
@@ -6678,7 +6674,7 @@ pub(crate) fn format_native_control_border(style: Option<&str>, width: &str) -> 
 ///
 /// The 156 references that are ten members hold a `<Picture><Abs>` base64
 /// image; the caller refuses them.
-pub(crate) fn format_native_item_picture(
+pub fn format_native_item_picture(
     uuid: Option<&str>,
     load_transparent: bool,
     transparent_x: Option<&str>,
@@ -6705,7 +6701,7 @@ pub(crate) fn format_native_item_picture(
 /// picture also writes 1. Every member partitions over all 225 references of
 /// both corpora, and the base64 in member 7 decodes to the named file byte
 /// for byte on all 225.
-pub(crate) fn format_native_inline_picture(
+pub fn format_native_inline_picture(
     bytes: &[u8],
     load_transparent: bool,
     transparent_x: Option<&str>,
@@ -6716,8 +6712,35 @@ pub(crate) fn format_native_inline_picture(
         x = transparent_x.unwrap_or("-1"),
         y = transparent_y.unwrap_or("-1"),
         transparent = u8::from(load_transparent),
-        data = crate::module_blob::encode_base64(bytes),
+        data = encode_base64(bytes),
     )
+}
+
+/// Standard base64 (RFC 4648 alphabet, `=` padding, no line breaks).
+///
+/// The same encoder as the root crate's `module_blob::encode_base64`, kept
+/// here so this crate depends on nothing in the root.
+fn encode_base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        output.push(ALPHABET[(first >> 2) as usize] as char);
+        output.push(ALPHABET[(((first & 0b0000_0011) << 4) | (second >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            output.push(ALPHABET[(((second & 0b0000_1111) << 2) | (third >> 6)) as usize] as char);
+        } else {
+            output.push('=');
+        }
+        if chunk.len() > 2 {
+            output.push(ALPHABET[(third & 0b0011_1111) as usize] as char);
+        } else {
+            output.push('=');
+        }
+    }
+    output
 }
 
 /// A picture reference to one of the platform's own pictures.
@@ -6727,7 +6750,7 @@ pub(crate) fn format_native_inline_picture(
 /// all 666 of the corpus: present, the transparent pixel when the source
 /// names one, and member 6 is **1**, not the 0 a common picture takes --
 /// unless the source says `<xr:LoadTransparent>false`, which stores 0.
-pub(crate) fn format_native_std_picture(
+pub fn format_native_std_picture(
     value: &str,
     load_transparent: bool,
     transparent_x: Option<&str>,
@@ -6772,16 +6795,16 @@ pub(crate) fn format_native_std_picture(
 /// differ are stored state the element does not carry: four bind `Click` to an
 /// empty handler with no `<Events>` at all, and two store a second event group
 /// the source does not name.
-pub(crate) struct NativeLabelDecorationPayload<'a> {
-    pub(crate) hyperlink: bool,
-    pub(crate) horizontal_align: Option<&'a str>,
-    pub(crate) vertical_align: Option<&'a str>,
-    pub(crate) title_height: Option<&'a str>,
+pub struct NativeLabelDecorationPayload<'a> {
+    pub hyperlink: bool,
+    pub horizontal_align: Option<&'a str>,
+    pub vertical_align: Option<&'a str>,
+    pub title_height: Option<&'a str>,
     /// Already formatted -- the event block, the two colours and the border.
-    pub(crate) events: &'a str,
-    pub(crate) back_color: &'a str,
-    pub(crate) border_color: &'a str,
-    pub(crate) border: &'a str,
+    pub events: &'a str,
+    pub back_color: &'a str,
+    pub border_color: &'a str,
+    pub border: &'a str,
 }
 
 impl Default for NativeLabelDecorationPayload<'_> {
@@ -6799,7 +6822,7 @@ impl Default for NativeLabelDecorationPayload<'_> {
     }
 }
 
-pub(crate) fn format_label_decoration_payload(
+pub fn format_label_decoration_payload(
     payload: &NativeLabelDecorationPayload<'_>,
 ) -> Option<String> {
     let horizontal = root_code(
@@ -6861,23 +6884,23 @@ pub(crate) fn format_label_decoration_payload(
 /// keeping the source's order, and the body reader it used strips newlines,
 /// which three of the four carry inside a `<NonselectedPictureText>`. The
 /// caller refuses that element anyway, so the writer never reaches them.
-pub(crate) struct NativePictureDecorationPayload<'a> {
+pub struct NativePictureDecorationPayload<'a> {
     /// Already formatted -- the picture, the text, the colour, the border and
     /// the event block.
-    pub(crate) picture: &'a str,
-    pub(crate) hyperlink: bool,
-    pub(crate) picture_size: Option<&'a str>,
-    pub(crate) zoomable: bool,
-    pub(crate) nonselected_picture_text: &'a str,
-    pub(crate) border_color: &'a str,
-    pub(crate) border: &'a str,
-    pub(crate) enable_start_drag: bool,
-    pub(crate) enable_drag: bool,
-    pub(crate) events: &'a str,
+    pub picture: &'a str,
+    pub hyperlink: bool,
+    pub picture_size: Option<&'a str>,
+    pub zoomable: bool,
+    pub nonselected_picture_text: &'a str,
+    pub border_color: &'a str,
+    pub border: &'a str,
+    pub enable_start_drag: bool,
+    pub enable_drag: bool,
+    pub events: &'a str,
     /// `<FileDragMode>`, of which only `AsFile` is ever stored, and which
     /// writes 0 where naming nothing writes 1.
-    pub(crate) file_drag_mode: Option<&'a str>,
-    pub(crate) image_scale: Option<&'a str>,
+    pub file_drag_mode: Option<&'a str>,
+    pub image_scale: Option<&'a str>,
 }
 
 impl Default for NativePictureDecorationPayload<'_> {
@@ -6899,7 +6922,7 @@ impl Default for NativePictureDecorationPayload<'_> {
     }
 }
 
-pub(crate) fn format_picture_decoration_payload(
+pub fn format_picture_decoration_payload(
     payload: &NativePictureDecorationPayload<'_>,
 ) -> Option<String> {
     let size = root_code(
@@ -6947,67 +6970,67 @@ pub(crate) fn format_picture_decoration_payload(
 /// command-bar button) and fine at member 46, and `<LocationInCommandBar>` is
 /// coarse at member 15 and fine at member 49. Reading either one once leaves
 /// tens of thousands of records wrong.
-pub(crate) struct NativeButtonItem<'a> {
-    pub(crate) id: &'a str,
+pub struct NativeButtonItem<'a> {
+    pub id: &'a str,
     /// The functional-options block, when the button restricts itself.
-    pub(crate) functional_options: Option<&'a str>,
+    pub functional_options: Option<&'a str>,
     /// `<Type>`: `CommandBarButton`, `CommandBarHyperlink`, `UsualButton` or
     /// `Hyperlink`.
-    pub(crate) button_type: Option<&'a str>,
-    pub(crate) name: &'a str,
+    pub button_type: Option<&'a str>,
+    pub name: &'a str,
     /// Already formatted -- `{1,0}` when the button names no title.
-    pub(crate) title: &'a str,
-    pub(crate) enabled: bool,
+    pub title: &'a str,
+    pub enabled: bool,
     /// The command the button runs, as `{<id>,<command namespace>}`.
-    pub(crate) command: &'a str,
+    pub command: &'a str,
     /// The button's data path, `{0}` when it has none.
-    pub(crate) data_path: &'a str,
+    pub data_path: &'a str,
     /// `<Representation>`: `Text`, `Picture` or `PictureAndText`.
-    pub(crate) representation: Option<&'a str>,
-    pub(crate) default_button: bool,
-    pub(crate) default_item: bool,
+    pub representation: Option<&'a str>,
+    pub default_button: bool,
+    pub default_item: bool,
     /// `<LocationInCommandBar>`: `InCommandBar`, `InAdditionalSubmenu` or
     /// `InCommandBarAndInAdditionalSubmenu`.
-    pub(crate) location_in_command_bar: Option<&'a str>,
-    pub(crate) width: Option<&'a str>,
-    pub(crate) height: Option<&'a str>,
-    pub(crate) title_height: Option<&'a str>,
+    pub location_in_command_bar: Option<&'a str>,
+    pub width: Option<&'a str>,
+    pub height: Option<&'a str>,
+    pub title_height: Option<&'a str>,
     /// The back, text and border colours and the font, already formatted.
-    pub(crate) appearance: [&'a str; 4],
-    pub(crate) check: bool,
+    pub appearance: [&'a str; 4],
+    pub check: bool,
     /// The picture, already formatted.
-    pub(crate) picture: &'a str,
-    pub(crate) visible: bool,
+    pub picture: &'a str,
+    pub visible: bool,
     /// `<SkipOnInput>`: 2 when the button names neither value.
-    pub(crate) skip_on_input: Option<bool>,
+    pub skip_on_input: Option<bool>,
     /// `<ToolTipRepresentation>`.
-    pub(crate) tooltip_representation: Option<&'a str>,
-    pub(crate) extended_tooltip: &'a str,
-    pub(crate) auto_max_width: bool,
-    pub(crate) max_width: Option<&'a str>,
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: Option<&'a str>,
-    pub(crate) horizontal_stretch: bool,
-    pub(crate) vertical_stretch: bool,
+    pub tooltip_representation: Option<&'a str>,
+    pub extended_tooltip: &'a str,
+    pub auto_max_width: bool,
+    pub max_width: Option<&'a str>,
+    pub auto_max_height: bool,
+    pub max_height: Option<&'a str>,
+    pub horizontal_stretch: bool,
+    pub vertical_stretch: bool,
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
-    pub(crate) group_horizontal_align: Option<&'a str>,
-    pub(crate) group_vertical_align: Option<&'a str>,
+    pub group_horizontal_align: Option<&'a str>,
+    pub group_vertical_align: Option<&'a str>,
     /// `<RepresentationInContextMenu>`: `None`, `AdditionalInContextMenu` or
     /// `OnlyInContextMenu`.
-    pub(crate) representation_in_context_menu: Option<&'a str>,
+    pub representation_in_context_menu: Option<&'a str>,
     /// `<Shape>`: `Usual` or `Oval`.
-    pub(crate) shape: Option<&'a str>,
+    pub shape: Option<&'a str>,
     /// `<ShapeRepresentation>`: `Always`, `WhenActive` or `None`.
-    pub(crate) shape_representation: Option<&'a str>,
+    pub shape_representation: Option<&'a str>,
     /// `<PictureLocation>`: `Left` or `Right`.
-    pub(crate) picture_location: Option<&'a str>,
+    pub picture_location: Option<&'a str>,
     /// Member 48, which the button's own element does not carry: 214 records
     /// of the corpus name something there and the rest write 0.
-    pub(crate) forty_eighth: &'a str,
-    pub(crate) command_uniqueness: bool,
+    pub forty_eighth: &'a str,
+    pub command_uniqueness: bool,
     /// Member 23, `<Shortcut>`, and member 33, the command's `<Parameter>`.
-    pub(crate) shortcut: &'a str,
-    pub(crate) parameter: &'a str,
+    pub shortcut: &'a str,
+    pub parameter: &'a str,
 }
 
 impl Default for NativeButtonItem<'_> {
@@ -7056,7 +7079,7 @@ impl Default for NativeButtonItem<'_> {
 }
 
 /// The `{31,…}` record of a button.
-pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String> {
+pub fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String> {
     let options = match button.functional_options {
         Some(block) => format!("1,{block}"),
         None => "0".to_string(),
@@ -7217,32 +7240,32 @@ pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String
 /// what an attribute that names none of them stores -- 141 493, 141 431,
 /// 137 363 and 138 968 records with no exception -- so the values were right
 /// all along and only the names were out of step.
-pub(crate) struct NativeFormAttribute<'a> {
-    pub(crate) id: &'a str,
-    pub(crate) name: &'a str,
+pub struct NativeFormAttribute<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
     /// Already formatted -- `{1,0}` for an attribute with no title.
-    pub(crate) title: &'a str,
+    pub title: &'a str,
     /// Already formatted -- `{"Pattern"}` for an attribute the form does not
     /// type, and the pattern with its reference list for one it does.
-    pub(crate) type_pattern: &'a str,
+    pub type_pattern: &'a str,
     /// Member 6, `<View>`, and member 7, `<Edit>` -- `{0,{0,{"B",1},0}}` when
     /// the attribute restricts nothing.
-    pub(crate) view: &'a str,
-    pub(crate) edit: &'a str,
+    pub view: &'a str,
+    pub edit: &'a str,
     /// Member 8, `<UseAlways>`, `{0,0}` when the attribute names none.
-    pub(crate) use_always: &'a str,
+    pub use_always: &'a str,
     /// Member 9, `<Save>`, `{0,0}` when the attribute names none. See
     /// [`format_form_attribute_save`].
-    pub(crate) save: &'a str,
-    pub(crate) main_attribute: bool,
-    pub(crate) saved_data: bool,
+    pub save: &'a str,
+    pub main_attribute: bool,
+    pub saved_data: bool,
     /// `<FillCheck>`: true for `ShowError`.
-    pub(crate) fill_check: bool,
+    pub fill_check: bool,
     /// The attribute's columns, each a `{5,…}` record, already formatted.
-    pub(crate) columns: &'a [String],
+    pub columns: &'a [String],
     /// The two blocks that close the record, `{0,0}` in 94 031 of the 100 740
     /// records whose shape holds; the rest name a type or an object.
-    pub(crate) trailing: [&'a str; 2],
+    pub trailing: [&'a str; 2],
 }
 
 impl Default for NativeFormAttribute<'_> {
@@ -7266,7 +7289,7 @@ impl Default for NativeFormAttribute<'_> {
 }
 
 /// The `{9,…}` record of a form attribute.
-pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> String {
+pub fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> String {
     let mut columns = String::new();
     for column in attribute.columns {
         columns.push(',');
@@ -7308,7 +7331,7 @@ pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> Stri
 /// text, and the 65 that are all uuid are in ascending uuid order with no
 /// exception. Pairing the nth `<Field>` with the nth entry agrees on the set
 /// and silently swaps the uuids.
-pub(crate) fn format_form_attribute_save(paths: &[String]) -> String {
+pub fn format_form_attribute_save(paths: &[String]) -> String {
     let mut sorted = paths.to_vec();
     // By the segment count, then segment by segment: the first member as a
     // number, the rest as text -- `{1,{-30}}` before `{1,{-20}}`, `{1,{2}}`
@@ -7410,19 +7433,19 @@ fn top_level_braced_fields(text: &str) -> Vec<String> {
 ///
 /// Member 9 is `<FillCheck>`: a pure partition, 143 448 absent to 0 and the
 /// six `ShowError` to 1.
-pub(crate) struct NativeFormAttributeColumn<'a> {
-    pub(crate) id: &'a str,
-    pub(crate) name: &'a str,
+pub struct NativeFormAttributeColumn<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
     /// Already formatted -- `{1,0}` for a column with no title.
-    pub(crate) title: &'a str,
+    pub title: &'a str,
     /// Already formatted -- `{"Pattern"}` for a column the form does not type.
-    pub(crate) type_pattern: &'a str,
+    pub type_pattern: &'a str,
     /// The `<View>` and `<Edit>` restrictions.
-    pub(crate) restrictions: [&'a str; 2],
+    pub restrictions: [&'a str; 2],
     /// `<FunctionalOptions>`, `{0,0}` when the column names none.
-    pub(crate) functional_options: &'a str,
+    pub functional_options: &'a str,
     /// `<FillCheck>`: true for `ShowError`.
-    pub(crate) fill_check: bool,
+    pub fill_check: bool,
 }
 
 impl Default for NativeFormAttributeColumn<'_> {
@@ -7440,7 +7463,7 @@ impl Default for NativeFormAttributeColumn<'_> {
 }
 
 /// The `{5,…}` record of one column of a form attribute.
-pub(crate) fn format_form_attribute_column(column: &NativeFormAttributeColumn<'_>) -> String {
+pub fn format_form_attribute_column(column: &NativeFormAttributeColumn<'_>) -> String {
     format!(
         "{{5,{id},0,{name},{title},{type_pattern},{view},{edit},{functional_options},{fill_check}}}",
         id = column.id,
@@ -7468,7 +7491,7 @@ const FORM_TYPE_DESCRIPTION_TYPE_UUID: &str = "f5c65050-3bbb-11d5-b988-0050bae0a
 /// `{"Pattern",…}` grammar an attribute's own `<Type>` uses. All 2 140 share
 /// this prefix; the 238 value lists with no `<Settings>` store `{0,0}`
 /// instead, which is the field's default.
-pub(crate) fn format_form_value_list_element_type(type_pattern: &str) -> String {
+pub fn format_form_value_list_element_type(type_pattern: &str) -> String {
     format!("{{0,1,\"ElementType\",{{\"#\",{FORM_TYPE_DESCRIPTION_TYPE_UUID},{type_pattern}}}}}")
 }
 
@@ -7488,28 +7511,28 @@ pub(crate) fn format_form_value_list_element_type(type_pattern: &str) -> String 
 /// command's own element does not carry -- values from 1 to 325, which look
 /// like a reference into the form. The caller can pass it; the default is the
 /// 0 that 60 983 records write.
-pub(crate) struct NativeFormCommand<'a> {
-    pub(crate) id: &'a str,
-    pub(crate) name: &'a str,
+pub struct NativeFormCommand<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
     /// Already formatted -- `{1,0}` when the command names none.
-    pub(crate) title: &'a str,
-    pub(crate) tooltip: &'a str,
+    pub title: &'a str,
+    pub tooltip: &'a str,
     /// The `<UseAlways>` block, `{0,{0,{"B",1},0}}` when it restricts nothing.
-    pub(crate) use_always: &'a str,
+    pub use_always: &'a str,
     /// The picture's index tuple and the picture itself.
-    pub(crate) picture_index: &'a str,
-    pub(crate) picture: &'a str,
+    pub picture_index: &'a str,
+    pub picture: &'a str,
     /// `<Action>`: the procedure the command runs.
-    pub(crate) action: &'a str,
+    pub action: &'a str,
     /// `<Representation>`: `Text`, `Picture`, `TextPicture` or `Auto`.
-    pub(crate) representation: Option<&'a str>,
-    pub(crate) modifies_saved_data: bool,
+    pub representation: Option<&'a str>,
+    pub modifies_saved_data: bool,
     /// The functional options, `{0,0}` when there are none.
-    pub(crate) functional_options: &'a str,
+    pub functional_options: &'a str,
     /// `<CurrentRowUse>`: `Use`, `DontUse` or `Auto`.
-    pub(crate) current_row_use: Option<&'a str>,
+    pub current_row_use: Option<&'a str>,
     /// Member 14, which the command's element does not carry.
-    pub(crate) fourteenth: &'a str,
+    pub fourteenth: &'a str,
 }
 
 impl Default for NativeFormCommand<'_> {
@@ -7533,7 +7556,7 @@ impl Default for NativeFormCommand<'_> {
 }
 
 /// The `{9,…}` record of a form command.
-pub(crate) fn format_form_command(command: &NativeFormCommand<'_>) -> Option<String> {
+pub fn format_form_command(command: &NativeFormCommand<'_>) -> Option<String> {
     let representation = root_code(
         command.representation,
         &[
@@ -7578,7 +7601,7 @@ pub(crate) fn format_form_command(command: &NativeFormCommand<'_>) -> Option<Str
 /// Four members in all 24 863 parameter records of ERP УХ, and all 24 863
 /// rebuild byte for byte: the name, the type pattern the caller supplies, and
 /// whether `<KeyParameter>` is set.
-pub(crate) fn format_form_parameter(name: &str, type_pattern: &str, key: bool) -> String {
+pub fn format_form_parameter(name: &str, type_pattern: &str, key: bool) -> String {
     format!(
         "{{0,{name},{type_pattern},{key}}}",
         name = quoted(name),
@@ -7602,56 +7625,56 @@ pub(crate) fn format_form_parameter(name: &str, type_pattern: &str, key: bool) -
 /// Five members carry something no scalar property gives -- the picture, the
 /// format, the two colours and the associated table element -- and the writer
 /// takes those from its caller.
-pub(crate) struct NativeUsualGroupPayload<'a> {
+pub struct NativeUsualGroupPayload<'a> {
     /// Slots 1, 22 and 27.
-    pub(crate) group: Option<&'a str>,
+    pub group: Option<&'a str>,
     /// Slots 10, 24 and 28.
-    pub(crate) behavior: Option<&'a str>,
+    pub behavior: Option<&'a str>,
     /// Slot 2, `<ChildItemsWidth>`.
-    pub(crate) child_items_width: Option<&'a str>,
+    pub child_items_width: Option<&'a str>,
     /// Slot 3, `<Representation>`, of which "names none" is its own value.
-    pub(crate) representation: Option<&'a str>,
+    pub representation: Option<&'a str>,
     /// Slot 4, `<ShowTitle>`, on unless the group turns it off.
-    pub(crate) show_title: bool,
+    pub show_title: bool,
     /// Slot 5, `<TitleDataPath>`, `{0}` by default.
-    pub(crate) title_data_path: &'a str,
+    pub title_data_path: &'a str,
     /// Slot 6, `<Format>`, `{1,0}` by default.
-    pub(crate) format: &'a str,
+    pub format: &'a str,
     /// Slot 9, `<BackColor>`, `{3,4,{0}}` by default.
-    pub(crate) back_color: &'a str,
+    pub back_color: &'a str,
     /// Slot 11, `<ControlRepresentation>`: `Picture` 1.
-    pub(crate) control_representation: Option<&'a str>,
+    pub control_representation: Option<&'a str>,
     /// Slot 12, `<Collapsed>`.
-    pub(crate) collapsed: bool,
+    pub collapsed: bool,
     /// Slot 13, `<ShowLeftMargin>`, on unless the group turns it off.
-    pub(crate) show_left_margin: bool,
+    pub show_left_margin: bool,
     /// Slot 14, `<CollapsedRepresentationTitle>`, `{1,0}` by default.
-    pub(crate) collapsed_representation_title: &'a str,
+    pub collapsed_representation_title: &'a str,
     /// Slots 15 and 16, `<HorizontalSpacing>` and `<VerticalSpacing>`.
-    pub(crate) horizontal_spacing: Option<&'a str>,
-    pub(crate) vertical_spacing: Option<&'a str>,
+    pub horizontal_spacing: Option<&'a str>,
+    pub vertical_spacing: Option<&'a str>,
     /// Slots 17 and 18, `<HorizontalAlign>` and `<VerticalAlign>`, each 3 when
     /// the group names none.
-    pub(crate) horizontal_align: Option<&'a str>,
-    pub(crate) vertical_align: Option<&'a str>,
+    pub horizontal_align: Option<&'a str>,
+    pub vertical_align: Option<&'a str>,
     /// Slot 19, `<ThroughAlign>`: `Use` 0, `DontUse` 1, absent 2.
-    pub(crate) through_align: Option<&'a str>,
+    pub through_align: Option<&'a str>,
     /// Slot 20, `<ChildrenAlign>`.
-    pub(crate) children_align: Option<&'a str>,
+    pub children_align: Option<&'a str>,
     /// Slot 21, `<United>`, on unless the group turns it off.
-    pub(crate) united: bool,
+    pub united: bool,
     /// Slot 23, `<HiddenStateTitleBackColor>`, `{3,4,{0}}` by default.
-    pub(crate) hidden_state_title_back_color: &'a str,
+    pub hidden_state_title_back_color: &'a str,
     /// Slot 25, `<CurrentRowUse>`: `Use` 0, `DontUse` 1, absent 2.
-    pub(crate) current_row_use: Option<&'a str>,
+    pub current_row_use: Option<&'a str>,
     /// Slot 26, the id of the item `<AssociatedTableElementId>` names, 0 when
     /// the group names none.
-    pub(crate) associated_table_element_id: &'a str,
+    pub associated_table_element_id: &'a str,
 }
 
 impl NativeUsualGroupPayload<'_> {
     /// What a group that names none of these carries.
-    pub(crate) const fn plain() -> Self {
+    pub const fn plain() -> Self {
         Self {
             group: None,
             behavior: None,
@@ -7679,7 +7702,7 @@ impl NativeUsualGroupPayload<'_> {
     }
 }
 
-pub(crate) fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) -> Option<String> {
+pub fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) -> Option<String> {
     // `<Group>` under its three codings.
     let arrangement = root_code(
         payload.group,
@@ -7814,7 +7837,7 @@ pub(crate) fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) 
 /// Four members, one of which carries `<Representation>`: `Usual` 1,
 /// `Compact` 2, and 0 when the group names none. All 21 651 of the corpus are
 /// reproduced exactly.
-pub(crate) fn format_button_group_payload(
+pub fn format_button_group_payload(
     command_source: &str,
     representation: Option<&str>,
 ) -> Option<String> {
@@ -7826,7 +7849,7 @@ pub(crate) fn format_button_group_payload(
 ///
 /// Three members, one of which carries `<HorizontalLocation>`. All 3 233 of
 /// the corpus are reproduced exactly.
-pub(crate) fn format_command_bar_payload(
+pub fn format_command_bar_payload(
     horizontal_location: Option<&str>,
     command_source: &str,
 ) -> Option<String> {
@@ -7844,7 +7867,7 @@ pub(crate) fn format_command_bar_payload(
 /// except that a group naming none carries 1 in the first and 6 in the second
 /// -- and one carries `<AssociatedTableElementId>`. All 4 329 of the corpus
 /// are reproduced exactly.
-pub(crate) fn format_pages_payload(
+pub fn format_pages_payload(
     representation: Option<&str>,
     events: &str,
     associated_table_element_id: &str,
@@ -7874,18 +7897,18 @@ pub(crate) fn format_pages_payload(
 /// Nine members, four of which carry an XML property: `<Representation>`,
 /// which is 3 when the popup names none, `<Shape>`, `<ShapeRepresentation>`
 /// and the two colours. All 10 642 of the corpus are reproduced exactly.
-pub(crate) struct NativePopupPayload<'a> {
-    pub(crate) picture: &'a str,
-    pub(crate) command_source: &'a str,
-    pub(crate) representation: Option<&'a str>,
-    pub(crate) shape: Option<&'a str>,
-    pub(crate) shape_representation: Option<&'a str>,
-    pub(crate) back_color: &'a str,
-    pub(crate) border_color: &'a str,
+pub struct NativePopupPayload<'a> {
+    pub picture: &'a str,
+    pub command_source: &'a str,
+    pub representation: Option<&'a str>,
+    pub shape: Option<&'a str>,
+    pub shape_representation: Option<&'a str>,
+    pub back_color: &'a str,
+    pub border_color: &'a str,
 }
 
 impl NativePopupPayload<'_> {
-    pub(crate) const fn plain() -> Self {
+    pub const fn plain() -> Self {
         Self {
             picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
             command_source: "{0}",
@@ -7904,23 +7927,21 @@ impl NativePopupPayload<'_> {
 /// the partition test outright. Members 3 and 4 are the `border_color_option`
 /// and `document_field_output` slots the reader already claims for this kind,
 /// so the two directions agree slot for slot.
-pub(crate) struct NativeHtmlDocumentPayload<'a> {
-    pub(crate) width: &'a str,
-    pub(crate) height: &'a str,
-    pub(crate) border_color: &'a str,
-    pub(crate) output: Option<&'a str>,
-    pub(crate) events: &'a str,
-    pub(crate) auto_max_width: bool,
-    pub(crate) max_width: &'a str,
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: &'a str,
-    pub(crate) horizontal_stretch: bool,
-    pub(crate) vertical_stretch: bool,
+pub struct NativeHtmlDocumentPayload<'a> {
+    pub width: &'a str,
+    pub height: &'a str,
+    pub border_color: &'a str,
+    pub output: Option<&'a str>,
+    pub events: &'a str,
+    pub auto_max_width: bool,
+    pub max_width: &'a str,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
+    pub horizontal_stretch: bool,
+    pub vertical_stretch: bool,
 }
 
-pub(crate) fn format_html_document_payload(
-    payload: &NativeHtmlDocumentPayload<'_>,
-) -> Option<String> {
+pub fn format_html_document_payload(payload: &NativeHtmlDocumentPayload<'_>) -> Option<String> {
     let output = root_code(payload.output, &[("Enable", "1"), ("Disable", "2")], "0")?;
     Some(format!(
         "{{3,{width},{height},{border_color},{output},{events},{auto_width},{max_width},0,\
@@ -7950,26 +7971,24 @@ pub(crate) fn format_html_document_payload(
 ///
 /// Members 12 and 15 are 0 because no item spells `<MaxWidth>` or
 /// `<MaxHeight>`; by position they are the pair the sibling payloads carry.
-pub(crate) struct NativeFormattedDocumentPayload<'a> {
-    pub(crate) width: &'a str,
-    pub(crate) height: &'a str,
-    pub(crate) horizontal_stretch: bool,
-    pub(crate) vertical_stretch: bool,
-    pub(crate) back_color: &'a str,
-    pub(crate) border_color: &'a str,
-    pub(crate) font: &'a str,
-    pub(crate) events: &'a str,
-    pub(crate) auto_max_width: bool,
-    pub(crate) auto_max_height: bool,
+pub struct NativeFormattedDocumentPayload<'a> {
+    pub width: &'a str,
+    pub height: &'a str,
+    pub horizontal_stretch: bool,
+    pub vertical_stretch: bool,
+    pub back_color: &'a str,
+    pub border_color: &'a str,
+    pub font: &'a str,
+    pub events: &'a str,
+    pub auto_max_width: bool,
+    pub auto_max_height: bool,
     /// Member 6 (`<TextColor>`) and member 15 (`<MaxHeight>`, `0` when absent);
     /// slots from the exporter's FormattedDocumentField schema and geometry rows.
-    pub(crate) text_color: &'a str,
-    pub(crate) max_height: &'a str,
+    pub text_color: &'a str,
+    pub max_height: &'a str,
 }
 
-pub(crate) fn format_formatted_document_payload(
-    payload: &NativeFormattedDocumentPayload<'_>,
-) -> String {
+pub fn format_formatted_document_payload(payload: &NativeFormattedDocumentPayload<'_>) -> String {
     format!(
         "{{1,{width},{height},{horizontal},{vertical},0,{text_color},{back_color},\
          {border_color},{font},{events},{auto_width},0,0,{auto_height},{max_height}}}",
@@ -7995,23 +8014,23 @@ pub(crate) fn format_formatted_document_payload(
 /// its own member. Member 3 is constant 1 over all 159 records because no
 /// field of either corpus spells `<HorizontalStretch>`, so the caller refuses
 /// one that does rather than guess which of the two readings it takes.
-pub(crate) struct NativeTextDocumentPayload<'a> {
-    pub(crate) width: &'a str,
-    pub(crate) height: &'a str,
+pub struct NativeTextDocumentPayload<'a> {
+    pub width: &'a str,
+    pub height: &'a str,
     /// Member 3: 0 only on the 8.5.1.1150 BSP field written
     /// `<HorizontalStretch>false` (`Catalogs/_ДемоБанковскиеСчета`).
-    pub(crate) horizontal_stretch: bool,
-    pub(crate) vertical_stretch: bool,
-    pub(crate) back_color: &'a str,
-    pub(crate) font: &'a str,
-    pub(crate) auto_max_width: bool,
-    pub(crate) max_width: &'a str,
-    pub(crate) auto_max_height: bool,
-    pub(crate) max_height: &'a str,
-    pub(crate) events: &'a str,
+    pub horizontal_stretch: bool,
+    pub vertical_stretch: bool,
+    pub back_color: &'a str,
+    pub font: &'a str,
+    pub auto_max_width: bool,
+    pub max_width: &'a str,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
+    pub events: &'a str,
 }
 
-pub(crate) fn format_text_document_payload(payload: &NativeTextDocumentPayload<'_>) -> String {
+pub fn format_text_document_payload(payload: &NativeTextDocumentPayload<'_>) -> String {
     format!(
         "{{5,{width},{height},{horizontal},{vertical},0,{{3,4,{{0}}}},{back_color},{{3,4,{{0}}}},{font},\
          {auto_width},{max_width},0,{auto_height},{max_height},{events}}}",
@@ -8029,7 +8048,7 @@ pub(crate) fn format_text_document_payload(payload: &NativeTextDocumentPayload<'
     )
 }
 
-pub(crate) fn format_popup_payload(payload: &NativePopupPayload<'_>) -> Option<String> {
+pub fn format_popup_payload(payload: &NativePopupPayload<'_>) -> Option<String> {
     let representation = root_code(
         payload.representation,
         &[("Text", "0"), ("Picture", "1"), ("PictureAndText", "2")],
@@ -8057,18 +8076,18 @@ pub(crate) fn format_popup_payload(payload: &NativePopupPayload<'_>) -> Option<S
 /// the group names none), `<ShowTitle>`, `<ShowInHeader>`,
 /// `<HeaderHorizontalAlign>`, the title background and `<FixingInTable>`. All
 /// 7 076 of the corpus are reproduced exactly.
-pub(crate) struct NativeColumnGroupPayload<'a> {
-    pub(crate) group: Option<&'a str>,
-    pub(crate) show_title: bool,
-    pub(crate) show_in_header: bool,
-    pub(crate) header_horizontal_align: Option<&'a str>,
-    pub(crate) picture: &'a str,
-    pub(crate) title_back_color: &'a str,
-    pub(crate) fixing_in_table: Option<&'a str>,
+pub struct NativeColumnGroupPayload<'a> {
+    pub group: Option<&'a str>,
+    pub show_title: bool,
+    pub show_in_header: bool,
+    pub header_horizontal_align: Option<&'a str>,
+    pub picture: &'a str,
+    pub title_back_color: &'a str,
+    pub fixing_in_table: Option<&'a str>,
 }
 
 impl NativeColumnGroupPayload<'_> {
-    pub(crate) const fn plain() -> Self {
+    pub const fn plain() -> Self {
         Self {
             group: None,
             show_title: true,
@@ -8081,9 +8100,7 @@ impl NativeColumnGroupPayload<'_> {
     }
 }
 
-pub(crate) fn format_column_group_payload(
-    payload: &NativeColumnGroupPayload<'_>,
-) -> Option<String> {
+pub fn format_column_group_payload(payload: &NativeColumnGroupPayload<'_>) -> Option<String> {
     let group = root_code(payload.group, &[("Horizontal", "0"), ("InCell", "2")], "1")?;
     let header_align = root_code(
         payload.header_horizontal_align,
@@ -8110,26 +8127,26 @@ pub(crate) fn format_column_group_payload(
 /// test over all 11 804 pages of the corpus. `<Group>` is written three times:
 /// slot 2 says whether the page names one at all, and slots 16 and 17 carry
 /// which, differing on `AlwaysHorizontal` and `HorizontalIfPossible`.
-pub(crate) struct NativePagePayload<'a> {
-    pub(crate) group: Option<&'a str>,
-    pub(crate) picture: &'a str,
-    pub(crate) child_items_width: Option<&'a str>,
-    pub(crate) title_data_path: &'a str,
-    pub(crate) format: &'a str,
-    pub(crate) show_title: bool,
-    pub(crate) back_color: &'a str,
-    pub(crate) horizontal_spacing: Option<&'a str>,
-    pub(crate) vertical_spacing: Option<&'a str>,
-    pub(crate) horizontal_align: Option<&'a str>,
-    pub(crate) vertical_align: Option<&'a str>,
-    pub(crate) children_align: Option<&'a str>,
-    pub(crate) scroll_on_compress: bool,
-    pub(crate) border_color: &'a str,
-    pub(crate) font: &'a str,
+pub struct NativePagePayload<'a> {
+    pub group: Option<&'a str>,
+    pub picture: &'a str,
+    pub child_items_width: Option<&'a str>,
+    pub title_data_path: &'a str,
+    pub format: &'a str,
+    pub show_title: bool,
+    pub back_color: &'a str,
+    pub horizontal_spacing: Option<&'a str>,
+    pub vertical_spacing: Option<&'a str>,
+    pub horizontal_align: Option<&'a str>,
+    pub vertical_align: Option<&'a str>,
+    pub children_align: Option<&'a str>,
+    pub scroll_on_compress: bool,
+    pub border_color: &'a str,
+    pub font: &'a str,
 }
 
 impl NativePagePayload<'_> {
-    pub(crate) const fn plain() -> Self {
+    pub const fn plain() -> Self {
         Self {
             group: None,
             picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
@@ -8150,7 +8167,7 @@ impl NativePagePayload<'_> {
     }
 }
 
-pub(crate) fn format_page_payload(payload: &NativePagePayload<'_>) -> Option<String> {
+pub fn format_page_payload(payload: &NativePagePayload<'_>) -> Option<String> {
     let named = u8::from(payload.group.is_some());
     let horizontal = root_code(
         payload.group,
@@ -8253,47 +8270,47 @@ pub(crate) fn format_page_payload(payload: &NativePagePayload<'_>) -> Option<Str
 /// 9 354. The three that differ are column groups that both sit in a cell and
 /// carry an extended tooltip, and they write 1 where every other column group
 /// writes 0.
-pub(crate) struct NativeGroupItem<'a> {
-    pub(crate) id: &'a str,
+pub struct NativeGroupItem<'a> {
+    pub id: &'a str,
     /// Member 5 -- see [`native_group_kind`].
-    pub(crate) kind: u8,
+    pub kind: u8,
     /// The functional-options block, when the group restricts itself.
-    pub(crate) functional_options: Option<&'a str>,
-    pub(crate) name: &'a str,
+    pub functional_options: Option<&'a str>,
+    pub name: &'a str,
     /// Already formatted -- see [`format_russian_title`].
-    pub(crate) title: &'a str,
-    pub(crate) tooltip_title: &'a str,
+    pub title: &'a str,
+    pub tooltip_title: &'a str,
     /// `<EnableContentChange>`, `<Enabled>` and `<ReadOnly>`.
-    pub(crate) enable_content_change: bool,
-    pub(crate) enabled: bool,
-    pub(crate) read_only: bool,
+    pub enable_content_change: bool,
+    pub enabled: bool,
+    pub read_only: bool,
     /// `<Width>` and `<Height>`, 0 when the group names neither.
-    pub(crate) width: Option<&'a str>,
-    pub(crate) height: Option<&'a str>,
+    pub width: Option<&'a str>,
+    pub height: Option<&'a str>,
     /// `<HorizontalStretch>` and `<VerticalStretch>`: 2 when unnamed.
-    pub(crate) horizontal_stretch: Option<bool>,
-    pub(crate) vertical_stretch: Option<bool>,
+    pub horizontal_stretch: Option<bool>,
+    pub vertical_stretch: Option<bool>,
     /// Already formatted -- see [`format_native_color`] and
     /// [`format_native_font`].
-    pub(crate) back_color: &'a str,
-    pub(crate) font: &'a str,
-    pub(crate) payload: &'a str,
+    pub back_color: &'a str,
+    pub font: &'a str,
+    pub payload: &'a str,
     /// `(group uuid, child record)` in the order the body stores them.
-    pub(crate) children: &'a [(&'a str, String)],
+    pub children: &'a [(&'a str, String)],
     /// `<Visible>`, on unless the group turns it off.
-    pub(crate) visible: bool,
+    pub visible: bool,
     /// `<ToolTipRepresentation>`: `None`, `Button`, `ShowTop`, `ShowBottom`
     /// or `Auto`.
-    pub(crate) tooltip_representation: Option<&'a str>,
+    pub tooltip_representation: Option<&'a str>,
     /// Already formatted -- see [`format_extended_tooltip`].
-    pub(crate) extended_tooltip: Option<&'a str>,
+    pub extended_tooltip: Option<&'a str>,
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
-    pub(crate) horizontal_align: Option<&'a str>,
-    pub(crate) vertical_align: Option<&'a str>,
+    pub horizontal_align: Option<&'a str>,
+    pub vertical_align: Option<&'a str>,
     /// The last member, see [`native_display_importance`].
-    pub(crate) display_importance: &'a str,
+    pub display_importance: &'a str,
     /// Member 18, `<Shortcut>`, `{0,0,0}` by default.
-    pub(crate) shortcut: &'a str,
+    pub shortcut: &'a str,
 }
 
 impl Default for NativeGroupItem<'_> {
@@ -8328,7 +8345,7 @@ impl Default for NativeGroupItem<'_> {
 }
 
 /// Member 5 of a `{22,…}` record, by the element that names the container.
-pub(crate) fn native_group_kind(tag: &str) -> Option<u8> {
+pub fn native_group_kind(tag: &str) -> Option<u8> {
     Some(match tag {
         "CommandBar" => 0,
         "Popup" => 1,
@@ -8353,7 +8370,7 @@ fn native_stretch(value: Option<bool>) -> &'static str {
 }
 
 /// The `{22,…}` record of a container, with its children in place.
-pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
+pub fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
     let mut children = String::new();
     for (group_uuid, record) in group.children {
         children.push(',');
@@ -8430,40 +8447,40 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
 /// `<SettingsStorage>`: all 12 469 heads rebuild byte for byte from the source
 /// alone. A form that names one is refused, because member 8 is then that
 /// storage object's uuid, which only the configuration can resolve.
-pub(crate) struct NativeRootHead<'a> {
+pub struct NativeRootHead<'a> {
     /// `<WindowOpeningMode>`: `LockOwnerWindow`, `LockWholeInterface` or
     /// `DontUse`.
-    pub(crate) window_opening_mode: Option<&'a str>,
+    pub window_opening_mode: Option<&'a str>,
     /// `<Width>` and `<Height>`, in characters.
-    pub(crate) width: Option<&'a str>,
-    pub(crate) height: Option<&'a str>,
+    pub width: Option<&'a str>,
+    pub height: Option<&'a str>,
     /// `<EnterKeyBehavior>`, of which only `DefaultButton` is ever stored.
-    pub(crate) enter_key_behavior: Option<&'a str>,
+    pub enter_key_behavior: Option<&'a str>,
     /// `<SaveDataInSettings>`, of which only `UseList` is ever stored.
-    pub(crate) save_data_in_settings: Option<&'a str>,
+    pub save_data_in_settings: Option<&'a str>,
     /// `<AutoSaveDataInSettings>`, of which only `Use` is ever stored.
-    pub(crate) auto_save_data_in_settings: Option<&'a str>,
+    pub auto_save_data_in_settings: Option<&'a str>,
     /// The uuid of the `<SettingsStorage>` the form names.
-    pub(crate) settings_storage: Option<&'a str>,
+    pub settings_storage: Option<&'a str>,
     /// `<AutoTitle>`, on unless the form turns it off.
-    pub(crate) auto_title: bool,
+    pub auto_title: bool,
     /// Form-wide ReadOnly, stored independently of child control flags.
-    pub(crate) read_only: bool,
+    pub read_only: bool,
     /// Already formatted -- see [`format_russian_title`]. A form that names no
     /// title writes `{1,0}`.
-    pub(crate) title: &'a str,
+    pub title: &'a str,
     /// `<Group>`: member 11 only says whether the form names one at all.
-    pub(crate) group: Option<&'a str>,
+    pub group: Option<&'a str>,
     /// `<ChildItemsWidth>`: `Equal`, `LeftWide`, `LeftWidest`, `LeftNarrow` or
     /// `LeftNarrowest`.
-    pub(crate) child_items_width: Option<&'a str>,
+    pub child_items_width: Option<&'a str>,
     /// `<AutoFillCheck>`, `<Customizable>` and `<Enabled>`, all on unless the
     /// form turns them off.
-    pub(crate) auto_fill_check: bool,
-    pub(crate) customizable: bool,
-    pub(crate) enabled: bool,
+    pub auto_fill_check: bool,
+    pub customizable: bool,
+    pub enabled: bool,
     /// `<CommandBarLocation>`: `None`, `Top`, `Bottom` or `Auto`.
-    pub(crate) command_bar_location: Option<&'a str>,
+    pub command_bar_location: Option<&'a str>,
 }
 
 impl Default for NativeRootHead<'_> {
@@ -8490,7 +8507,7 @@ impl Default for NativeRootHead<'_> {
 }
 
 /// The root record's head, from `50` to the command bar's location.
-pub(crate) fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
+pub fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
     let members = [
         "50".to_string(),
         "0".to_string(),
@@ -8552,45 +8569,45 @@ pub(crate) fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
 /// `<n>` is the id of the form **item** its `<xr:Value>` names -- so the
 /// source does resolve it. See [`format_mobile_device_command_bar_content`],
 /// which the caller fills this field from.
-pub(crate) struct NativeRootTail<'a> {
+pub struct NativeRootTail<'a> {
     /// `<AutoURL>`, which is on unless the form turns it off.
-    pub(crate) auto_url: bool,
+    pub auto_url: bool,
     /// `<VerticalScroll>`: `useIfNecessary` or `useWithoutStretch`. It is read
     /// twice, and not the same way both times -- `useWithoutStretch` writes 0
     /// in the first place and 3 in the second.
-    pub(crate) vertical_scroll: Option<&'a str>,
+    pub vertical_scroll: Option<&'a str>,
     /// `<ScalingMode>`: `Normal` or `Compact`.
-    pub(crate) scaling_mode: Option<&'a str>,
+    pub scaling_mode: Option<&'a str>,
     /// `<HorizontalSpacing>` and `<VerticalSpacing>`: `None`, `Half`,
     /// `OneAndHalf` or `Double`.
-    pub(crate) horizontal_spacing: Option<&'a str>,
-    pub(crate) vertical_spacing: Option<&'a str>,
+    pub horizontal_spacing: Option<&'a str>,
+    pub vertical_spacing: Option<&'a str>,
     /// `<HorizontalAlign>`: `Left`, `Center` or `Right`.
-    pub(crate) horizontal_align: Option<&'a str>,
+    pub horizontal_align: Option<&'a str>,
     /// `<VerticalAlign>`: `Top`, `Center` or `Bottom`.
-    pub(crate) vertical_align: Option<&'a str>,
+    pub vertical_align: Option<&'a str>,
     /// `<ChildrenAlign>`, of which only `None` is ever stored.
-    pub(crate) children_align: Option<&'a str>,
+    pub children_align: Option<&'a str>,
     /// `<Group>`, read twice and again not the same way: `AlwaysHorizontal`
     /// writes 1 in the first place and 3 in the second.
-    pub(crate) group: Option<&'a str>,
+    pub group: Option<&'a str>,
     /// `<ShowTitle>` and `<ShowCloseButton>`, both on unless turned off.
-    pub(crate) show_title: bool,
-    pub(crate) show_close_button: bool,
+    pub show_title: bool,
+    pub show_close_button: bool,
     /// `<Scale>`, the stored percentage; 100 when the form names none.
-    pub(crate) scale: Option<&'a str>,
+    pub scale: Option<&'a str>,
     /// `<ConversationsRepresentation>`: `Show` or `DontShow`.
-    pub(crate) conversations_representation: Option<&'a str>,
+    pub conversations_representation: Option<&'a str>,
     /// `<CollapseItemsByImportanceVariant>`: `Use` or `DontUse`.
-    pub(crate) collapse_items_by_importance: Option<&'a str>,
+    pub collapse_items_by_importance: Option<&'a str>,
     /// `<SaveWindowSettings>`, on unless turned off.
-    pub(crate) save_window_settings: bool,
+    pub save_window_settings: bool,
     /// The navigator group's record, when the form has one.
-    pub(crate) navigator: Option<&'a str>,
+    pub navigator: Option<&'a str>,
     /// `<MobileDeviceCommandBarContent>`, already formatted by
     /// [`format_mobile_device_command_bar_content`] -- `{50,0}` for the
     /// 13 443 forms of both corpora that do not carry the element.
-    pub(crate) mobile_device_command_bar_content: &'a str,
+    pub mobile_device_command_bar_content: &'a str,
 }
 
 impl Default for NativeRootTail<'_> {
@@ -8637,7 +8654,7 @@ impl Default for NativeRootTail<'_> {
 /// The caller resolves the name, over the form's items and never its
 /// `<Command>`s -- in all ten forms where an item and a command share a name
 /// the item's id is what the body holds.
-pub(crate) fn format_mobile_device_command_bar_content(item_ids: &[&str]) -> String {
+pub fn format_mobile_device_command_bar_content(item_ids: &[&str]) -> String {
     if item_ids.is_empty() {
         return "{50,0}".to_string();
     }
@@ -8670,7 +8687,7 @@ const ROOT_SPACING: &[(&str, &str)] = &[
 ];
 
 /// The root record's tail, from `"",""` to the last member of the record.
-pub(crate) fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
+pub fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
     let scroll = root_code(
         tail.vertical_scroll,
         &[("useIfNecessary", "2"), ("useWithoutStretch", "0")],
@@ -8748,29 +8765,29 @@ pub(crate) fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
     Some(format!("{head},{}", members.join(",")))
 }
 
-pub(crate) struct NativeRootLayout<'a> {
+pub struct NativeRootLayout<'a> {
     /// The first 18 members, from [`format_root_head`].
-    pub(crate) head: &'a str,
+    pub head: &'a str,
     /// The keyed property bag: a count, then that many `(key, value)` pairs.
     /// Its shape holds in all 12 488 records of the corpus that split, and
     /// exactly four members follow it -- the events, the command set, the
     /// command bar's flag and the bar.
-    pub(crate) properties: &'a [(&'a str, String)],
+    pub properties: &'a [(&'a str, String)],
     /// The form's own event bindings, or `{0,1,0}` when it has none.
-    pub(crate) events: &'a str,
+    pub events: &'a str,
     /// The root `<CommandSet>`, `{0}` when the form excludes nothing.
-    pub(crate) command_set: &'a str,
+    pub command_set: &'a str,
     /// The auto command bar's record.
-    pub(crate) command_bar: &'a str,
+    pub command_bar: &'a str,
     /// The form's own child items, as `(kind uuid, record)` -- the same
     /// encoding a group uses, with the count first. See [`child_kind_uuid`].
-    pub(crate) children: &'a [(&'a str, String)],
+    pub children: &'a [(&'a str, String)],
     /// Everything after the children, from [`format_root_tail`].
-    pub(crate) tail: &'a str,
+    pub tail: &'a str,
 }
 
 /// The `{50,…}` root layout of a form body.
-pub(crate) fn format_root_layout(root: &NativeRootLayout<'_>) -> String {
+pub fn format_root_layout(root: &NativeRootLayout<'_>) -> String {
     let mut children = String::new();
     for (kind_uuid, record) in root.children {
         children.push(',');
@@ -8807,7 +8824,7 @@ pub(crate) fn format_root_layout(root: &NativeRootLayout<'_>) -> String {
 /// carries five appearance blocks where the search string carries three -- so
 /// it arrives already formatted, like every other slot whose XML property is
 /// not yet named.
-pub(crate) fn format_search_addition(
+pub fn format_search_addition(
     id: &str,
     kind: u8,
     name: &str,
@@ -8835,29 +8852,29 @@ pub(crate) fn format_search_addition(
 ///
 /// So the parts a caller supplies are the head and the scalar runs; this
 /// writer owns the structure between them.
-pub(crate) struct NativeTableItem<'a> {
+pub struct NativeTableItem<'a> {
     /// Everything from `55` up to the member before the context menu's flag,
     /// already joined with commas.
-    pub(crate) head: &'a str,
-    pub(crate) context_menu: &'a str,
-    pub(crate) command_bar: &'a str,
+    pub head: &'a str,
+    pub context_menu: &'a str,
+    pub command_bar: &'a str,
     /// The twelve members between the command bar and the tooltip's flag.
-    pub(crate) middle: &'a str,
-    pub(crate) extended_tooltip: &'a str,
+    pub middle: &'a str,
+    pub extended_tooltip: &'a str,
     /// Where the table says what it shows -- the search string, the view
     /// status and the search control -- which is exactly the three members
     /// between the tooltip and the first addition's flag. Measured over all
     /// 7 183 table records of the ERP УХ corpus: a candidate filling these
     /// three, with `<Representation>` and `<SkipOnInput>` which live in the
     /// head and the middle, reproduces every one of them exactly.
-    pub(crate) search_string_location: Option<&'a str>,
-    pub(crate) view_status_location: Option<&'a str>,
-    pub(crate) search_control_location: Option<&'a str>,
-    pub(crate) search_string_addition: &'a str,
-    pub(crate) view_status_addition: &'a str,
-    pub(crate) search_control_addition: &'a str,
+    pub search_string_location: Option<&'a str>,
+    pub view_status_location: Option<&'a str>,
+    pub search_control_location: Option<&'a str>,
+    pub search_string_addition: &'a str,
+    pub view_status_addition: &'a str,
+    pub search_control_addition: &'a str,
     /// The sixteen members that close the record.
-    pub(crate) tail: &'a str,
+    pub tail: &'a str,
 }
 
 /// The codes a table writes for where it shows its search string.
@@ -8892,7 +8909,7 @@ fn table_location_code(
 }
 
 /// The `{55,…}` record of a table, with its six children in place.
-pub(crate) fn format_table_item(table: &NativeTableItem<'_>) -> String {
+pub fn format_table_item(table: &NativeTableItem<'_>) -> String {
     format!(
         "{{{head},1,{context_menu},1,{command_bar},{middle},1,{tooltip},{search_string_location},{view_status_location},{search_control_location},\
          1,{search_string},1,{view_status},1,{search_control},{tail}}}",
@@ -8918,7 +8935,7 @@ pub(crate) fn format_table_item(table: &NativeTableItem<'_>) -> String {
 ///
 /// The one slot that separates it from a context menu is the marker `9`, and
 /// the tail carries `{0,0,1}` where a context menu carries `{1,1}`.
-pub(crate) fn format_empty_auto_command_bar(id: &str, name: &str) -> String {
+pub fn format_empty_auto_command_bar(id: &str, name: &str) -> String {
     format!(
         "{{22,{{{id},{ns}}},0,0,0,9,{name},{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},\
          {{7,3,0,1,100}},{{0,0,0}},1,{{0,0,1}},0,1,0,0,0,3,3,0}}",
@@ -8959,7 +8976,7 @@ static RECORDING_DATA_PATH_STEPS: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// Start recording data-path steps.
-pub(crate) fn record_data_path_steps() {
+pub fn record_data_path_steps() {
     if let Ok(mut steps) = DATA_PATH_STEPS.lock() {
         *steps = Some(std::collections::BTreeSet::new());
         RECORDING_DATA_PATH_STEPS.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -8967,7 +8984,7 @@ pub(crate) fn record_data_path_steps() {
 }
 
 /// The steps recorded since `record_data_path_steps`; recording stops.
-pub(crate) fn take_data_path_steps() -> std::collections::BTreeSet<(String, String)> {
+pub fn take_data_path_steps() -> std::collections::BTreeSet<(String, String)> {
     DATA_PATH_STEPS
         .lock()
         .ok()
@@ -9281,35 +9298,35 @@ const DATA_PATH_REGISTER_FAMILIES: [&str; 4] = [
 /// `uuid` is the field's own `uuid=` attribute, verbatim: a field id is never
 /// an ordinal and never a number the object's XML carries anywhere else.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(crate) struct ConfigurationField {
-    pub(crate) uuid: String,
+pub struct ConfigurationField {
+    pub uuid: String,
     /// The XML tag the field is declared with -- `Attribute`, `Dimension`,
     /// `TabularSection`, `AccountingFlag` and the rest. Part of the key: all
     /// three charts of accounts name an `<AccountingFlag>` and an
     /// `<ExtDimensionAccountingFlag>` alike.
-    pub(crate) tag: String,
+    pub tag: String,
     /// The `<Properties><Type>` entries, which say what the next segment
     /// resolves against.
-    pub(crate) types: Vec<String>,
+    pub types: Vec<String>,
 }
 
 /// One metadata object of the configuration source tree: its own uuid and the
 /// fields it declares, keyed by name.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(crate) struct ConfigurationObject {
+pub struct ConfigurationObject {
     /// `<MetaDataObject>/<Class uuid=>`.
-    pub(crate) uuid: String,
+    pub uuid: String,
     /// The singular class name, `Catalog`, `Document`, `AccountingRegister`…
-    pub(crate) class: String,
+    pub class: String,
     /// `<Properties><Owners>`, for the `Owner` standard attribute.
-    pub(crate) owners: Vec<String>,
+    pub owners: Vec<String>,
     /// Every field, keyed by name; a name that two tags share keeps both.
-    pub(crate) fields: BTreeMap<String, Vec<ConfigurationField>>,
+    pub fields: BTreeMap<String, Vec<ConfigurationField>>,
     /// Each tabular section's own fields.
-    pub(crate) sections: BTreeMap<String, BTreeMap<String, Vec<ConfigurationField>>>,
+    pub sections: BTreeMap<String, BTreeMap<String, Vec<ConfigurationField>>>,
     /// A defined type's own `<Properties><Type>`, which a data path walks on
     /// in as if the attribute had declared it.
-    pub(crate) types: Vec<String>,
+    pub types: Vec<String>,
 }
 
 /// The configuration source tree, as the data-path walk asks it questions.
@@ -9317,48 +9334,48 @@ pub(crate) struct ConfigurationObject {
 /// One method: give me the object `"Catalog.Валюты"`, `"CommonAttribute.X"` or
 /// `"Constant.X"`. The implementation reads it from the tree and memoises it,
 /// so an object is parsed once per run however many paths name it.
-pub(crate) trait ConfigurationObjects {
+pub trait ConfigurationObjects {
     fn object(&self, key: &str) -> Option<Arc<ConfigurationObject>>;
 }
 
 /// A `<Columns><Column>` or one column of an `<AdditionalColumns>` block.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(crate) struct DataPathColumn {
-    pub(crate) id: String,
-    pub(crate) types: Vec<String>,
+pub struct DataPathColumn {
+    pub id: String,
+    pub types: Vec<String>,
 }
 
 /// A form `<Attribute>`, with the two column tables a data path walks into.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(crate) struct DataPathAttribute {
+pub struct DataPathAttribute {
     /// A dynamic list's synthetic field map: the id each dotted prefix of a
     /// query field stores, and the ids of the `~`-marked references by prefix
     /// and twin (`findings/rt-dynamic-list.md` §3).
-    pub(crate) dynamic_fields: BTreeMap<String, String>,
-    pub(crate) dynamic_marked: BTreeMap<(String, Option<String>), String>,
+    pub dynamic_fields: BTreeMap<String, String>,
+    pub dynamic_marked: BTreeMap<(String, Option<String>), String>,
     /// The attribute's own name, which a marked reference's twin repeats.
-    pub(crate) list_name: Option<String>,
-    pub(crate) id: String,
-    pub(crate) types: Vec<String>,
+    pub list_name: Option<String>,
+    pub id: String,
+    pub types: Vec<String>,
     /// `<Columns><Column name= id=>`.
-    pub(crate) columns: BTreeMap<String, DataPathColumn>,
+    pub columns: BTreeMap<String, DataPathColumn>,
     /// `<Columns><AdditionalColumns table="…">`, keyed by that `table=` path --
     /// a dotted path with no subscripts, rooted at the attribute's own name.
-    pub(crate) additional_columns: BTreeMap<String, BTreeMap<String, DataPathColumn>>,
+    pub additional_columns: BTreeMap<String, BTreeMap<String, DataPathColumn>>,
 }
 
 /// A form item, for an `Items.<item>` head.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(crate) struct DataPathItem {
-    pub(crate) id: String,
-    pub(crate) data_path: Option<String>,
+pub struct DataPathItem {
+    pub id: String,
+    pub data_path: Option<String>,
 }
 
 /// Everything a data path needs from the form's own `Form.xml`.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(crate) struct DataPathForm {
-    pub(crate) attributes: BTreeMap<String, DataPathAttribute>,
-    pub(crate) items: BTreeMap<String, DataPathItem>,
+pub struct DataPathForm {
+    pub attributes: BTreeMap<String, DataPathAttribute>,
+    pub items: BTreeMap<String, DataPathItem>,
 }
 
 /// The context the walk carries: the type the previous segment resolved to.
@@ -9653,7 +9670,7 @@ fn walk_data_path_context<'a>(
 /// accounting register, whose uuid appears nowhere in the configuration, or a
 /// dynamic list's query field, whose number is the form's own
 /// `FieldsMapItemId` and is in no source file.
-pub(crate) fn resolve_form_data_path(
+pub fn resolve_form_data_path(
     form: &DataPathForm,
     configuration: Option<&dyn ConfigurationObjects>,
     data_path: &str,
@@ -10124,6 +10141,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn encodes_base64_as_rfc_4648_does() {
+        // RFC 4648 section 10 test vectors, then every byte value once.
+        for (input, expected) in [
+            ("", ""),
+            ("f", "Zg=="),
+            ("fo", "Zm8="),
+            ("foo", "Zm9v"),
+            ("foob", "Zm9vYg=="),
+            ("fooba", "Zm9vYmE="),
+            ("foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(encode_base64(input.as_bytes()), expected);
+        }
+        let every_byte: Vec<u8> = (0..=255).collect();
+        let expected = concat!(
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4v",
+            "MDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5f",
+            "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6P",
+            "kJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/",
+            "wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v",
+            "8PHy8/T19vf4+fr7/P3+/w==",
+        );
+        assert_eq!(encode_base64(&every_byte), expected);
+    }
+
+    #[test]
     fn root_scale_rejects_non_numeric_and_extra_member_input() {
         let expected = format_root_tail(&NativeRootTail::default()).unwrap();
         assert_eq!(
@@ -10315,7 +10358,18 @@ mod tests {
     /// the payload is the same in all of them.
     #[test]
     fn writes_one_record_of_every_group_kind() {
-        let cases: [(u8, &str, &str, &str, &str, &str, &str, &str); 6] = [
+        // `(kind, id, name, title, payload, tooltip id, tooltip name, expected head)`.
+        type GroupKindCase<'a> = (
+            u8,
+            &'a str,
+            &'a str,
+            &'a str,
+            &'a str,
+            &'a str,
+            &'a str,
+            &'a str,
+        );
+        let cases: [GroupKindCase; 6] = [
             (
                 0,
                 "76",

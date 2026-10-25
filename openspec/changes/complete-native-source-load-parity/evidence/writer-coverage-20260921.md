@@ -1,6 +1,6 @@
 # What the native body writer covers, 21.09.2026
 
-`src/compiler/bodies/form_native.rs` writes the records a native 8.3.27 form
+`crates/ibcmd-form-native/src/lib.rs` writes the records a native 8.3.27 form
 body stores. Every function below is proved against strings read out of
 `ibcmd_rs_uha_8327_parity2_20260920`, not against the writer's own output.
 

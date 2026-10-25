@@ -90,7 +90,7 @@ both places.
 
 ## What the writer does
 
-`format_native_events` in `src/compiler/bodies/form_native.rs` builds the tuple
+`format_native_events` in `crates/ibcmd-form-native/src/lib.rs` builds the tuple
 from `(owner tag, main attribute class, events)`, with `FORM_EVENT_UUIDS`
 holding the 145 measured entries. A name the table does not hold, and a main
 attribute class the corpus never showed declaring a split event, are **refused**

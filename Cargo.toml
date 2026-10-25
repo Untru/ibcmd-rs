@@ -19,6 +19,7 @@ members = [
     "crates/ibcmd-filedb",
     "crates/ibcmd-postgres",
     "crates/ibcmd-form-schema",
+    "crates/ibcmd-form-native",
 ]
 resolver = "3"
 exclude = ["crates/ibcmd-edt/vendor/morph1c"]
@@ -52,6 +53,7 @@ ibcmd-edt = { path = "crates/ibcmd-edt" }
 ibcmd-filedb = { path = "crates/ibcmd-filedb" }
 ibcmd-postgres = { path = "crates/ibcmd-postgres" }
 ibcmd-form-schema = { path = "crates/ibcmd-form-schema" }
+ibcmd-form-native = { path = "crates/ibcmd-form-native" }
 # The process allocator, installed in main.rs.
 mimalloc = "0.1.52"
 quick-xml = "0.38"

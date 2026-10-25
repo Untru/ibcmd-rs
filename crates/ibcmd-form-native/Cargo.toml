@@ -1,0 +1,10 @@
+[package]
+name = "ibcmd-form-native"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Writer for the managed-form item records a native 8.3.27 form body stores"
+
+[lints.rust]
+unsafe_code = "forbid"
