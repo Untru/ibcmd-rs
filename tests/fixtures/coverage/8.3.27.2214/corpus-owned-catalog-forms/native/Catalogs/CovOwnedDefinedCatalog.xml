@@ -1,0 +1,145 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Catalog uuid="30c17c2b-1282-5154-8cdc-b3389fc7fe8a">
+		<InternalInfo>
+			<xr:GeneratedType name="CatalogObject.CovOwnedDefinedCatalog" category="Object">
+				<xr:TypeId>fa0547ab-7767-50ec-afb5-9c65d9e42c89</xr:TypeId>
+				<xr:ValueId>c5a55edf-fe2a-5cad-94e1-c6d0e5d5718d</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogRef.CovOwnedDefinedCatalog" category="Ref">
+				<xr:TypeId>34b18b10-794c-591f-9d6f-15ec90d74772</xr:TypeId>
+				<xr:ValueId>454d5fc7-ffcb-5607-9f4b-46ae2cfbf5a9</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogSelection.CovOwnedDefinedCatalog" category="Selection">
+				<xr:TypeId>59ce0f54-158f-5a58-a418-2ee5b802071c</xr:TypeId>
+				<xr:ValueId>9a486567-5bb1-5021-a6c8-19b971496d92</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogList.CovOwnedDefinedCatalog" category="List">
+				<xr:TypeId>0ff95eb3-befd-54c8-84e2-33c09c98e8a0</xr:TypeId>
+				<xr:ValueId>8d7e32ce-a612-5ec5-a50b-0f78ae0160fc</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogManager.CovOwnedDefinedCatalog" category="Manager">
+				<xr:TypeId>fc982de0-382f-578d-9677-82b80c80dc65</xr:TypeId>
+				<xr:ValueId>58ab6610-ee95-5445-af9c-47fa821aa49b</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovOwnedDefinedCatalog</Name>
+			<Synonym/>
+			<Comment/>
+			<Hierarchical>false</Hierarchical>
+			<HierarchyType>HierarchyFoldersAndItems</HierarchyType>
+			<LimitLevelCount>false</LimitLevelCount>
+			<LevelCount>2</LevelCount>
+			<FoldersOnTop>true</FoldersOnTop>
+			<UseStandardCommands>true</UseStandardCommands>
+			<Owners/>
+			<SubordinationUse>ToItems</SubordinationUse>
+			<CodeLength>9</CodeLength>
+			<DescriptionLength>25</DescriptionLength>
+			<CodeType>String</CodeType>
+			<CodeAllowedLength>Variable</CodeAllowedLength>
+			<CodeSeries>WholeCatalog</CodeSeries>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>true</Autonumbering>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<Characteristics/>
+			<PredefinedDataUpdate>Auto</PredefinedDataUpdate>
+			<EditType>InDialog</EditType>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<InputByString>
+				<xr:Field>Catalog.CovOwnedDefinedCatalog.StandardAttribute.Description</xr:Field>
+				<xr:Field>Catalog.CovOwnedDefinedCatalog.StandardAttribute.Code</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<DefaultObjectForm/>
+			<DefaultFolderForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<DefaultFolderChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryFolderForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<AuxiliaryFolderChoiceForm/>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<BasedOn/>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<CreateOnInput>Use</CreateOnInput>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects>
+			<TabularSection uuid="5fcf23ef-4190-5555-9ada-e557663a76c9">
+				<InternalInfo>
+					<xr:GeneratedType name="CatalogTabularSection.CovOwnedDefinedCatalog.Goods" category="TabularSection">
+						<xr:TypeId>2a45b398-028c-5c28-9aea-fb710e2150ff</xr:TypeId>
+						<xr:ValueId>0ff0e5aa-4c55-5577-bdee-b57d7ecb71fe</xr:ValueId>
+					</xr:GeneratedType>
+					<xr:GeneratedType name="CatalogTabularSectionRow.CovOwnedDefinedCatalog.Goods" category="TabularSectionRow">
+						<xr:TypeId>9667eef8-75ac-5613-b611-6a058120b7c7</xr:TypeId>
+						<xr:ValueId>8105fc59-b2e8-583f-aa28-4548e1b12016</xr:ValueId>
+					</xr:GeneratedType>
+				</InternalInfo>
+				<Properties>
+					<Name>Goods</Name>
+					<Synonym/>
+					<Comment/>
+					<ToolTip/>
+					<FillChecking>DontCheck</FillChecking>
+					<Use>ForItem</Use>
+					<LineNumberLength>9</LineNumberLength>
+				</Properties>
+				<ChildObjects>
+					<Attribute uuid="c10f962a-26d1-571d-b299-5d612573777a">
+						<Properties>
+							<Name>Product</Name>
+							<Synonym/>
+							<Comment/>
+							<Type>
+								<v8:TypeSet>cfg:DefinedType.CovOwnedProductType</v8:TypeSet>
+							</Type>
+							<PasswordMode>false</PasswordMode>
+							<Format/>
+							<EditFormat/>
+							<ToolTip/>
+							<MarkNegatives>false</MarkNegatives>
+							<Mask/>
+							<MultiLine>false</MultiLine>
+							<ExtendedEdit>false</ExtendedEdit>
+							<MinValue xsi:nil="true"/>
+							<MaxValue xsi:nil="true"/>
+							<FillChecking>DontCheck</FillChecking>
+							<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+							<ChoiceParameterLinks/>
+							<ChoiceParameters/>
+							<QuickChoice>Auto</QuickChoice>
+							<CreateOnInput>Auto</CreateOnInput>
+							<ChoiceForm/>
+							<LinkByType/>
+							<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+							<Indexing>DontIndex</Indexing>
+							<FullTextSearch>Use</FullTextSearch>
+							<DataHistory>Use</DataHistory>
+						</Properties>
+					</Attribute>
+				</ChildObjects>
+			</TabularSection>
+			<Form>DeepForm</Form>
+			<Form>TableForm</Form>
+			<Form>DeepInputForm</Form>
+		</ChildObjects>
+	</Catalog>
+</MetaDataObject>

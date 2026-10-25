@@ -1,0 +1,84 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<AccumulationRegister uuid="c3deae26-e28b-5636-89dc-07cad440a279">
+		<InternalInfo>
+			<xr:GeneratedType name="AccumulationRegisterRecord.CovRegisterType_Turnovers_Acc" category="Record">
+				<xr:TypeId>cae2e3db-8d1b-56b8-a718-591b1040471f</xr:TypeId>
+				<xr:ValueId>053d4a14-e6bd-5ad5-a2ea-700d98191457</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterManager.CovRegisterType_Turnovers_Acc" category="Manager">
+				<xr:TypeId>8d6b34dd-0dbc-5c35-bb3e-a3fbfbf5bbda</xr:TypeId>
+				<xr:ValueId>404ddb23-203e-5135-8358-e0f5848d1a12</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterSelection.CovRegisterType_Turnovers_Acc" category="Selection">
+				<xr:TypeId>50b64b05-dbe7-54c4-a6f4-5d494ef183a6</xr:TypeId>
+				<xr:ValueId>6155eabf-9ffd-56fb-b575-a967f6c9e325</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterList.CovRegisterType_Turnovers_Acc" category="List">
+				<xr:TypeId>2817f62e-4204-5042-ad74-d984e5995e58</xr:TypeId>
+				<xr:ValueId>573c3c9e-24b2-542f-b52a-8d51ec7ef2fa</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterRecordSet.CovRegisterType_Turnovers_Acc" category="RecordSet">
+				<xr:TypeId>d9f1929a-d017-5249-b7b0-baab79896263</xr:TypeId>
+				<xr:ValueId>cf81107c-8981-5e47-8c05-4898d6dfe740</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccumulationRegisterRecordKey.CovRegisterType_Turnovers_Acc" category="RecordKey">
+				<xr:TypeId>b92bf89d-5d9d-5c82-a3a8-ddbc1b789c38</xr:TypeId>
+				<xr:ValueId>8f342d62-3bc4-539c-8af6-81379a84369b</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovRegisterType_Turnovers_Acc</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<DefaultListForm/>
+			<AuxiliaryListForm/>
+			<RegisterType>Turnovers</RegisterType>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>DontUse</FullTextSearch>
+			<EnableTotalsSplitting>false</EnableTotalsSplitting>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+		</Properties>
+		<ChildObjects>
+			<Resource uuid="be15f5a8-b71d-5991-8dc2-a83e3976a724">
+				<Properties>
+					<Name>CovResource</Name>
+					<Synonym/>
+					<Comment/>
+					<Type>
+						<v8:Type>xs:decimal</v8:Type>
+						<v8:NumberQualifiers>
+							<v8:Digits>10</v8:Digits>
+							<v8:FractionDigits>0</v8:FractionDigits>
+							<v8:AllowedSign>Any</v8:AllowedSign>
+						</v8:NumberQualifiers>
+					</Type>
+					<PasswordMode>false</PasswordMode>
+					<Format/>
+					<EditFormat/>
+					<ToolTip/>
+					<MarkNegatives>false</MarkNegatives>
+					<Mask/>
+					<MultiLine>false</MultiLine>
+					<ExtendedEdit>false</ExtendedEdit>
+					<MinValue xsi:nil="true"/>
+					<MaxValue xsi:nil="true"/>
+					<FillChecking>DontCheck</FillChecking>
+					<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+					<ChoiceParameterLinks/>
+					<ChoiceParameters/>
+					<QuickChoice>Auto</QuickChoice>
+					<CreateOnInput>Auto</CreateOnInput>
+					<ChoiceForm/>
+					<LinkByType/>
+					<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+					<FullTextSearch>Use</FullTextSearch>
+				</Properties>
+			</Resource>
+		</ChildObjects>
+	</AccumulationRegister>
+</MetaDataObject>

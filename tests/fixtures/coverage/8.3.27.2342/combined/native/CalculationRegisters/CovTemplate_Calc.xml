@@ -1,0 +1,57 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<CalculationRegister uuid="cdbf9830-6ad9-5512-8bf4-6f6ed22959ba">
+		<InternalInfo>
+			<xr:GeneratedType name="CalculationRegisterRecord.CovTemplate_Calc" category="Record">
+				<xr:TypeId>f66bf24c-e9c6-5706-82ca-2592586cfa76</xr:TypeId>
+				<xr:ValueId>924e6e7b-0ccc-5ed6-833e-67f07ad8d9b3</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CalculationRegisterManager.CovTemplate_Calc" category="Manager">
+				<xr:TypeId>9869fe61-01fc-5383-b628-adecedbf904c</xr:TypeId>
+				<xr:ValueId>ac0f9b5f-bba5-595a-ab89-c04258ec75ab</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CalculationRegisterSelection.CovTemplate_Calc" category="Selection">
+				<xr:TypeId>023f80cf-5b5a-58bb-bd59-c1be7f913a7b</xr:TypeId>
+				<xr:ValueId>e90e9d55-12a6-5df9-ad25-f2a091bb9b37</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CalculationRegisterList.CovTemplate_Calc" category="List">
+				<xr:TypeId>c38a1722-6637-5440-a212-70c427085680</xr:TypeId>
+				<xr:ValueId>ca2101f0-c47c-594a-8a68-55f8a19174f8</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CalculationRegisterRecordSet.CovTemplate_Calc" category="RecordSet">
+				<xr:TypeId>35f86ed3-5f0a-5f2f-bac7-8a52f67858b6</xr:TypeId>
+				<xr:ValueId>b5b6a431-9d05-5f8e-94b2-4b1a7fc98cc9</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CalculationRegisterRecordKey.CovTemplate_Calc" category="RecordKey">
+				<xr:TypeId>dd9c2dec-7abe-5e6a-badb-2303194fe049</xr:TypeId>
+				<xr:ValueId>e2ab30a0-e528-593d-bd67-4981179327e3</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="RecalculationsManager.CovTemplate_Calc" category="Recalcs">
+				<xr:TypeId>54fadb95-3813-55f9-a3b9-0ba8459e4866</xr:TypeId>
+				<xr:ValueId>5c943370-fd25-55fa-af91-cd5c94d6fcb4</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovTemplate_Calc</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<DefaultListForm/>
+			<AuxiliaryListForm/>
+			<Periodicity>Month</Periodicity>
+			<ActionPeriod>false</ActionPeriod>
+			<BasePeriod>false</BasePeriod>
+			<Schedule/>
+			<ScheduleValue/>
+			<ScheduleDate/>
+			<ChartOfCalculationTypes>ChartOfCalculationTypes.CovCalculationTypes</ChartOfCalculationTypes>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>DontUse</FullTextSearch>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+		</Properties>
+		<ChildObjects/>
+	</CalculationRegister>
+</MetaDataObject>

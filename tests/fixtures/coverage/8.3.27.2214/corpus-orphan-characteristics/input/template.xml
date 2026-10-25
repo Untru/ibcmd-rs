@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Catalog uuid="7e0b67b0-c6d3-5a06-bbaf-b78f89c06903">
+		<InternalInfo>
+			<xr:GeneratedType name="CatalogObject.CovOrphanCharacteristics" category="Object">
+				<xr:TypeId>82f71525-9f10-54c9-af8d-4f9c92a51468</xr:TypeId>
+				<xr:ValueId>4c93a8ed-6b81-510a-915d-434fc44bdedd</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogRef.CovOrphanCharacteristics" category="Ref">
+				<xr:TypeId>d8fe960a-3cb1-52e3-8f1d-d46f7b999aab</xr:TypeId>
+				<xr:ValueId>7021accf-07c8-5a02-bc45-00bdd46cfa1a</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogSelection.CovOrphanCharacteristics" category="Selection">
+				<xr:TypeId>171555e1-5406-5861-9e21-55092629039e</xr:TypeId>
+				<xr:ValueId>7e86ffa5-e596-50f7-ac3a-cc8b8f282637</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogList.CovOrphanCharacteristics" category="List">
+				<xr:TypeId>d1fbf012-796b-5cac-bfc0-f7acfc27c4a8</xr:TypeId>
+				<xr:ValueId>8f85ffa1-b0db-5e10-a0ea-5314bfc9fb19</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogManager.CovOrphanCharacteristics" category="Manager">
+				<xr:TypeId>c20c1217-4bc4-5318-b58f-e6ece9a5ca75</xr:TypeId>
+				<xr:ValueId>fef0ab6c-1396-5968-b774-5f6c522b5702</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovOrphanCharacteristics</Name>
+			<Synonym/>
+			<Comment/>
+			<Hierarchical>false</Hierarchical>
+			<HierarchyType>HierarchyFoldersAndItems</HierarchyType>
+			<LimitLevelCount>false</LimitLevelCount>
+			<LevelCount>2</LevelCount>
+			<FoldersOnTop>true</FoldersOnTop>
+			<UseStandardCommands>true</UseStandardCommands>
+			<Owners/>
+			<SubordinationUse>ToItems</SubordinationUse>
+			<CodeLength>9</CodeLength>
+			<DescriptionLength>25</DescriptionLength>
+			<CodeType>String</CodeType>
+			<CodeAllowedLength>Variable</CodeAllowedLength>
+			<CodeSeries>WholeCatalog</CodeSeries>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>true</Autonumbering>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<Characteristics><xr:Characteristic><xr:CharacteristicTypes from=""><xr:KeyField>-2</xr:KeyField><xr:TypesFilterField>0:8819d20a-c08a-51e6-a785-989f7956c436</xr:TypesFilterField><xr:TypesFilterValue xsi:type="xs:boolean">true</xr:TypesFilterValue><xr:DataPathField>-1</xr:DataPathField><xr:MultipleValuesUseField>-1</xr:MultipleValuesUseField></xr:CharacteristicTypes><xr:CharacteristicValues from=""><xr:ObjectField>0:f9bdc705-5711-5281-b8bb-5cc0f02e8d3e</xr:ObjectField><xr:TypeField>0:0abedfa1-76d4-5574-81eb-a78943da2b1c</xr:TypeField><xr:ValueField>0:877c4590-632e-565d-9e33-fb07b47b063f</xr:ValueField><xr:MultipleValuesKeyField>-1</xr:MultipleValuesKeyField><xr:MultipleValuesOrderField>-1</xr:MultipleValuesOrderField></xr:CharacteristicValues></xr:Characteristic></Characteristics>
+			<PredefinedDataUpdate>Auto</PredefinedDataUpdate>
+			<EditType>InDialog</EditType>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<InputByString>
+				<xr:Field>Catalog.CovOrphanCharacteristics.StandardAttribute.Description</xr:Field>
+				<xr:Field>Catalog.CovOrphanCharacteristics.StandardAttribute.Code</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<DefaultObjectForm/>
+			<DefaultFolderForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<DefaultFolderChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryFolderForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<AuxiliaryFolderChoiceForm/>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<BasedOn/>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<CreateOnInput>Use</CreateOnInput>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects/>
+	</Catalog>
+</MetaDataObject>
+

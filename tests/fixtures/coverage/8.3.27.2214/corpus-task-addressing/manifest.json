@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-task-addressing",
+  "collection": "Tasks",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "314cdb130429d328b4b96aadda50c55aec0ef7b59461411d56ea25361bea0213",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 78045,
+    "decoded_sha256": "a63b49c61215307adb5b13dae30d99471db24459ba79b1579e360d7a9e7aa615",
+    "encoded_sha256": "bdcac2232cdfc4264ec38f608a07dd2668239238d8756e329476500cfc1f6826"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovAddressedProcess/Ext/Flowchart.xml",
+          "size": 9170,
+          "sha256": "b69287c88814d591cbb40647ee9b45024023a3efad1a2c52d8169cc9b511f277"
+        },
+        {
+          "path": "BusinessProcesses/CovAddressedProcess.xml",
+          "size": 4304,
+          "sha256": "4b8c7026357ea3e3ecc2eca0ec12e9b607455d228edcc2ebe7394c2ee2d35afc"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 10399,
+          "sha256": "59729b04645b384d99d6e1ad8a73013a8c4f2f345d6d653d0aceadd7048a293e"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "c51426e2d749a80f004699012fddfae5a6b06dc2747ec224f042cac9a2b4de11"
+        }
+      ]
+    },
+    {
+      "name": "CovAddressedTask",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovAddressedTask.xml",
+          "size": 9234,
+          "sha256": "4140330d353ab1949d340b13c3824a1abfa35ce8730d31d29729cfea31f5cab1"
+        }
+      ]
+    }
+  ]
+}

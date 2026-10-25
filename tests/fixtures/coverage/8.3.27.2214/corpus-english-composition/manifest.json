@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-english-composition",
+  "collection": "CommonTemplates",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "3e0bfc757bf2af7462ffbc724eaa04ba2c15fc1bd1046cce65588ef204f2668d",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 77601,
+    "decoded_sha256": "53903aad7e3f0dd64d6c0a02cc5cc4404a2507fdc95eee385f266c136ffdb610",
+    "encoded_sha256": "28a49aa6392a95576ad20e90417b410e76748877d7cd60f6e6d18e89f330475b"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10391,
+          "sha256": "34a7dc1bc43fa1a7d67d6d567d5d7f9768914a778aa5444c358eea0fbfebe1cb"
+        },
+        {
+          "path": "Languages/English.xml",
+          "size": 1237,
+          "sha256": "f2a0133f8869b5aee9fceb8747ecc7113d20049f706f917f70d3e7a38d89d0c5"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "a7e657ad0d2c679415df010765ca0b12d693369db0c73558837fe02650540a7b"
+        }
+      ]
+    },
+    {
+      "name": "CovEnglishComposition",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovEnglishComposition/Ext/Template.xml",
+          "size": 1206,
+          "sha256": "b90d200c3c76c86d096f2c3afe3681366108ae0595b2809c98b18426a6acdcdc"
+        },
+        {
+          "path": "CommonTemplates/CovEnglishComposition.xml",
+          "size": 1170,
+          "sha256": "d7f166a47aca2a0816c22c0a11801355dba4c9dc11ed8b8b10f90df7ca793673"
+        }
+      ]
+    }
+  ]
+}

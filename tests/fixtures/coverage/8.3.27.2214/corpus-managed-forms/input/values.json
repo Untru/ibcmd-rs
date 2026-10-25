@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "corpus": "clean-room-corpus-regressions",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovPeriodField",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovPeriodField.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovLabelDecorationTextColorTomato",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLabelDecorationTextColorTomato.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovLabelDecorationTextColorMediumGreen",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLabelDecorationTextColorMediumGreen.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovLabelFieldTextColorTomato",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLabelFieldTextColorTomato.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovLabelFieldTextColorMediumGreen",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLabelFieldTextColorMediumGreen.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovUsualGroupBackColorTomato",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovUsualGroupBackColorTomato.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovUsualGroupBackColorMediumGreen",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovUsualGroupBackColorMediumGreen.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovGraphicalSchemaFieldBorderColorTomato",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovGraphicalSchemaFieldBorderColorTomato.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovGraphicalSchemaFieldBorderColorMediumGreen",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovGraphicalSchemaFieldBorderColorMediumGreen.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovButtonPictureGotoURL",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovButtonPictureGotoURL.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovButtonPictureAppearanceStarHalfFilled",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovButtonPictureAppearanceStarHalfFilled.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovButtonPictureFormattedString",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovButtonPictureFormattedString.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovButtonPictureQueryWizardTempTableDescription",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovButtonPictureQueryWizardTempTableDescription.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovButtonPictureToday",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovButtonPictureToday.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovButtonPictureAccountingRegister",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovButtonPictureAccountingRegister.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovButtonPictureNewConversation",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovButtonPictureNewConversation.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovFormEventOnOpen",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFormEventOnOpen.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovFormCommandSpace",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFormCommandSpace.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovEmbeddedSpreadsheetCells",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovEmbeddedSpreadsheetCells.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovValueTableChildDataPath",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovValueTableChildDataPath.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovChartField",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovChartField.xml"
+      },
+      "source": "generated:corpus structural class"
+    },
+    {
+      "name": "CovPlannerField",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovPlannerField.xml"
+      },
+      "source": "generated:corpus structural class"
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  }
+}

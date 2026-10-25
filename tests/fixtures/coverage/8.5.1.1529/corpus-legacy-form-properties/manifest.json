@@ -1,0 +1,361 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1529-xml-2.21-corpus-legacy-form-properties",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1529",
+    "source_version": "2.21",
+    "ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "38d9e6653e23b2e315bb86fac08150acfd8ef6100dbd481349176c82f6801dec",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 100235,
+    "decoded_sha256": "4243f736968336785d025708f9a8fb1b0710faf1377d712de1502bd2469a3114",
+    "encoded_sha256": "0e9fda2fb21f197d4358c90f9e51d571d1b364b107b606812d6db3402594b6b0"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11868,
+          "sha256": "ea6e489916255a3653899fbe6e02b76d1400e8fd85743b2c4a07396c2e8afe34"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "9af5a667de5ea34622b685dad6625c6fb1acccd6c0972373d272b93ed227a6f8"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyPropertyTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyPropertyTemplate/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyPropertyTemplate/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovLegacyPropertyTemplate.xml",
+          "size": 1639,
+          "sha256": "da7f61b35e7edc7bb564944d21e034161a65089df601d42affa2da78c86b90d4"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyVerticalSingle",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyVerticalSingle/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyVerticalSingle/Ext/Form.xml",
+          "size": 1548,
+          "sha256": "830f0ecfaee47ff444b6a06367ae75d6fabd4d7e2ffbccbb6be54dd06ba22a3f"
+        },
+        {
+          "path": "CommonForms/CovLegacyVerticalSingle.xml",
+          "size": 1637,
+          "sha256": "41b13309047b3beff107a4b63d83844c397a58090e53ed549347494f2f2691c3"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyChildrenAlign",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyChildrenAlign/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyChildrenAlign/Ext/Form.xml",
+          "size": 1530,
+          "sha256": "205072470783c0963fe83893ca37bdc5591244aefb7d389081e1d1c74d467928"
+        },
+        {
+          "path": "CommonForms/CovLegacyChildrenAlign.xml",
+          "size": 1636,
+          "sha256": "b42b8a3599e29e6d6490a9bdb7d610ff4348c7a8e7530fc3d5497e048a5fd706"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyUsualGroupBackColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyUsualGroupBackColorPalette/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyUsualGroupBackColorPalette/Ext/Form.xml",
+          "size": 1295,
+          "sha256": "d5be885908f8a04db4cf7ae72d3efd4b421fb3da7f76f3bc05752775f6ee8cbb"
+        },
+        {
+          "path": "CommonForms/CovLegacyUsualGroupBackColorPalette.xml",
+          "size": 1649,
+          "sha256": "65a1fd20cdb05da169498f3a188d7b9aecf1f10dc2db49d547456ea2cb887751"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyLabelDecorationTextColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationTextColorPalette/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationTextColorPalette/Ext/Form.xml",
+          "size": 1374,
+          "sha256": "941380fcd3959b8364d0197d805c0e716b3d09818934958a1a84b54e694d2a76"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationTextColorPalette.xml",
+          "size": 1654,
+          "sha256": "716d239f64a94a326e9844cb5140b0589ce10def6d492e27dad3baed69af76f1"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyLabelDecorationBackColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationBackColorPalette/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationBackColorPalette/Ext/Form.xml",
+          "size": 1374,
+          "sha256": "efa106092d31fb7eacab4fa2543caea1a844cca243c40d077f5943452ce84f89"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationBackColorPalette.xml",
+          "size": 1654,
+          "sha256": "a27d1883c618552530ee79276fedcbc54e62d1ad1eaacb352c3153a072936f35"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyLabelFieldTextColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTextColorPalette/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTextColorPalette/Ext/Form.xml",
+          "size": 1364,
+          "sha256": "24abd8f6cd72a65abed4011be04ab56eae9679439120127fe5b721a1ae225c60"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTextColorPalette.xml",
+          "size": 1649,
+          "sha256": "ce83daebd31efb1ddcb7fde00c928661db18be8bb2d9422152a7fc1f5f31df01"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyButtonTextColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyButtonTextColorPalette/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyButtonTextColorPalette/Ext/Form.xml",
+          "size": 1349,
+          "sha256": "061dc5787bd62a92a79eeb95ec67d572b7d9328a0057928049b136315b85bbe1"
+        },
+        {
+          "path": "CommonForms/CovLegacyButtonTextColorPalette.xml",
+          "size": 1645,
+          "sha256": "a597944e2b64a93f81f76493ce73aaab75d37910ef638ee95becfbcc7510785a"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyPictureDecorationPictureColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyPictureDecorationPictureColorPalette/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyPictureDecorationPictureColorPalette/Ext/Form.xml",
+          "size": 1422,
+          "sha256": "ee4043b710cbe786a19d8cd13971e25b15f93118c251265bb65dc9db57bff337"
+        },
+        {
+          "path": "CommonForms/CovLegacyPictureDecorationPictureColorPalette.xml",
+          "size": 1659,
+          "sha256": "077df36ecdd7a249524b5fcb85b96e913b0d56eec0442fe2d4ebc649a38cbde1"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyLabelDecorationTitleLevel2",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationTitleLevel2/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationTitleLevel2/Ext/Form.xml",
+          "size": 1389,
+          "sha256": "ed5af955a22ffc4b797f5f131a2c7f1ec85f686058001a206bcd2c9a4c73858b"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationTitleLevel2.xml",
+          "size": 1649,
+          "sha256": "1f98258775f1e3c99713416fd7e65bda4cbab0778cdff18bed6f0a80368e2b06"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyLabelFieldTitleLevel4",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTitleLevel4/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTitleLevel4/Ext/Form.xml",
+          "size": 1379,
+          "sha256": "07ca0f830d3c7aca41f6d03b58621de6b3865dd5dbbab41141246259cbd3b80a"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTitleLevel4.xml",
+          "size": 1644,
+          "sha256": "da78d0d7de8e92b76ca87ca4041bf321c6800819c0391d3233153a3b285dca6e"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyUsualGroupTitleLevel2",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyUsualGroupTitleLevel2/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyUsualGroupTitleLevel2/Ext/Form.xml",
+          "size": 1257,
+          "sha256": "64aa3ad1ece4f956f737f987cf1088a21509dac99022c541218b407d85b04e4d"
+        },
+        {
+          "path": "CommonForms/CovLegacyUsualGroupTitleLevel2.xml",
+          "size": 1644,
+          "sha256": "5587c90496df2cf4e7cf87c49bc845abcb86a213ac872b0e9f0e02945a1a80ec"
+        }
+      ]
+    },
+    {
+      "name": "CovLegacyGroupTitleFont",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLegacyGroupTitleFont/Ext/Form/Module.bsl",
+          "size": 55,
+          "sha256": "b3e7faf18c99ed83c59ba5db26a1b80ce752655648b4661e3c15d3feffe2f753"
+        },
+        {
+          "path": "CommonForms/CovLegacyGroupTitleFont/Ext/Form.xml",
+          "size": 1439,
+          "sha256": "735267310a77201626519f335990edd2f4896719f1a0d17f0ea639251454af50"
+        },
+        {
+          "path": "CommonForms/CovLegacyGroupTitleFont.xml",
+          "size": 1637,
+          "sha256": "491e328d76f1e4762559789b239c50c3b081fbc10ed9c4b847a40de80dd9f5bb"
+        }
+      ]
+    }
+  ]
+}

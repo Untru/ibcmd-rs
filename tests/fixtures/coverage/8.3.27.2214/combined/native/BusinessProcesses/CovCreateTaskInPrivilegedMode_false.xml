@@ -1,0 +1,75 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<BusinessProcess uuid="c8c20ce3-d757-5ca6-a554-6f9cb085d8ee">
+		<InternalInfo>
+			<xr:GeneratedType name="BusinessProcessObject.CovCreateTaskInPrivilegedMode_false" category="Object">
+				<xr:TypeId>adfa42fb-ba35-56d1-a8a7-7669405b6578</xr:TypeId>
+				<xr:ValueId>3dfdb548-8f2c-56ba-bfd8-0c7fbd8797b7</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="BusinessProcessRef.CovCreateTaskInPrivilegedMode_false" category="Ref">
+				<xr:TypeId>00579c1b-9fec-5f15-87e1-c81226cd1fa1</xr:TypeId>
+				<xr:ValueId>40267982-bf26-5449-97a0-2c68ef666aa0</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="BusinessProcessSelection.CovCreateTaskInPrivilegedMode_false" category="Selection">
+				<xr:TypeId>0bd35001-8ac8-596e-9a2e-cabd8797fbb8</xr:TypeId>
+				<xr:ValueId>d0561641-ecaa-534d-885e-bb119c50c861</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="BusinessProcessList.CovCreateTaskInPrivilegedMode_false" category="List">
+				<xr:TypeId>efd196fc-b4f9-5e44-a32b-cd7d8ae7fac7</xr:TypeId>
+				<xr:ValueId>4199140c-1eb3-5ad2-b4eb-5bcc70b535e8</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="BusinessProcessManager.CovCreateTaskInPrivilegedMode_false" category="Manager">
+				<xr:TypeId>4264b765-ab29-58ff-b821-be10474dfea4</xr:TypeId>
+				<xr:ValueId>2d1343db-18ce-5d85-a0a1-e11b907e12b8</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="BusinessProcessRoutePointRef.CovCreateTaskInPrivilegedMode_false" category="RoutePointRef">
+				<xr:TypeId>a7b73dad-0769-5daa-9559-08e069d577e3</xr:TypeId>
+				<xr:ValueId>af12fe3c-efb0-5ccc-bcac-ff80b56327e1</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovCreateTaskInPrivilegedMode_false</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<EditType>InDialog</EditType>
+			<InputByString>
+				<xr:Field>BusinessProcess.CovCreateTaskInPrivilegedMode_false.StandardAttribute.Number</xr:Field>
+			</InputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<NumberType>String</NumberType>
+			<NumberLength>9</NumberLength>
+			<NumberAllowedLength>Variable</NumberAllowedLength>
+			<CheckUnique>true</CheckUnique>
+			<Characteristics/>
+			<Autonumbering>true</Autonumbering>
+			<BasedOn/>
+			<NumberPeriodicity>Nonperiodical</NumberPeriodicity>
+			<Task>Task.CovTask</Task>
+			<CreateTaskInPrivilegedMode>false</CreateTaskInPrivilegedMode>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects/>
+	</BusinessProcess>
+</MetaDataObject>

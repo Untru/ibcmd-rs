@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-style-colors",
+  "collection": "StyleItems",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "188937388d552ecea8f231b95b3aced57e370462745a2406685b468a01a159aa",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 78361,
+    "decoded_sha256": "1a02c7353003ea2f450363e5d242feccef221509f61b8e5acc692338729e91cc",
+    "encoded_sha256": "af5b4b74f19d17e1f3f479ba71aca6e10284ed7628f0ee45683c57e8cc1693da"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10500,
+          "sha256": "d291beb327e03caa286073e1f570243c2431934b63827608e7c259e4bed25b5e"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "204fc612bae3d1004dc05113257e694ed8a61ca2fdaa996b32348c37e592160e"
+        }
+      ]
+    },
+    {
+      "name": "CovStyleColorTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "StyleItems/CovStyleColorTemplate.xml",
+          "size": 1177,
+          "sha256": "3de0cdbd0bd01d91ea380ea3ff90ff933e7c0a62f50ddb088717a56afaad2150"
+        }
+      ]
+    },
+    {
+      "name": "CovStyleColorTomato",
+      "property": [
+        "Value"
+      ],
+      "kind": "combination",
+      "value": {
+        "Value": "web:Tomato"
+      },
+      "source": "observed:Accounting-MDM; property value only",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "StyleItems/CovStyleColorTomato.xml",
+          "size": 1178,
+          "sha256": "42269a02f6c79f610fadd5fb67316bb830efcfdef6d1f382586b70da1fc0d183"
+        }
+      ]
+    },
+    {
+      "name": "CovStyleColorMediumGreen",
+      "property": [
+        "Value"
+      ],
+      "kind": "combination",
+      "value": {
+        "Value": "web:MediumGreen"
+      },
+      "source": "observed:Accounting-MDM; property value only",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "StyleItems/CovStyleColorMediumGreen.xml",
+          "size": 1188,
+          "sha256": "1ab635b557c737210613912302a59168c2c5ec48dd1324079688a761c2845dcb"
+        }
+      ]
+    },
+    {
+      "name": "CovStyleColorLinen",
+      "property": [
+        "Value"
+      ],
+      "kind": "combination",
+      "value": {
+        "Value": "web:Linen"
+      },
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "StyleItems/CovStyleColorLinen.xml",
+          "size": 1176,
+          "sha256": "b193ab65fbbb12e19e969e37377a5cc66278641eb70f1c7369c9ed817cd23a24"
+        }
+      ]
+    }
+  ]
+}

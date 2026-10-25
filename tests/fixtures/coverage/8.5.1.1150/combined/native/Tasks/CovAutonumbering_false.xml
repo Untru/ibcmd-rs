@@ -1,0 +1,75 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<Task uuid="5e1c2c94-2090-5e64-a5d6-b659319e78a2">
+		<InternalInfo>
+			<xr:GeneratedType name="TaskObject.CovAutonumbering_false" category="Object">
+				<xr:TypeId>25958fc6-d92d-5887-83b3-a41ba5a42a9e</xr:TypeId>
+				<xr:ValueId>31e8d307-f9d0-5fc0-87aa-e2a88e6b9413</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskRef.CovAutonumbering_false" category="Ref">
+				<xr:TypeId>cf9e90cb-2529-5b66-91c2-02d4ccca125d</xr:TypeId>
+				<xr:ValueId>c87180ff-83c6-5fc5-a21f-89c509ef5c98</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskSelection.CovAutonumbering_false" category="Selection">
+				<xr:TypeId>afd8d0f1-fc30-50c6-ab90-c504da4207b7</xr:TypeId>
+				<xr:ValueId>dfa4a4bb-df82-5dd5-abaa-d279a79283e0</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskList.CovAutonumbering_false" category="List">
+				<xr:TypeId>2d50f6fb-3970-51d9-a6a2-f4ec67182233</xr:TypeId>
+				<xr:ValueId>7dcf9bfa-ac52-54c3-9b31-544ef5232295</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskManager.CovAutonumbering_false" category="Manager">
+				<xr:TypeId>2876827e-2c57-5c7c-a0ee-744c940bd668</xr:TypeId>
+				<xr:ValueId>9f25196f-f0d8-5cb7-8ced-9aea4de7aa52</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovAutonumbering_false</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<NumberType>String</NumberType>
+			<NumberLength>9</NumberLength>
+			<NumberAllowedLength>Variable</NumberAllowedLength>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>false</Autonumbering>
+			<TaskNumberAutoPrefix>DontUse</TaskNumberAutoPrefix>
+			<DescriptionLength>25</DescriptionLength>
+			<Addressing/>
+			<MainAddressingAttribute/>
+			<CurrentPerformer/>
+			<BasedOn/>
+			<Characteristics/>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<EditType>InDialog</EditType>
+			<InputByString>
+				<xr:Field>Task.CovAutonumbering_false.StandardAttribute.Description</xr:Field>
+				<xr:Field>Task.CovAutonumbering_false.StandardAttribute.Number</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects/>
+	</Task>
+</MetaDataObject>

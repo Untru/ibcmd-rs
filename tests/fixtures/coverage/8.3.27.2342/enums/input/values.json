@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "collection": "Enums",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 129,
+  "properties": [
+    {
+      "name": "UseStandardCommands",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Characteristics",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "QuickChoice",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ChoiceMode",
+      "kind": "enum",
+      "template": "BothWays",
+      "values": [
+        {
+          "value": "QuickChoice",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "DefaultListForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryListForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ListPresentation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ExtendedListPresentation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Explanation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "template": "Auto",
+      "values": [
+        {
+          "value": "DontUse",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-orphan-characteristics",
+  "collection": "Catalogs",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "b4294e96a79cb1ec2aa5608069f65e5dc766474f7ee980a461df184c37465d4e",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76361,
+    "decoded_sha256": "bdfa6acfe2501b6938fb1db2aeab57fcd74a831c5509fa62b3da78da61f51f64",
+    "encoded_sha256": "5e24bb3dc5276cc9a6c3848455e24d1b27972d1262d446cfbfe76a6b02e907d5"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11111,
+          "sha256": "171e7d75486631a8a85e7d01db291f969973d239661d118aea53d10e70c34911"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "b68f52aa273e40687376424154d065ff625e6ae96f510171cf939bc6f8b7ccf6"
+        }
+      ]
+    },
+    {
+      "name": "CovOrphanCharacteristics",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovOrphanCharacteristics.xml",
+          "size": 5546,
+          "sha256": "3053239442708edb0bc437cee579529a2ee0dcb7ce2fed4959113b77220bec09"
+        }
+      ]
+    }
+  ]
+}

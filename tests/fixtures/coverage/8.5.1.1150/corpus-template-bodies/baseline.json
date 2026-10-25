@@ -1,0 +1,9 @@
+{
+  "equal": [
+    "CovBodyTemplate",
+    "CovDataCompositionParameters",
+    "CovGraphicalSchemaBody",
+    "CovSpreadsheetMergedCells",
+    "configuration"
+  ]
+}

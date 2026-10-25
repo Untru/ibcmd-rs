@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "collection": "CommonTemplates",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovGraphicalSchemaBody",
+      "set": {
+        "TemplateType": "GraphicalSchema"
+      },
+      "files": {
+        "Ext/Template.xml": "bodies/CovGraphicalSchemaBody.xml"
+      },
+      "source": "generated:template-body-class"
+    },
+    {
+      "name": "CovDataCompositionParameters",
+      "set": {
+        "TemplateType": "DataCompositionSchema"
+      },
+      "files": {
+        "Ext/Template.xml": "bodies/CovDataCompositionParameters.xml"
+      },
+      "source": "generated:template-body-class"
+    },
+    {
+      "name": "CovSpreadsheetMergedCells",
+      "set": {
+        "TemplateType": "SpreadsheetDocument"
+      },
+      "files": {
+        "Ext/Template.xml": "bodies/CovSpreadsheetMergedCells.xml"
+      },
+      "source": "generated:template-body-class"
+    },
+    {
+      "name": "CovVerticalBrackets",
+      "set": {
+        "TemplateType": "GraphicalSchema"
+      },
+      "files": {
+        "Ext/Template.xml": "bodies/brackets.xml"
+      }
+    }
+  ],
+  "corpus": "clean-room-structural-regressions",
+  "template_files": {
+    "Ext/Template.xml": "bodies/spreadsheet.xml"
+  }
+}

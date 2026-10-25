@@ -1,0 +1,984 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1529-xml-2.21-corpus-hybrid-interface",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1529",
+    "source_version": "2.21",
+    "ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "6ab208e06f9fea122bbe344ccf02f2e8b2a88af7302941a93ea0d2f53260cbd8",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 167530,
+    "decoded_sha256": "dc18afd914f2b98f39edd97c1ece3fced7de4b028ac10bf3e52cbf9cf1240037",
+    "encoded_sha256": "e04f1d7e3f19011c6e0cb1c27c437ba23b3ca0abe4ce5d17ccc1c3020f0d1168"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 13886,
+          "sha256": "9456754db31c588b28b049515cca03c50677e5e85da0f5f9a4f033f3a2c032a8"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "9af5a667de5ea34622b685dad6625c6fb1acccd6c0972373d272b93ed227a6f8"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridDetailsTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridDetailsTemplate/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovHybridDetailsTemplate.xml",
+          "size": 1638,
+          "sha256": "f64c4f64e33b30787a8644ee562e51a7a42d3db3734ffb49331c76e10a4e86dc"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridVerticalSingle",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridVerticalSingle/Ext/Form.xml",
+          "size": 1160,
+          "sha256": "30827f962284820fd1dfa8a9ec8653858e7ceb7e45c7df74a24c8645a2da09a7"
+        },
+        {
+          "path": "CommonForms/CovHybridVerticalSingle.xml",
+          "size": 1637,
+          "sha256": "577275f19af11f4503efc923176aa7063270e4c1ee7abcf8f53c695816556135"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridChildrenAlign",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridChildrenAlign/Ext/Form.xml",
+          "size": 1142,
+          "sha256": "5454a9b69fdfc37ff1203f8bae13acb8ae19955d0a2c74c982d373322d95e22e"
+        },
+        {
+          "path": "CommonForms/CovHybridChildrenAlign.xml",
+          "size": 1636,
+          "sha256": "c77bb0511d0d21cfda3605e371aea1ff3549c77d61963cd7aa6817c96577afe7"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelDecorationTitleLevel2",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTitleLevel2/Ext/Form.xml",
+          "size": 1389,
+          "sha256": "ed5af955a22ffc4b797f5f131a2c7f1ec85f686058001a206bcd2c9a4c73858b"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTitleLevel2.xml",
+          "size": 1649,
+          "sha256": "0b3e5954365b5ad19668096b70561ca803e4deb0fb5025e1e7f08ae16b428cb9"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelDecorationTitleLevel4",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTitleLevel4/Ext/Form.xml",
+          "size": 1389,
+          "sha256": "db47201470129928dff48083d1434fed4d3b1199a1b7bb68e2fd7c711f7e90d3"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTitleLevel4.xml",
+          "size": 1649,
+          "sha256": "49159fde1fd58522b2b41e48aadf7acfd693a3a3c36d1e67bb5bd0a1dcfc0d43"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelDecorationTextLevel3",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTextLevel3/Ext/Form.xml",
+          "size": 1388,
+          "sha256": "d2c53b585252aeaea353c593cb3cc62ccc3f216ec79b419771bb4e283d80c2f5"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTextLevel3.xml",
+          "size": 1648,
+          "sha256": "585a3129d3d2327511ab38eaab613aa88bdda27ad9bcb14863ae650e8d5ddcd7"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelDecorationAutoBold",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelDecorationAutoBold/Ext/Form.xml",
+          "size": 1376,
+          "sha256": "004bd2f715932d6c07510ae5e79c7914fd8d4be41bb8ba125ae8acc44deb0256"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationAutoBold.xml",
+          "size": 1646,
+          "sha256": "5d44b0a5a4e69f0136db70a1dcc5175496237d69a69cdaba63bbe5a90cddbc95"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelFieldTitleLevel2",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelFieldTitleLevel2/Ext/Form.xml",
+          "size": 1379,
+          "sha256": "215c688760413c01d0a2d85f20684ab3d2d6ed6d91e097dca35e117fe5c3d9ac"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldTitleLevel2.xml",
+          "size": 1644,
+          "sha256": "c660faf748042e7ee212b7b2562567c554fb32229318af9f1921a3b3d300cc1c"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelFieldTitleLevel4",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelFieldTitleLevel4/Ext/Form.xml",
+          "size": 1379,
+          "sha256": "07ca0f830d3c7aca41f6d03b58621de6b3865dd5dbbab41141246259cbd3b80a"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldTitleLevel4.xml",
+          "size": 1644,
+          "sha256": "fb33402484e1377e8186ace68a02b11ea47c0952f3b66eb650daf8340e725c6d"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelFieldTextLevel3",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelFieldTextLevel3/Ext/Form.xml",
+          "size": 1378,
+          "sha256": "bc5422f5cc977801580883b0882ee68cbd34d46e17834ffab7d424c1aeb4f241"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldTextLevel3.xml",
+          "size": 1643,
+          "sha256": "26e3ec676ba1824fd37e07a5d99f86c783afdef4535249f64695f2e4f47dfd5c"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelFieldAutoBold",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelFieldAutoBold/Ext/Form.xml",
+          "size": 1366,
+          "sha256": "2afae1606acb6f06c5c237b7ac56a275ada4e6daa59cf8ceba20c6b56556d62f"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldAutoBold.xml",
+          "size": 1641,
+          "sha256": "e75e59de55a9cf625aa43133a07a4587c4c9a295eae0ed0b69cdc3b0fbb4f5e6"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridUsualGroupTitleLevel2",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridUsualGroupTitleLevel2/Ext/Form.xml",
+          "size": 1257,
+          "sha256": "64aa3ad1ece4f956f737f987cf1088a21509dac99022c541218b407d85b04e4d"
+        },
+        {
+          "path": "CommonForms/CovHybridUsualGroupTitleLevel2.xml",
+          "size": 1644,
+          "sha256": "c5cd871b9b1a96444de4ff73b6401b68c26fd1e1d9282b8c947309f202f4fa4a"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridUsualGroupTitleLevel4",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridUsualGroupTitleLevel4/Ext/Form.xml",
+          "size": 1257,
+          "sha256": "64aa3ad1ece4f956f737f987cf1088a21509dac99022c541218b407d85b04e4d"
+        },
+        {
+          "path": "CommonForms/CovHybridUsualGroupTitleLevel4.xml",
+          "size": 1644,
+          "sha256": "d3820ea20dcf05c437b9ca16d142c511777bc24e92d7f8d692304f3de676d0eb"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridUsualGroupTextLevel3",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridUsualGroupTextLevel3/Ext/Form.xml",
+          "size": 1257,
+          "sha256": "64aa3ad1ece4f956f737f987cf1088a21509dac99022c541218b407d85b04e4d"
+        },
+        {
+          "path": "CommonForms/CovHybridUsualGroupTextLevel3.xml",
+          "size": 1643,
+          "sha256": "4ac7c520da4ea1a4aeeacf6267460bf83a641546626783220392a1080537830f"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridUsualGroupAutoBold",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridUsualGroupAutoBold/Ext/Form.xml",
+          "size": 1257,
+          "sha256": "64aa3ad1ece4f956f737f987cf1088a21509dac99022c541218b407d85b04e4d"
+        },
+        {
+          "path": "CommonForms/CovHybridUsualGroupAutoBold.xml",
+          "size": 1641,
+          "sha256": "a02bc908119f7f9ee53884222deca02e00216de19d013790847d043b12f255a6"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelFieldUseCopy",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelFieldUseCopy/Ext/Form.xml",
+          "size": 1647,
+          "sha256": "eb34c4b7bb91272bfd752fab9001a480b9c98347bf638bab5a7dfc7d9f39b56b"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldUseCopy.xml",
+          "size": 1640,
+          "sha256": "c59c42d0f8e9ef39b3c1f009e6f1d37ade0b8bbf8f7ff979ce284ce383f742e2"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelFieldCellHyperlinkRepresentation",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelFieldCellHyperlinkRepresentation/Ext/Form.xml",
+          "size": 1690,
+          "sha256": "da4d398f5bcf8eb526415798fc4f6802ac26657d503a3a3b8396a3834939b00a"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldCellHyperlinkRepresentation.xml",
+          "size": 1660,
+          "sha256": "94ea122353018fee3fb8c8059942bb0c1411b0aa5dce99179ea3f067a2e5765d"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridInputFieldCellHyperlinkRepresentation",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridInputFieldCellHyperlinkRepresentation/Ext/Form.xml",
+          "size": 1690,
+          "sha256": "d540ac96845a0d1597909bdbe5c9dd9ddcb1a732881e3720b74aeb85579f33c9"
+        },
+        {
+          "path": "CommonForms/CovHybridInputFieldCellHyperlinkRepresentation.xml",
+          "size": 1660,
+          "sha256": "61a39bd1ed6e441f1f32bcfc232840799092c455364e788961938959a97be7c4"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridInputFieldWidthInCard",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridInputFieldWidthInCard/Ext/Form.xml",
+          "size": 1654,
+          "sha256": "f0917287d83946a25fe54ccb439ed3591361eb1e62818988274c6ecb0ee6f5cd"
+        },
+        {
+          "path": "CommonForms/CovHybridInputFieldWidthInCard.xml",
+          "size": 1644,
+          "sha256": "cf6a7adf53589ea0658215f6bad9e35626c87ee5f71db2fc5557f164957eea75"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridRadioButtonFieldHorizontalStretch",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridRadioButtonFieldHorizontalStretch/Ext/Form.xml",
+          "size": 1723,
+          "sha256": "1933caeb55a396f6ab2b4ccf5a0c4e2a9eea2b322fd1274390b35444a80c6a20"
+        },
+        {
+          "path": "CommonForms/CovHybridRadioButtonFieldHorizontalStretch.xml",
+          "size": 1656,
+          "sha256": "832c73e104509769283699e4d6d8c3e67b60769a56f5289ba3f86d99d038b839"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridInputFieldAutofillHint",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridInputFieldAutofillHint/Ext/Form.xml",
+          "size": 1663,
+          "sha256": "c80bc7b1f0f67df44e62d753c927aea561ea9b23a45bf2a3aac07d55e9cc4512"
+        },
+        {
+          "path": "CommonForms/CovHybridInputFieldAutofillHint.xml",
+          "size": 1645,
+          "sha256": "1000ba4a262932f0c6f52db6277941b2e85b63fdd7dc23f2f8141ea940671695"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridTrackBarFieldMarkingAppearance",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridTrackBarFieldMarkingAppearance/Ext/Form.xml",
+          "size": 1716,
+          "sha256": "db786b747ef58552a156029e318efb67df2e9af37e45974e20512143cf9586be"
+        },
+        {
+          "path": "CommonForms/CovHybridTrackBarFieldMarkingAppearance.xml",
+          "size": 1653,
+          "sha256": "86bc4f696b8e63700e6e05b7f7a8b167cae5c14318c68f8ebbc3f40f88b94761"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridCommandBarAppearance",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridCommandBarAppearance/Ext/Form.xml",
+          "size": 1486,
+          "sha256": "b839ff5a504e3e45fd1fd85f7cbd56588e1e66ac4218dd7d59b1920543aba4bc"
+        },
+        {
+          "path": "CommonForms/CovHybridCommandBarAppearance.xml",
+          "size": 1643,
+          "sha256": "fcae8656f1a3cab445799940817a88e7ea1f61b91c027f499a98751f5a00fa06"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridColumnGroupCard",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridColumnGroupCard/Ext/Form.xml",
+          "size": 3701,
+          "sha256": "c44e45bf740d42dfafd69f090c355bb3c812697a8b6f66554c59cf6334c21fc1"
+        },
+        {
+          "path": "CommonForms/CovHybridColumnGroupCard.xml",
+          "size": 1638,
+          "sha256": "f3ba8c9c95c25a76547c86704abce45d987d9d8591399b61fe2e96f4c007bb29"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridUsualGroupBackColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridUsualGroupBackColorPalette/Ext/Form.xml",
+          "size": 1295,
+          "sha256": "d5be885908f8a04db4cf7ae72d3efd4b421fb3da7f76f3bc05752775f6ee8cbb"
+        },
+        {
+          "path": "CommonForms/CovHybridUsualGroupBackColorPalette.xml",
+          "size": 1649,
+          "sha256": "7b4a4f8517d37056107d3f11a1f4d596ae6134923782f75334df912d1196a270"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelDecorationTextColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTextColorPalette/Ext/Form.xml",
+          "size": 1374,
+          "sha256": "941380fcd3959b8364d0197d805c0e716b3d09818934958a1a84b54e694d2a76"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTextColorPalette.xml",
+          "size": 1654,
+          "sha256": "05541c790628014ecf0c691a57e7da577855aecabefef9bebd92647a998f59c3"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelDecorationBackColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelDecorationBackColorPalette/Ext/Form.xml",
+          "size": 1374,
+          "sha256": "efa106092d31fb7eacab4fa2543caea1a844cca243c40d077f5943452ce84f89"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationBackColorPalette.xml",
+          "size": 1654,
+          "sha256": "bc2b3b2e3b1548fcc4074301b87fee6f88343203239ec6af72936c6101785dad"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridLabelFieldTextColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridLabelFieldTextColorPalette/Ext/Form.xml",
+          "size": 1364,
+          "sha256": "24abd8f6cd72a65abed4011be04ab56eae9679439120127fe5b721a1ae225c60"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldTextColorPalette.xml",
+          "size": 1649,
+          "sha256": "5d170e148e9a3058026a4af04a8881dadfa3fb8cba70c92ac50e179325c1aaeb"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridButtonTextColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridButtonTextColorPalette/Ext/Form.xml",
+          "size": 1349,
+          "sha256": "061dc5787bd62a92a79eeb95ec67d572b7d9328a0057928049b136315b85bbe1"
+        },
+        {
+          "path": "CommonForms/CovHybridButtonTextColorPalette.xml",
+          "size": 1645,
+          "sha256": "03a887b0e44191a591349e124e5521f0ce7c479974225f0a2c073652557f84c4"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridPictureDecorationPictureColorPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridPictureDecorationPictureColorPalette/Ext/Form.xml",
+          "size": 1422,
+          "sha256": "ee4043b710cbe786a19d8cd13971e25b15f93118c251265bb65dc9db57bff337"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureDecorationPictureColorPalette.xml",
+          "size": 1659,
+          "sha256": "97e5bdf85206947547c28117a3bfdfd837a6654db560ada4158f1a1a499a74db"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridPictureAppearanceUpArrowGray",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridPictureAppearanceUpArrowGray/Ext/Form.xml",
+          "size": 1446,
+          "sha256": "f3cb4568518640084a6ec7b6f1eada42c3094eadd5f7e2cf25bba858deac718e"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureAppearanceUpArrowGray.xml",
+          "size": 1651,
+          "sha256": "832f04ca4fef841e6be2ef6a85e65cda92d1389d8b09b9149f87eef3b4d48ecd"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridPictureGrayedAll",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridPictureGrayedAll/Ext/Form.xml",
+          "size": 1434,
+          "sha256": "210790aa590ed9ea400c6f8c8868f3fbc287718b477fa992b44b5c556f746c30"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureGrayedAll.xml",
+          "size": 1639,
+          "sha256": "7905de38d61d029fc85bdd6bba7ba6d85e2bf6d196b9c820392a85c923687dc4"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridPictureStartVideoconference",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridPictureStartVideoconference/Ext/Form.xml",
+          "size": 1445,
+          "sha256": "881270c3046ef51bdc1ac8358ac6c2740a587a71047f376fff1cc362e49f8828"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureStartVideoconference.xml",
+          "size": 1650,
+          "sha256": "d6c38e14cdb741e19a3e87493a3533d7b07b21c4902063be7e17656dd2aa2e89"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridPictureDontNotify",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridPictureDontNotify/Ext/Form.xml",
+          "size": 1435,
+          "sha256": "2c69695fb837d368340fe3a10f2ffc9f0f111af8c568f8b754c1015cbc88a3c1"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureDontNotify.xml",
+          "size": 1640,
+          "sha256": "88dad58f138cc0c958d79518275b85f2c711a61e4857798adcf51a5e19ccac16"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridInputPictureExternalUser",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridInputPictureExternalUser/Ext/Form.xml",
+          "size": 1763,
+          "sha256": "a528b9d08a0a1c5d2ceaa011ae00345bfab4484e8bf7313d374bccf50c833344"
+        },
+        {
+          "path": "CommonForms/CovHybridInputPictureExternalUser.xml",
+          "size": 1647,
+          "sha256": "3f2f7170a7f010e588e7345af54ef51904c807f9167d1cc5e6160872131778a6"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridInputMultipleValueEvent",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridInputMultipleValueEvent/Ext/Form.xml",
+          "size": 1712,
+          "sha256": "b8ab18f8ba21c96332e10d29c3c4039c7ffc67b6c0ed5fa877c264905c18932b"
+        },
+        {
+          "path": "CommonForms/CovHybridInputMultipleValueEvent.xml",
+          "size": 1646,
+          "sha256": "8295b8737ce1a8349ebede3090ad27c39d2d07902ace19d2357c31903d73d075"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridGeographicalSchema",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridGeographicalSchema/Ext/Form.xml",
+          "size": 1352,
+          "sha256": "1e2937d9a7978341d1e7152c30a572e369bb2875a1e909f155cc70d0671c3d96"
+        },
+        {
+          "path": "CommonForms/CovHybridGeographicalSchema.xml",
+          "size": 1641,
+          "sha256": "42eca0067e4583e8ab7f31f4818e534a40768a2e9ccb6654c6d2ef83f0749067"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridPdfGray",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridPdfGray/Ext/Form.xml",
+          "size": 1879,
+          "sha256": "aaf48a1bcd07a7657e3c5e5f5281201617c5ebf4841b83fe4f25e0e69a812d37"
+        },
+        {
+          "path": "CommonForms/CovHybridPdfGray.xml",
+          "size": 1630,
+          "sha256": "34f3f94c79d3a4bebde6896bda3595408881c0a2b65dc7d378514dc33f699e69"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridChoicePeriod",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridChoicePeriod/Ext/Form.xml",
+          "size": 1960,
+          "sha256": "f7b2f7bf6ac2ee2ee05bd0d3b6cb8c01ca01223802d96088ddb51339ddcf59c5"
+        },
+        {
+          "path": "CommonForms/CovHybridChoicePeriod.xml",
+          "size": 1635,
+          "sha256": "83398200a12578b0266476bff231d98b69099e059e73931b8ab3585a27772ee9"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridModeTaxi",
+      "property": [
+        "UseInInterfaceCompatibilityMode"
+      ],
+      "kind": "combination",
+      "value": {
+        "UseInInterfaceCompatibilityMode": "Taxi"
+      },
+      "source": "observed:UNF; platform enum only",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridModeTaxi/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovHybridModeTaxi.xml",
+          "size": 1632,
+          "sha256": "e7ce72c9544fedc914a5ca396e3213790c0529c5de9ad38ec764db884dba0b98"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridModeVersion85",
+      "property": [
+        "UseInInterfaceCompatibilityMode"
+      ],
+      "kind": "combination",
+      "value": {
+        "UseInInterfaceCompatibilityMode": "Version85"
+      },
+      "source": "observed:UNF; platform enum only",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridModeVersion85/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovHybridModeVersion85.xml",
+          "size": 1642,
+          "sha256": "06cd6e2c6544a4c2eb6a50e27f2c511bb1f1d9ca1a7a15789f4d28c6965f541b"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridParentButton",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridParentButton/Ext/Form.xml",
+          "size": 1771,
+          "sha256": "3afa925301da9d4e06e4496849b27dee58c76e3cd28ade2c0bb55689b8f38f51"
+        },
+        {
+          "path": "CommonForms/CovHybridParentButton.xml",
+          "size": 1635,
+          "sha256": "e8877e1f87a6e03b236de169ef36c96d1ec273253fb22bd2da395169721c99de"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridReducedText",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridReducedText/Ext/Form.xml",
+          "size": 1651,
+          "sha256": "322b21ba55cd1a3fcdd821d39758267e32a42b8162363308c717a15aec83ea89"
+        },
+        {
+          "path": "CommonForms/CovHybridReducedText.xml",
+          "size": 1634,
+          "sha256": "4c7bf176a00688ff13f488412c306f5b1301ccc151283e4dad249bd0e77a76b3"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridBrokenTilt",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridBrokenTilt/Ext/Form.xml",
+          "size": 1717,
+          "sha256": "a738c77ffd1d36f0ae35627f0cbbb1e04c56523e824401721e6f83abd994af23"
+        },
+        {
+          "path": "CommonForms/CovHybridBrokenTilt.xml",
+          "size": 1633,
+          "sha256": "60c2030d532865ed40ff8f6338f0514f4ed60d01bf632d04fa8aa38668bdbe47"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridCollapseUse",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridCollapseUse/Ext/Form.xml",
+          "size": 1165,
+          "sha256": "e2a71364f9c428bdff27c65debada18817218c04c52bd6af5d5a19ada1ca7208"
+        },
+        {
+          "path": "CommonForms/CovHybridCollapseUse.xml",
+          "size": 1634,
+          "sha256": "50b2d78999e7a76955e529af678a3c47b8b1dd0efa47c7ac6375524e05165188"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridPictureChar",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridPictureChar/Ext/Form.xml",
+          "size": 1429,
+          "sha256": "7ee63b6bc22354f377911cc8a3ea1c3fe7b4436d040e0288441271c10c0f388b"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureChar.xml",
+          "size": 1634,
+          "sha256": "270a0c093007677c31591f1c0774aab67d05b1da7b9da36da36a9f161fccc5d7"
+        }
+      ]
+    },
+    {
+      "name": "CovHybridSheetFormattedString",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovHybridSheetFormattedString/Ext/Form.xml",
+          "size": 3050,
+          "sha256": "758390e91ecaf3c4ef60f0e460415ad446714f786707827cd04e9df0d7a0343c"
+        },
+        {
+          "path": "CommonForms/CovHybridSheetFormattedString.xml",
+          "size": 1643,
+          "sha256": "0ffa5fba4fbc9a539d68ee25b154ccbdd2aa5e216771b202240113a7b3de910d"
+        }
+      ]
+    }
+  ]
+}

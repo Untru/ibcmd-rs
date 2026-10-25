@@ -1,0 +1,331 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-informationregisters",
+  "collection": "InformationRegisters",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "b5855f399188f487923d04d3e4103ae065301f561aaa35f434a199a8b502376f",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 92774,
+    "decoded_sha256": "504e16548211d53d6d873a51a8f8f921cc51ba731ac10f42656d2b921d2e6620",
+    "encoded_sha256": "55b2bec7fdc28921dbf9c08d5a6a606d1bfe79fc077d9b41d0dbc3e461d494fa"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 12525,
+          "sha256": "6b1d88cb220610c163dd372cb58db8f22acc6af4f35f64104628dc054642355f"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "455aab21bd42e51455ff5b406b3e28ea60d64253a3dd0ea6fdcbf115cb29cd1e"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovTemplate.xml",
+          "size": 5386,
+          "sha256": "49380ab889eb51f28e632478d298ed199b78f4a1f5f2f6c58eeb25b0560499fd"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovUseStandardCommands_false.xml",
+          "size": 5523,
+          "sha256": "019b48c104e9437aba206d3962f9681999341b570f0f35e951a70138de26fdfd"
+        }
+      ]
+    },
+    {
+      "name": "CovEditType_BothWays",
+      "property": "EditType",
+      "kind": "enum",
+      "value": "BothWays",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovEditType_BothWays.xml",
+          "size": 5458,
+          "sha256": "43bf7647698297e4927d1989f557d1dfee0f1b8ff9f592cc85ca7b97365ed57b"
+        }
+      ]
+    },
+    {
+      "name": "CovEditType_InList",
+      "property": "EditType",
+      "kind": "enum",
+      "value": "InList",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovEditType_InList.xml",
+          "size": 5440,
+          "sha256": "e8046abf66ca06b3bf07afaf8e59ed30930ad7620e2d0bac6eb25bb206e18a83"
+        }
+      ]
+    },
+    {
+      "name": "CovInformationRegisterPeriodicity_Day",
+      "property": "InformationRegisterPeriodicity",
+      "kind": "enum",
+      "value": "Day",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovInformationRegisterPeriodicity_Day.xml",
+          "size": 5584,
+          "sha256": "55060d28de6d8dd358b701cd4765731c4019b3168d8c5369433f7d69312b304f"
+        }
+      ]
+    },
+    {
+      "name": "CovInformationRegisterPeriodicity_Second",
+      "property": "InformationRegisterPeriodicity",
+      "kind": "enum",
+      "value": "Second",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovInformationRegisterPeriodicity_Second.xml",
+          "size": 5611,
+          "sha256": "1921a6618993e1528c12991751ac6299ce21d3155a252f90edbe2534e4776736"
+        }
+      ]
+    },
+    {
+      "name": "CovWriteMode_RecorderSubordinate",
+      "property": "WriteMode",
+      "kind": "enum",
+      "value": "RecorderSubordinate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] РегистрСведений.CovWriteMode_RecorderSubordinate - Ни один из документов не является регистратором для регистра",
+      "files": []
+    },
+    {
+      "name": "CovMainFilterOnPeriod_true",
+      "property": "MainFilterOnPeriod",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovMainFilterOnPeriod_true.xml",
+          "size": 5506,
+          "sha256": "d2d1b806a56cb1f2967423361dbc06bc698b886566c3cbdadf7717ba1aa1d1f7"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovIncludeHelpInContents_true.xml",
+          "size": 5529,
+          "sha256": "51e58a2177624e280f538d0bc88d3a37f9c34c1081d26e46f1b8b6218f7ed6ac"
+        }
+      ]
+    },
+    {
+      "name": "CovDataLockControlMode_Automatic",
+      "property": "DataLockControlMode",
+      "kind": "enum",
+      "value": "Automatic",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovDataLockControlMode_Automatic.xml",
+          "size": 5556,
+          "sha256": "2c97e047ad1d0a66af50347f09b138c09b0672e17750ea4b505bd1adce9f9d37"
+        }
+      ]
+    },
+    {
+      "name": "CovFullTextSearch_Use",
+      "property": "FullTextSearch",
+      "kind": "enum",
+      "value": "Use",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovFullTextSearch_Use.xml",
+          "size": 5462,
+          "sha256": "197ee97b7d7701e04df9e815f3b229f4e6e1c629b56f5e359e343f44bab09879"
+        }
+      ]
+    },
+    {
+      "name": "CovEnableTotalsSliceFirst_true",
+      "property": "EnableTotalsSliceFirst",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovEnableTotalsSliceFirst_true.xml",
+          "size": 5537,
+          "sha256": "cf3be29465f2461e259128e48a48257d0c7785dc2617f7eababde45705bf5588"
+        }
+      ]
+    },
+    {
+      "name": "CovEnableTotalsSliceLast_true",
+      "property": "EnableTotalsSliceLast",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovEnableTotalsSliceLast_true.xml",
+          "size": 5529,
+          "sha256": "7448c6a95665e61e5e0add66a56730fb5efd49b21f8552d4097b98ca724ed910"
+        }
+      ]
+    },
+    {
+      "name": "CovRecordPresentation_Cov",
+      "property": "RecordPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovRecordPresentation_Cov.xml",
+          "size": 5617,
+          "sha256": "4789d5510d4456daf8bf66937c73b79b4f6ab73f35e56493d0fda34708db7882"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedRecordPresentation_Cov",
+      "property": "ExtendedRecordPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovExtendedRecordPresentation_Cov.xml",
+          "size": 5689,
+          "sha256": "20fc1b1c63f840c27db8ad3ac8b61158636ac3ba0276feac0ee4e3480fa18941"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovListPresentation_Cov.xml",
+          "size": 5599,
+          "sha256": "eea97ceb32b1e5ba888dd9472b04d779b318a34c13b65a2251c434982d96a5fd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedListPresentation_Cov",
+      "property": "ExtendedListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovExtendedListPresentation_Cov.xml",
+          "size": 5671,
+          "sha256": "67b3246b6bc37ca24b894855044c7c50d4486e3ee805520dd20351a95a7dd4b1"
+        }
+      ]
+    },
+    {
+      "name": "CovExplanation_Cov",
+      "property": "Explanation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovExplanation_Cov.xml",
+          "size": 5554,
+          "sha256": "c5009fedfb3857806e4144b29b83e390ca88c0e4bb7bca6252e4ad15990363d3"
+        }
+      ]
+    },
+    {
+      "name": "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+      "property": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+          "size": 5665,
+          "sha256": "f18f128d67df568f32b1e8e60bd6c7708b20f6c8c2049eace65b14fe7c30918b"
+        }
+      ]
+    },
+    {
+      "name": "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+      "property": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+          "size": 5721,
+          "sha256": "f05aac9fc9f80043434e04c9b8caab7b7cd40c638ed94a2065b24ea2d12b18fc"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Task uuid="d1886615-f694-522b-9fc7-d5eba43d2564">
+		<InternalInfo>
+			<xr:GeneratedType name="TaskObject.CovNumberAllowedLength_Fixed" category="Object">
+				<xr:TypeId>8aee226a-938c-5549-95f9-9b5755d957ab</xr:TypeId>
+				<xr:ValueId>0e09a045-f4c7-5fe2-9b73-b7fb8442ea01</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskRef.CovNumberAllowedLength_Fixed" category="Ref">
+				<xr:TypeId>ddd5b024-805e-5d55-b6bb-59228677e736</xr:TypeId>
+				<xr:ValueId>9c657c96-2c3c-5fdb-9859-7ebc65f54eef</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskSelection.CovNumberAllowedLength_Fixed" category="Selection">
+				<xr:TypeId>3537370d-17a0-5b24-a4b7-8a0c99f518ab</xr:TypeId>
+				<xr:ValueId>ffee2d2c-dc4b-5c71-bbba-fcbfe054b707</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskList.CovNumberAllowedLength_Fixed" category="List">
+				<xr:TypeId>5ef68274-3a36-5e18-8807-15b4c8940408</xr:TypeId>
+				<xr:ValueId>110ebdba-6537-5451-a72b-944ebabde75e</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskManager.CovNumberAllowedLength_Fixed" category="Manager">
+				<xr:TypeId>5f630e4c-527e-513e-a267-29f231889887</xr:TypeId>
+				<xr:ValueId>58b3c638-7c7e-5e77-a898-3b7943b84177</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovNumberAllowedLength_Fixed</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<NumberType>String</NumberType>
+			<NumberLength>9</NumberLength>
+			<NumberAllowedLength>Fixed</NumberAllowedLength>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>true</Autonumbering>
+			<TaskNumberAutoPrefix>DontUse</TaskNumberAutoPrefix>
+			<DescriptionLength>25</DescriptionLength>
+			<Addressing/>
+			<MainAddressingAttribute/>
+			<CurrentPerformer/>
+			<BasedOn/>
+			<Characteristics/>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<EditType>InDialog</EditType>
+			<InputByString>
+				<xr:Field>Task.CovNumberAllowedLength_Fixed.StandardAttribute.Description</xr:Field>
+				<xr:Field>Task.CovNumberAllowedLength_Fixed.StandardAttribute.Number</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects/>
+	</Task>
+</MetaDataObject>

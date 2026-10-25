@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-business-process-flowchart",
+  "collection": "BusinessProcesses",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "e1130a53a3376253643995a3027652259ecffebf34ef81fd1414f3ba4197196e",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 83979,
+    "decoded_sha256": "e63a4ff9722a6d4f4b936e0066b7f2701bafebf508ff4cf99da1c15e8e8f9e80",
+    "encoded_sha256": "154897d0fdd5a302ea8a9a153bb6936df29641812cadb878e42fdc4eedebe688"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10626,
+          "sha256": "df1d49aed140238125de60be3a5afe897fdc2aa077e95d2792d702e356806b83"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "6f208844fb8e6c69b2a264b365a76fa8507ad22caedc79ccb6ab65b876251c2c"
+        },
+        {
+          "path": "Tasks/CovTask.xml",
+          "size": 4016,
+          "sha256": "caf7b5acaa393af743690ae488d89f87b2d96a319b78411632d8d3fcb54037ef"
+        }
+      ]
+    },
+    {
+      "name": "CovFlowchartProcess",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovFlowchartProcess/Ext/Flowchart.xml",
+          "size": 3974,
+          "sha256": "8095e4d380c71999ba82ad9ddc6bd58f2450cf2dfd099561c92a5a840b52b14c"
+        },
+        {
+          "path": "BusinessProcesses/CovFlowchartProcess.xml",
+          "size": 4295,
+          "sha256": "1139289648a59cadf78c63c0d4e4fba98811c7ea094b89fd92e000efa98b4609"
+        }
+      ]
+    },
+    {
+      "name": "CovCompoundFlowchart",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovCompoundFlowchart/Ext/Flowchart.xml",
+          "size": 8546,
+          "sha256": "e954eb883847ed80c20ee1d4f752aa8c8249d7f8216f6372204f2c39222c710d"
+        },
+        {
+          "path": "BusinessProcesses/CovCompoundFlowchart.xml",
+          "size": 4303,
+          "sha256": "5a5530b34f2091896f6197c495c019a1477296b7dddec49a9690cd1abfee3069"
+        }
+      ]
+    },
+    {
+      "name": "CovGifFlowchart",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart/Items/Work/Picture.gif",
+          "size": 35,
+          "sha256": "6c63cc5063ac82d8bbc925f9a31adf3a87f1510c021e0fde51854d60484b5019"
+        },
+        {
+          "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart.xml",
+          "size": 8719,
+          "sha256": "4808fccb84262381f75a9a0b5a0f7ebda27b567a1dcb2c6bf11d693afd7e8157"
+        },
+        {
+          "path": "BusinessProcesses/CovGifFlowchart.xml",
+          "size": 4263,
+          "sha256": "b24436d56c8bb79b3bd6ab6d65248a813de3496736a99bdd384de43690640a04"
+        }
+      ]
+    },
+    {
+      "name": "CovProcessingFlowchart",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:processing-point-without-image",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovProcessingFlowchart/Ext/Flowchart.xml",
+          "size": 9466,
+          "sha256": "7f6a4f2f240fa7d63b0248866ebbea82a3c9b563f75f5a363708bbe54dea2448"
+        },
+        {
+          "path": "BusinessProcesses/CovProcessingFlowchart.xml",
+          "size": 4319,
+          "sha256": "e6670bbc14f24a5fc9ab8ab97be21eea176942e560e0bbb2352d2ac97828ef58"
+        }
+      ]
+    },
+    {
+      "name": "CovPrintedFlowchart",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml",
+          "size": 4185,
+          "sha256": "0415a9212cf9595dd5b1505865dc5b0ba0a4883c203ebe6ac8f6e66d55459582"
+        },
+        {
+          "path": "BusinessProcesses/CovPrintedFlowchart.xml",
+          "size": 4295,
+          "sha256": "6bca400c19e46c5ca682384e31da5ea844d08a6e8f6f4cea8c89fbfe92e73ee5"
+        }
+      ]
+    }
+  ]
+}

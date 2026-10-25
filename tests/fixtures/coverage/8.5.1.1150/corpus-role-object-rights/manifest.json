@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-role-object-rights",
+  "collection": "Roles",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "8fe124e4ffdd4bb76831849378df48b380d83a7a930b07e14f8ac6aa8b481d28",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 77669,
+    "decoded_sha256": "33e4098b96a3f10a9c2393366f6c508e586b38b5756c4543fc866c6739b9e888",
+    "encoded_sha256": "332d019fce28d4e76c60e140397d6a4f7fccbdc5132972cf31842a15c7585c88"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovRightsCatalog.xml",
+          "size": 4585,
+          "sha256": "d215e35ecf69b34f963cf06e13afdda960f7675476f66f1399475d9b56f717f1"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 11136,
+          "sha256": "2c59522e173dc698d741f37eff909fae2878b2d012a44ed101d79863f6aad944"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "b5ca0820d649a708353093dda10e791c4351fa3ccfba5405f12b1c4062aeedf2"
+        }
+      ]
+    },
+    {
+      "name": "CovObjectRights",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Roles/CovObjectRights/Ext/Rights.xml",
+          "size": 611,
+          "sha256": "d60b0792200d75471b9962a8e9b9d55ae8abbac68cb615e9e951f51fba1dff8b"
+        },
+        {
+          "path": "Roles/CovObjectRights.xml",
+          "size": 1144,
+          "sha256": "b777a62806c10b99a50914627e929fb4042df39a0f7f28111ff9cc3c5cc5fa18"
+        }
+      ]
+    }
+  ]
+}

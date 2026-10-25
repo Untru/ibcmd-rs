@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<Enum uuid="55a25264-89ce-5e70-8947-66ad699c735f">
+		<InternalInfo>
+			<xr:GeneratedType name="EnumRef.CovPaletteEnum" category="Ref">
+				<xr:TypeId>ef1bbfba-c799-51b0-8236-106e7fd2811f</xr:TypeId>
+				<xr:ValueId>3306bb0d-a75f-54e9-aaf5-19b122c77698</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumManager.CovPaletteEnum" category="Manager">
+				<xr:TypeId>34a3c55b-2d21-5c58-93a9-bb7a0845dc3c</xr:TypeId>
+				<xr:ValueId>7e505c37-b1cb-58f7-a549-7821c83f218d</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumList.CovPaletteEnum" category="List">
+				<xr:TypeId>033e6256-b7cf-5910-9bff-32fb3705f121</xr:TypeId>
+				<xr:ValueId>fc348fcb-d3f7-542c-9215-e9fe052c31ca</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovPaletteEnum</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>false</UseStandardCommands>
+			<Characteristics/>
+			<QuickChoice>true</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+		</Properties>
+		<ChildObjects>
+			<EnumValue uuid="462088b5-0127-571b-a1bc-c4d9a423a511">
+				<Properties>
+					<Name>Violet</Name>
+					<Synonym/>
+					<Comment/>
+					<Color>pal:Violet</Color>
+				</Properties>
+			</EnumValue>
+		</ChildObjects>
+	</Enum>
+</MetaDataObject>

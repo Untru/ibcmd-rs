@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "collection": "StyleItems",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovPaletteViolet",
+      "set": {
+        "Value": "pal:Violet"
+      },
+      "kinds": {
+        "Value": "enum"
+      }
+    }
+  ]
+}

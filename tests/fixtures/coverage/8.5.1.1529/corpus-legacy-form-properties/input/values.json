@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovLegacyVerticalSingle",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyVerticalSingle.xml"
+      }
+    },
+    {
+      "name": "CovLegacyChildrenAlign",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyChildrenAlign.xml"
+      }
+    },
+    {
+      "name": "CovLegacyUsualGroupBackColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyUsualGroupBackColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovLegacyLabelDecorationTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyLabelDecorationTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovLegacyLabelDecorationBackColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyLabelDecorationBackColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovLegacyLabelFieldTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyLabelFieldTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovLegacyButtonTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyButtonTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovLegacyPictureDecorationPictureColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyPictureDecorationPictureColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovLegacyLabelDecorationTitleLevel2",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyLabelDecorationTitleLevel2.xml"
+      }
+    },
+    {
+      "name": "CovLegacyLabelFieldTitleLevel4",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyLabelFieldTitleLevel4.xml"
+      }
+    },
+    {
+      "name": "CovLegacyUsualGroupTitleLevel2",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyUsualGroupTitleLevel2.xml"
+      }
+    },
+    {
+      "name": "CovLegacyGroupTitleFont",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovLegacyGroupTitleFont.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml",
+    "Ext/Form/Module.bsl": "bodies/module.bsl"
+  }
+}

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<InformationRegister uuid="0ba57dc5-75e0-5530-855a-c5b0a8ef3cb2">
+		<InternalInfo>
+			<xr:GeneratedType name="InformationRegisterRecord.CovDefinedResourceTemplate" category="Record">
+				<xr:TypeId>f5306edb-0c18-51ec-a3d0-864413e656d5</xr:TypeId>
+				<xr:ValueId>1c76defc-acac-5767-b0ca-1b8c4022d83d</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterManager.CovDefinedResourceTemplate" category="Manager">
+				<xr:TypeId>98d58ced-1aeb-5385-9a33-000d3566fdbe</xr:TypeId>
+				<xr:ValueId>87ea3863-c608-5e11-95a0-473a3dbe8f2c</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterSelection.CovDefinedResourceTemplate" category="Selection">
+				<xr:TypeId>b1bf90f5-0085-559e-9671-aaa50362797a</xr:TypeId>
+				<xr:ValueId>111edf16-30e8-5be5-8e78-84d6eadaf9a6</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterList.CovDefinedResourceTemplate" category="List">
+				<xr:TypeId>dc1a0939-6f12-5f8b-97a3-55fe79d831dd</xr:TypeId>
+				<xr:ValueId>24f1a8df-348f-56af-b37f-34e77403b4a3</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordSet.CovDefinedResourceTemplate" category="RecordSet">
+				<xr:TypeId>702847a5-28cb-5777-8041-3fa6d292e5d2</xr:TypeId>
+				<xr:ValueId>9da90e3b-f4cf-578d-983a-28ade602562a</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordKey.CovDefinedResourceTemplate" category="RecordKey">
+				<xr:TypeId>4bf57817-182b-54ce-bc91-36bfefa63c99</xr:TypeId>
+				<xr:ValueId>bc139f24-12a8-526c-88a8-58444d396c93</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordManager.CovDefinedResourceTemplate" category="RecordManager">
+				<xr:TypeId>4a353d09-afdb-5725-877c-3669340bd20a</xr:TypeId>
+				<xr:ValueId>b3b6839e-9fc4-54d0-be04-3efbbc48cfa8</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovDefinedResourceTemplate</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<EditType>InDialog</EditType>
+			<DefaultRecordForm/>
+			<DefaultListForm/>
+			<AuxiliaryRecordForm/>
+			<AuxiliaryListForm/>
+			<InformationRegisterPeriodicity>Nonperiodical</InformationRegisterPeriodicity>
+			<WriteMode>Independent</WriteMode>
+			<MainFilterOnPeriod>false</MainFilterOnPeriod>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>DontUse</FullTextSearch>
+			<EnableTotalsSliceFirst>false</EnableTotalsSliceFirst>
+			<EnableTotalsSliceLast>false</EnableTotalsSliceLast>
+			<RecordPresentation/>
+			<ExtendedRecordPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects>
+			<Dimension uuid="1f35c941-905a-5dcc-b678-9e8abdd0538a">
+				<Properties>
+					<Name>CovDimension</Name>
+					<Synonym/>
+					<Comment/>
+					<Type>
+						<v8:Type>xs:string</v8:Type>
+						<v8:StringQualifiers>
+							<v8:Length>10</v8:Length>
+							<v8:AllowedLength>Variable</v8:AllowedLength>
+						</v8:StringQualifiers>
+					</Type>
+					<PasswordMode>false</PasswordMode>
+					<Format/>
+					<EditFormat/>
+					<ToolTip/>
+					<MarkNegatives>false</MarkNegatives>
+					<Mask/>
+					<MultiLine>false</MultiLine>
+					<ExtendedEdit>false</ExtendedEdit>
+					<MinValue xsi:nil="true"/>
+					<MaxValue xsi:nil="true"/>
+					<FillFromFillingValue>false</FillFromFillingValue>
+					<FillValue xsi:type="xs:string"/>
+					<FillChecking>DontCheck</FillChecking>
+					<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+					<ChoiceParameterLinks/>
+					<ChoiceParameters/>
+					<QuickChoice>Auto</QuickChoice>
+					<CreateOnInput>Auto</CreateOnInput>
+					<ChoiceForm/>
+					<LinkByType/>
+					<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+					<Master>false</Master>
+					<MainFilter>true</MainFilter>
+					<DenyIncompleteValues>false</DenyIncompleteValues>
+					<Indexing>DontIndex</Indexing>
+					<FullTextSearch>Use</FullTextSearch>
+					<DataHistory>Use</DataHistory>
+					<TypeReductionMode>TransformValues</TypeReductionMode>
+				</Properties>
+			</Dimension>
+		<Resource uuid="e135f3df-cabd-5ae4-a43d-f29d2b7d9780"><Properties><Name>StoredValue</Name><Type><v8:Type>v8:ValueStorage</v8:Type></Type><DataHistory>DontUse</DataHistory><BinaryDataStorageLocationUse>DontUse</BinaryDataStorageLocationUse></Properties></Resource>
+<Attribute uuid="f461ccae-b8b8-51ea-bfba-51a3ad080b4a"><Properties><Name>TypedValue</Name><Type><v8:TypeSet>cfg:DefinedType.CovResourceType</v8:TypeSet></Type></Properties></Attribute>
+		</ChildObjects>
+	</InformationRegister>
+</MetaDataObject>

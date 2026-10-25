@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "collection": "WebSocketClients",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 0,
+  "properties": [
+    {
+      "name": "Predefined",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "AutoConnect",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ServerURL",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "User",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Password",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Headers",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "UseOSProxy",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "UseOSAuthentication",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Timeout",
+      "kind": "number",
+      "template": "30",
+      "values": []
+    }
+  ]
+}

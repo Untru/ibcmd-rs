@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-commonattributes",
+  "collection": "CommonAttributes",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "2bcabf1fbaaf9c837288c08663d38e0ca11c2df64d0387e1efc6b3acd00290ce",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 84443,
+    "decoded_sha256": "95ad80a8d028a72311fca0eb0ae6218faf4eb6681d60fb0197641208f3bf2d25",
+    "encoded_sha256": "5790f19714c1846d9e2b7c242d100fea277150c19b78b788744fe2eb46ae31f8"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11828,
+          "sha256": "eedb95af3e816682d6df5ce93fdf79abe105a49faf2827076a8b5488c4bff641"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "dfcaa8c2729ed12856afaac58413ef504794f365f86883ee988a491caa1eace0"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovTemplate.xml",
+          "size": 2575,
+          "sha256": "50c2398814a1ed308224c26e954abc3d632fb0b7e8fa37821b8f7d4b4276eaf1"
+        }
+      ]
+    },
+    {
+      "name": "CovPasswordMode_true",
+      "property": "PasswordMode",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovPasswordMode_true.xml",
+          "size": 2583,
+          "sha256": "2661eb073860a9a5b703e6ee7f7bc7092b96a5ffaf04c7f6737932cc88cd17ee"
+        }
+      ]
+    },
+    {
+      "name": "CovMarkNegatives_true",
+      "property": "MarkNegatives",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovMarkNegatives_true.xml",
+          "size": 2584,
+          "sha256": "1866aa8c1c83b4b0ee35cf13755cce04a8cb20c56b8fcae84854f9da2853ac36"
+        }
+      ]
+    },
+    {
+      "name": "CovMultiLine_true",
+      "property": "MultiLine",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovMultiLine_true.xml",
+          "size": 2580,
+          "sha256": "41f6c92195acf2151c84aa8550fac0221bbe4fe6c4bd67e159a9ef2e56e5820b"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedEdit_true",
+      "property": "ExtendedEdit",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovExtendedEdit_true.xml",
+          "size": 2583,
+          "sha256": "41ef2d1d242b43f8890ad4d5292b1010a0580fe0623b650ebea886ffb6b6a013"
+        }
+      ]
+    },
+    {
+      "name": "CovFillFromFillingValue_true",
+      "property": "FillFromFillingValue",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovFillFromFillingValue_true.xml",
+          "size": 2591,
+          "sha256": "3e731b55a6e03429996f71b84e3daafa77c0ecd78cb34cf7f47c4778292c7a89"
+        }
+      ]
+    },
+    {
+      "name": "CovAutoUse_Use",
+      "property": "AutoUse",
+      "kind": "enum",
+      "value": "Use",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovAutoUse_Use.xml",
+          "size": 2574,
+          "sha256": "6adfd9a5edf69f88d702977c3351564d2b447878a4bab001b57829174527c066"
+        }
+      ]
+    },
+    {
+      "name": "CovDataSeparation_Separate",
+      "property": "DataSeparation",
+      "kind": "enum",
+      "value": "Separate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ОбщийРеквизит.CovDataSeparation_Separate - Не указан параметр сеанса, задающий использование разделителя",
+      "files": []
+    },
+    {
+      "name": "CovSeparatedDataUse_IndependentlyAndSimultaneously",
+      "property": "SeparatedDataUse",
+      "kind": "enum",
+      "value": "IndependentlyAndSimultaneously",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovSeparatedDataUse_IndependentlyAndSimultaneously.xml",
+          "size": 2631,
+          "sha256": "a796b58e3e3286116c47f8890996ef8bb1f67b0d367c22d705868841169634c6"
+        }
+      ]
+    },
+    {
+      "name": "CovUsersSeparation_Separate",
+      "property": "UsersSeparation",
+      "kind": "enum",
+      "value": "Separate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovUsersSeparation_Separate.xml",
+          "size": 2592,
+          "sha256": "5a06ef84a1e9c74b6b14ef49a2bc01b736aad0dd4ae130243efce8e5697a983f"
+        }
+      ]
+    },
+    {
+      "name": "CovAuthenticationSeparation_Separate",
+      "property": "AuthenticationSeparation",
+      "kind": "enum",
+      "value": "Separate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovAuthenticationSeparation_Separate.xml",
+          "size": 2601,
+          "sha256": "a6142e712ad67dec7518849ff4f3d83ecb76b96c4f6c2cb5870ed9abcdff37b4"
+        }
+      ]
+    },
+    {
+      "name": "CovConfigurationExtensionsSeparation_Separate",
+      "property": "ConfigurationExtensionsSeparation",
+      "kind": "enum",
+      "value": "Separate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovConfigurationExtensionsSeparation_Separate.xml",
+          "size": 2610,
+          "sha256": "5181f3f79a8f188501a3d1caaafe757328aea7b9fafe9acfa380206ed8a8fc5d"
+        }
+      ]
+    },
+    {
+      "name": "CovIndexing_IndexWithAdditionalOrder",
+      "property": "Indexing",
+      "kind": "enum",
+      "value": "IndexWithAdditionalOrder",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonAttributes/CovIndexing_IndexWithAdditionalOrder.xml",
+          "size": 2615,
+          "sha256": "0c3a711a726c0386b61319c6883410160b3f9e412e3df38097726a64b902e529"
+        }
+      ]
+    }
+  ]
+}

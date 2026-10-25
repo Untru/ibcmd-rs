@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-documentnumerators",
+  "collection": "DocumentNumerators",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "612f33570bd33f955750d08291a73524a76760f958d30931fcbcd1fb398820c5",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79092,
+    "decoded_sha256": "70357157c3b9975ba9c4829a3527573caea3c00b0b7924362ee284b68da81ccf",
+    "encoded_sha256": "58c0fa3e02354cdd403ad729d729123e0f1a4003a82a5fcf5db08d89ae50cb5d"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10628,
+          "sha256": "6d1c75aaee3f72d61852e902e21dcc0758d2e23db402b952dacbab83ecfc7aa5"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "806312d3b292aebd02c5ee2fcb1fee07df9a9ea7cec619c7b6ba5643e3bbe065"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentNumerators/CovTemplate.xml",
+          "size": 1331,
+          "sha256": "2a91a958608d83974fb83a9118fc64c4397fc3e8585ed948068e84382c498c6a"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberLength_11",
+      "property": "NumberLength",
+      "kind": "number",
+      "value": "11",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150/Documents",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentNumerators/CovNumberLength_11.xml",
+          "size": 1339,
+          "sha256": "b01241cc90537e9dcb2969049a3065471cb314b481e36301a1c2a5727eeaf65e"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberAllowedLength_Fixed",
+      "property": "NumberAllowedLength",
+      "kind": "enum",
+      "value": "Fixed",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150/Documents",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentNumerators/CovNumberAllowedLength_Fixed.xml",
+          "size": 1345,
+          "sha256": "6644354556c0b88cc3c0db8814872b195f1dfc6990b1ba76a598380434bbad1f"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberPeriodicity_Year",
+      "property": "NumberPeriodicity",
+      "kind": "enum",
+      "value": "Year",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150/Documents",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentNumerators/CovNumberPeriodicity_Year.xml",
+          "size": 1336,
+          "sha256": "71c8324f21347f70ef104750aa59113f31a86e4c3ae8d209dc2ae71b1941424a"
+        }
+      ]
+    },
+    {
+      "name": "CovCheckUnique_false",
+      "property": "CheckUnique",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentNumerators/CovCheckUnique_false.xml",
+          "size": 1341,
+          "sha256": "935e517c04e5d6ee4c7eff6780eb36caecdca3f5aa3ece652c7a09304d65ad3a"
+        }
+      ]
+    }
+  ]
+}

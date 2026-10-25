@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "collection": "Tasks",
+  "properties": [],
+  "combinations": [],
+  "template_files": {
+    "Forms/EventsForm.xml": "forms/EventsForm.xml",
+    "Forms/EventsForm/Ext/Form.xml": "forms/EventsForm/Form.xml",
+    "Forms/EventsForm/Ext/Form/Module.bsl": "forms/EventsForm/Module.bsl"
+  }
+}

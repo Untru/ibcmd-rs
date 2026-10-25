@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-defined-type-resource",
+  "collection": "InformationRegisters",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "5586cb591cfbb9af8a248db6633255625541b51922755dce80a14c4b8a4c09e9",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 77202,
+    "decoded_sha256": "cac16912c6f6aa17b3e6a2a0121909157373dafecaa7ef88b6e1e3e38084e062",
+    "encoded_sha256": "cd473465d81759f8bdf0cdfdb4a0ba93aa0a3c8ce277c5a3076f348a90c437c0"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11184,
+          "sha256": "e522927decb6b34a0b46cf8299f8609c32b5821feffaf1cbfe0d652f1ede13fe"
+        },
+        {
+          "path": "DefinedTypes/CovResourceType.xml",
+          "size": 1628,
+          "sha256": "ecff7eea7795a5ba69f2e4db8a11c65c70a2705354f9741a033e32e2461e7f84"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "455aab21bd42e51455ff5b406b3e28ea60d64253a3dd0ea6fdcbf115cb29cd1e"
+        }
+      ]
+    },
+    {
+      "name": "CovDefinedResourceTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovDefinedResourceTemplate.xml",
+          "size": 7780,
+          "sha256": "f016094b7a08bac2d5e02ea5d2e35e7018d2dcaa2a1b4ddd4cc64c668aa37291"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "collection": "StyleItems",
+  "corpus": "clean-room-corpus-regressions",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovStyleColorTomato",
+      "set": {
+        "Value": "web:Tomato"
+      },
+      "kinds": {
+        "Value": "enum"
+      },
+      "source": "observed:Accounting-MDM; property value only"
+    },
+    {
+      "name": "CovStyleColorMediumGreen",
+      "set": {
+        "Value": "web:MediumGreen"
+      },
+      "kinds": {
+        "Value": "enum"
+      },
+      "source": "observed:Accounting-MDM; property value only"
+    },
+    {
+      "name": "CovStyleColorLinen",
+      "set": {
+        "Value": "web:Linen"
+      },
+      "kinds": {
+        "Value": "enum"
+      }
+    }
+  ]
+}

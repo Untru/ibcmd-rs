@@ -1,0 +1,75 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<Task uuid="4f22f624-e720-5c47-bac3-773674fee50e">
+		<InternalInfo>
+			<xr:GeneratedType name="TaskObject.CovExecuteAfterWriteDataHistoryVersionProcessing_true" category="Object">
+				<xr:TypeId>24bb128a-24d9-56ba-8412-9a84b251a100</xr:TypeId>
+				<xr:ValueId>5f0674a8-09a0-5e43-b0a8-c42743c8e07e</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskRef.CovExecuteAfterWriteDataHistoryVersionProcessing_true" category="Ref">
+				<xr:TypeId>55eab7ab-6ffc-5101-8e88-c9ea03433c3f</xr:TypeId>
+				<xr:ValueId>d6c25e74-91a7-5488-98bc-3ccce6f81561</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskSelection.CovExecuteAfterWriteDataHistoryVersionProcessing_true" category="Selection">
+				<xr:TypeId>a408ef81-bd47-5ce4-af70-c74bc3ba1c6d</xr:TypeId>
+				<xr:ValueId>f5429f0c-b46a-5da0-9048-168aefa1901d</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskList.CovExecuteAfterWriteDataHistoryVersionProcessing_true" category="List">
+				<xr:TypeId>bbf3e999-4cc3-5a41-b3e6-f88d714ee1c4</xr:TypeId>
+				<xr:ValueId>46b64d0c-5968-5d22-a07f-8a0f23620c46</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskManager.CovExecuteAfterWriteDataHistoryVersionProcessing_true" category="Manager">
+				<xr:TypeId>0cc40e97-0899-5f29-9232-65b881857538</xr:TypeId>
+				<xr:ValueId>e2e566e6-8d1a-5a92-b2c1-f5c2df86aa15</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovExecuteAfterWriteDataHistoryVersionProcessing_true</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<NumberType>String</NumberType>
+			<NumberLength>9</NumberLength>
+			<NumberAllowedLength>Variable</NumberAllowedLength>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>true</Autonumbering>
+			<TaskNumberAutoPrefix>DontUse</TaskNumberAutoPrefix>
+			<DescriptionLength>25</DescriptionLength>
+			<Addressing/>
+			<MainAddressingAttribute/>
+			<CurrentPerformer/>
+			<BasedOn/>
+			<Characteristics/>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<EditType>InDialog</EditType>
+			<InputByString>
+				<xr:Field>Task.CovExecuteAfterWriteDataHistoryVersionProcessing_true.StandardAttribute.Description</xr:Field>
+				<xr:Field>Task.CovExecuteAfterWriteDataHistoryVersionProcessing_true.StandardAttribute.Number</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>true</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects/>
+	</Task>
+</MetaDataObject>

@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-tasks",
+  "collection": "Tasks",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "01ddfdfa036d3ddad5027415ea34cce559ea63bb4cff41a385277a30a2b0fe00",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 84768,
+    "decoded_sha256": "c2839244743ca21e535704d63cfdb6240b02968cc2d15aaff5d2ecb9ba82bfa3",
+    "encoded_sha256": "7b2f88a512d8c823d9ce8fd00ae1e85f516f48fa0974f1109d3e130d73bdb32c"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11563,
+          "sha256": "7d392904f875bb9e60b82b3e970a4e965fd1c28c414bd0ebf51d2a925c8b8f45"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "383fb4a76d671eb609d07e468fb341f7267266e20a4aecb5b029173e310c5530"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovTemplate.xml",
+          "size": 4103,
+          "sha256": "0c85752b5feaca56f57c6ce6b0a21dbc53ca082fb8233fc190611b4eab16df88"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovUseStandardCommands_false.xml",
+          "size": 4240,
+          "sha256": "4016b5cf6c295a1197512815635028a9d00a2e59cc2147ae95e9227fd855a0db"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberLength_14",
+      "property": "NumberLength",
+      "kind": "number",
+      "value": "14",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovNumberLength_14.xml",
+          "size": 4160,
+          "sha256": "6249d0d6855606fda444286bb60978b6213b6c32f425cf0320cb90c4f41da25c"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberAllowedLength_Fixed",
+      "property": "NumberAllowedLength",
+      "kind": "enum",
+      "value": "Fixed",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovNumberAllowedLength_Fixed.xml",
+          "size": 4236,
+          "sha256": "1421729c10677e3c02d2fb4ccc1ab035fe24f2f9412402fcda3cda0e4c22c40f"
+        }
+      ]
+    },
+    {
+      "name": "CovCheckUnique_false",
+      "property": "CheckUnique",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovCheckUnique_false.xml",
+          "size": 4176,
+          "sha256": "043725fdc16f5b736fed537124c1cce9d3310c824a81200e4213ffcbcb696939"
+        }
+      ]
+    },
+    {
+      "name": "CovAutonumbering_false",
+      "property": "Autonumbering",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovAutonumbering_false.xml",
+          "size": 4192,
+          "sha256": "6728563d053327a77ef760054c2217cda4903f69570ddbd1c3b5161c0d834d48"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_150",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "150",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovDescriptionLength_150.xml",
+          "size": 4208,
+          "sha256": "7940db6127f5a4a0ade4f5f2a89a93fa7fdc714ed15b31435704a775245697f0"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovIncludeHelpInContents_true.xml",
+          "size": 4246,
+          "sha256": "0a359af85604fe504002aebb5352253b71633931612cdfd05103f0b91c89a921"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovListPresentation_Cov.xml",
+          "size": 4316,
+          "sha256": "ba18733546695d65a2c3b57fa88a583f5c3bc19eaf9dd4149c4f6799e5780b90"
+        }
+      ]
+    },
+    {
+      "name": "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+      "property": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+          "size": 4382,
+          "sha256": "27d24b1ab7f8ab8922cd8b5faca63cae479f9fc0ea281d0a6dbdd338010debf4"
+        }
+      ]
+    },
+    {
+      "name": "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+      "property": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+          "size": 4438,
+          "sha256": "56870be838df7847e5829845f967cff656bace104cb1aac6c41edc26f022cdfb"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-role-object-rights",
+  "collection": "Roles",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "81428cd20e1d2bd191c5b6cb4657fc79328bfe7aeab3210a31a57d529c8a9ee2",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 77631,
+    "decoded_sha256": "4f335dbb0e3f30e7ecbb930796affed1068ca1d9c960439b4d1b1beddc033409",
+    "encoded_sha256": "73219f03129933f887af39672214acf76afe654c30b95db9f0c0943fe50bf89e"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovRightsCatalog.xml",
+          "size": 4530,
+          "sha256": "b7fb692ca53bd7e129f29ecaafa335e628e7be6b3c4983f869fd287feaf4cd2e"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 10379,
+          "sha256": "29202de7905a78873d309de2d5ca32ab99ffea90414360dc6f7cf2caec6e5606"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "6790e5bd2965e0e02c4afc6b5c834d894ef875651d16aada073cafee01439ab5"
+        }
+      ]
+    },
+    {
+      "name": "CovObjectRights",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Roles/CovObjectRights/Ext/Rights.xml",
+          "size": 611,
+          "sha256": "327318ec51ce47cd0fc8c3168d5b3dcffdceeedb1fcffd0e3548ce9befdc8ea3"
+        },
+        {
+          "path": "Roles/CovObjectRights.xml",
+          "size": 1089,
+          "sha256": "109c995257cb9316f8f48183502a73eb9da387a40c4546576639cd3652063117"
+        }
+      ]
+    }
+  ]
+}

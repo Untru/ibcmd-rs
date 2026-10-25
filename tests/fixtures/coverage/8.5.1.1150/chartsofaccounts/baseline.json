@@ -1,0 +1,19 @@
+{
+  "equal": [
+    "CovAutoOrderByCode_true",
+    "CovCheckUnique_false",
+    "CovCodeLength_5",
+    "CovCodeSeries_WithinSubordination",
+    "CovDescriptionLength_120",
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+    "CovIncludeHelpInContents_true",
+    "CovListPresentation_Cov",
+    "CovObjectPresentation_Cov",
+    "CovOrderLength_5",
+    "CovQuickChoice_true",
+    "CovTemplate",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

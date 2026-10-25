@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-scheduledjobs",
+  "collection": "ScheduledJobs",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "4ce90998467480103800b0de423fd8c6eb8a1ef8a75f6dd95e1189feac0eeebd",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 84170,
+    "decoded_sha256": "08a0eab015637319a6fe3b58384b3da21506e4037d706a9d73f7b7b357cf0268",
+    "encoded_sha256": "8c0600b0ecddb16c3774cb9d4a988944842f7503238d59f4d5df1f880837db73"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovHandlers/Ext/Module.bsl",
+          "size": 190,
+          "sha256": "3fe719fa26b725022ab4b40888d871b58875d85ed895712c2649c017f75ab7e7"
+        },
+        {
+          "path": "CommonModules/CovHandlers.xml",
+          "size": 1453,
+          "sha256": "9a14315427e1a34a4a8d5bc7d21ad14f01eec916db39b6fc24e82957cae2365a"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 10870,
+          "sha256": "5b6a9a811b6beee78de2f4a7a8d7eb7c1c9b09a7be1c69fd85980b5dc75bba46"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "86fb8144d60b0b3a27644bd2200f985efb2b111a583ea124cb76348981a1f1cd"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovTemplate.xml",
+          "size": 1360,
+          "sha256": "cd5e87b8aba50f19464341f08b8503b990249841bd4a30c697ebcbb46b9120d9"
+        }
+      ]
+    },
+    {
+      "name": "CovUse_false",
+      "property": "Use",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovUse_false.xml",
+          "size": 1362,
+          "sha256": "d30401c849801d556240ec7f78da1f789ddf7eae9018b800173f13eb00218ce1"
+        }
+      ]
+    },
+    {
+      "name": "CovPredefined_true",
+      "property": "Predefined",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovPredefined_true.xml",
+          "size": 1366,
+          "sha256": "ba2a21b5066dd31fdf3452bc8141e9033aecce32a76b5ac735613ef936f3618d"
+        }
+      ]
+    },
+    {
+      "name": "CovRestartCountOnFailure_0",
+      "property": "RestartCountOnFailure",
+      "kind": "number",
+      "value": "0",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovRestartCountOnFailure_0.xml",
+          "size": 1375,
+          "sha256": "320e32ff4e66f3289a21b2759c62d391a45fe708847f1f492e8b5470e048ca51"
+        }
+      ]
+    },
+    {
+      "name": "CovRestartCountOnFailure_10",
+      "property": "RestartCountOnFailure",
+      "kind": "number",
+      "value": "10",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovRestartCountOnFailure_10.xml",
+          "size": 1377,
+          "sha256": "916fd3928f480c94030416a0e2a41e9f35eda50f88bf839adff908407b40fe59"
+        }
+      ]
+    },
+    {
+      "name": "CovRestartIntervalOnFailure_0",
+      "property": "RestartIntervalOnFailure",
+      "kind": "number",
+      "value": "0",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovRestartIntervalOnFailure_0.xml",
+          "size": 1377,
+          "sha256": "320e7c908f964dbe23e45ffe4c6d5d1b1a861863a864130579025b3adf753f42"
+        }
+      ]
+    },
+    {
+      "name": "CovRestartIntervalOnFailure_15",
+      "property": "RestartIntervalOnFailure",
+      "kind": "number",
+      "value": "15",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovRestartIntervalOnFailure_15.xml",
+          "size": 1379,
+          "sha256": "0913b13466d63965791775e3deb8bd95cc7cd46c2bac8b014acf5e32482a3b6b"
+        }
+      ]
+    },
+    {
+      "name": "CovRestartIntervalOnFailure_25",
+      "property": "RestartIntervalOnFailure",
+      "kind": "number",
+      "value": "25",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovRestartIntervalOnFailure_25.xml",
+          "size": 1379,
+          "sha256": "cb270c9bda9a70d38ecde21f73d9e5c1f85bfb35a32fbf48d6718ef04350d5af"
+        }
+      ]
+    },
+    {
+      "name": "CovRestartIntervalOnFailure_60",
+      "property": "RestartIntervalOnFailure",
+      "kind": "number",
+      "value": "60",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ScheduledJobs/CovRestartIntervalOnFailure_60.xml",
+          "size": 1379,
+          "sha256": "4dd08fd0e9f1b0620f7e55293bdb5f68d2fb8b081f48f94d4d71a0f1ba5140d8"
+        }
+      ]
+    }
+  ]
+}

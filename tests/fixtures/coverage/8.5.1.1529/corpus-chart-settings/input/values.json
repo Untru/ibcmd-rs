@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovChartTypeColumn",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovChartTypeColumn.xml"
+      }
+    },
+    {
+      "name": "CovChartTypePie3D",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovChartTypePie3D.xml"
+      }
+    },
+    {
+      "name": "CovChartSelectionMode",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovChartSelectionMode.xml"
+      }
+    },
+    {
+      "name": "CovChartMissingSeries",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovChartMissingSeries.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  }
+}

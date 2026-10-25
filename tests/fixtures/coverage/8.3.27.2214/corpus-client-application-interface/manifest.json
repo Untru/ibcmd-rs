@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-client-application-interface",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "ebd7aecf51aae3d133af86b30194da2f74154224f85351659fcf0fda566ebf1d",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76854,
+    "decoded_sha256": "278a1934e997794830c4708b4f7581c07b14824c93aedc5f72f0abdd5040b381",
+    "encoded_sha256": "a616ffe7f13888634a1922c0463b7b856f46f15fdca1ac09145dbd529c4c6a17"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10353,
+          "sha256": "54e5c6de38864b1ba1c21f99c5e1c1b48c094c37afdd760505870209ce9fca88"
+        },
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "size": 1109,
+          "sha256": "35da6580b9c3b4a9af45bfb84ec2f4fcb4c572988e418923d6221ce59ec55c34"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "4307b3294744a891ded3a94cce374fc4b0757d45fde1b0ffe68998285dc33d87"
+        }
+      ]
+    },
+    {
+      "name": "CovLayoutTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLayoutTemplate.xml",
+          "size": 1502,
+          "sha256": "0926efab0875c391878cf047be550e245e8f8d178f6ff153d29230f7116c47fc"
+        }
+      ]
+    }
+  ]
+}

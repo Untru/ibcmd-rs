@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "collection": "CommonTemplates",
+  "properties": [],
+  "combinations": [],
+  "corpus": "clean-room-language-and-graph-assets",
+  "template_files": {
+    "Ext/Template.xml": "bodies/schema.xml"
+  },
+  "configuration_properties": [
+    "DefaultLanguage",
+    "ScriptVariant"
+  ]
+}

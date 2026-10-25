@@ -1,0 +1,66 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<AutoCommandBar name="FormCommandBar" id="-1"/>
+	<ChildItems>
+		<Table name="RowsTable" id="1">
+			<DataPath>Rows</DataPath>
+			<RowFilter xsi:nil="true"/>
+			<ContextMenu name="RowsTableКонтекстноеМеню" id="3"/>
+			<AutoCommandBar name="RowsTableКоманднаяПанель" id="4"/>
+			<ExtendedTooltip name="RowsTableРасширеннаяПодсказка" id="5"/>
+			<SearchStringAddition name="RowsTableСтрокаПоиска" id="6">
+				<AdditionSource>
+					<Item>RowsTable</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="RowsTableСтрокаПоискаКонтекстноеМеню" id="7"/>
+				<ExtendedTooltip name="RowsTableСтрокаПоискаРасширеннаяПодсказка" id="8"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="RowsTableСостояниеПросмотра" id="9">
+				<AdditionSource>
+					<Item>RowsTable</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="RowsTableСостояниеПросмотраКонтекстноеМеню" id="10"/>
+				<ExtendedTooltip name="RowsTableСостояниеПросмотраРасширеннаяПодсказка" id="11"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="RowsTableУправлениеПоиском" id="12">
+				<AdditionSource>
+					<Item>RowsTable</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="RowsTableУправлениеПоискомКонтекстноеМеню" id="13"/>
+				<ExtendedTooltip name="RowsTableУправлениеПоискомРасширеннаяПодсказка" id="14"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<PictureField name="Probe" id="2">
+					<DataPath>Rows.Flag</DataPath>
+					<TitleFont ref="style:NormalTextFont" kind="StyleItem"/>
+					<EditMode>EnterOnInput</EditMode>
+					<CellHyperlink>true</CellHyperlink>
+					<ContextMenu name="ProbeКонтекстноеМеню" id="15"/>
+					<ExtendedTooltip name="ProbeРасширеннаяПодсказка" id="16"/>
+				</PictureField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Rows" id="1">
+			<Type>
+				<v8:Type>v8:ValueTable</v8:Type>
+			</Type>
+			<Columns>
+				<Column name="Flag" id="1">
+					<Type>
+						<v8:Type>xs:decimal</v8:Type>
+						<v8:NumberQualifiers>
+							<v8:Digits>0</v8:Digits>
+							<v8:FractionDigits>0</v8:FractionDigits>
+							<v8:AllowedSign>Any</v8:AllowedSign>
+						</v8:NumberQualifiers>
+					</Type>
+				</Column>
+			</Columns>
+		</Attribute>
+	</Attributes>
+</Form>

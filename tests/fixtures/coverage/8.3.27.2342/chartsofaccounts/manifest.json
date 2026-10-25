@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-chartsofaccounts",
+  "collection": "ChartsOfAccounts",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "3462b03e885ac75ef64174b98f6940c9fd7665303b7fcdc9a898ac2160d39139",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 88524,
+    "decoded_sha256": "28a62b7cf9db0d38715e0565084631f5054c6e4e90a9c9c2c9f6414939fe5849",
+    "encoded_sha256": "8f44325730c95576fc8f9e9b0fb58b1a593d336758154922cc47384933588c7a"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11191,
+          "sha256": "1010bcb1c3ea4eacaaf467fabea4f910d5a5b103bcca6c2fed51f9237389ea01"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "0117c1212d8edfe3701563f5135b697df0bb72bdd8802fe3d77839cd8d91f738"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovTemplate.xml",
+          "size": 4747,
+          "sha256": "15864748323fab3b68779bad5db5ea7d000b163a37cb1e572eb52279c8b213c6"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovUseStandardCommands_false.xml",
+          "size": 4918,
+          "sha256": "9ddd3f09b322a752a10340650ce1ea37b22a6e4baf56ca9efe2cf26c60190550"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovIncludeHelpInContents_true.xml",
+          "size": 4926,
+          "sha256": "7dc8d47bd8b8315483a9b2bddc564391f3ba6a95a518bd5fa31080a3240acca3"
+        }
+      ]
+    },
+    {
+      "name": "CovMaxExtDimensionCount_3",
+      "property": "MaxExtDimensionCount",
+      "kind": "number",
+      "value": "3",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПланСчетов.CovMaxExtDimensionCount_3 - У плана счетов с количеством субконто не равным 0 должен быть установлен план видов характеристик.",
+      "files": []
+    },
+    {
+      "name": "CovCodeLength_5",
+      "property": "CodeLength",
+      "kind": "number",
+      "value": "5",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovCodeLength_5.xml",
+          "size": 4787,
+          "sha256": "e02702ddfd1813ac552b933448b4c4c628ebc3c8afac6f187d71efb3d5e3f480"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_120",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "120",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovDescriptionLength_120.xml",
+          "size": 4878,
+          "sha256": "ec805106c37c555906e6e8adddd2de7a5fcd6b39831fd9abd7152b67577a3760"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeSeries_WithinSubordination",
+      "property": "CodeSeries",
+      "kind": "enum",
+      "value": "WithinSubordination",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovCodeSeries_WithinSubordination.xml",
+          "size": 4966,
+          "sha256": "1e6ead3666cd2f2567b7ecfca057d43416228cebb7b3f1a37698197e0e09718b"
+        }
+      ]
+    },
+    {
+      "name": "CovCheckUnique_false",
+      "property": "CheckUnique",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovCheckUnique_false.xml",
+          "size": 4838,
+          "sha256": "fb862314794b18f2b510b2011558842e022c5cf18e522796c4e319886d4b908c"
+        }
+      ]
+    },
+    {
+      "name": "CovQuickChoice_true",
+      "property": "QuickChoice",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovQuickChoice_true.xml",
+          "size": 4826,
+          "sha256": "94f4837108c6058ea38b18920eecaf9e8ea0b31643d0b1d9bdd960dc0b8977b5"
+        }
+      ]
+    },
+    {
+      "name": "CovAutoOrderByCode_true",
+      "property": "AutoOrderByCode",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovAutoOrderByCode_true.xml",
+          "size": 4866,
+          "sha256": "3e32c1c9fa9d3885b107f51957c50d9da3eb97aef2a854d58a83a336aed081a7"
+        }
+      ]
+    },
+    {
+      "name": "CovOrderLength_5",
+      "property": "OrderLength",
+      "kind": "number",
+      "value": "5",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovOrderLength_5.xml",
+          "size": 4797,
+          "sha256": "6dac6fbbe6c041d97da5fac044e2a0da28696b1534dad45b3e25996eb18fb759"
+        }
+      ]
+    },
+    {
+      "name": "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+      "property": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+          "size": 5096,
+          "sha256": "dd3369fe1acbfcd6e110ac9df3ddb7842ea1ac02d54c0e84183c62019b642ac8"
+        }
+      ]
+    },
+    {
+      "name": "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+      "property": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+          "size": 5166,
+          "sha256": "4fac72f68e2aa512a67b5d4909488cf8b2f53b105d8d00b6bdf76b8104194bf1"
+        }
+      ]
+    },
+    {
+      "name": "CovObjectPresentation_Cov",
+      "property": "ObjectPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovObjectPresentation_Cov.xml",
+          "size": 5006,
+          "sha256": "3b5d94efd5fbde76223076c351afce6c84232a5fa9346045c8558000e762db39"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovListPresentation_Cov.xml",
+          "size": 4984,
+          "sha256": "8e651bba91383e065117c926b2f6bc9fbf690a2fd09376d2d6208b15ece687e3"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovRootURL_billing",
+    "CovRootURL_dt",
+    "CovRootURL_exchange_dsl_1_0_0_1",
+    "CovRootURL_oauth2_mail",
+    "CovTemplate",
+    "configuration"
+  ]
+}

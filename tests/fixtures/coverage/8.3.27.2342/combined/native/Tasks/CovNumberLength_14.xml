@@ -1,0 +1,75 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Task uuid="a7a964fd-86f4-59a5-9100-01b831abc49b">
+		<InternalInfo>
+			<xr:GeneratedType name="TaskObject.CovNumberLength_14" category="Object">
+				<xr:TypeId>41bd7c9b-0ec3-5cc2-bb0e-6756b384f187</xr:TypeId>
+				<xr:ValueId>777ebb30-05d2-52f9-a9e2-0b3384c22466</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskRef.CovNumberLength_14" category="Ref">
+				<xr:TypeId>6cb2f6fa-16c3-5ef7-9f90-5f39dcb7fc60</xr:TypeId>
+				<xr:ValueId>ce3b4d03-c8a2-5313-8e3c-84c458aa43c8</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskSelection.CovNumberLength_14" category="Selection">
+				<xr:TypeId>2df417ee-f22f-56bf-a11c-c006ab314c89</xr:TypeId>
+				<xr:ValueId>fa1c012b-f71e-5566-86f0-8943b8583566</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskList.CovNumberLength_14" category="List">
+				<xr:TypeId>f3a45224-c7af-518c-bc2a-72eb2588627b</xr:TypeId>
+				<xr:ValueId>8c057781-652a-58a0-a735-dad5d808bc2e</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskManager.CovNumberLength_14" category="Manager">
+				<xr:TypeId>1bf7e243-61c9-5697-bde9-bc5c75697229</xr:TypeId>
+				<xr:ValueId>0cec109b-2d59-5b17-a845-8edda979b62b</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovNumberLength_14</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<NumberType>String</NumberType>
+			<NumberLength>14</NumberLength>
+			<NumberAllowedLength>Variable</NumberAllowedLength>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>true</Autonumbering>
+			<TaskNumberAutoPrefix>DontUse</TaskNumberAutoPrefix>
+			<DescriptionLength>25</DescriptionLength>
+			<Addressing/>
+			<MainAddressingAttribute/>
+			<CurrentPerformer/>
+			<BasedOn/>
+			<Characteristics/>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<EditType>InDialog</EditType>
+			<InputByString>
+				<xr:Field>Task.CovNumberLength_14.StandardAttribute.Description</xr:Field>
+				<xr:Field>Task.CovNumberLength_14.StandardAttribute.Number</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects/>
+	</Task>
+</MetaDataObject>

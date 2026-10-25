@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<FilterCriterion uuid="bbfe4447-e9df-5c29-a6a3-9be12b5b2f0b">
+		<InternalInfo>
+			<xr:GeneratedType name="FilterCriterionManager.CovTemplate" category="Manager">
+				<xr:TypeId>857d6c58-f37f-5ae4-816b-957912fbe4da</xr:TypeId>
+				<xr:ValueId>ee9e7096-f3fd-5494-8004-6e4d3274af25</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="FilterCriterionList.CovTemplate" category="List">
+				<xr:TypeId>68cf89b9-d75d-5ad6-a0ae-7ef58f6b5832</xr:TypeId>
+				<xr:ValueId>d554fb45-e47f-53bc-8bbd-b9145a0a390e</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovTemplate</Name>
+			<Synonym/>
+			<Comment/>
+			<Type>
+				<v8:Type>cfg:DocumentRef.CovRecorder</v8:Type>
+			</Type>
+			<UseStandardCommands>true</UseStandardCommands>
+			<Content/>
+			<DefaultForm/>
+			<AuxiliaryForm/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+		</Properties>
+		<ChildObjects/>
+	</FilterCriterion>
+</MetaDataObject>

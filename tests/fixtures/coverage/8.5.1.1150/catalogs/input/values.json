@@ -1,0 +1,546 @@
+{
+  "schema_version": 1,
+  "collection": "Catalogs",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 116,
+  "properties": [
+    {
+      "name": "Hierarchical",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "HierarchyType",
+      "kind": "enum",
+      "template": "HierarchyFoldersAndItems",
+      "values": [
+        {
+          "value": "HierarchyOfItems",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "LimitLevelCount",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "LevelCount",
+      "kind": "number",
+      "template": "2",
+      "values": [
+        {
+          "value": "1",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "3",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "FoldersOnTop",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "UseStandardCommands",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Owners",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "SubordinationUse",
+      "kind": "enum",
+      "template": "ToItems",
+      "values": []
+    },
+    {
+      "name": "CodeLength",
+      "kind": "number",
+      "template": "9",
+      "values": [
+        {
+          "value": "0",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "3",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "5",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "11",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "DescriptionLength",
+      "kind": "number",
+      "template": "25",
+      "values": [
+        {
+          "value": "0",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "10",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "36",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "50",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "CodeType",
+      "kind": "enum",
+      "template": "String",
+      "values": [
+        {
+          "value": "Number",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "CodeAllowedLength",
+      "kind": "enum",
+      "template": "Variable",
+      "values": [
+        {
+          "value": "Fixed",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "CodeSeries",
+      "kind": "enum",
+      "template": "WholeCatalog",
+      "values": [
+        {
+          "value": "WithinOwnerSubordination",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "WithinSubordination",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "CheckUnique",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Autonumbering",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "DefaultPresentation",
+      "kind": "enum",
+      "template": "AsDescription",
+      "values": [
+        {
+          "value": "AsCode",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "Characteristics",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "PredefinedDataUpdate",
+      "kind": "enum",
+      "template": "Auto",
+      "values": [
+        {
+          "value": "AutoUpdate",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "DontAutoUpdate",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "EditType",
+      "kind": "enum",
+      "template": "InDialog",
+      "values": [
+        {
+          "value": "BothWays",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "InList",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "QuickChoice",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ChoiceMode",
+      "kind": "enum",
+      "template": "BothWays",
+      "values": [
+        {
+          "value": "FromForm",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "QuickChoice",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "InputByString",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "SearchStringModeOnInputByString",
+      "kind": "enum",
+      "template": "Begin",
+      "values": [
+        {
+          "value": "AnyPart",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "FullTextSearchOnInputByString",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": []
+    },
+    {
+      "name": "ChoiceDataGetModeOnInputByString",
+      "kind": "enum",
+      "template": "Directly",
+      "values": []
+    },
+    {
+      "name": "DefaultObjectForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultFolderForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultListForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultFolderChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryObjectForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryFolderForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryListForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryFolderChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "IncludeHelpInContents",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "BasedOn",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DataLockFields",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DataLockControlMode",
+      "kind": "enum",
+      "template": "Managed",
+      "values": [
+        {
+          "value": "Automatic",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "FullTextSearch",
+      "kind": "enum",
+      "template": "Use",
+      "values": [
+        {
+          "value": "DontUse",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "ObjectPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "ExtendedObjectPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "ListPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "ExtendedListPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "Explanation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "CreateOnInput",
+      "kind": "enum",
+      "template": "Use",
+      "values": [
+        {
+          "value": "DontUse",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "template": "Auto",
+      "values": [
+        {
+          "value": "DontUse",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "DataHistory",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": []
+    },
+    {
+      "name": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    }
+  ],
+  "combinations": [
+    {
+      "set": {
+        "CodeLength": "0",
+        "InputByString": "\n\t\t\t\t<xr:Field>Catalog.CovTemplate.StandardAttribute.Description</xr:Field>\n\t\t\t"
+      },
+      "kinds": {
+        "InputByString": "xml"
+      },
+      "source": "platform refusal of CodeLength_0: input by string names the code",
+      "name": "CovCodeLength_0__InputByStringDescription"
+    },
+    {
+      "set": {
+        "DescriptionLength": "0",
+        "InputByString": "\n\t\t\t\t<xr:Field>Catalog.CovTemplate.StandardAttribute.Code</xr:Field>\n\t\t\t"
+      },
+      "kinds": {
+        "InputByString": "xml"
+      },
+      "source": "platform refusal of DescriptionLength_0: input by string names the description",
+      "name": "CovDescriptionLength_0__InputByStringCode"
+    }
+  ]
+}

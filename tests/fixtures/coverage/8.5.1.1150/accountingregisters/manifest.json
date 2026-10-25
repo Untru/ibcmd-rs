@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-accountingregisters",
+  "collection": "AccountingRegisters",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "0f5cabb83cd38ee72973cbefabef3466efd947ec55fcc3412547c723bf87872f",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 82969,
+    "decoded_sha256": "57415cad813eb899614ec6abb55e8abede2830534d38f5e0800b3247d4e37e72",
+    "encoded_sha256": "26e8f51b19ec3388596020170d4af64f594cafd0a9774a322744d6e3f0a1257a"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfAccounts/CovAccounts.xml",
+          "size": 4802,
+          "sha256": "e677e9c9a4aca91055d902c492ee1acfcab319a52406b8af827833f7e6edf7ce"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 11588,
+          "sha256": "0392bd6756fb928d2d67a87c29afd2e5dabf38211ffea9bc8f7727bbb6f67cfc"
+        },
+        {
+          "path": "Documents/CovAccountingRecorder.xml",
+          "size": 4934,
+          "sha256": "b534b942c8cc5b9e3721d3e9010ea86429dab91ca3071a2307fb50abc6f086f9"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "5fbcf7a13b6a6217864dc5f2159ac1a6fc3de54a76023b2356c18121f0ccad75"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccountingRegisters/CovTemplate.xml",
+          "size": 4703,
+          "sha256": "0e494046bd8236858c1e6b8355f2a062592608d7619fc28b523fcf497c12883e"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccountingRegisters/CovUseStandardCommands_false.xml",
+          "size": 4840,
+          "sha256": "6705aaecc2378fd87b68bf380294bb26610386a53e57f7774ea4795dfaab4589"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccountingRegisters/CovIncludeHelpInContents_true.xml",
+          "size": 4846,
+          "sha256": "8ce21caf3eb7c043cf7e117358d76a0061a9f4db44429bbee4595c70ae89bc44"
+        }
+      ]
+    },
+    {
+      "name": "CovCorrespondence_true",
+      "property": "Correspondence",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccountingRegisters/CovCorrespondence_true.xml",
+          "size": 4790,
+          "sha256": "3127596edf78d4d2e8424223dcb38f1851f8536d18a0917fa0111267d92c2c6b"
+        }
+      ]
+    },
+    {
+      "name": "CovDataLockControlMode_Automatic",
+      "property": "DataLockControlMode",
+      "kind": "enum",
+      "value": "Automatic",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccountingRegisters/CovDataLockControlMode_Automatic.xml",
+          "size": 4873,
+          "sha256": "1ff164c5e71dda3485a7c7379cde66556b0d20c97898370eef62b340beb1457e"
+        }
+      ]
+    },
+    {
+      "name": "CovEnableTotalsSplitting_true",
+      "property": "EnableTotalsSplitting",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccountingRegisters/CovEnableTotalsSplitting_true.xml",
+          "size": 4846,
+          "sha256": "c84d0fe1bfc843892783d5ab455d8d9f07bf3738725218e243ac1041afa320c3"
+        }
+      ]
+    }
+  ]
+}

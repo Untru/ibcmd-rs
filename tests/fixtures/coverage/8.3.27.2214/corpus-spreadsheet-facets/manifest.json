@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-spreadsheet-facets",
+  "collection": "CommonTemplates",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "01cfc456a0572411d9856d680bc0ebd78d2d53b5aabaaf5c1d9bc3438c8f8155",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 90326,
+    "decoded_sha256": "0a10aa69f798ac50b5f0f70cee61f9dd91763df5117503f1418ff0d471bf1a28",
+    "encoded_sha256": "68cc1ec881abb2747b059b0cfb9d365ffce341a8ba913e38101183d6f70e8340"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10899,
+          "sha256": "7dd64f9160aa797ce1030847769959632aee7c139e6d2b902721640b85840b42"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "a7e657ad0d2c679415df010765ca0b12d693369db0c73558837fe02650540a7b"
+        }
+      ]
+    },
+    {
+      "name": "CovSpreadsheetFacetTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSpreadsheetFacetTemplate/Ext/Template.xml",
+          "size": 1266,
+          "sha256": "707afdd421a3910824d91cb9f16ecd504e240fb304f94a835c4b52c3dabf4e3d"
+        },
+        {
+          "path": "CommonTemplates/CovSpreadsheetFacetTemplate.xml",
+          "size": 1174,
+          "sha256": "a9a13b480ed8d98201c2c75dd61072a8ef7fa4bceee68580d431ae1cb44a79c6"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetVerticalPageBreak",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml",
+          "size": 1337,
+          "sha256": "3fe48a7f033199131b64c776b7f61ddba3470855db3afdc5df61298e2b370ae9"
+        },
+        {
+          "path": "CommonTemplates/CovSheetVerticalPageBreak.xml",
+          "size": 1172,
+          "sha256": "f91af6b3808223a3f502bf3d028f05bea8038a0986ae84a51aff01ace5e87b7f"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetPageSizeA4",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+          "size": 1532,
+          "sha256": "514bee7153f86068e14acb12f78ea2c50087686d189eef4c93863fc3696231e6"
+        },
+        {
+          "path": "CommonTemplates/CovSheetPageSizeA4.xml",
+          "size": 1165,
+          "sha256": "1e1a2371b8261f24dd7f219ed993ac6f3c54e24bc2a52591820ad83ec1cc18c7"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetAutoFontHeight",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+          "size": 1172,
+          "sha256": "0845b47ab9c0c1cb885defa91f59c9b97e5e026bdb6738c6f33d99bd4ab20825"
+        },
+        {
+          "path": "CommonTemplates/CovSheetAutoFontHeight.xml",
+          "size": 1169,
+          "sha256": "84e7f7a495e1d5db08b4a9f78f94db13b876155ca029ce5af6be4dd66068d8ba"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetOEMFixedFont",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+          "size": 1269,
+          "sha256": "9c3a3a7e83700652b0123379bcf470664f985eef2db4949afe89a4c10bd9c22c"
+        },
+        {
+          "path": "CommonTemplates/CovSheetOEMFixedFont.xml",
+          "size": 1167,
+          "sha256": "99fb0fe939f7d6ac18eaa7f66bf0bfa3b9523a4ec940dc3cac64a49def1c9c63"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetSandyBrown",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+          "size": 1360,
+          "sha256": "e7c0ab1a0704a2c7d4bcb7dbfb4e3c19a647f64c73c1bcaca21220e6004619ed"
+        },
+        {
+          "path": "CommonTemplates/CovSheetSandyBrown.xml",
+          "size": 1165,
+          "sha256": "e24fb878d719f2f022a5eb2bdb119907e06c7618566eeefee1e17dd93805e332"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetDashDotted",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+          "size": 1431,
+          "sha256": "972f6e3809637c47a8ed6860f6565f42db3daaf1c6f7c06017ba10c2bf7cca4f"
+        },
+        {
+          "path": "CommonTemplates/CovSheetDashDotted.xml",
+          "size": 1165,
+          "sha256": "6afb38c5496e61b4d2c5d647cef53c7f3ad095da465d9e7b280322bbd75dfb24"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetGapLine",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+          "size": 1421,
+          "sha256": "fd37ec08cbed134cea0cc938fcd4f6433fd21347476addd2a0637c92cd3b4961"
+        },
+        {
+          "path": "CommonTemplates/CovSheetGapLine.xml",
+          "size": 1162,
+          "sha256": "93f0f838183fed5163eb400aecca1687342e15ef0752a1dc7bf54f5491600888"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetValueListDetail",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+          "size": 1392,
+          "sha256": "9089367b650a8123c46729b55106bbe8c94cf49ebdbb2e35eaa04fb10c9db4e9"
+        },
+        {
+          "path": "CommonTemplates/CovSheetValueListDetail.xml",
+          "size": 1170,
+          "sha256": "90c2ea91ae7f4e10a4dd789dd612af0a2c2ec19955dee1615af510780632942a"
+        }
+      ]
+    },
+    {
+      "name": "CovSheetAppearanceCheckIcon",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:spreadsheet-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+          "size": 1439,
+          "sha256": "9f0aa3c65414e8c89e20b54c33978e805d6e26a72bf0084aad221cce3ba113b9"
+        },
+        {
+          "path": "CommonTemplates/CovSheetAppearanceCheckIcon.xml",
+          "size": 1174,
+          "sha256": "49c0c894c7a6b5a815c78124aa3b128a6ad17c0b31cadbc83ac93c052838ed78"
+        }
+      ]
+    }
+  ]
+}

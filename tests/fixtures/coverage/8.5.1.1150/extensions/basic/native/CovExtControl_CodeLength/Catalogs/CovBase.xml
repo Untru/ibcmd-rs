@@ -1,0 +1,35 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<Catalog uuid="47735296-34a3-5246-a45b-69f19c61b48a">
+		<InternalInfo>
+			<xr:GeneratedType name="CatalogObject.CovBase" category="Object">
+				<xr:TypeId>95f0a7ef-98b8-589b-9109-f310c31fb52b</xr:TypeId>
+				<xr:ValueId>388b68aa-b32b-5556-b6fd-3b857580b4c8</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogRef.CovBase" category="Ref">
+				<xr:TypeId>e8607ba9-1d03-5ff9-a4e6-d49bee0f868a</xr:TypeId>
+				<xr:ValueId>414906c2-5b7c-5e0c-ad59-3f8a223b3a1e</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogSelection.CovBase" category="Selection">
+				<xr:TypeId>569fa275-1840-583a-9640-671bd5099c1f</xr:TypeId>
+				<xr:ValueId>6d60aa92-4275-50be-9162-bfb6d608b674</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogList.CovBase" category="List">
+				<xr:TypeId>12bfb4f3-94a1-5b6f-aae5-658ebd1eff74</xr:TypeId>
+				<xr:ValueId>e1643d51-8c45-5e07-862b-2256479713ec</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogManager.CovBase" category="Manager">
+				<xr:TypeId>c678e367-5e98-5767-8b91-e17b32c29c45</xr:TypeId>
+				<xr:ValueId>a35421bd-66da-5d95-9254-d1e28f99c1c2</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>CovBase</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>193974b9-daaa-5b64-9d7e-cf3491c0991d</ExtendedConfigurationObject>
+			<CodeLength>9</CodeLength>
+		</Properties>
+		<ChildObjects/>
+	</Catalog>
+</MetaDataObject>

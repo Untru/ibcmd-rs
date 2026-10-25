@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "collection": "Bots",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 0,
+  "properties": [
+    {
+      "name": "Predefined",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Picture",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ]
+}

@@ -235,6 +235,22 @@ fn ci_steps(root: &Path) -> Vec<Step> {
         let path = format!("tests/scripts/{script}.py");
         steps.push(Step::new(format!("python {script}"), python, &[path.as_str()]).needs_program());
     }
+    steps.push(
+        Step::new(
+            "coverage generator tests",
+            python,
+            &[
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "tools/coverage",
+                "-p",
+                "test_*.py",
+            ],
+        )
+        .needs_program(),
+    );
     steps.push(Step::cargo(
         "test -p ibcmd-schema",
         &["test", "--locked", "-p", "ibcmd-schema"],

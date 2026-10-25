@@ -1,0 +1,160 @@
+{
+  "comment": "Seed recipes of tools/coverage/new_set.py: what the platform refused a minimal seed for, answered. `properties` and `children` are XML inserted into the seed (after <Comment/>, into <ChildObjects>); `internal_head` opens its InternalInfo; {uuid:N} becomes a deterministic identifier. `requires` names auxiliary objects (`aux`) built with the seed, which stay in the set's base configuration. `recorder` names the auxiliary document whose register records generate.py extends to every variant of a register set. `tag` and `generated` stand in for a corpus object when the corpus has none of the class. `values_from` observes the values on another class of the corpus whose properties share the class's types (a numerator's number type, length and periodicity are a document's).",
+  "aux": {
+    "CommonModules/CovHandlers": {
+      "properties": "\t\t\t<Server>true</Server>\n",
+      "files": {
+        "Ext/Module.bsl": "﻿Процедура CovSubscription(Источник, Отказ) Экспорт\r\nКонецПроцедуры\r\n\r\nПроцедура CovJob() Экспорт\r\nКонецПроцедуры\r\n"
+      }
+    },
+    "Constants/CovFlag": {
+      "properties": "\t\t\t<Type>\n\t\t\t\t<v8:Type>xs:boolean</v8:Type>\n\t\t\t</Type>\n"
+    },
+    "Documents/CovRecorder": {},
+    "Documents/CovAccumulationRecorder": {
+      "properties": "\t\t\t<RegisterRecords>\n\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">AccumulationRegister.CovTemplate</xr:Item>\n\t\t\t</RegisterRecords>\n"
+    },
+    "Documents/CovAccountingRecorder": {
+      "properties": "\t\t\t<RegisterRecords>\n\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">AccountingRegister.CovTemplate</xr:Item>\n\t\t\t</RegisterRecords>\n"
+    },
+    "Documents/CovCalculationRecorder": {
+      "properties": "\t\t\t<RegisterRecords>\n\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">CalculationRegister.CovTemplate</xr:Item>\n\t\t\t</RegisterRecords>\n"
+    },
+    "ChartsOfAccounts/CovAccounts": {},
+    "ChartsOfCalculationTypes/CovCalculationTypes": {},
+    "Tasks/CovTask": {}
+  },
+  "classes": {
+    "InformationRegisters": {
+      "children": "\t\t\t<Dimension uuid=\"{uuid:1}\">\n\t\t\t\t<Properties>\n\t\t\t\t\t<Name>CovDimension</Name>\n\t\t\t\t\t<Synonym/>\n\t\t\t\t\t<Comment/>\n\t\t\t\t\t<Type>\n\t\t\t\t\t\t<v8:Type>xs:string</v8:Type>\n\t\t\t\t\t\t<v8:StringQualifiers>\n\t\t\t\t\t\t\t<v8:Length>10</v8:Length>\n\t\t\t\t\t\t\t<v8:AllowedLength>Variable</v8:AllowedLength>\n\t\t\t\t\t\t</v8:StringQualifiers>\n\t\t\t\t\t</Type>\n\t\t\t\t</Properties>\n\t\t\t</Dimension>\n"
+    },
+    "AccumulationRegisters": {
+      "requires": [
+        "Documents/CovAccumulationRecorder"
+      ],
+      "recorder": "Documents/CovAccumulationRecorder",
+      "children": "\t\t\t<Resource uuid=\"{uuid:1}\">\n\t\t\t\t<Properties>\n\t\t\t\t\t<Name>CovResource</Name>\n\t\t\t\t\t<Synonym/>\n\t\t\t\t\t<Comment/>\n\t\t\t\t\t<Type>\n\t\t\t\t\t\t<v8:Type>xs:decimal</v8:Type>\n\t\t\t\t\t\t<v8:NumberQualifiers>\n\t\t\t\t\t\t\t<v8:Digits>10</v8:Digits>\n\t\t\t\t\t\t\t<v8:FractionDigits>0</v8:FractionDigits>\n\t\t\t\t\t\t\t<v8:AllowedSign>Any</v8:AllowedSign>\n\t\t\t\t\t\t</v8:NumberQualifiers>\n\t\t\t\t\t</Type>\n\t\t\t\t</Properties>\n\t\t\t</Resource>\n"
+    },
+    "AccountingRegisters": {
+      "requires": [
+        "ChartsOfAccounts/CovAccounts",
+        "Documents/CovAccountingRecorder"
+      ],
+      "recorder": "Documents/CovAccountingRecorder",
+      "properties": "\t\t\t<ChartOfAccounts>ChartOfAccounts.CovAccounts</ChartOfAccounts>\n",
+      "children": "\t\t\t<Resource uuid=\"{uuid:1}\">\n\t\t\t\t<Properties>\n\t\t\t\t\t<Name>CovResource</Name>\n\t\t\t\t\t<Synonym/>\n\t\t\t\t\t<Comment/>\n\t\t\t\t\t<Type>\n\t\t\t\t\t\t<v8:Type>xs:decimal</v8:Type>\n\t\t\t\t\t\t<v8:NumberQualifiers>\n\t\t\t\t\t\t\t<v8:Digits>10</v8:Digits>\n\t\t\t\t\t\t\t<v8:FractionDigits>0</v8:FractionDigits>\n\t\t\t\t\t\t\t<v8:AllowedSign>Any</v8:AllowedSign>\n\t\t\t\t\t\t</v8:NumberQualifiers>\n\t\t\t\t\t</Type>\n\t\t\t\t</Properties>\n\t\t\t</Resource>\n"
+    },
+    "CalculationRegisters": {
+      "requires": [
+        "ChartsOfCalculationTypes/CovCalculationTypes",
+        "Documents/CovCalculationRecorder"
+      ],
+      "recorder": "Documents/CovCalculationRecorder",
+      "properties": "\t\t\t<ChartOfCalculationTypes>ChartOfCalculationTypes.CovCalculationTypes</ChartOfCalculationTypes>\n"
+    },
+    "DocumentJournals": {
+      "requires": [
+        "Documents/CovRecorder"
+      ],
+      "properties": "\t\t\t<RegisteredDocuments>\n\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">Document.CovRecorder</xr:Item>\n\t\t\t</RegisteredDocuments>\n"
+    },
+    "Sequences": {
+      "requires": [
+        "Documents/CovRecorder"
+      ],
+      "properties": "\t\t\t<Documents>\n\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">Document.CovRecorder</xr:Item>\n\t\t\t</Documents>\n"
+    },
+    "FilterCriteria": {
+      "requires": [
+        "Documents/CovRecorder"
+      ],
+      "properties": "\t\t\t<Type>\n\t\t\t\t<v8:Type>cfg:DocumentRef.CovRecorder</v8:Type>\n\t\t\t</Type>\n"
+    },
+    "BusinessProcesses": {
+      "requires": [
+        "Tasks/CovTask"
+      ],
+      "properties": "\t\t\t<Task>Task.CovTask</Task>\n"
+    },
+    "EventSubscriptions": {
+      "requires": [
+        "CommonModules/CovHandlers",
+        "Documents/CovRecorder"
+      ],
+      "properties": "\t\t\t<Source>\n\t\t\t\t<v8:Type>cfg:DocumentObject.CovRecorder</v8:Type>\n\t\t\t</Source>\n\t\t\t<Event>BeforeWrite</Event>\n\t\t\t<Handler>CommonModule.CovHandlers.CovSubscription</Handler>\n"
+    },
+    "ScheduledJobs": {
+      "requires": [
+        "CommonModules/CovHandlers"
+      ],
+      "properties": "\t\t\t<MethodName>CommonModule.CovHandlers.CovJob</MethodName>\n"
+    },
+    "FunctionalOptions": {
+      "requires": [
+        "Constants/CovFlag"
+      ],
+      "properties": "\t\t\t<Location>Constant.CovFlag</Location>\n"
+    },
+    "FunctionalOptionsParameters": {
+      "requires": [
+        "Documents/CovRecorder"
+      ],
+      "properties": "\t\t\t<Use>\n\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">Document.CovRecorder</xr:Item>\n\t\t\t</Use>\n"
+    },
+    "CommonCommands": {
+      "properties": "\t\t\t<Group>ActionsPanelTools</Group>\n"
+    },
+    "WebServices": {
+      "properties": "\t\t\t<Namespace>http://ibcmd-rs.coverage/ws</Namespace>\n"
+    },
+    "HTTPServices": {
+      "properties": "\t\t\t<RootURL>cov</RootURL>\n"
+    },
+    "ExchangePlans": {
+      "internal_head": "\t\t\t<xr:ThisNode>{uuid:1}</xr:ThisNode>\n"
+    },
+    "Bots": {
+      "tag": "Bot"
+    },
+    "ExternalDataSources": {
+      "tag": "ExternalDataSource",
+      "child_objects": true,
+      "generated": [
+        [
+          "ExternalDataSourceManager",
+          "Manager"
+        ],
+        [
+          "ExternalDataSourceTablesManager",
+          "TablesManager"
+        ],
+        [
+          "ExternalDataSourceCubesManager",
+          "CubesManager"
+        ]
+      ]
+    },
+    "WSReferences": {
+      "tag": "WSReference",
+      "generated": [
+        [
+          "WSReferenceManager",
+          "Manager"
+        ]
+      ]
+    },
+    "WebSocketClients": {
+      "tag": "WebSocketClient"
+    },
+    "Styles": {
+      "tag": "Style"
+    },
+    "DocumentNumerators": {
+      "tag": "DocumentNumerator",
+      "values_from": "Documents"
+    },
+    "Interfaces": {
+      "tag": "Interface"
+    }
+  }
+}

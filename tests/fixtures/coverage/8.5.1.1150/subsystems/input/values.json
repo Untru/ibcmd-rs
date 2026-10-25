@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "collection": "Subsystems",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 18,
+  "properties": [
+    {
+      "name": "IncludeHelpInContents",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "IncludeInCommandInterface",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "UseOneCommand",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Explanation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "Picture",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Content",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ]
+}

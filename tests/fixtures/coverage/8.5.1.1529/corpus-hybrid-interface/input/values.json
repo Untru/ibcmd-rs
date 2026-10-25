@@ -1,0 +1,335 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovHybridVerticalSingle",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridVerticalSingle.xml"
+      }
+    },
+    {
+      "name": "CovHybridChildrenAlign",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridChildrenAlign.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelDecorationTitleLevel2",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelDecorationTitleLevel2.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelDecorationTitleLevel4",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelDecorationTitleLevel4.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelDecorationTextLevel3",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelDecorationTextLevel3.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelDecorationAutoBold",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelDecorationAutoBold.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelFieldTitleLevel2",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelFieldTitleLevel2.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelFieldTitleLevel4",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelFieldTitleLevel4.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelFieldTextLevel3",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelFieldTextLevel3.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelFieldAutoBold",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelFieldAutoBold.xml"
+      }
+    },
+    {
+      "name": "CovHybridUsualGroupTitleLevel2",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridUsualGroupTitleLevel2.xml"
+      }
+    },
+    {
+      "name": "CovHybridUsualGroupTitleLevel4",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridUsualGroupTitleLevel4.xml"
+      }
+    },
+    {
+      "name": "CovHybridUsualGroupTextLevel3",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridUsualGroupTextLevel3.xml"
+      }
+    },
+    {
+      "name": "CovHybridUsualGroupAutoBold",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridUsualGroupAutoBold.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelFieldUseCopy",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelFieldUseCopy.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelFieldCellHyperlinkRepresentation",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelFieldCellHyperlinkRepresentation.xml"
+      }
+    },
+    {
+      "name": "CovHybridInputFieldCellHyperlinkRepresentation",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridInputFieldCellHyperlinkRepresentation.xml"
+      }
+    },
+    {
+      "name": "CovHybridInputFieldWidthInCard",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridInputFieldWidthInCard.xml"
+      }
+    },
+    {
+      "name": "CovHybridRadioButtonFieldHorizontalStretch",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridRadioButtonFieldHorizontalStretch.xml"
+      }
+    },
+    {
+      "name": "CovHybridInputFieldAutofillHint",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridInputFieldAutofillHint.xml"
+      }
+    },
+    {
+      "name": "CovHybridTrackBarFieldMarkingAppearance",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridTrackBarFieldMarkingAppearance.xml"
+      }
+    },
+    {
+      "name": "CovHybridCommandBarAppearance",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridCommandBarAppearance.xml"
+      }
+    },
+    {
+      "name": "CovHybridColumnGroupCard",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridColumnGroupCard.xml"
+      }
+    },
+    {
+      "name": "CovHybridUsualGroupBackColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridUsualGroupBackColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelDecorationTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelDecorationTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelDecorationBackColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelDecorationBackColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovHybridLabelFieldTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridLabelFieldTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovHybridButtonTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridButtonTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovHybridPictureDecorationPictureColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridPictureDecorationPictureColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovHybridPictureAppearanceUpArrowGray",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridPictureAppearanceUpArrowGray.xml"
+      }
+    },
+    {
+      "name": "CovHybridPictureGrayedAll",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridPictureGrayedAll.xml"
+      }
+    },
+    {
+      "name": "CovHybridPictureStartVideoconference",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridPictureStartVideoconference.xml"
+      }
+    },
+    {
+      "name": "CovHybridPictureDontNotify",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridPictureDontNotify.xml"
+      }
+    },
+    {
+      "name": "CovHybridInputPictureExternalUser",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridInputPictureExternalUser.xml"
+      }
+    },
+    {
+      "name": "CovHybridInputMultipleValueEvent",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridInputMultipleValueEvent.xml"
+      }
+    },
+    {
+      "name": "CovHybridGeographicalSchema",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridGeographicalSchema.xml"
+      }
+    },
+    {
+      "name": "CovHybridPdfGray",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridPdfGray.xml"
+      }
+    },
+    {
+      "name": "CovHybridChoicePeriod",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridChoicePeriod.xml"
+      }
+    },
+    {
+      "name": "CovHybridModeTaxi",
+      "set": {
+        "UseInInterfaceCompatibilityMode": "Taxi"
+      },
+      "source": "observed:UNF; platform enum only"
+    },
+    {
+      "name": "CovHybridModeVersion85",
+      "set": {
+        "UseInInterfaceCompatibilityMode": "Version85"
+      },
+      "source": "observed:UNF; platform enum only"
+    },
+    {
+      "name": "CovHybridParentButton",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridParentButton.xml"
+      }
+    },
+    {
+      "name": "CovHybridReducedText",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridReducedText.xml"
+      }
+    },
+    {
+      "name": "CovHybridBrokenTilt",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridBrokenTilt.xml"
+      }
+    },
+    {
+      "name": "CovHybridCollapseUse",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridCollapseUse.xml"
+      }
+    },
+    {
+      "name": "CovHybridPictureChar",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridPictureChar.xml"
+      }
+    },
+    {
+      "name": "CovHybridSheetFormattedString",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovHybridSheetFormattedString.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  },
+  "configuration_properties": [
+    "InterfaceCompatibilityMode"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "collection": "InformationRegisters",
+  "corpus": "clean-room-corpus-regressions",
+  "properties": [],
+  "combinations": []
+}

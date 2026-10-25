@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "collection": "Roles",
+  "properties": [],
+  "combinations": [],
+  "corpus": "clean-room-nested-objects-and-sidecars",
+  "template_files": {
+    "Ext/Rights.xml": "bodies/rights.xml"
+  }
+}

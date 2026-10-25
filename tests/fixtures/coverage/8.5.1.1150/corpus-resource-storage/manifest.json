@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-resource-storage",
+  "collection": "InformationRegisters",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "7869244a653528cc2676e5326b1bcf8ffabd667f068709f7785b95f01ad6f594",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76366,
+    "decoded_sha256": "4ba72f68043fa8103a502b573b42ca6087cee9070f19d7859b774e6938d95890",
+    "encoded_sha256": "0f3117829503bec145bcc9c97a524d716f03e917da62574cff12d7d8038e3c2c"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11137,
+          "sha256": "7ce010461ca542c6489dba92529ff0d432f35774b43ed9487b616730cb6df63e"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "455aab21bd42e51455ff5b406b3e28ea60d64253a3dd0ea6fdcbf115cb29cd1e"
+        }
+      ]
+    },
+    {
+      "name": "CovResourceStorageTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "InformationRegisters/CovResourceStorageTemplate.xml",
+          "size": 6812,
+          "sha256": "9e7892987ad912c966fa2a01533eeafd60d528b17ebc6d827eeabe6e3d2caedb"
+        }
+      ]
+    }
+  ]
+}

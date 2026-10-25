@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovFacetConversationsRepresentation",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetConversationsRepresentation.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetCollapseItemsByImportanceVariant",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetCollapseItemsByImportanceVariant.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetRootURLProcessing",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetRootURLProcessing.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetRootOnLoadDataFromSettingsAtServer",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetRootOnLoadDataFromSettingsAtServer.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetRootFillCheckProcessingAtServer",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetRootFillCheckProcessingAtServer.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetRootNotificationProcessing",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetRootNotificationProcessing.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetChartMaxWidth",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetChartMaxWidth.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetChartAutoMaxWidth",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetChartAutoMaxWidth.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetChartAutoMaxHeight",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetChartAutoMaxHeight.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetChartOnActivate",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetChartOnActivate.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetPlannerBeforeCreate",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetPlannerBeforeCreate.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetPlannerCommandGenerateProcessing",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetPlannerCommandGenerateProcessing.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetPlannerBeforeStartQuickEdit",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetPlannerBeforeStartQuickEdit.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetPlannerSelection",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetPlannerSelection.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetCommandSpace",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetCommandSpace.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetTableExcludesAddAutoSelectedField",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetTableExcludesAddAutoSelectedField.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetTableExcludesSelectAll",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetTableExcludesSelectAll.xml"
+      },
+      "source": "generated:platform-form-facet"
+    },
+    {
+      "name": "CovFacetTableExcludesDeselectAll",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovFacetTableExcludesDeselectAll.xml"
+      },
+      "source": "generated:platform-form-facet"
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  }
+}

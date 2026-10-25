@@ -1,0 +1,17 @@
+{
+  "equal": [
+    "CommonTemplates/CovModernSheetBuiltinFont.xml",
+    "CommonTemplates/CovModernSheetBuiltinFont/Ext/Template.xml",
+    "CommonTemplates/CovModernSheetChartColumn.xml",
+    "CommonTemplates/CovModernSheetChartLine.xml",
+    "CommonTemplates/CovModernSheetDashed.xml",
+    "CommonTemplates/CovModernSheetEmbeddedTable.xml",
+    "CommonTemplates/CovModernSheetEmbeddedTable/Ext/Template.xml",
+    "CommonTemplates/CovModernSheetPalette.xml",
+    "CommonTemplates/CovModernSheetSkyBlue.xml",
+    "CommonTemplates/CovModernSpreadsheetTemplate.xml",
+    "CommonTemplates/CovModernSpreadsheetTemplate/Ext/Template.xml",
+    "Configuration.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+  ]
+}

@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Enum uuid="5ada3a46-b9a6-5c91-b7ec-4e05248eff92">
+		<InternalInfo>
+			<xr:GeneratedType name="EnumRef.CovQuickChoice_false" category="Ref">
+				<xr:TypeId>5b0fa6eb-542a-5c7b-91c0-04043065aed1</xr:TypeId>
+				<xr:ValueId>3bd9cb1e-113f-5514-8456-99a16f4d8e84</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumManager.CovQuickChoice_false" category="Manager">
+				<xr:TypeId>0e89528a-67b4-5c81-9a60-f14f7b9f9cfd</xr:TypeId>
+				<xr:ValueId>57798791-c75c-5627-9a50-e90ff56bb98d</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumList.CovQuickChoice_false" category="List">
+				<xr:TypeId>65227948-c584-526e-8e19-d78c8082b79c</xr:TypeId>
+				<xr:ValueId>6bbdf6b5-7cf5-55fd-8380-08e0246b420e</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovQuickChoice_false</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>false</UseStandardCommands>
+			<Characteristics/>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+		</Properties>
+		<ChildObjects/>
+	</Enum>
+</MetaDataObject>

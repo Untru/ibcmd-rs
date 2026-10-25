@@ -1,0 +1,22 @@
+{
+  "equal": [
+    "Catalogs/CovNetworkAlpha.xml",
+    "Catalogs/CovNetworkBeta.xml",
+    "Catalogs/CovNetworkConsumer.xml",
+    "Catalogs/CovNetworkGamma.xml",
+    "CommandGroups/CovNetworkGroup.xml",
+    "CommonCommands/CovNetworkCommand.xml",
+    "CommonModules/CovHandlers.xml",
+    "Configuration.xml",
+    "DefinedTypes/CovNetworkMixed.xml",
+    "Documents/CovRecorder.xml",
+    "EventSubscriptions/CovNetworkSubscription.xml",
+    "FunctionalOptions/CovNetworkOption.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+    "Roles/CovNetworkRights.xml",
+    "Roles/CovNetworkRights/Ext/Rights.xml",
+    "Subsystems/CovNetworkSubsystem.xml",
+    "Subsystems/CovNetworkSubsystem/Subsystems/CovDeepChild.xml",
+    "Subsystems/CovNetworkSubsystem/Subsystems/CovDeepChild/Subsystems/CovDeepLeaf.xml"
+  ]
+}

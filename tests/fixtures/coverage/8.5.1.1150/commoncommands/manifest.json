@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-commoncommands",
+  "collection": "CommonCommands",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "a612fe621df7eddfe2c804d88b41f47f4b856a48d19709b18dc89b70063dee32",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 86802,
+    "decoded_sha256": "e3111eb2e54cbddd7e0c9bbb419caaf94bcd3a7cf414ba4ed8a6dca22ce201e4",
+    "encoded_sha256": "6a97348edc0ab8e33ba0ae8b115d316587c96ae6ae1df9e94518acb987b7c33e"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 12017,
+          "sha256": "5696e581c32489a40b9ea726867c5edf0256808b6b6f794a867a25c9bd95bbff"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "7dea8b2c3244142b24ad970c09d74a514fcdc69f43ddc87308cb3661ca7bc6ad"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovTemplate.xml",
+          "size": 1529,
+          "sha256": "2ddd033e8a12b37109c553846fbeae847b0e09e543568bf0983f5b645b424c5b"
+        }
+      ]
+    },
+    {
+      "name": "CovGroup_ActionsPanelCreate",
+      "property": "Group",
+      "kind": "enum",
+      "value": "ActionsPanelCreate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovGroup_ActionsPanelCreate.xml",
+          "size": 1546,
+          "sha256": "cc9ee12a7d1b4a27bc0951b089254fd453a428498d46c3e68c02e441208b6439"
+        }
+      ]
+    },
+    {
+      "name": "CovGroup_ActionsPanelReports",
+      "property": "Group",
+      "kind": "enum",
+      "value": "ActionsPanelReports",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovGroup_ActionsPanelReports.xml",
+          "size": 1548,
+          "sha256": "f917214c86c73189310093430796f006ad4c845b27ee29f1fa1aece687832d49"
+        }
+      ]
+    },
+    {
+      "name": "CovGroup_FormCommandBarCreateBasedOn",
+      "property": "Group",
+      "kind": "enum",
+      "value": "FormCommandBarCreateBasedOn",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovGroup_FormCommandBarCreateBasedOn.xml",
+          "size": 1564,
+          "sha256": "0c8d30cccc5d7925d2758ff8b8e5f3f7c43bc7f8c46e420ddd9b961e98281f64"
+        }
+      ]
+    },
+    {
+      "name": "CovGroup_FormCommandBarImportant",
+      "property": "Group",
+      "kind": "enum",
+      "value": "FormCommandBarImportant",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovGroup_FormCommandBarImportant.xml",
+          "size": 1556,
+          "sha256": "c7e9f1516ce4f113514d73eafce2588b2d22cb02072def29e1b9958a47b3cc8e"
+        }
+      ]
+    },
+    {
+      "name": "CovGroup_FormNavigationPanelGoTo",
+      "property": "Group",
+      "kind": "enum",
+      "value": "FormNavigationPanelGoTo",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovGroup_FormNavigationPanelGoTo.xml",
+          "size": 1556,
+          "sha256": "9c88c2ed5108814ee6424b0664f2814ef7ffd5f509c8b0a29f6a53b6271e39b4"
+        }
+      ]
+    },
+    {
+      "name": "CovGroup_FormNavigationPanelImportant",
+      "property": "Group",
+      "kind": "enum",
+      "value": "FormNavigationPanelImportant",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovGroup_FormNavigationPanelImportant.xml",
+          "size": 1566,
+          "sha256": "7045fd96fad530ed74134ba28ae844d85bfd5b9de67c51b1271f0eadc08afef3"
+        }
+      ]
+    },
+    {
+      "name": "CovGroup_NavigationPanelOrdinary",
+      "property": "Group",
+      "kind": "enum",
+      "value": "NavigationPanelOrdinary",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovGroup_NavigationPanelOrdinary.xml",
+          "size": 1556,
+          "sha256": "2d8eff88b041f783b141408ac7fd82447ec53b5a10498e0d8bf110673799f8e3"
+        }
+      ]
+    },
+    {
+      "name": "CovGroup_NavigationPanelSeeAlso",
+      "property": "Group",
+      "kind": "enum",
+      "value": "NavigationPanelSeeAlso",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovGroup_NavigationPanelSeeAlso.xml",
+          "size": 1554,
+          "sha256": "e6abdcccc37f0984117b7b82a3d1b5b435065b29c2b583c6616f2cd9d842e5a4"
+        }
+      ]
+    },
+    {
+      "name": "CovRepresentation_Picture",
+      "property": "Representation",
+      "kind": "enum",
+      "value": "Picture",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovRepresentation_Picture.xml",
+          "size": 1546,
+          "sha256": "399384a017bffa633082177a1e04ab1a717e7cabb75b026ed12809167cc770e8"
+        }
+      ]
+    },
+    {
+      "name": "CovRepresentation_PictureAndText",
+      "property": "Representation",
+      "kind": "enum",
+      "value": "PictureAndText",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovRepresentation_PictureAndText.xml",
+          "size": 1560,
+          "sha256": "a9653897c2821c12693e36fbd5a052cd4478af19cf2c8346c71b34a6d2e85b77"
+        }
+      ]
+    },
+    {
+      "name": "CovToolTip_Cov",
+      "property": "ToolTip",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovToolTip_Cov.xml",
+          "size": 1640,
+          "sha256": "679f0f61b4f4c83329537beae25cc2346e7606f25222e98114e0aeddde71f4bc"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovIncludeHelpInContents_true.xml",
+          "size": 1546,
+          "sha256": "f22c0bad6ee8a1ee8bff9c2588e6de09527d29d919e0604ca52754829316cdff"
+        }
+      ]
+    },
+    {
+      "name": "CovParameterUseMode_Multiple",
+      "property": "ParameterUseMode",
+      "kind": "enum",
+      "value": "Multiple",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovParameterUseMode_Multiple.xml",
+          "size": 1548,
+          "sha256": "4dee9a03f27b87c9d7b56c4bc7f6169ac817e338073d9980345c1cbee3c8efef"
+        }
+      ]
+    },
+    {
+      "name": "CovModifiesData_true",
+      "property": "ModifiesData",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonCommands/CovModifiesData_true.xml",
+          "size": 1537,
+          "sha256": "cc839d74af72a8689b2624240e829a6796eee2e01d0b14a9cfbeec5a09053025"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovVerticalScrollAlways",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovVerticalScrollAlways.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovPictureTitleFontStyleItem",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovPictureTitleFontStyleItem.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovCommandPictureGotoURL",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovCommandPictureGotoURL.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovCommandPictureAppearanceStarHalfFilled",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovCommandPictureAppearanceStarHalfFilled.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovCommandPictureFormattedString",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovCommandPictureFormattedString.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovCommandPictureQueryWizardTempTableDescription",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovCommandPictureQueryWizardTempTableDescription.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovCommandPictureToday",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovCommandPictureToday.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovCommandPictureAccountingRegister",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovCommandPictureAccountingRegister.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovCommandPictureNewConversation",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovCommandPictureNewConversation.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovBoundTableExcludesSelectAll",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovBoundTableExcludesSelectAll.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovDynamicListRowNumber",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovDynamicListRowNumber.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovRootEventChoiceProcessing",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovRootEventChoiceProcessing.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovRootCollapseImportance",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovRootCollapseImportance.xml"
+      },
+      "source": "generated:form-location-sensitive"
+    },
+    {
+      "name": "CovPictureTitleFontEnterOnInput",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovPictureTitleFontEnterOnInput.xml"
+      },
+      "source": "generated:font-with-upgrade-trigger"
+    },
+    {
+      "name": "CovTablePictureTitleFont",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovTablePictureTitleFont.xml"
+      },
+      "source": "generated:font-with-upgrade-trigger"
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  },
+  "corpus": "clean-room-location-sensitive-form-cases"
+}

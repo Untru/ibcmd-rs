@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-reference-network",
+  "collection": "EventSubscriptions",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "5356b768855ea637626f62fd7362d93c5d5ebd63e827dd6ca7e111f407a81584",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 89764,
+    "decoded_sha256": "870621a066f836621683ee3277566b7392a9d7cff4965827374044854b71aec9",
+    "encoded_sha256": "31e411ecbaf8307f5f24817741bbcfe7347d263a3c4b3e55fe1e72c568de6a81"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovNetworkAlpha.xml",
+          "size": 4577,
+          "sha256": "b77d2c04d827208f160f0a9cb73c54bd6708f38055b2870d484419726e753cfb"
+        },
+        {
+          "path": "Catalogs/CovNetworkBeta.xml",
+          "size": 4569,
+          "sha256": "d05fee64a5c64a4042aef8c900d86e71db08055c2fa052cbe71087f0ba69c784"
+        },
+        {
+          "path": "Catalogs/CovNetworkConsumer.xml",
+          "size": 5751,
+          "sha256": "e52fc739cc27b00a2a8535a56810d05858b1b4090972a29ff7a6457dec35c120"
+        },
+        {
+          "path": "Catalogs/CovNetworkGamma.xml",
+          "size": 4577,
+          "sha256": "f19c2f3d187fc2e78547a374d59d65bed20bb412dc7b440d19c95702b9cf1ae4"
+        },
+        {
+          "path": "CommandGroups/CovNetworkGroup.xml",
+          "size": 1273,
+          "sha256": "8dad6fdf447c2554897fa5e9b1a2f828166003174c6c7c04402e34d1ae5ce24f"
+        },
+        {
+          "path": "CommonCommands/CovNetworkCommand.xml",
+          "size": 1546,
+          "sha256": "d8adbff4543e1ff35904756311560f4869c84829009a41fd3fb2f434e14d9426"
+        },
+        {
+          "path": "CommonModules/CovHandlers/Ext/Module.bsl",
+          "size": 190,
+          "sha256": "3fe719fa26b725022ab4b40888d871b58875d85ed895712c2649c017f75ab7e7"
+        },
+        {
+          "path": "CommonModules/CovHandlers.xml",
+          "size": 1508,
+          "sha256": "40a0fb94e2210ca045652e775dd5f4bfd3ba99b18898a882be12d68ebcc1d157"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 11722,
+          "sha256": "a45105e3332c72dc48dc3644629736495481749a545a9567ae0966fd8f5dc0ad"
+        },
+        {
+          "path": "DefinedTypes/CovNetworkMixed.xml",
+          "size": 1792,
+          "sha256": "1674581332549c66564269e024232e406061d8bd8da47753073ec538637d23fc"
+        },
+        {
+          "path": "Documents/CovRecorder.xml",
+          "size": 4271,
+          "sha256": "9fd994c22d992b52bd35a436342e856cb91780b306cbf571fc2f2bc5c34ab787"
+        },
+        {
+          "path": "FunctionalOptions/CovNetworkOption.xml",
+          "size": 1449,
+          "sha256": "58cd18e601e29c7cc1b30f40473d9be9cedaa569a8d0e448bb8cbdc326b54bd9"
+        },
+        {
+          "path": "InformationRegisters/CovNetworkOptions.xml",
+          "size": 7158,
+          "sha256": "12d23f910a93fffb30c33cee63d5951106ccec60c0f3b9c0d3bdf666f60b247e"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "a09c9bbc06e0c4f01413a61875c6b7f5aa9dd30a5e9a3a995f698b1b070a46c3"
+        },
+        {
+          "path": "Roles/CovNetworkRights/Ext/Rights.xml",
+          "size": 592,
+          "sha256": "324280f5264cb09ef27e805137c749be8b723e1abac986b0ff62b96efbf748e9"
+        },
+        {
+          "path": "Roles/CovNetworkRights.xml",
+          "size": 1145,
+          "sha256": "d7454572be1b259e38f19894cd79425f0d8ded15ee3518741be8caba3d772605"
+        },
+        {
+          "path": "Subsystems/CovNetworkSubsystem/Subsystems/CovDeepChild/Subsystems/CovDeepLeaf.xml",
+          "size": 1379,
+          "sha256": "21af116ad09ab31489e7774e4364bfc2a94e21ad41ce000ebf7b78ac6b413efb"
+        },
+        {
+          "path": "Subsystems/CovNetworkSubsystem/Subsystems/CovDeepChild.xml",
+          "size": 1437,
+          "sha256": "7cf682390cd21ead29d4ace14b0d6d2a2d4222189397c29e873000aa00506129"
+        },
+        {
+          "path": "Subsystems/CovNetworkSubsystem.xml",
+          "size": 1680,
+          "sha256": "ba9279e650f2c2a86c6d7907691aaf072168e9ff1e7e60c6ea4235daf0fa2186"
+        }
+      ]
+    },
+    {
+      "name": "CovNetworkSubscription",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovNetworkSubscription.xml",
+          "size": 1472,
+          "sha256": "c6c6ff9e999b6737bef504e91a1f09cf6935b3896e1bc1d7c8ba92bc91ce5f6c"
+        }
+      ]
+    }
+  ]
+}

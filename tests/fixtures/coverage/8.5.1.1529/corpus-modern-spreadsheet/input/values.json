@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "collection": "CommonTemplates",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovModernSheetPalette",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovModernSheetPalette.xml"
+      }
+    },
+    {
+      "name": "CovModernSheetDashed",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovModernSheetDashed.xml"
+      }
+    },
+    {
+      "name": "CovModernSheetBuiltinFont",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovModernSheetBuiltinFont.xml"
+      }
+    },
+    {
+      "name": "CovModernSheetEmbeddedTable",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovModernSheetEmbeddedTable.xml"
+      }
+    },
+    {
+      "name": "CovModernSheetSkyBlue",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovModernSheetSkyBlue.xml"
+      }
+    },
+    {
+      "name": "CovModernSheetChartColumn",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovModernSheetChartColumn.xml"
+      }
+    },
+    {
+      "name": "CovModernSheetChartLine",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovModernSheetChartLine.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Template.xml": "bodies/default.xml"
+  }
+}

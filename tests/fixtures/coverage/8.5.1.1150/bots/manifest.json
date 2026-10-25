@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-bots",
+  "collection": "Bots",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "577ab5a8f9d3ad1924dbf15c8fdd934dade9e154f4d2e02f5925066faa9eae67",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76909,
+    "decoded_sha256": "9a94034172bcf0f22028e42d9933bc9dde8e471b4ffebdec53efff9774d91abd",
+    "encoded_sha256": "bf0d58b682455b63af78b17b031e57d81d615e628cf0caba376240277ddb67e2"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11125,
+          "sha256": "d3fc1a32c8f4b466aefab4754245274adce679073aed6abd3d338654c9d08217"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "5a1e90c8ff25be2b9e8bb1b3b3a4052c5fb89ca37509eb1467f93d3dc2fd3867"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Bots/CovTemplate.xml",
+          "size": 1187,
+          "sha256": "095ea897ed3572c172337934a0edab646809031aee45b047c1a713409b92f5ef"
+        }
+      ]
+    },
+    {
+      "name": "CovPredefined_false",
+      "property": "Predefined",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Bots/CovPredefined_false.xml",
+          "size": 1196,
+          "sha256": "328c1b48110f6a0b6287b8f477c664859c5f2dcb1962e47f09d3672a45244b04"
+        }
+      ]
+    }
+  ]
+}

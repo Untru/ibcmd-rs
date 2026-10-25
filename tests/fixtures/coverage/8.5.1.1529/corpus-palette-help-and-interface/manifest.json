@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1529-xml-2.21-corpus-palette-help-and-interface",
+  "collection": "StyleItems",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1529",
+    "source_version": "2.21",
+    "ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "e5393f907572b1e5caba5a58279a5a4c6d1abeb80fd418bf38ee59c26efbb9cd",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 82903,
+    "decoded_sha256": "2eabf1289683c13375990242a0cb307a7a468239fee275dcc6103081655488b0",
+    "encoded_sha256": "acc79e5718f7fb30705d0c6c378268ff6c5dd9934cf64c02fd5b2d0160954881"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovHelpCatalog/Ext/Help/ru.html",
+          "size": 304,
+          "sha256": "96ed951a3382f0c9254ef4a6754b34e5dc492eb2f942fb4d75ed749568c383a2"
+        },
+        {
+          "path": "Catalogs/CovHelpCatalog/Ext/Help.xml",
+          "size": 232,
+          "sha256": "09ec19d9a3758b74825717cf61074e36e66d3c333f05e1c1a6e17ab8791665b1"
+        },
+        {
+          "path": "Catalogs/CovHelpCatalog.xml",
+          "size": 4569,
+          "sha256": "344f7774e0ca2217589c72cfed39c1fb98b6b5d2ce360be94a9f5d2d9fc6b88e"
+        },
+        {
+          "path": "Catalogs/CovHelpTarget/Ext/Help/ru.html",
+          "size": 146,
+          "sha256": "44d7dd123e0720011a61fe47374e3b9924f97695ac585a15cdc0e569c67bd667"
+        },
+        {
+          "path": "Catalogs/CovHelpTarget/Ext/Help.xml",
+          "size": 232,
+          "sha256": "09ec19d9a3758b74825717cf61074e36e66d3c333f05e1c1a6e17ab8791665b1"
+        },
+        {
+          "path": "Catalogs/CovHelpTarget.xml",
+          "size": 4561,
+          "sha256": "2e46e89a44f2650f36d62c9c6fd21f12d3250f56c5438abae8078021e2f45280"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 11360,
+          "sha256": "37f07788e9b53484299dbe93ae4c1d73472ecbfaaa40aa921a61b8a87478a1dd"
+        },
+        {
+          "path": "Enums/CovPaletteEnum.xml",
+          "size": 2484,
+          "sha256": "1b8b7e1cbaf73792f13cfa95cd6f5439f9b061ad520d3ac3f50fb80bc9fcca49"
+        },
+        {
+          "path": "ExchangePlans/CovCommandPlan.xml",
+          "size": 4218,
+          "sha256": "2fd15d201ca8d1648724a0e39438ba21bb91f8fd3ee76ae63195af0c67597309"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "75a493425acfbbc92b31f4c04d1e5524272607e9abda5ac77c57cb3659a59877"
+        },
+        {
+          "path": "Subsystems/CovCommandSubsystem/Ext/CommandInterface.xml",
+          "size": 456,
+          "sha256": "59f70a18d71b7b8c960a6038bb66939f98c026a76740be4f24a1bc3f96aa213b"
+        },
+        {
+          "path": "Subsystems/CovCommandSubsystem.xml",
+          "size": 1479,
+          "sha256": "b97810efa2befdd7e20e6139434fcb4822e3cfa595c30223e532591edfc0e143"
+        }
+      ]
+    },
+    {
+      "name": "CovPaletteStyleTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "StyleItems/CovPaletteStyleTemplate.xml",
+          "size": 1234,
+          "sha256": "f0b0d02c392dc763dd4981c0f52ed4908b5dd92e64aabd492cc3189de25231e9"
+        }
+      ]
+    },
+    {
+      "name": "CovPaletteViolet",
+      "property": [
+        "Value"
+      ],
+      "kind": "combination",
+      "value": {
+        "Value": "pal:Violet"
+      },
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "StyleItems/CovPaletteViolet.xml",
+          "size": 1230,
+          "sha256": "7794cfb397bdee56d35fb8315408157f3415b1895ed1c5cef9925b17b042327e"
+        }
+      ]
+    }
+  ]
+}

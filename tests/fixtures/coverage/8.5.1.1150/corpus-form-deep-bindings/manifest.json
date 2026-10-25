@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-form-deep-bindings",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "8ee6cc4a24681d45ef7d2a2bd264868f98a7bbe2512aea6600deab6c28d573b8",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 84667,
+    "decoded_sha256": "ead48609831bc1bf352e55c5223f04fc82eed86e453ad4e581e8aaf0b49794a1",
+    "encoded_sha256": "df0094845b80f04ee487d75da86a2a43cdb103e1d026d9644cb543eb2342d9d9"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovBindingGoods.xml",
+          "size": 6598,
+          "sha256": "c84a8357ba528c7b2d0cd509bcf10809b785579eb3b141b82464942c1374160a"
+        },
+        {
+          "path": "Catalogs/CovBindingProducts.xml",
+          "size": 5746,
+          "sha256": "728e8b90324731843757ecae9fd1bfd13be9c764863a44adf8735a89129c46ee"
+        },
+        {
+          "path": "Catalogs/CovBindingUnits.xml",
+          "size": 4577,
+          "sha256": "01071a4f5cb01dfd7177db1ebc95246cf12692cd131d383f0f428bbcc08b8370"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 11376,
+          "sha256": "184f1819b01de6bf61469d243c78b8d3e14208b60bd59956fbd2ddfb7ca9393e"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "9af5a667de5ea34622b685dad6625c6fb1acccd6c0972373d272b93ed227a6f8"
+        },
+        {
+          "path": "Reports/CovBindingReport.xml",
+          "size": 2060,
+          "sha256": "a06161aae81db33c6a4387c3b04922c380cf41fe44cf6cfe6d089ff56fff339e"
+        }
+      ]
+    },
+    {
+      "name": "CovDeepBindingTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovDeepBindingTemplate/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovDeepBindingTemplate.xml",
+          "size": 1636,
+          "sha256": "fc38125e3641ba76b344b494e6507da8e4a47c8627c6426313e32f1ec9499f04"
+        }
+      ]
+    },
+    {
+      "name": "CovDeepProductBinding",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovDeepProductBinding/Ext/Form.xml",
+          "size": 1534,
+          "sha256": "296830d0992e84a25032d74e8f1302429842bb7367bf1592ef6632c41ebca037"
+        },
+        {
+          "path": "CommonForms/CovDeepProductBinding.xml",
+          "size": 1635,
+          "sha256": "6672508e62d918e8d6e647d5c95460098ff1de9cacffabf10ce6d6d78c2daafc"
+        }
+      ]
+    },
+    {
+      "name": "CovDeepComposerBinding",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovDeepComposerBinding/Ext/Form.xml",
+          "size": 1552,
+          "sha256": "ba850a9bdfbbf07bf1c68602076ab9486cc13b149a49c605b9b3ee952e921ba9"
+        },
+        {
+          "path": "CommonForms/CovDeepComposerBinding.xml",
+          "size": 1636,
+          "sha256": "93c8d1eb5964ae8d065bcd58511e8fcb61ebf6778e82a0626c0a41c411b650b7"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-styleitems",
+  "collection": "StyleItems",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "9dc424ec68c8aeb7a1bfbf997857246282975ab2fca5a32e07e3563fff52011a",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76914,
+    "decoded_sha256": "3c6138d8036151cf383489c323f7d9d67452a3b85ed7c39018a6037198515ae3",
+    "encoded_sha256": "a690c8606c22710edd421a7029ed417045cc20d2f550fa24226b3ad0b00a0027"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11142,
+          "sha256": "cffaaa13ab7cf953f09dece539c8ff8b94da7ba16a4666abed4573c2c2069656"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "75a493425acfbbc92b31f4c04d1e5524272607e9abda5ac77c57cb3659a59877"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "StyleItems/CovTemplate.xml",
+          "size": 1222,
+          "sha256": "2b4b47cff434f0c22fdda1d856b9225adc33f8456977d8afed83e1f269f7a2e8"
+        }
+      ]
+    },
+    {
+      "name": "CovType_Font",
+      "property": "Type",
+      "kind": "enum",
+      "value": "Font",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "StyleItems/CovType_Font.xml",
+          "size": 1222,
+          "sha256": "03979c01a0d56c1050ab932a54ad7d020a93b26c33d1c1fc3e39fd28a472935b"
+        }
+      ]
+    }
+  ]
+}

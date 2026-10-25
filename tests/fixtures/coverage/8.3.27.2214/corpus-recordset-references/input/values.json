@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "collection": "EventSubscriptions",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovRsOneIndependent",
+      "set": {},
+      "template": "metadata/Independent.xml"
+    },
+    {
+      "name": "CovRsOneSubordinate",
+      "set": {},
+      "template": "metadata/Subordinate.xml"
+    }
+  ]
+}

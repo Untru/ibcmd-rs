@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "collection": "Constants",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 251,
+  "properties": [
+    {
+      "name": "Type",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "UseStandardCommands",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "DefaultForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ExtendedPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "Explanation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "PasswordMode",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Format",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "EditFormat",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ToolTip",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "MarkNegatives",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Mask",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "MultiLine",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ExtendedEdit",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "MinValue",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "MaxValue",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "FillChecking",
+      "kind": "enum",
+      "template": "DontCheck",
+      "values": [
+        {
+          "value": "ShowError",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "ChoiceFoldersAndItems",
+      "kind": "enum",
+      "template": "Items",
+      "values": []
+    },
+    {
+      "name": "ChoiceParameterLinks",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ChoiceParameters",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "QuickChoice",
+      "kind": "enum",
+      "template": "Auto",
+      "values": []
+    },
+    {
+      "name": "ChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "LinkByType",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "template": "Auto",
+      "values": []
+    },
+    {
+      "name": "DataLockControlMode",
+      "kind": "enum",
+      "template": "Managed",
+      "values": [
+        {
+          "value": "Automatic",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "DataHistory",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": []
+    },
+    {
+      "name": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    }
+  ]
+}

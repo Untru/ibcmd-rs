@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "collection": "FilterCriteria",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 1,
+  "properties": [
+    {
+      "name": "Type",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "UseStandardCommands",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Content",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ListPresentation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ExtendedListPresentation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Explanation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ]
+}

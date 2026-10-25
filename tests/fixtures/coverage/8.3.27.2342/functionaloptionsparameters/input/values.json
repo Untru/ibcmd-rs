@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "collection": "FunctionalOptionsParameters",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 5,
+  "properties": [
+    {
+      "name": "Use",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ]
+}

@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-commontemplates",
+  "collection": "CommonTemplates",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "a7ba66a6d2c435e5acee4aca62d1541b16dacfcaca1aa0dbee84a8dde0948bf3",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 80577,
+    "decoded_sha256": "5e2ed8e84b544ef22ffb8f89b8eaa20f7b09827647f538af97f9c3a6c9212f69",
+    "encoded_sha256": "65253e22ddd4c5da93d79c33733b725f8929ad2fa7a2cb3f95f3b1f4fbe77d35"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10772,
+          "sha256": "b6fad0f9e54f07b6fb533435a5e07d5fed1ccd13f6ab48b95d8b9cef62f6247e"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "a7e657ad0d2c679415df010765ca0b12d693369db0c73558837fe02650540a7b"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovTemplate.xml",
+          "size": 1158,
+          "sha256": "15e3fa5e23361476bc60cfd3bab14092d68da9c8116ab31f7ba79a268e8c6b3c"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplateType_AddIn",
+      "property": "TemplateType",
+      "kind": "enum",
+      "value": "AddIn",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovTemplateType_AddIn.xml",
+          "size": 1154,
+          "sha256": "092a151caf7d06154ec287d707d2357cf2894d28e8d63721cf208f5e619ef885"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplateType_BinaryData",
+      "property": "TemplateType",
+      "kind": "enum",
+      "value": "BinaryData",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovTemplateType_BinaryData.xml",
+          "size": 1164,
+          "sha256": "002bf7e8edd0c4c65cbf7e3113448fee35ba167608cf0db0269a5d13e96ee400"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplateType_DataCompositionAppearanceTemplate",
+      "property": "TemplateType",
+      "kind": "enum",
+      "value": "DataCompositionAppearanceTemplate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovTemplateType_DataCompositionAppearanceTemplate.xml",
+          "size": 1210,
+          "sha256": "f069df1e2fcf9875574066c8c66e068a35e1b0d7b1770e13597ae4599405dc02"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplateType_DataCompositionSchema",
+      "property": "TemplateType",
+      "kind": "enum",
+      "value": "DataCompositionSchema",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovTemplateType_DataCompositionSchema.xml",
+          "size": 1186,
+          "sha256": "a9035746d65e24566a9d446ec3a99ed40284bdc002b3e029b0e19f5f4c43ad0d"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplateType_HTMLDocument",
+      "property": "TemplateType",
+      "kind": "enum",
+      "value": "HTMLDocument",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovTemplateType_HTMLDocument.xml",
+          "size": 1168,
+          "sha256": "c2b120f68d5e5c838b62177abebf20e8582b713a68a381a760f80f6cae9d0528"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplateType_TextDocument",
+      "property": "TemplateType",
+      "kind": "enum",
+      "value": "TextDocument",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovTemplateType_TextDocument.xml",
+          "size": 1168,
+          "sha256": "a1fccbd83d4144f1a7103f28ede9c24dbef1c89ef6889cbe340507812699acbd"
+        }
+      ]
+    }
+  ]
+}

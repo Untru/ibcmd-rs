@@ -1,0 +1,12 @@
+{
+  "equal": [
+    "CovTemplate",
+    "CovTemplateType_AddIn",
+    "CovTemplateType_BinaryData",
+    "CovTemplateType_DataCompositionAppearanceTemplate",
+    "CovTemplateType_DataCompositionSchema",
+    "CovTemplateType_HTMLDocument",
+    "CovTemplateType_TextDocument",
+    "configuration"
+  ]
+}

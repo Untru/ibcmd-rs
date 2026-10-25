@@ -1,0 +1,93 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<AccountingRegister uuid="94743e81-1677-532a-9016-7f847fa75602">
+		<InternalInfo>
+			<xr:GeneratedType name="AccountingRegisterRecord.CovIncludeHelpInContents_true_Bk" category="Record">
+				<xr:TypeId>a27c3bf4-80c8-5298-8733-657d03a3baa6</xr:TypeId>
+				<xr:ValueId>e26c0b44-e305-5324-b024-18893681f0ae</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterExtDimensions.CovIncludeHelpInContents_true_Bk" category="ExtDimensions">
+				<xr:TypeId>458b5b0d-da70-5c12-b946-5f99535f74c4</xr:TypeId>
+				<xr:ValueId>c3b237a8-9804-5cf8-9c63-153471f0dab7</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterRecordSet.CovIncludeHelpInContents_true_Bk" category="RecordSet">
+				<xr:TypeId>1781cbfe-144c-5488-afe4-905be427b19b</xr:TypeId>
+				<xr:ValueId>03c36beb-980c-5e5a-9bf7-553d2ea837f5</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterRecordKey.CovIncludeHelpInContents_true_Bk" category="RecordKey">
+				<xr:TypeId>2b083d76-eb37-54d3-aff6-bafa3e0df124</xr:TypeId>
+				<xr:ValueId>bf44c180-1766-5b9c-84ce-eb25d2bdfa0d</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterSelection.CovIncludeHelpInContents_true_Bk" category="Selection">
+				<xr:TypeId>dca0bc36-81e5-505e-b262-31beb181737f</xr:TypeId>
+				<xr:ValueId>9c611f07-45ce-5c47-8b68-b6cd9bc799bb</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterList.CovIncludeHelpInContents_true_Bk" category="List">
+				<xr:TypeId>24bafb23-3c99-536f-9138-1b117d33f40d</xr:TypeId>
+				<xr:ValueId>bdd6c0ed-ffa6-5dd2-8881-e31d38acee5d</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterManager.CovIncludeHelpInContents_true_Bk" category="Manager">
+				<xr:TypeId>b027cf13-f2ed-5093-b0bb-8e95c1266971</xr:TypeId>
+				<xr:ValueId>e63d15ed-2f15-57a4-8b03-94e22fc15188</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovIncludeHelpInContents_true_Bk</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<IncludeHelpInContents>true</IncludeHelpInContents>
+			<ChartOfAccounts>ChartOfAccounts.CovAccounts</ChartOfAccounts>
+			<Correspondence>false</Correspondence>
+			<PeriodAdjustmentLength>0</PeriodAdjustmentLength>
+			<DefaultListForm/>
+			<AuxiliaryListForm/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<EnableTotalsSplitting>false</EnableTotalsSplitting>
+			<FullTextSearch>DontUse</FullTextSearch>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+		</Properties>
+		<ChildObjects>
+			<Resource uuid="cd3f8f25-a4b7-54e6-a7ee-8d8e14a6679d">
+				<Properties>
+					<Name>CovResource</Name>
+					<Synonym/>
+					<Comment/>
+					<Type>
+						<v8:Type>xs:decimal</v8:Type>
+						<v8:NumberQualifiers>
+							<v8:Digits>10</v8:Digits>
+							<v8:FractionDigits>0</v8:FractionDigits>
+							<v8:AllowedSign>Any</v8:AllowedSign>
+						</v8:NumberQualifiers>
+					</Type>
+					<PasswordMode>false</PasswordMode>
+					<Format/>
+					<EditFormat/>
+					<ToolTip/>
+					<MarkNegatives>false</MarkNegatives>
+					<Mask/>
+					<MultiLine>false</MultiLine>
+					<ExtendedEdit>false</ExtendedEdit>
+					<MinValue xsi:nil="true"/>
+					<MaxValue xsi:nil="true"/>
+					<FillChecking>DontCheck</FillChecking>
+					<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+					<ChoiceParameterLinks/>
+					<ChoiceParameters/>
+					<QuickChoice>Auto</QuickChoice>
+					<CreateOnInput>Auto</CreateOnInput>
+					<ChoiceForm/>
+					<LinkByType/>
+					<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+					<Balance>true</Balance>
+					<AccountingFlag/>
+					<ExtDimensionAccountingFlag/>
+					<FullTextSearch>Use</FullTextSearch>
+				</Properties>
+			</Resource>
+		</ChildObjects>
+	</AccountingRegister>
+</MetaDataObject>

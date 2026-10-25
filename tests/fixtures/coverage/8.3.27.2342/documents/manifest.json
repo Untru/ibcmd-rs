@@ -1,0 +1,411 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-documents",
+  "collection": "Documents",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "c7e8b7ed439687be01ac45a19d795ae0a5d8cde3584831e90b828c9b535e019b",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 95682,
+    "decoded_sha256": "8ebfcb681f26512449c318e39cbab63877ed758b09327332873db878ec043ba1",
+    "encoded_sha256": "8125eb27d8a3fe11214ddd4a657a9ab0e9725bcaa913044c784c6cc51761625b"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11679,
+          "sha256": "67e6e51d8aff669370cce9e0bd8d430585be28a6a551995889b78e7a9625901b"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "a0a5ca8f275cd8a2e1a7f271b7130ae2888201fc405f40f809c90c377a781eba"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovTemplate.xml",
+          "size": 4216,
+          "sha256": "bac88d40bd4f84583c556dcc55d620acff4befb6669ec7e6656ebe75b01ea39d"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovUseStandardCommands_false.xml",
+          "size": 4336,
+          "sha256": "928e89d9fd595d042117e32626bf9b46fad1b12696ab68799c56c263fb9fcb68"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberLength_11",
+      "property": "NumberLength",
+      "kind": "number",
+      "value": "11",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovNumberLength_11.xml",
+          "size": 4266,
+          "sha256": "cb408c856563338bf42eb585a6a8d85ad032aae29987eb0c634667074d87508e"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberAllowedLength_Fixed",
+      "property": "NumberAllowedLength",
+      "kind": "enum",
+      "value": "Fixed",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovNumberAllowedLength_Fixed.xml",
+          "size": 4332,
+          "sha256": "9344d1eecc230ff93e20274d10ea3f4266dc05069ae7590a88094a9e95e9f4cc"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberPeriodicity_Year",
+      "property": "NumberPeriodicity",
+      "kind": "enum",
+      "value": "Year",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovNumberPeriodicity_Year.xml",
+          "size": 4305,
+          "sha256": "1dba002c965f29599e7a071f63943b92a988ce4cc42d8f50f683fa22e185e820"
+        }
+      ]
+    },
+    {
+      "name": "CovCheckUnique_false",
+      "property": "CheckUnique",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovCheckUnique_false.xml",
+          "size": 4280,
+          "sha256": "cdbba1bf45838ce78d13bb06c5ddfe9a609ddb34e29ba1ed95cec9672baa4454"
+        }
+      ]
+    },
+    {
+      "name": "CovAutonumbering_false",
+      "property": "Autonumbering",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovAutonumbering_false.xml",
+          "size": 4294,
+          "sha256": "36ca9ad95289c252e4eed9f1ce9593cbed4f2c0f1b88787a0616bcdce227f78c"
+        }
+      ]
+    },
+    {
+      "name": "CovPosting_Deny",
+      "property": "Posting",
+      "kind": "enum",
+      "value": "Deny",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovPosting_Deny.xml",
+          "size": 4243,
+          "sha256": "a051d2cf9c16eadc7f7ebc8e5ad85918f39338f82139b326b1634d9ecb3c85eb"
+        }
+      ]
+    },
+    {
+      "name": "CovRealTimePosting_Deny",
+      "property": "RealTimePosting",
+      "kind": "enum",
+      "value": "Deny",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovRealTimePosting_Deny.xml",
+          "size": 4299,
+          "sha256": "f2aa3a24851d6fa2d7ab6b2603aeb2fb45b4eab4ee32565385ff7c9ddb6b8c45"
+        }
+      ]
+    },
+    {
+      "name": "CovRegisterRecordsDeletion_AutoDelete",
+      "property": "RegisterRecordsDeletion",
+      "kind": "enum",
+      "value": "AutoDelete",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovRegisterRecordsDeletion_AutoDelete.xml",
+          "size": 4390,
+          "sha256": "d324885d8bd68089ef700e79d1afd4a3d193b30d57022430d29dca561d0b2f82"
+        }
+      ]
+    },
+    {
+      "name": "CovRegisterRecordsDeletion_AutoDeleteOff",
+      "property": "RegisterRecordsDeletion",
+      "kind": "enum",
+      "value": "AutoDeleteOff",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovRegisterRecordsDeletion_AutoDeleteOff.xml",
+          "size": 4414,
+          "sha256": "3f37f91e2b7defa0bf588e3aac0eed1db3da22b88c62ebd6c070acb001bd531c"
+        }
+      ]
+    },
+    {
+      "name": "CovRegisterRecordsWritingOnPost_WriteModified",
+      "property": "RegisterRecordsWritingOnPost",
+      "kind": "enum",
+      "value": "WriteModified",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovRegisterRecordsWritingOnPost_WriteModified.xml",
+          "size": 4454,
+          "sha256": "5d8f5276df7d85b5bc3c25a3157f39ddbe508b14510a96df69b130397024f415"
+        }
+      ]
+    },
+    {
+      "name": "CovSequenceFilling_AutoFillOff",
+      "property": "SequenceFilling",
+      "kind": "enum",
+      "value": "AutoFillOff",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovSequenceFilling_AutoFillOff.xml",
+          "size": 4352,
+          "sha256": "60edd687234178fc66834fe5e622b109f9151b966f5e82828d8825db6cc2d7d6"
+        }
+      ]
+    },
+    {
+      "name": "CovPostInPrivilegedMode_false",
+      "property": "PostInPrivilegedMode",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovPostInPrivilegedMode_false.xml",
+          "size": 4343,
+          "sha256": "0e9ced62b77d694fe5471740859e056a3c522678e8ed2600dddd0a365fb58f38"
+        }
+      ]
+    },
+    {
+      "name": "CovUnpostInPrivilegedMode_false",
+      "property": "UnpostInPrivilegedMode",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovUnpostInPrivilegedMode_false.xml",
+          "size": 4357,
+          "sha256": "7a402bc7f69fbe1f49ae9a64d4e4a76f23527bedb74dcf836fdaf5069a15d611"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovIncludeHelpInContents_true.xml",
+          "size": 4341,
+          "sha256": "743cd26d321e693c1d461c5adb9fa88df495729a2ee268aeba1a57d4812bbc1f"
+        }
+      ]
+    },
+    {
+      "name": "CovDataLockControlMode_Automatic",
+      "property": "DataLockControlMode",
+      "kind": "enum",
+      "value": "Automatic",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovDataLockControlMode_Automatic.xml",
+          "size": 4365,
+          "sha256": "23b22ef7cd80c66619ad5c20e49a553a0cf69030cda62fcc913c95f172439f2f"
+        }
+      ]
+    },
+    {
+      "name": "CovObjectPresentation_Cov",
+      "property": "ObjectPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovObjectPresentation_Cov.xml",
+          "size": 4433,
+          "sha256": "ee2bfbabe80ba0b2e4238f06af49d04b74cb4cb8794e7ffa0df07b54b47bb8ef"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedObjectPresentation_Cov",
+      "property": "ExtendedObjectPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovExtendedObjectPresentation_Cov.xml",
+          "size": 4497,
+          "sha256": "58f7dfa54ddab5aa331c6c845e233a1d11ae8be1af1e6277c61dc95b146b98a3"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovListPresentation_Cov.xml",
+          "size": 4417,
+          "sha256": "0e91c11f026c6fe55e27dacf852a31e209f3d8b5a00d3e0fcee478ed3df1077b"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedListPresentation_Cov",
+      "property": "ExtendedListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovExtendedListPresentation_Cov.xml",
+          "size": 4481,
+          "sha256": "bd802386952f71cb31501f2e40d0942142377c2bebea2d88a1a532cb1e101629"
+        }
+      ]
+    },
+    {
+      "name": "CovExplanation_Cov",
+      "property": "Explanation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovExplanation_Cov.xml",
+          "size": 4377,
+          "sha256": "df456433ddc28e0867c0d815ec79714ac8fed19690625129c9bb10a241d79ad6"
+        }
+      ]
+    },
+    {
+      "name": "CovChoiceHistoryOnInput_DontUse",
+      "property": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "value": "DontUse",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovChoiceHistoryOnInput_DontUse.xml",
+          "size": 4359,
+          "sha256": "a07d6a1c5a8602e58f6fe0fd3edfd651fd93c8f1dfbfe22234bcf460ca7047fd"
+        }
+      ]
+    },
+    {
+      "name": "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+      "property": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+          "size": 4460,
+          "sha256": "170bc7303efdd745e5b00a85c3bb5241e53f2a627a849b3c0c8f456c468e0351"
+        }
+      ]
+    },
+    {
+      "name": "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+      "property": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Documents/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+          "size": 4509,
+          "sha256": "2d602123320d74be5cb13385d215db5b57845ddc4d13cae4a842252e40613e99"
+        }
+      ]
+    }
+  ]
+}

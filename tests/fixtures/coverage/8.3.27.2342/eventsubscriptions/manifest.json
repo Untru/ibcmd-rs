@@ -1,0 +1,261 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-eventsubscriptions",
+  "collection": "EventSubscriptions",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "de3ca6f3e429cf3969c4bd03cf1283ae9a6fb7c207174f6d84b348beda198358",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 84184,
+    "decoded_sha256": "40ab6f34834c7d99191d5d3bc210779c468eda78e09deb39860fa54861dde922",
+    "encoded_sha256": "253fe255312c820ece6d8b78bd74ee03789c072b7e34f1b7ba0ee35899a28970"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovHandlers/Ext/Module.bsl",
+          "size": 190,
+          "sha256": "3fe719fa26b725022ab4b40888d871b58875d85ed895712c2649c017f75ab7e7"
+        },
+        {
+          "path": "CommonModules/CovHandlers.xml",
+          "size": 1453,
+          "sha256": "9a14315427e1a34a4a8d5bc7d21ad14f01eec916db39b6fc24e82957cae2365a"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 10886,
+          "sha256": "759bad95ff0af2a474e0a6ac5e37f4cfbb90f967c389800342f20c689f69f788"
+        },
+        {
+          "path": "Documents/CovRecorder.xml",
+          "size": 4216,
+          "sha256": "4b01f371d591d20f65133a12ee600f15c3aec47720de13f0ef6e0f9c2ff2680a"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "bf2d3780aa5c520c4d58561402c8f6c3286629fe0ce8860bf32203daf1d69696"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovTemplate.xml",
+          "size": 1288,
+          "sha256": "7e3cceb776c6d5fc388089a53a0b4cf720acd790d0f9101584da2023602bacbd"
+        }
+      ]
+    },
+    {
+      "name": "CovEvent_BeforeDelete",
+      "property": "Event",
+      "kind": "enum",
+      "value": "BeforeDelete",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovEvent_BeforeDelete.xml",
+          "size": 1299,
+          "sha256": "3ae47140726ed460df86bfa9ab9edd2379028dba67a8fc4abc04810bf7c1c386"
+        }
+      ]
+    },
+    {
+      "name": "CovEvent_FillCheckProcessing",
+      "property": "Event",
+      "kind": "enum",
+      "value": "FillCheckProcessing",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovEvent_FillCheckProcessing.xml",
+          "size": 1313,
+          "sha256": "f78d0eab2a55b0edb6855ee5558faf1f68266beafa187cf9fe35794f5c13f22e"
+        }
+      ]
+    },
+    {
+      "name": "CovEvent_Filling",
+      "property": "Event",
+      "kind": "enum",
+      "value": "Filling",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovEvent_Filling.xml",
+          "size": 1289,
+          "sha256": "aa05aca6c89251b1895a3309aeefd88f5f4ce7c17d7353dfbb0d7968dbf0cdf9"
+        }
+      ]
+    },
+    {
+      "name": "CovEvent_FormGetProcessing",
+      "property": "Event",
+      "kind": "enum",
+      "value": "FormGetProcessing",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_FormGetProcessing - Имя события должно быть задано",
+      "files": []
+    },
+    {
+      "name": "CovEvent_OnCopy",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnCopy",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovEvent_OnCopy.xml",
+          "size": 1287,
+          "sha256": "570642d162325786c8f83676109ece71abd8f22ca0522894ed542f382553dce1"
+        }
+      ]
+    },
+    {
+      "name": "CovEvent_OnReceiveDataFromMaster",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnReceiveDataFromMaster",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_OnReceiveDataFromMaster - Имя события должно быть задано",
+      "files": []
+    },
+    {
+      "name": "CovEvent_OnReceiveDataFromSlave",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnReceiveDataFromSlave",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_OnReceiveDataFromSlave - Имя события должно быть задано",
+      "files": []
+    },
+    {
+      "name": "CovEvent_OnSendDataToMaster",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnSendDataToMaster",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_OnSendDataToMaster - Имя события должно быть задано",
+      "files": []
+    },
+    {
+      "name": "CovEvent_OnSendDataToSlave",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnSendDataToSlave",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_OnSendDataToSlave - Имя события должно быть задано",
+      "files": []
+    },
+    {
+      "name": "CovEvent_OnSendNodeDataToSlave",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnSendNodeDataToSlave",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_OnSendNodeDataToSlave - Имя события должно быть задано",
+      "files": []
+    },
+    {
+      "name": "CovEvent_OnSetNewCode",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnSetNewCode",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_OnSetNewCode - Имя события должно быть задано",
+      "files": []
+    },
+    {
+      "name": "CovEvent_OnSetNewNumber",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnSetNewNumber",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovEvent_OnSetNewNumber.xml",
+          "size": 1303,
+          "sha256": "b420106704fd1e6dbd4e88c16045229628c7d774b087dadabbcb7ef3587f0f18"
+        }
+      ]
+    },
+    {
+      "name": "CovEvent_OnWrite",
+      "property": "Event",
+      "kind": "enum",
+      "value": "OnWrite",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovEvent_OnWrite.xml",
+          "size": 1289,
+          "sha256": "2fd0464d50a65b38c9114fc08865820e54519f5e1545f28a547e0a2000eb679b"
+        }
+      ]
+    },
+    {
+      "name": "CovEvent_Posting",
+      "property": "Event",
+      "kind": "enum",
+      "value": "Posting",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovEvent_Posting.xml",
+          "size": 1289,
+          "sha256": "17cab87cd6ad5c418b68d7c1a71999fdc7485309c477030ff32672949cd7ce91"
+        }
+      ]
+    },
+    {
+      "name": "CovEvent_PresentationFieldsGetProcessing",
+      "property": "Event",
+      "kind": "enum",
+      "value": "PresentationFieldsGetProcessing",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_PresentationFieldsGetProcessing - Имя события должно быть задано",
+      "files": []
+    },
+    {
+      "name": "CovEvent_PresentationGetProcessing",
+      "property": "Event",
+      "kind": "enum",
+      "value": "PresentationGetProcessing",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПодпискаНаСобытие.CovEvent_PresentationGetProcessing - Имя события должно быть задано",
+      "files": []
+    }
+  ]
+}

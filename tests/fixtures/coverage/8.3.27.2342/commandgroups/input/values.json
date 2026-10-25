@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "collection": "CommandGroups",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 7,
+  "properties": [
+    {
+      "name": "Representation",
+      "kind": "enum",
+      "template": "Auto",
+      "values": [
+        {
+          "value": "Picture",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "ToolTip",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "Picture",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Category",
+      "kind": "enum",
+      "template": "NavigationPanel",
+      "values": [
+        {
+          "value": "ActionsPanel",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "FormCommandBar",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-recordset-references",
+  "collection": "EventSubscriptions",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "d68fb67392ad35e3bfd90a6bd9d2eb49a7b4c9e5b0d22f87af0432c01f13e5a0",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 85153,
+    "decoded_sha256": "6fcb22d4a178d896d4a1f50bae63aa7db5df63a17b11b6e9cb1ac5a6a496a0cb",
+    "encoded_sha256": "aa65140901cc3da5b4de3eb3d019d80af732f8563aeddaec7601928fa2c60201"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovRecordsetHandlers/Ext/Module.bsl",
+          "size": 190,
+          "sha256": "3fe719fa26b725022ab4b40888d871b58875d85ed895712c2649c017f75ab7e7"
+        },
+        {
+          "path": "CommonModules/CovRecordsetHandlers.xml",
+          "size": 1462,
+          "sha256": "d77fd3770f1dad8983d44297454e544d1988040a6e520f70c444c524906e5794"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 10909,
+          "sha256": "04bfba3548f6d3ff187dff37d664bacf3a1f8f6bd0bb3ad11bf565b75c72203d"
+        },
+        {
+          "path": "Documents/CovRecorder.xml",
+          "size": 4216,
+          "sha256": "4b01f371d591d20f65133a12ee600f15c3aec47720de13f0ef6e0f9c2ff2680a"
+        },
+        {
+          "path": "Documents/CovRsRecorder.xml",
+          "size": 4413,
+          "sha256": "cf681b19e3d1489d49b60f3001059ea4a441c5282727a21c2498a00b012c7c86"
+        },
+        {
+          "path": "InformationRegisters/CovRsAlpha.xml",
+          "size": 5323,
+          "sha256": "17e22d1a8cbdf0457de82032a6ab84995da9dc92aa5de4f004f9f6ef6d9986ec"
+        },
+        {
+          "path": "InformationRegisters/CovRsBeta.xml",
+          "size": 5323,
+          "sha256": "11e9207dcac2b5f9795bcd177f18196b7f3992154968d229b0dcecc886552872"
+        },
+        {
+          "path": "InformationRegisters/CovRsDelta.xml",
+          "size": 5331,
+          "sha256": "19522b61d1839715135e5b7b1da1e1eeacacb9da7f1d880a16ed96b210d5a826"
+        },
+        {
+          "path": "InformationRegisters/CovRsEpsilon.xml",
+          "size": 5339,
+          "sha256": "405560a06cab7a993a9819a316d16269eb57507d8d1efac95185923f2267b718"
+        },
+        {
+          "path": "InformationRegisters/CovRsGamma.xml",
+          "size": 5323,
+          "sha256": "41c3c1ee75b40d64b6c21f2da57fc847492f017566a0a7d489c244929be7f65a"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "bf2d3780aa5c520c4d58561402c8f6c3286629fe0ce8860bf32203daf1d69696"
+        }
+      ]
+    },
+    {
+      "name": "CovRsSources",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovRsSources.xml",
+          "size": 1584,
+          "sha256": "1c3028f7ab4d5196b55194e7ddcc3e5573af15a34878ada2c0757c258777d8f4"
+        }
+      ]
+    },
+    {
+      "name": "CovRsOneIndependent",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovRsOneIndependent.xml",
+          "size": 1318,
+          "sha256": "3158827d7679dbe2fd2e5e53d1724e4701a8b18d49b6769b40a365d02303e2e3"
+        }
+      ]
+    },
+    {
+      "name": "CovRsOneSubordinate",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "EventSubscriptions/CovRsOneSubordinate.xml",
+          "size": 1317,
+          "sha256": "5f28236d5f8cea3589c5a07e21976f3ac93f6015f7146cc3d33571db9c50e973"
+        }
+      ]
+    }
+  ]
+}

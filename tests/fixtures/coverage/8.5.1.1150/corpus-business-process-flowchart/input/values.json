@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "collection": "BusinessProcesses",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovCompoundFlowchart",
+      "set": {},
+      "files": {
+        "Ext/Flowchart.xml": "bodies/compound.xml"
+      }
+    },
+    {
+      "name": "CovGifFlowchart",
+      "set": {},
+      "files": {
+        "Ext/Flowchart.xml": "bodies/gif.xml",
+        "Ext/Flowchart/Items/Work/Pixel.gif": {
+          "path": "bodies/pixel.gif",
+          "binary": true
+        }
+      }
+    },
+    {
+      "name": "CovProcessingFlowchart",
+      "set": {},
+      "files": {
+        "Ext/Flowchart.xml": "bodies/processing.xml"
+      },
+      "source": "generated:processing-point-without-image"
+    },
+    {
+      "name": "CovPrintedFlowchart",
+      "set": {},
+      "files": {
+        "Ext/Flowchart.xml": "bodies/printed.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Flowchart.xml": "bodies/flowchart.xml"
+  },
+  "corpus": "clean-room-start-finish-flowchart"
+}

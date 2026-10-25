@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-nested-subsystem-rights",
+  "collection": "Roles",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "4bdf427f00665d18021cd87fae21363106fc371491a0f4a4af42cbe505cf2171",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79037,
+    "decoded_sha256": "e0a738fa9c86270e6080a43cf0a095a48e6528c1a81891e6568d186d0fb99a75",
+    "encoded_sha256": "f818b94b1a142e2ff52449918a3a72ccef1c5cbaea4a2209b840791b4586bbab"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10389,
+          "sha256": "149daf1ea0d8464cd196ba1d3e05ad2822f74387c7711c7b365e3c1196c428bd"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "6790e5bd2965e0e02c4afc6b5c834d894ef875651d16aada073cafee01439ab5"
+        },
+        {
+          "path": "Subsystems/CovRightsTree/Subsystems/CovChildA.xml",
+          "size": 1322,
+          "sha256": "5584dbc7ce7bb63667cc3752dee00e01a3ff7b84314c2b3f9141d5d4f7d3b1aa"
+        },
+        {
+          "path": "Subsystems/CovRightsTree/Subsystems/CovChildB.xml",
+          "size": 1322,
+          "sha256": "a456269a8a3118d6ff338b7f4124b15012c53ff97a43b332e133221db808e369"
+        },
+        {
+          "path": "Subsystems/CovRightsTree.xml",
+          "size": 1418,
+          "sha256": "ed1652afb784a64158d53d5b8629d9cccb64f7f46d668f0cc4cf6913778c9740"
+        }
+      ]
+    },
+    {
+      "name": "CovNestedSubsystemRights",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Roles/CovNestedSubsystemRights/Ext/Rights.xml",
+          "size": 845,
+          "sha256": "b9f42814603ec4adb7cc94a215ac8686f8365e1ee840a394528ace07509f85fd"
+        },
+        {
+          "path": "Roles/CovNestedSubsystemRights.xml",
+          "size": 1098,
+          "sha256": "eea45f118fc63f97e72a23125e84f855813b10f17ba02922c2b61bc567c7959a"
+        }
+      ]
+    }
+  ]
+}

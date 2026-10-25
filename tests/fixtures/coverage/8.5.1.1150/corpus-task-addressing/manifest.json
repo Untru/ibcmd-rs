@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-task-addressing",
+  "collection": "Tasks",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "111fc12a060f41452006c5e72cd354396e29f79456247679fcc2f8c92d38ad58",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 78082,
+    "decoded_sha256": "f068a9118a88d1068abc8b47030a83dbd63cf6164b0ca06744043ba29179e35f",
+    "encoded_sha256": "317d05b85086f5dbd26bc75654c7ca7fc518e0b876049bd5d1bafc78bde6534f"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovAddressedProcess/Ext/Flowchart.xml",
+          "size": 9225,
+          "sha256": "473a6ae5443dc69fc6673c9a21aaf012944030c8df3a5314d1fae434808e229a"
+        },
+        {
+          "path": "BusinessProcesses/CovAddressedProcess.xml",
+          "size": 4359,
+          "sha256": "a1c3000409d28e5dc0f3a1ade8b75525421c3f661e1d44b1bfa3b51dd01df1e7"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 11156,
+          "sha256": "f3f0557dee665ff54de32f59900609e32ba7850eb85a165aae6f53ddb4332b07"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "383fb4a76d671eb609d07e468fb341f7267266e20a4aecb5b029173e310c5530"
+        }
+      ]
+    },
+    {
+      "name": "CovAddressedTask",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovAddressedTask.xml",
+          "size": 9289,
+          "sha256": "4a18feaf269560e2e4c34d060ee76dd91564992b70f49b667e4954df896af51d"
+        }
+      ]
+    }
+  ]
+}

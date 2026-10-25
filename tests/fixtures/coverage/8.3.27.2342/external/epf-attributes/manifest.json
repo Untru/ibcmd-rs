@@ -1,0 +1,1823 @@
+{
+  "schema_version": 1,
+  "kind": "external",
+  "set": "8.3.27.2342-xml-2.20-external-epf-attributes",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "rounds": "config import --out -> config export --file (1) -> config import --out -> config export --file (2); identical"
+  },
+  "inputs_sha256": "8ce8505ed3461110054fe2bec0f2fb6a3aca7d4e48ed07429d2ce2a01dc661d1",
+  "variants": [
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovTemplate.epf.b64",
+        "decoded_sha256": "05a48842dc90381fe3414f96f0fcbfa0bfc8bc314555a3f2a57e4a71b947c299"
+      },
+      "files": [
+        {
+          "path": "CovTemplate.xml",
+          "size": 1646,
+          "sha256": "d715b95e898203471e5446fedda6a4b1f0aed7b473eda2233e02110dcbcdd5b5"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_xs_string",
+      "property": "Attribute",
+      "value": "xs_string",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_xs_string.epf.b64",
+        "decoded_sha256": "a05c5f249302b0bbe5879b2f3c30706ec5d250fd8b9fb47970f035a7ca817ecb"
+      },
+      "files": [
+        {
+          "path": "CovAttr_xs_string.xml",
+          "size": 2700,
+          "sha256": "9d21cf97f699be62a4f3268c2e2b1e2a9cbf283ec8032d77b44d1d44c8fb5611"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped",
+      "property": "Attribute",
+      "value": "untyped",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped.epf.b64",
+        "decoded_sha256": "dab313235fe2d52a3850a735e10dae99a2d15a52ffe0b95ebb2f0561cf9ab4f3"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped.xml",
+          "size": 2639,
+          "sha256": "6b243d137f7001a120ef0d0720dac2de9b98db1617eb1522b95b5deb258179b0"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_xs_dateTime",
+      "property": "Attribute",
+      "value": "xs_dateTime",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_xs_dateTime.epf.b64",
+        "decoded_sha256": "d82f5c0ffe1caf09eb04a73df6dad346c1804cba184d1417c8cf97bf20e2163c"
+      },
+      "files": [
+        {
+          "path": "CovAttr_xs_dateTime.xml",
+          "size": 2787,
+          "sha256": "2a85d8721b8188429f99541874b468eb603939c88b9374578809731bade8f5c1"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_xs_boolean",
+      "property": "Attribute",
+      "value": "xs_boolean",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_xs_boolean.epf.b64",
+        "decoded_sha256": "99e8d550c9ad2a369d305ff817e66bb0d520fc243c6fc3e9744d68a03fceef33"
+      },
+      "files": [
+        {
+          "path": "CovAttr_xs_boolean.xml",
+          "size": 2683,
+          "sha256": "602fe1a592cfb93742ebe49abf42f3b29eb9ce3c8197a49f852e9e0715cf29ce"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8_UUID",
+      "property": "Attribute",
+      "value": "v8_UUID",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8_UUID.epf.b64",
+        "decoded_sha256": "675a525183d533da6c449aed2b94b9dc9983583748a0c4edb5074639ca14f2c3"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8_UUID.xml",
+          "size": 2708,
+          "sha256": "f3675c1615242f78de7c0c01d3241e56cf2406c3678e3f92dfb630386f09dc81"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_DynamicList",
+      "property": "Attribute",
+      "value": "cfg_DynamicList",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_DynamicList.epf.b64",
+        "decoded_sha256": "056a431ebe657dac851dac6ec46b92dd8f9dd799d29c896de38aa1ffc02c9ca8"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_DynamicList.xml",
+          "size": 2722,
+          "sha256": "e738537b4505c632916dc822cd52fe519e61ee3cf5b6f8dc46800ce887e9c650"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8_ValueTable",
+      "property": "Attribute",
+      "value": "v8_ValueTable",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8_ValueTable.epf.b64",
+        "decoded_sha256": "a20a708ab0654d8e4cbf58421b707529eb3810c92f62cb23bc07a72c769711b8"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8_ValueTable.xml",
+          "size": 2710,
+          "sha256": "7a47de89e820a48a05b142c07e7394817d171299a597a47e08d3fb34293d0849"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8_ValueTree",
+      "property": "Attribute",
+      "value": "v8_ValueTree",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8_ValueTree.epf.b64",
+        "decoded_sha256": "ce63b0cb1c1dfea170e850a8ae6f72e28ebf4396a57969416ac00f13fd49ef91"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8_ValueTree.xml",
+          "size": 2705,
+          "sha256": "9a86c3e2dc5c2beba46c893fed9c18399ff5827ff2078bc5602d75819fdd8e0a"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8_ValueListType",
+      "property": "Attribute",
+      "value": "v8_ValueListType",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8_ValueListType.epf.b64",
+        "decoded_sha256": "acea0fe5badcd1b58abe18dc0bbeb264fd3cdd8e0886524034d7e1bef97252d1"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8_ValueListType.xml",
+          "size": 2717,
+          "sha256": "e344722805ff8b5680a93006a93272a30e045fba4606757be0674e527f1627fc"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8ui_FormattedString",
+      "property": "Attribute",
+      "value": "v8ui_FormattedString",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8ui_FormattedString.epf.b64",
+        "decoded_sha256": "f4a51117a7c4380e61fdb3357a0154ba167b73f8d1d7717bc1015c3a1076f41e"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8ui_FormattedString.xml",
+          "size": 2744,
+          "sha256": "a08112bf1048c31be85014ba6e9c54207cce8da6c55668953172c7463d306af4"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_",
+      "property": "Attribute",
+      "value": "untyped_",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_.epf.b64",
+        "decoded_sha256": "9f6fdf6d71184c0e660fe3f2d2d0674cc5d0bba9f39a2a7668235451fd38bfef"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_.xml",
+          "size": 2764,
+          "sha256": "445dbdd4dadfe6619785afb7b9fb4cd4a1a4e3219176892ab330eeee0d4c1c33"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped__",
+      "property": "Attribute",
+      "value": "untyped__",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped__.epf.b64",
+        "decoded_sha256": "b9119be5f57dcd110399a6fbd2d4faa6a630b84a39641b439fd5b0656ecdb763"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped__.xml",
+          "size": 2781,
+          "sha256": "04242ab695f6faac24217c2a1e212ee156e29add7afa02c2b5b8dd3dfcee28e6"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped___",
+      "property": "Attribute",
+      "value": "untyped___",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped___.epf.b64",
+        "decoded_sha256": "72e756974fc432190503c1141a1423791cff9845d67432da8b4f9b7401450446"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped___.xml",
+          "size": 2758,
+          "sha256": "deee759212bb167f0750c1902ded1e6f3e3301aa3a42620d108b1096620d1908"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped____",
+      "property": "Attribute",
+      "value": "untyped____",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped____.epf.b64",
+        "decoded_sha256": "43820d00a4bfd9fc8cc367268929caffd1eff4ac31dd197cb78322fd5221b6e4"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped____.xml",
+          "size": 2745,
+          "sha256": "febff5fc92385ac12efe124231988d2993c805acbde5a9cace616e8cbaa6385e"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8_Null",
+      "property": "Attribute",
+      "value": "v8_Null",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8_Null.epf.b64",
+        "decoded_sha256": "d19b3316e2e0e7f9e9237c6649acbe9da08c0a4bc85aa8b84436d6421ef23b3f"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8_Null.xml",
+          "size": 2667,
+          "sha256": "0b6ced7539b4bae791d0d1c5b56d5ab96dfb6728a761a9c2a0061d6ab79f3c69"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_CatalogRef",
+      "property": "Attribute",
+      "value": "cfg_CatalogRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_CatalogRef.epf.b64",
+        "decoded_sha256": "cc4895c95b1e4f4206db2e1c8a796f48a5c4194bcbab7ad2d26c4571bb72d901"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_CatalogRef.xml",
+          "size": 2722,
+          "sha256": "1d5a8b3db465139cf146c79212df7a73eab45415f5cb7a8aa430a586640c1fed"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_____",
+      "property": "Attribute",
+      "value": "untyped_____",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_____.epf.b64",
+        "decoded_sha256": "dabb50a516c889beb24516ae59737744972daa669450da5be77fc5d08972968d"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_____.xml",
+          "size": 2760,
+          "sha256": "561bd60564da2d41aa3ec609c5151703c4c948f88297c8e047653d45888744f4"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_DocumentRef",
+      "property": "Attribute",
+      "value": "cfg_DocumentRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_DocumentRef.epf.b64",
+        "decoded_sha256": "a35722d056724b6a00280dbeb9d9465451efafc3be78512deb27bf8cce453959"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_DocumentRef.xml",
+          "size": 2721,
+          "sha256": "7dcbe3d32cdfed52c2cb5be421410c5dd6146c1985e97db4680fb13d537cdd86"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped______",
+      "property": "Attribute",
+      "value": "untyped______",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped______.epf.b64",
+        "decoded_sha256": "f426517896a19f391194f6c7a6e1e5608e96209d9713bd33907a2c76f6481407"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped______.xml",
+          "size": 2754,
+          "sha256": "0758f193d387340159e6f8093bf45b1379c06b24c723fae5601713b31dc9cee5"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_______",
+      "property": "Attribute",
+      "value": "untyped_______",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_______.epf.b64",
+        "decoded_sha256": "f8e53cba5e269fb2bdbbf2f8321f14ea9eaf5a0cd480b4434b4af267f8c67563"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_______.xml",
+          "size": 2756,
+          "sha256": "6d4fcba497f1cb4e689b93325c271faef29e0e12ff5ff9e87766480e67cb57bf"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_EnumRef",
+      "property": "Attribute",
+      "value": "cfg_EnumRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_EnumRef.epf.b64",
+        "decoded_sha256": "742a872791d6ff9f46a38e6b267882bd1a183ae7b5654ecd75585dee0e8d87c6"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_EnumRef.xml",
+          "size": 2717,
+          "sha256": "cfb387eef52177eacb34550b62897c3afd6f06f80a878704fdd10750bf8d3921"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped________",
+      "property": "Attribute",
+      "value": "untyped________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped________.epf.b64",
+        "decoded_sha256": "baa1059cd67923e0d007e5501746a47421e09f9b3627991cb69300becf8a9245"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped________.xml",
+          "size": 2774,
+          "sha256": "a7c814b66629e5383469eee9d5a510ea802cdf9166579897545cf564ac52fd60"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_ChartOfCharacteristicTypesRef",
+      "property": "Attribute",
+      "value": "cfg_ChartOfCharacteristicTypesRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_ChartOfCharacteristicTypesRef.epf.b64",
+        "decoded_sha256": "4213498622d18b6f9cd1858df9f87e521bcdc708877bc45fd40041127dc531f0"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_ChartOfCharacteristicTypesRef.xml",
+          "size": 2803,
+          "sha256": "aa1549b03882c176320f466dc6eaa9a321fc5234fe9caf923f9a5eb6a20ed1ef"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_________",
+      "property": "Attribute",
+      "value": "untyped_________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_________.epf.b64",
+        "decoded_sha256": "49f3b32cdfc3e8feef5c23bfdfc12024d87a59323743c882e4aefa6f323927d5"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_________.xml",
+          "size": 2816,
+          "sha256": "89a38e95050c3ed0d6e9744032de67e61524c0a38bc5f8008579d5c7eae3e38a"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_ChartOfAccountsRef",
+      "property": "Attribute",
+      "value": "cfg_ChartOfAccountsRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_ChartOfAccountsRef.epf.b64",
+        "decoded_sha256": "617cb475147a3e3f0bdc35354dc81983aa88558d98bc945bc0cbad11c6b77a74"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_ChartOfAccountsRef.xml",
+          "size": 2746,
+          "sha256": "2191c1193054054b6d3b72d2d4cb7584d3e71ff6af403502a2730ab291f36fe5"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped__________",
+      "property": "Attribute",
+      "value": "untyped__________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped__________.epf.b64",
+        "decoded_sha256": "a05e78e2f8ccd23ea4c0202dcc2af24e90770946bc9ab59d0309f69d6d1712d1"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped__________.xml",
+          "size": 2770,
+          "sha256": "32137fccf4f8cd1d42fed20d98d7f9cf2ea5c0d4b86232fce8966f9022bc3412"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_ChartOfCalculationTypesRef",
+      "property": "Attribute",
+      "value": "cfg_ChartOfCalculationTypesRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_ChartOfCalculationTypesRef.epf.b64",
+        "decoded_sha256": "ffb81020b0d1fa7c22de182be5bea789c43af545c39424a3c8ccff31caaa0150"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_ChartOfCalculationTypesRef.xml",
+          "size": 2782,
+          "sha256": "a7048151d5ca8ed624ad8ee284e423f7cc30d29cd6df3674acfe1c3da58502bf"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped___________",
+      "property": "Attribute",
+      "value": "untyped___________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped___________.epf.b64",
+        "decoded_sha256": "995205eb99d5a24fe58b62f2764f503ee91869ea53908477928fea65cbabac71"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped___________.xml",
+          "size": 2796,
+          "sha256": "76b80e43b2aab182d3a790127b0f4680326e87682752436e4a8784f9271f789f"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_BusinessProcessRef",
+      "property": "Attribute",
+      "value": "cfg_BusinessProcessRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_BusinessProcessRef.epf.b64",
+        "decoded_sha256": "40e93b0b2908b8ca5ff88a2a813430d039fbd40dac3c8fdb7409e354044e2dda"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_BusinessProcessRef.xml",
+          "size": 2752,
+          "sha256": "763e8525945aded7bdcc797c11221dc94ed5b2b864de26feaf2c89ddbf7599f2"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped____________",
+      "property": "Attribute",
+      "value": "untyped____________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped____________.epf.b64",
+        "decoded_sha256": "73b9acb9534115f73f3e7308d7ee39383d7cd6eedc35304df34abeccbd77fd99"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped____________.xml",
+          "size": 2786,
+          "sha256": "d0b5eb8780486fb855947836fac51a58b064289c85d15720dcc8087a14cbe0ef"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_BusinessProcessRoutePointRef",
+      "property": "Attribute",
+      "value": "cfg_BusinessProcessRoutePointRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_BusinessProcessRoutePointRef.epf.b64",
+        "decoded_sha256": "6c6e9e01ffa7a4a480e11e1021e12b9f40676c7e10c6de3f98b7998c00160f32"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_BusinessProcessRoutePointRef.xml",
+          "size": 2810,
+          "sha256": "6da746ffa24fcc7b4017eb551813748e3cdef3cc61aabf21c560369f09d5f759"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_____________",
+      "property": "Attribute",
+      "value": "untyped_____________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_____________.epf.b64",
+        "decoded_sha256": "5ab997c16a8326a22fb6fa4f3aedec960cd79a35aa779e4a333039fc4348bc61"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_____________.xml",
+          "size": 2816,
+          "sha256": "df2e30a1f45544d4ca62eb2d347647cabf1bd434f1e11ab62e34bea6ae0dd625"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_TaskRef",
+      "property": "Attribute",
+      "value": "cfg_TaskRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_TaskRef.epf.b64",
+        "decoded_sha256": "fe9bd7d20b49ec46a99fd1b29bbf35d34fe157e59f8a2ba94c78a58f827089be"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_TaskRef.xml",
+          "size": 2705,
+          "sha256": "26464204addbedf5cb43c364cb52240ad254625ea9134d4d0324a3b2315739df"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped______________",
+      "property": "Attribute",
+      "value": "untyped______________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped______________.epf.b64",
+        "decoded_sha256": "74338839973991d8b3f58a112a256751c2f6007de6cdaec9028cb2bc9ac306ef"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped______________.xml",
+          "size": 2762,
+          "sha256": "a1600887f7aa0adb1b6c25b437e1241c94d60327d29f00f2167988701736e462"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_ExchangePlanRef",
+      "property": "Attribute",
+      "value": "cfg_ExchangePlanRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_ExchangePlanRef.epf.b64",
+        "decoded_sha256": "762a1306b63415546d319008ab6cea268085e73d473bf84f27255909cc8c6c8f"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_ExchangePlanRef.xml",
+          "size": 2737,
+          "sha256": "4c376f83d017e5900c67690c9c95c3ab42a87fef0de7db71300f8c2542e03f08"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_______________",
+      "property": "Attribute",
+      "value": "untyped_______________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_______________.epf.b64",
+        "decoded_sha256": "d165bdb41b7405975475b38e14011bfa3a2fc835cabc5426394dc72e83e45d21"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_______________.xml",
+          "size": 2780,
+          "sha256": "fcea535f82eaa64750f65e5fe0d6ec40ec1622f136bd8da1527a2ff39b97f2ba"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped________________",
+      "property": "Attribute",
+      "value": "untyped________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped________________.epf.b64",
+        "decoded_sha256": "201a9c9ca391d66f8a7add23e8b1da7c5d96cda077396543436e3bcda073a147"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped________________.xml",
+          "size": 2802,
+          "sha256": "46cf95089e2b7f918eca622e86b9d136dffb3b0109b758df297dfc621cfc6d29"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_________________",
+      "property": "Attribute",
+      "value": "untyped_________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_________________.epf.b64",
+        "decoded_sha256": "504a581d676d85b980607fa63e4a82b8bf7644ddd984a5caf763f43b6ab053de"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_________________.xml",
+          "size": 2792,
+          "sha256": "e558d179f99fa74331879cff67e68a29f2e57df7a7f85c8dcdbcf38f157c05ae"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_AnyIBRef",
+      "property": "Attribute",
+      "value": "cfg_AnyIBRef",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_AnyIBRef.epf.b64",
+        "decoded_sha256": "dcc7bf36789f2c4e5621b8326e588c09710bf6955f7bebb66d174f88597d84dd"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_AnyIBRef.xml",
+          "size": 2706,
+          "sha256": "ca4eff3e25e211f1304d44f38d12a68ee4fc27805294444e67779a02552e04ac"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped__________________",
+      "property": "Attribute",
+      "value": "untyped__________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped__________________.epf.b64",
+        "decoded_sha256": "b3bb7b7867b81204c74656aa10def30585f1111eef5e0e8ab05b3b3d44417e3c"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped__________________.xml",
+          "size": 2910,
+          "sha256": "872e2b666394c9fceedf170f7aaefbaabf31c57de6c7f1f6f2e0a30b18feb70e"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped___________________",
+      "property": "Attribute",
+      "value": "untyped___________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped___________________.epf.b64",
+        "decoded_sha256": "329f8e26db19304a92a70a15c6913de744107c97eb08ab77bc2ef29004ee763c"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped___________________.xml",
+          "size": 2788,
+          "sha256": "9bc12ec3cc72131209f42747bc3b2304f5d7bf34fc63e1b93d6d174696379d27"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped____________________",
+      "property": "Attribute",
+      "value": "untyped____________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped____________________.epf.b64",
+        "decoded_sha256": "f1f5102bd21b3a142a6535527c1f736d52313bb21636a2ad16f576e8f384b523"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped____________________.xml",
+          "size": 2782,
+          "sha256": "0fae78094822eaf7b4c28770ca2845187c7067e0e38e8423f5abdfe607612b13"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_____________________",
+      "property": "Attribute",
+      "value": "untyped_____________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_____________________.epf.b64",
+        "decoded_sha256": "c1d73a4923ded977e6a3319cd0271c302a5a91053553deb1cca2af1916002e28"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_____________________.xml",
+          "size": 2784,
+          "sha256": "310b80305f3809ca649747547817a386b5811be626649db7d9c15a79017fe740"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped______________________",
+      "property": "Attribute",
+      "value": "untyped______________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped______________________.epf.b64",
+        "decoded_sha256": "099e84260224ac32da4f1ed17d8eb793001c4e3122121dc1b827ed90ee15e05d"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped______________________.xml",
+          "size": 2842,
+          "sha256": "75785835c7cb513e4f0ef6fd3523d74857dcd26c21af52aa78a9f146430b4682"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_______________________",
+      "property": "Attribute",
+      "value": "untyped_______________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_______________________.epf.b64",
+        "decoded_sha256": "b819560f5341235f702d41772a23f4aa85b9636d1c4e7fa11640997394f7dd14"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_______________________.xml",
+          "size": 2796,
+          "sha256": "fe50608a4bceb2a417ee03396a874f35f1f6cbee635b4abdeec788d97e416c94"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped________________________",
+      "property": "Attribute",
+      "value": "untyped________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped________________________.epf.b64",
+        "decoded_sha256": "c3e1a90554f9e2de0f33835c8f532d04cb8bc6c49a907059e8464d386e9022d6"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped________________________.xml",
+          "size": 2822,
+          "sha256": "149cee2d24b9b5f22db8f585415d684e876b5b80fb4cf1701167313b908359f8"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_________________________",
+      "property": "Attribute",
+      "value": "untyped_________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_________________________.epf.b64",
+        "decoded_sha256": "dde114a5af4af4feb879e222251b29616c636bbfc2d50848dcce474501794e9b"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_________________________.xml",
+          "size": 2780,
+          "sha256": "dc0ccee763a75d6f2f16c69d8dbda9d50c6782361fdd1d05ea3b83329a6acabc"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped__________________________",
+      "property": "Attribute",
+      "value": "untyped__________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped__________________________.epf.b64",
+        "decoded_sha256": "83326e53af7b1a8ef182e3b84449ccccfff8e33b74dac942303ed2e61247a6d6"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped__________________________.xml",
+          "size": 2798,
+          "sha256": "69d86fb31248e8261badd4c008f6d97be7976a73fd241a17dc29dd18e721b68f"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped___________________________",
+      "property": "Attribute",
+      "value": "untyped___________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped___________________________.epf.b64",
+        "decoded_sha256": "e6e34d68d3cfbed31534f8852d4713d3bd35e2e5764d38f7d2372723c208c4cf"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped___________________________.xml",
+          "size": 2816,
+          "sha256": "974573f185f797aa641de9401db065de786abca58286a5be510573d777ae3883"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped____________________________",
+      "property": "Attribute",
+      "value": "untyped____________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped____________________________.epf.b64",
+        "decoded_sha256": "00fc1b9d851b2999490b76bfda796e4251f7f5a38198c4269a70b9bb3ee034c7"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped____________________________.xml",
+          "size": 2790,
+          "sha256": "1bf854c919d112192ed309d4584d8782eee11cabb78710dbdd477c9dcf83e609"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_____________________________",
+      "property": "Attribute",
+      "value": "untyped_____________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_____________________________.epf.b64",
+        "decoded_sha256": "798a2a712d3d147ab06a785ce4cafaf405d79792432c47fc1a1e552d7a0f35c7"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_____________________________.xml",
+          "size": 2808,
+          "sha256": "f22ef592772cec2fda3d0b0acdceb12545bfb866ab9ee7273fb18f45be4a9db9"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped______________________________",
+      "property": "Attribute",
+      "value": "untyped______________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped______________________________.epf.b64",
+        "decoded_sha256": "21b4ff515c092184da4cdbfaaa9b6b08c23f803284d7432345b58b16965ac0be"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped______________________________.xml",
+          "size": 2884,
+          "sha256": "367aac5712a6ba37354de31ec86a762c3aa4951625f729a5929c07a969872f6a"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_______________________________",
+      "property": "Attribute",
+      "value": "untyped_______________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_______________________________.epf.b64",
+        "decoded_sha256": "263f3f584b860f691040d6d758f8fe2d843374a2e4affe28844109ae3e183830"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_______________________________.xml",
+          "size": 2936,
+          "sha256": "7486c14b18df88c7eca6993f7d2e50d87e001790005eeb63ffa0beedfa96b232"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped________________________________",
+      "property": "Attribute",
+      "value": "untyped________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped________________________________.epf.b64",
+        "decoded_sha256": "b36d182df33c17e8479bcf676c88a2a97de29b3ce0c34a65af3eadc503f17283"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped________________________________.xml",
+          "size": 2846,
+          "sha256": "c975a5b3673481bc171fb801543b0aa2f096178170eab8e220f28ade526fcf91"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_________________________________",
+      "property": "Attribute",
+      "value": "untyped_________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_________________________________.epf.b64",
+        "decoded_sha256": "b6ab32fc29f7b068c17a8faccd12c1a9175a5b3e955d9442ab829076a4a1af3c"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_________________________________.xml",
+          "size": 2852,
+          "sha256": "13e4204fea2c0b8ed6ee73e1c8708fb39fc904fa540163d5f95a18ee16ba0e2c"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped__________________________________",
+      "property": "Attribute",
+      "value": "untyped__________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped__________________________________.epf.b64",
+        "decoded_sha256": "27c5910e8c7997c85dbe9e7fc9552a69f92c0bf824cec8b9ccc3e24593fac52b"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped__________________________________.xml",
+          "size": 2858,
+          "sha256": "21bd23dd769da38727091266562b9ec4d8d3925f5dcc29bfa70f86c0e34366f7"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped___________________________________",
+      "property": "Attribute",
+      "value": "untyped___________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped___________________________________.epf.b64",
+        "decoded_sha256": "ac411e7d0bd33dadf26fa7593f70aea7427eac61c780b1c298b76443cd9c8bdb"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped___________________________________.xml",
+          "size": 2864,
+          "sha256": "57d82590ecf35981cfff13649f9d023adb37ecaeaf39ac71794c6bf9dac21ce2"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped____________________________________",
+      "property": "Attribute",
+      "value": "untyped____________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped____________________________________.epf.b64",
+        "decoded_sha256": "4cd52db2cf2917ed654be96c374db711533c7d54e81cbe51b57f39ad92f3d70f"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped____________________________________.xml",
+          "size": 2850,
+          "sha256": "72bc6f8770c354f4174d13548b362aa2e76d957bc4437e1562a61cce04d71212"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_____________________________________",
+      "property": "Attribute",
+      "value": "untyped_____________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_____________________________________.epf.b64",
+        "decoded_sha256": "5ff1d6be4670558266de27c66eaa1b6cdb59c2fb410144048ef96b5aa2909305"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_____________________________________.xml",
+          "size": 2894,
+          "sha256": "fb77b1fa5e7bc4bfd20b803db029472b9c0a911d5563ce33152d7cf06585b082"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_ConstantsSet",
+      "property": "Attribute",
+      "value": "cfg_ConstantsSet",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_ConstantsSet.epf.b64",
+        "decoded_sha256": "b61d865eb4a7e0dd3fa7c89a66d40f704a6f0a67aa40d1226e639359ca92977e"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_ConstantsSet.xml",
+          "size": 2718,
+          "sha256": "830850bef1018e2040cc500009cf768380a7338b2e63fd630b81f5356dbda52d"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_ReportObject",
+      "property": "Attribute",
+      "value": "cfg_ReportObject",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_cfg_ReportObject.epf.b64",
+        "decoded_sha256": "fe8d55974f1d4f95785d3d4d207d28257022b167bf847787d8ab1e1f40612ff5"
+      },
+      "files": [
+        {
+          "path": "CovAttr_cfg_ReportObject.xml",
+          "size": 2712,
+          "sha256": "39b08444f0601229103357d479e1f4dc01b1d10ab4bcadad58df2e96b68a74fa"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped______________________________________",
+      "property": "Attribute",
+      "value": "untyped______________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped______________________________________.epf.b64",
+        "decoded_sha256": "ab55d2317cebf077e7a65828294ca21c42918b8dc7290c6f8a63874aa3cf7a58"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped______________________________________.xml",
+          "size": 2893,
+          "sha256": "7ed21503d6814b7457ca4f92e6a2f0f475a81a15fee8ba74b43d509c8569248b"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_______________________________________",
+      "property": "Attribute",
+      "value": "untyped_______________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_______________________________________.epf.b64",
+        "decoded_sha256": "2da71f3d3ea2e950e8a91b140faed23a95bd334b391a18c4650e5ebd0966a215"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_______________________________________.xml",
+          "size": 2841,
+          "sha256": "75be79fd20ccff247acec87c8269b44af6dacdd0a7c8162440c87113f41e2f10"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped________________________________________",
+      "property": "Attribute",
+      "value": "untyped________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped________________________________________.epf.b64",
+        "decoded_sha256": "3c9eee389dce1504e21d5b2e690ee42466a68d8aa6cc4b22bc83b0e06b9f19e6"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped________________________________________.xml",
+          "size": 2839,
+          "sha256": "538e0bcec80da380b379600bd54415aef144b0a60093307c1bc7add62d3c9cca"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_________________________________________",
+      "property": "Attribute",
+      "value": "untyped_________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_________________________________________.epf.b64",
+        "decoded_sha256": "d9b7d176cb61fadd4767ba4c7f6be20bcd02fcd1b700d4c200583387b534c6f1"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_________________________________________.xml",
+          "size": 2810,
+          "sha256": "fef8d83a058a1c9870c488d23233c3b3efda8d96b1a557700888da391e81ecc8"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped__________________________________________",
+      "property": "Attribute",
+      "value": "untyped__________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped__________________________________________.epf.b64",
+        "decoded_sha256": "487af7579cb79e9987a89be37a582bb718b7b6f51febf86f85108f0cdb51dc51"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped__________________________________________.xml",
+          "size": 2827,
+          "sha256": "6ba38a3b91601f8ad1d18cb598ab03e2e218abc34f1d333160674ff2f1b6d3c1"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped___________________________________________",
+      "property": "Attribute",
+      "value": "untyped___________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped___________________________________________.epf.b64",
+        "decoded_sha256": "a116c18e8831f74d660a0b79d7464e9e213aa0fcf1c26fcec3e6b00bc27c95ed"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped___________________________________________.xml",
+          "size": 2825,
+          "sha256": "6f8579a1f63bf5dc2db85d5d26badb14ad3a42c94416e2d6592c669c87dbb341"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped____________________________________________",
+      "property": "Attribute",
+      "value": "untyped____________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped____________________________________________.epf.b64",
+        "decoded_sha256": "1be050e750a7386c30acdb53325358efca273958b5bd1b7d5dfebe66824e9f4d"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped____________________________________________.xml",
+          "size": 2820,
+          "sha256": "a85399383a6d8498e7be8e459cfaf15dd5416370f045a7fd2e430f6e22277ed6"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8_TypeDescription",
+      "property": "Attribute",
+      "value": "v8_TypeDescription",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8_TypeDescription.epf.b64",
+        "decoded_sha256": "67504054f59e970be6122f6ba76fd938d33eb145fb7b7021d967c084eab8e229"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8_TypeDescription.xml",
+          "size": 2722,
+          "sha256": "13ef842ea431e5cd0ce7e994c8d527cfb3d65a750f3696be018cbfb5e143d195"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8ui_Picture",
+      "property": "Attribute",
+      "value": "v8ui_Picture",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8ui_Picture.epf.b64",
+        "decoded_sha256": "0b80fba9b28c78f9527b96aece50f4498e9861789f3647343e3ec40ab04e31c9"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8ui_Picture.xml",
+          "size": 2694,
+          "sha256": "36deaea9c7cab47097e5bb63104ce8d01f093a822802ac23c90623862e75e8a5"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8ui_Color",
+      "property": "Attribute",
+      "value": "v8ui_Color",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8ui_Color.epf.b64",
+        "decoded_sha256": "b7bf3a1401bb773b33d234d15fb58a226ba00e1d673ce78e9aa8e823c057613e"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8ui_Color.xml",
+          "size": 2680,
+          "sha256": "75d1cf2ad123bde0034d4c7aa81fa10c8e821340ddd95c24e1746444337fa531"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8ui_Font",
+      "property": "Attribute",
+      "value": "v8ui_Font",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8ui_Font.epf.b64",
+        "decoded_sha256": "fc709cfabcb21bce3da3c632abc7d3a03ca0532824f4dc8a9c530a2df6060e5b"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8ui_Font.xml",
+          "size": 2679,
+          "sha256": "b8d93076fe1d0edbbc118dec18d1286adf97caa963a3ae8df83ea8f651f62a6b"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8_StandardBeginningDate",
+      "property": "Attribute",
+      "value": "v8_StandardBeginningDate",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8_StandardBeginningDate.epf.b64",
+        "decoded_sha256": "13d583abb73732e74be4a0936aec576d9421711279557e89fe8eb91ea7782b59"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8_StandardBeginningDate.xml",
+          "size": 2756,
+          "sha256": "76681b7702cb0d7330db1831ddf22dfc13dad515418da9074d3ea5dcd94c9fad"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8_StandardPeriod",
+      "property": "Attribute",
+      "value": "v8_StandardPeriod",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8_StandardPeriod.epf.b64",
+        "decoded_sha256": "3296dfabe832e6a1fdda2c6ae48136f4c78848f9adbf92c4917a5489b2e4f83b"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8_StandardPeriod.xml",
+          "size": 2727,
+          "sha256": "167be6479709f0eb46f34ac9447102f0f50d8fb0eac0da16a9c1e71cae5230fd"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_cfg_ExternalDataProcessorObject_________________1",
+      "property": "Attribute",
+      "value": "cfg_ExternalDataProcessorObject_________________1",
+      "source": "donor",
+      "status": "platform_refused",
+      "message": "[ERROR] Импорт конфигурации из XML завершен с ошибкой",
+      "files": []
+    },
+    {
+      "name": "CovAttr_ent_AccumulationRecordType",
+      "property": "Attribute",
+      "value": "ent_AccumulationRecordType",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_ent_AccumulationRecordType.epf.b64",
+        "decoded_sha256": "2e0bf17e78ef3234455a3b4041cdd2b1777c10cd6133595174dca8eb866fd6ad"
+      },
+      "files": [
+        {
+          "path": "CovAttr_ent_AccumulationRecordType.xml",
+          "size": 2762,
+          "sha256": "73a20c3085248e4dfbf3d25817fe559bf3ce4753aefb1f16e5e09b374bfcb99a"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_ent_AccountType",
+      "property": "Attribute",
+      "value": "ent_AccountType",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_ent_AccountType.epf.b64",
+        "decoded_sha256": "3c4722a633d569ca1672e8838c06c82b1eb4058ec5dc87c6e4dff46ab2868b23"
+      },
+      "files": [
+        {
+          "path": "CovAttr_ent_AccountType.xml",
+          "size": 2703,
+          "sha256": "3c1a19c6d8ae4f895ce9792325e26d71c1d303af673a37c19fbe3d81d244ef11"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_ent_AccountingRecordType",
+      "property": "Attribute",
+      "value": "ent_AccountingRecordType",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_ent_AccountingRecordType.epf.b64",
+        "decoded_sha256": "710a5ab6dd6fba47d38216ff3916f17e790361b2fae2be5f3634158d6cd79894"
+      },
+      "files": [
+        {
+          "path": "CovAttr_ent_AccountingRecordType.xml",
+          "size": 2758,
+          "sha256": "55edc0e6ea68a55555efd16ee5dcd233c9a3c22d674b866050e9d1992cab1bc7"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8ui_HorizontalAlign",
+      "property": "Attribute",
+      "value": "v8ui_HorizontalAlign",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8ui_HorizontalAlign.epf.b64",
+        "decoded_sha256": "6b0681d1b5454c43e69ee032d5166be10f1aad32b8130ca12730b8ec81271f79"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8ui_HorizontalAlign.xml",
+          "size": 2748,
+          "sha256": "626b888a6d47a5b8735e264eae95a0001fabd9b64b52d8a3d035cf96dbd56952"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8ui_VerticalAlign",
+      "property": "Attribute",
+      "value": "v8ui_VerticalAlign",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8ui_VerticalAlign.epf.b64",
+        "decoded_sha256": "7139fccacfa562c25b327395dbfed4ed6beccc3a466c0e62d85bffdcded286f6"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8ui_VerticalAlign.xml",
+          "size": 2738,
+          "sha256": "ec379051e7f376adc9a256d6c19f93b04abe9fe99438f197fed56dca45f405f2"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_v8ui_SizeChangeMode",
+      "property": "Attribute",
+      "value": "v8ui_SizeChangeMode",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_v8ui_SizeChangeMode.epf.b64",
+        "decoded_sha256": "2421f1dafd23b226c68c3cb8a56593f73e8a45a8726eec5d189baf8183021053"
+      },
+      "files": [
+        {
+          "path": "CovAttr_v8ui_SizeChangeMode.xml",
+          "size": 2741,
+          "sha256": "2b7084046e9403c83222e37fa8b71670d8e9ebda34182a57e8691dfdb35b1b80"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_____________________________________________",
+      "property": "Attribute",
+      "value": "untyped_____________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_____________________________________________.epf.b64",
+        "decoded_sha256": "eb8d54ae6f0c34a36a9c634d0056dbfd43986e41a432a4c9f2e0f2aa1caab725"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_____________________________________________.xml",
+          "size": 2851,
+          "sha256": "59948916a3983c0b7d90afd906c0d16b8b929656fb6bf27152a991c65130551c"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped______________________________________________",
+      "property": "Attribute",
+      "value": "untyped______________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped______________________________________________.epf.b64",
+        "decoded_sha256": "f10e5c054aa96eee883f2cbf9b2aca3d09f6496ecf284946e25296962021b1db"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped______________________________________________.xml",
+          "size": 2861,
+          "sha256": "7c3082e7f6d6ffafc005d314e3e1b169c3f58882e74e6b80fa308f49494fc145"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_______________________________________________",
+      "property": "Attribute",
+      "value": "untyped_______________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_______________________________________________.epf.b64",
+        "decoded_sha256": "f509d56f4d50228ddf6c4c4136fb54c2d511c9ba14329aa56a4b9b2d72ba7c09"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_______________________________________________.xml",
+          "size": 2917,
+          "sha256": "3366c0d3119acd4047eb7c52390e56daab71bb2c26302f96943b18062dbcbb7e"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped________________________________________________",
+      "property": "Attribute",
+      "value": "untyped________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped________________________________________________.epf.b64",
+        "decoded_sha256": "925ceeaf914c6efd0c9205d2d583b93e2bcf69606320e03583d5828c6d3f3409"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped________________________________________________.xml",
+          "size": 2926,
+          "sha256": "ac532654bab50935045fd2ae9eae7f8028b04a81f37b5af9eae2df453b0a254b"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_________________________________________________",
+      "property": "Attribute",
+      "value": "untyped_________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_________________________________________________.epf.b64",
+        "decoded_sha256": "3156bb3c898f75115aefdd330e4f24d293092d3e8ca0bb99891bc7238d6a360e"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_________________________________________________.xml",
+          "size": 2932,
+          "sha256": "2e9b621a8136c7557569cfa48cbb41b74803b54d957797d3e5999a4e06320c02"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped__________________________________________________",
+      "property": "Attribute",
+      "value": "untyped__________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped__________________________________________________.epf.b64",
+        "decoded_sha256": "5b8bb9bcb53703602425c9b6f177c363485d0a290bec91326acea8809058ad6f"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped__________________________________________________.xml",
+          "size": 2911,
+          "sha256": "4009a34d77ce517a0f18fcff2a72edd1363d88437d1d5d738645433096e7dbc6"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped___________________________________________________",
+      "property": "Attribute",
+      "value": "untyped___________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped___________________________________________________.epf.b64",
+        "decoded_sha256": "03d6659d612bfc71fead8f912e1af985d8b5ff56d2574f0142f3753b810fc343"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped___________________________________________________.xml",
+          "size": 2921,
+          "sha256": "c04ab3746933fd2fad723b72711c4fab23f7239e64a78c4e97645591c84e3f88"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped____________________________________________________",
+      "property": "Attribute",
+      "value": "untyped____________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped____________________________________________________.epf.b64",
+        "decoded_sha256": "e22c75948c297d04f80b3842f18ff0d2fa2559e0483f21c70c6127304d28aa81"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped____________________________________________________.xml",
+          "size": 2925,
+          "sha256": "21f99d2e99ff6525fab80103abacac07c8a6c0bdbe2324fa5ec4175aad2ea52a"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_____________________________________________________",
+      "property": "Attribute",
+      "value": "untyped_____________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_____________________________________________________.epf.b64",
+        "decoded_sha256": "3e167b4d7cbe7927b08ed387e15b15b9f7e466d8ab07f3c3c2168acc58b7ba2e"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_____________________________________________________.xml",
+          "size": 2934,
+          "sha256": "619708f2203cdccd0b296bceae398ef59e4b28f6d8910dcea98cb3fd2a8f4005"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped______________________________________________________",
+      "property": "Attribute",
+      "value": "untyped______________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped______________________________________________________.epf.b64",
+        "decoded_sha256": "77c4fa8f41fdcc7925e0f8042e3f1ab93444f66724dee6f13c766d5d75153744"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped______________________________________________________.xml",
+          "size": 2935,
+          "sha256": "d926c98ef4964a0f9bd99bbf465a4f38f780b1fb6bf48d4b5fc107f6b87d0597"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_______________________________________________________",
+      "property": "Attribute",
+      "value": "untyped_______________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_______________________________________________________.epf.b64",
+        "decoded_sha256": "8a2940d8d830028f0295700efcc0ddb50684faaf86e75543e5a3ae3fe9f4c2f2"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_______________________________________________________.xml",
+          "size": 2957,
+          "sha256": "c4c66dc19a4aa583136e293da54487a58a6d8288788e16d4d61697aaea5b3a69"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped________________________________________________________",
+      "property": "Attribute",
+      "value": "untyped________________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped________________________________________________________.epf.b64",
+        "decoded_sha256": "d409c9730b47884b5032a7047b8986f965be44aeeed306c6819e64191caff354"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped________________________________________________________.xml",
+          "size": 2898,
+          "sha256": "f721e56cb9e6ed85f232de244d74a124f14c761bb216d3fd20f0e248ca16a87e"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_________________________________________________________",
+      "property": "Attribute",
+      "value": "untyped_________________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_________________________________________________________.epf.b64",
+        "decoded_sha256": "24f01f2bd41b00de8806bb3088f3e207c4de44e5fe50084564a3b3cfdd5d33b8"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_________________________________________________________.xml",
+          "size": 2917,
+          "sha256": "bd18f732fa277b5c86f02275fcc4cdd5fe79612b070202d69e7b41600b76833c"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped__________________________________________________________",
+      "property": "Attribute",
+      "value": "untyped__________________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped__________________________________________________________.epf.b64",
+        "decoded_sha256": "c30983f7a3af3d77f8660847e6c654760656ff886972ebb890a738f7b51a0ff7"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped__________________________________________________________.xml",
+          "size": 2910,
+          "sha256": "94f01295a12533dd22d7c1a3bb1ca1cbdf333610d69591f69b2b7b25b15bb415"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped___________________________________________________________",
+      "property": "Attribute",
+      "value": "untyped___________________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped___________________________________________________________.epf.b64",
+        "decoded_sha256": "a5b50827ab3fb13758bbedbf0506228314f5a45c37446dcb471088b8ff2b40ea"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped___________________________________________________________.xml",
+          "size": 2922,
+          "sha256": "e86a62aebfec7807d85a8a50970d7ba60050d896878bbb877205e234c5c2f42e"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped____________________________________________________________",
+      "property": "Attribute",
+      "value": "untyped____________________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped____________________________________________________________.epf.b64",
+        "decoded_sha256": "d72d21410eb63d155ddb6214c1839cc4310bdd2646fe81ee5b06b90251b1106b"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped____________________________________________________________.xml",
+          "size": 2913,
+          "sha256": "80b9dc9f505107b9d43fd2643908cd9fc1cfec109f9dc96757be40763a53cfa8"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped_____________________________________________________________",
+      "property": "Attribute",
+      "value": "untyped_____________________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped_____________________________________________________________.epf.b64",
+        "decoded_sha256": "72b7b614e91ef416ad0dad8d0552113840df7ac0744d91a73ee19ce09b77cba5"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped_____________________________________________________________.xml",
+          "size": 2964,
+          "sha256": "892108bf86c35b184b3745933a5f78e8e50bb34a2de337059165caed95c39bc0"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_untyped______________________________________________________________",
+      "property": "Attribute",
+      "value": "untyped______________________________________________________________",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_untyped______________________________________________________________.epf.b64",
+        "decoded_sha256": "375c209dcce4270f10066e9d234742eac279fb5747bf5456091ae4326429c93e"
+      },
+      "files": [
+        {
+          "path": "CovAttr_untyped______________________________________________________________.xml",
+          "size": 2990,
+          "sha256": "7af9b8248b55ab729aa8abbb405e10fe7d14ca7c8bdfda2f70db2544ef1a68f9"
+        }
+      ]
+    },
+    {
+      "name": "CovAttr_xs_decimal",
+      "property": "Attribute",
+      "value": "xs_decimal",
+      "source": "donor",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovAttr_xs_decimal.epf.b64",
+        "decoded_sha256": "1b378415af8a2309aef6f437cb5862145432f443fe86e6ea0b3e10345f8e4230"
+      },
+      "files": [
+        {
+          "path": "CovAttr_xs_decimal.xml",
+          "size": 2745,
+          "sha256": "b9c90fdb79b51c730aabb8028fd86603cfe0cb3862ed6b76492bfec50836bc20"
+        }
+      ]
+    }
+  ]
+}

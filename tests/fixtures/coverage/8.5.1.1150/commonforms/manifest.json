@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-commonforms",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "97e67fc8a48ce82ffb8e4595d9730c592133d5acc98c12aa2d3e8b7e83b78bb3",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79132,
+    "decoded_sha256": "1934c5d530c43adad788d2a33e20fd7c163d1eaec5d88d6606fbdc79fae6fe1a",
+    "encoded_sha256": "483b5f13f6725d2c0a41998861525647ffe03452710e5c794fe8bddcc7c26243"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11318,
+          "sha256": "1cbe945df9605eba6b38aded290e9e00318bcf2cf8506b801e449b024634a111"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "9af5a667de5ea34622b685dad6625c6fb1acccd6c0972373d272b93ed227a6f8"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovTemplate.xml",
+          "size": 1626,
+          "sha256": "9a25433fb75dd4bcb91258c32863b0fd41c2486cb9c27eebd53ed2d4486a707f"
+        }
+      ]
+    },
+    {
+      "name": "CovFormType_Managed",
+      "property": "FormType",
+      "kind": "enum",
+      "value": "Managed",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFormType_Managed.xml",
+          "size": 1633,
+          "sha256": "db438523736864d47cafb796e3febacba11af2b575235e0c3826c9d75962e67e"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovIncludeHelpInContents_true.xml",
+          "size": 1643,
+          "sha256": "b3a5cbfa6151ab5ba92c9f9d7884eac5b29c9b58b6964e53868a0e6abfc25b70"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovUseStandardCommands_false.xml",
+          "size": 1644,
+          "sha256": "55745b2cde8edcbbfc36bb17a76e9033a5015da625c714f5a4100ac559e19fe4"
+        }
+      ]
+    },
+    {
+      "name": "CovExplanation_Cov",
+      "property": "Explanation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovExplanation_Cov.xml",
+          "size": 1745,
+          "sha256": "ec1147cbca8e5edf634810fe193b0c11f2417ee2f8bc251df1fab4940f0ed87f"
+        }
+      ]
+    }
+  ]
+}

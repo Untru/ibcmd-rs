@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-compatible-form-layouts",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "0eee71e6f0ed35995e13a4a6f588fcc68d12eb9da5331b9cdfdeb414fbb3a4e6",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 81281,
+    "decoded_sha256": "927b6023bc6b4387d530e230d754ed142b93798273a624005e4b493b9dbf280e",
+    "encoded_sha256": "34bcd622a855563f5fd06b70b38192bb868bf15d0bc0c2d21e55196897db600a"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11221,
+          "sha256": "2d43922946d4af95d3b2c6ad1c66df73c5d94aa1fb581bedabe7b7fcfa72d0da"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "9af5a667de5ea34622b685dad6625c6fb1acccd6c0972373d272b93ed227a6f8"
+        }
+      ]
+    },
+    {
+      "name": "CovCompatibleFormTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCompatibleFormTemplate/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovCompatibleFormTemplate.xml",
+          "size": 1639,
+          "sha256": "91bf61e68461208525c5f779481a9af0c609582feb119fb4d42c95db1f20beaa"
+        }
+      ]
+    },
+    {
+      "name": "CovCompatibleTable",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCompatibleTable/Ext/Form.xml",
+          "size": 3167,
+          "sha256": "8ffd9d4921973f0fe088b6bdcdb80f68ec255c051a9db823bc75c1547c4f7060"
+        },
+        {
+          "path": "CommonForms/CovCompatibleTable.xml",
+          "size": 1632,
+          "sha256": "6728382c94a8a3f94625d3fe194183dff290a7a24985e2305e8af9bdde5fe870"
+        }
+      ]
+    },
+    {
+      "name": "CovCompatiblePictureFont",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCompatiblePictureFont/Ext/Form.xml",
+          "size": 1391,
+          "sha256": "a0e172ee0819c22f11e54199d000b3f615445b7c00f3f6069c5452e1fe37d66b"
+        },
+        {
+          "path": "CommonForms/CovCompatiblePictureFont.xml",
+          "size": 1638,
+          "sha256": "6c1e1f104853af70087d35bae47b031c44cdcacf8847f07c4526eaf41774a0f4"
+        }
+      ]
+    }
+  ]
+}

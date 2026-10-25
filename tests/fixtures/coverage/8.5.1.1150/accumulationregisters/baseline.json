@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovEnableTotalsSplitting_true",
+    "CovIncludeHelpInContents_true",
+    "CovRegisterType_Turnovers",
+    "CovTemplate",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

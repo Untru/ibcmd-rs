@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "collection": "Catalogs",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovOwnedUnits",
+      "set": {}
+    },
+    {
+      "name": "CovOwnedProducts",
+      "set": {},
+      "template": "metadata/product.xml"
+    },
+    {
+      "name": "CovOwnedBindingCatalog",
+      "set": {},
+      "template": "metadata/owner.xml",
+      "files": {
+        "Forms/DeepForm.xml": "forms/DeepForm.xml",
+        "Forms/DeepForm/Ext/Form.xml": "forms/DeepForm/Form.xml",
+        "Forms/DeepForm/Ext/Form/Module.bsl": "forms/DeepForm/Module.bsl",
+        "Forms/SpaceForm.xml": "forms/SpaceForm.xml",
+        "Forms/SpaceForm/Ext/Form.xml": "forms/SpaceForm/Form.xml",
+        "Forms/SpaceForm/Ext/Form/Module.bsl": "forms/SpaceForm/Module.bsl",
+        "Forms/EventsForm.xml": "forms/EventsForm.xml",
+        "Forms/EventsForm/Ext/Form.xml": "forms/EventsForm/Form.xml",
+        "Forms/EventsForm/Ext/Form/Module.bsl": "forms/EventsForm/Module.bsl",
+        "Forms/TableForm.xml": "forms/TableForm.xml",
+        "Forms/TableForm/Ext/Form.xml": "forms/TableForm/Form.xml",
+        "Forms/TableForm/Ext/Form/Module.bsl": "forms/TableForm/Module.bsl"
+      }
+    },
+    {
+      "name": "CovOwnedProductsAlt",
+      "set": {},
+      "template": "metadata/product.xml"
+    },
+    {
+      "name": "CovOwnedDefinedCatalog",
+      "set": {},
+      "template": "metadata/CovOwnedDefinedCatalog.xml",
+      "files": {
+        "Forms/DeepForm.xml": "variants/CovOwnedDefinedCatalog/forms/DeepForm.xml",
+        "Forms/DeepForm/Ext/Form.xml": "variants/CovOwnedDefinedCatalog/forms/DeepForm/Form.xml",
+        "Forms/DeepForm/Ext/Form/Module.bsl": "variants/CovOwnedDefinedCatalog/forms/DeepForm/Module.bsl",
+        "Forms/TableForm.xml": "variants/CovOwnedDefinedCatalog/forms/TableForm.xml",
+        "Forms/TableForm/Ext/Form.xml": "variants/CovOwnedDefinedCatalog/forms/TableForm/Form.xml",
+        "Forms/TableForm/Ext/Form/Module.bsl": "variants/CovOwnedDefinedCatalog/forms/TableForm/Module.bsl",
+        "Forms/DeepInputForm.xml": "variants/CovOwnedDefinedCatalog/forms/DeepInputForm.xml",
+        "Forms/DeepInputForm/Ext/Form.xml": "variants/CovOwnedDefinedCatalog/forms/DeepInputForm/Form.xml",
+        "Forms/DeepInputForm/Ext/Form/Module.bsl": "variants/CovOwnedDefinedCatalog/forms/DeepInputForm/Module.bsl"
+      }
+    },
+    {
+      "name": "CovOwnedUnionCatalog",
+      "set": {},
+      "template": "metadata/CovOwnedUnionCatalog.xml",
+      "files": {
+        "Forms/TableForm.xml": "variants/CovOwnedUnionCatalog/forms/TableForm.xml",
+        "Forms/TableForm/Ext/Form.xml": "variants/CovOwnedUnionCatalog/forms/TableForm/Form.xml",
+        "Forms/TableForm/Ext/Form/Module.bsl": "variants/CovOwnedUnionCatalog/forms/TableForm/Module.bsl"
+      }
+    }
+  ],
+  "required_variants": [
+    "CovOwnedUnits",
+    "CovOwnedProducts",
+    "CovOwnedProductsAlt"
+  ]
+}

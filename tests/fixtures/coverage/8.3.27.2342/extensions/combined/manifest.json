@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "kind": "extension",
+  "set": "8.3.27.2342-xml-2.20-extensions-combined",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "extension create -> config import --extension -> export (1) -> config save --extension -> extension create + config load --extension in a fresh base -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "3cf91aa4a9b3cdb4d2dde97d03b60dbf04ee261d5114b70f3cd5a2341e05f559",
+  "sources": [
+    {
+      "set": "8.3.27.2342-xml-2.20-extensions-basic",
+      "path": "basic",
+      "manifest_sha256": "2a558f491a353bc8ecc3f9bf085ad95ce6f773394ba98611fe7d339f634cce03"
+    }
+  ],
+  "variants": [
+    {
+      "name": "CovCombined",
+      "property": "Combined",
+      "value": "basic",
+      "source": "combined",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovCombined.cfe.b64",
+        "decoded_sha256": "ff12e488c71518d7eecba9a4155ff3585dd3f5aea07908e2c27b8e4ae66cc38b"
+      },
+      "files": [
+        {
+          "path": "CovCombined/Catalogs/CovBase.xml",
+          "size": 2663,
+          "sha256": "32f01e08b559abfa25043aa9ded0239a6162c3babb27b100c0b379cf42e68408"
+        },
+        {
+          "path": "CovCombined/Catalogs/Cov_Own.xml",
+          "size": 4458,
+          "sha256": "81225e5745e247adc39b254747b7edb099372fcf5b0c1f4e968d03aee7c68203"
+        },
+        {
+          "path": "CovCombined/Configuration.xml",
+          "size": 3265,
+          "sha256": "864e88baad4905d811bd88b75a16430649698a1ed4cefd420fded1b7fd03566c"
+        },
+        {
+          "path": "CovCombined/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "db2ac8c779d4c19157a567338c490e1fb32c106d11b94ae83cc8487ab05d7be0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<AccountingRegister uuid="a8691948-3fee-5424-869d-c74ec0f81897">
+		<InternalInfo>
+			<xr:GeneratedType name="AccountingRegisterRecord.CovUseStandardCommands_false_Bk" category="Record">
+				<xr:TypeId>ffbcec23-8399-5a1f-ac2d-845b7738c59a</xr:TypeId>
+				<xr:ValueId>1e3741ea-87cc-5385-a497-4a4681755e42</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterExtDimensions.CovUseStandardCommands_false_Bk" category="ExtDimensions">
+				<xr:TypeId>6ae6147e-f1b6-5d56-ba10-863c1655eb09</xr:TypeId>
+				<xr:ValueId>eb520a6b-ff03-5c30-96ee-b6b212f1ffb3</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterRecordSet.CovUseStandardCommands_false_Bk" category="RecordSet">
+				<xr:TypeId>7d9d2c6a-1241-5103-9165-e408d8792b09</xr:TypeId>
+				<xr:ValueId>8a438972-e565-5462-a63e-96af88ec5b0e</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterRecordKey.CovUseStandardCommands_false_Bk" category="RecordKey">
+				<xr:TypeId>1386fefa-a263-58f1-b725-3e55d3f7fbf1</xr:TypeId>
+				<xr:ValueId>99bfb4f5-7686-51f4-9af2-7d523e8655a3</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterSelection.CovUseStandardCommands_false_Bk" category="Selection">
+				<xr:TypeId>0e370fbf-2f96-5601-a4c7-dbaa8402feaf</xr:TypeId>
+				<xr:ValueId>86419251-9d9b-517d-9798-a04dec447d97</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterList.CovUseStandardCommands_false_Bk" category="List">
+				<xr:TypeId>6acc42a9-03a1-59f2-8333-740ec22cb533</xr:TypeId>
+				<xr:ValueId>5feed4d5-4aec-57dc-96e7-266c6c87c6a6</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="AccountingRegisterManager.CovUseStandardCommands_false_Bk" category="Manager">
+				<xr:TypeId>3b8d74fb-2397-5604-8002-ba9cbda7e731</xr:TypeId>
+				<xr:ValueId>76f261f9-8e4a-5868-b0ee-1bf457eccd0d</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovUseStandardCommands_false_Bk</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>false</UseStandardCommands>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<ChartOfAccounts>ChartOfAccounts.CovAccounts</ChartOfAccounts>
+			<Correspondence>false</Correspondence>
+			<PeriodAdjustmentLength>0</PeriodAdjustmentLength>
+			<DefaultListForm/>
+			<AuxiliaryListForm/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<EnableTotalsSplitting>false</EnableTotalsSplitting>
+			<FullTextSearch>DontUse</FullTextSearch>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+		</Properties>
+		<ChildObjects>
+			<Resource uuid="eb4f239b-3909-5eb7-bb3c-79d5318c1b29">
+				<Properties>
+					<Name>CovResource</Name>
+					<Synonym/>
+					<Comment/>
+					<Type>
+						<v8:Type>xs:decimal</v8:Type>
+						<v8:NumberQualifiers>
+							<v8:Digits>10</v8:Digits>
+							<v8:FractionDigits>0</v8:FractionDigits>
+							<v8:AllowedSign>Any</v8:AllowedSign>
+						</v8:NumberQualifiers>
+					</Type>
+					<PasswordMode>false</PasswordMode>
+					<Format/>
+					<EditFormat/>
+					<ToolTip/>
+					<MarkNegatives>false</MarkNegatives>
+					<Mask/>
+					<MultiLine>false</MultiLine>
+					<ExtendedEdit>false</ExtendedEdit>
+					<MinValue xsi:nil="true"/>
+					<MaxValue xsi:nil="true"/>
+					<FillChecking>DontCheck</FillChecking>
+					<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+					<ChoiceParameterLinks/>
+					<ChoiceParameters/>
+					<QuickChoice>Auto</QuickChoice>
+					<CreateOnInput>Auto</CreateOnInput>
+					<ChoiceForm/>
+					<LinkByType/>
+					<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+					<Balance>true</Balance>
+					<AccountingFlag/>
+					<ExtDimensionAccountingFlag/>
+					<FullTextSearch>Use</FullTextSearch>
+				</Properties>
+			</Resource>
+		</ChildObjects>
+	</AccountingRegister>
+</MetaDataObject>

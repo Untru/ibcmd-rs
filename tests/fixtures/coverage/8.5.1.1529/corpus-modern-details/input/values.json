@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovModernVerticalSingle",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernVerticalSingle.xml"
+      }
+    },
+    {
+      "name": "CovModernChildrenAlign",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernChildrenAlign.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelDecorationTitleLevel2",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelDecorationTitleLevel2.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelDecorationTitleLevel4",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelDecorationTitleLevel4.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelDecorationTextLevel3",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelDecorationTextLevel3.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelDecorationAutoBold",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelDecorationAutoBold.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelFieldTitleLevel2",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelFieldTitleLevel2.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelFieldTitleLevel4",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelFieldTitleLevel4.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelFieldTextLevel3",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelFieldTextLevel3.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelFieldAutoBold",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelFieldAutoBold.xml"
+      }
+    },
+    {
+      "name": "CovModernUsualGroupTitleLevel2",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernUsualGroupTitleLevel2.xml"
+      }
+    },
+    {
+      "name": "CovModernUsualGroupTitleLevel4",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernUsualGroupTitleLevel4.xml"
+      }
+    },
+    {
+      "name": "CovModernUsualGroupTextLevel3",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernUsualGroupTextLevel3.xml"
+      }
+    },
+    {
+      "name": "CovModernUsualGroupAutoBold",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernUsualGroupAutoBold.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelFieldUseCopy",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelFieldUseCopy.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelFieldCellHyperlinkRepresentation",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelFieldCellHyperlinkRepresentation.xml"
+      }
+    },
+    {
+      "name": "CovModernInputFieldCellHyperlinkRepresentation",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernInputFieldCellHyperlinkRepresentation.xml"
+      }
+    },
+    {
+      "name": "CovModernInputFieldWidthInCard",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernInputFieldWidthInCard.xml"
+      }
+    },
+    {
+      "name": "CovModernRadioButtonFieldHorizontalStretch",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernRadioButtonFieldHorizontalStretch.xml"
+      }
+    },
+    {
+      "name": "CovModernInputFieldAutofillHint",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernInputFieldAutofillHint.xml"
+      }
+    },
+    {
+      "name": "CovModernTrackBarFieldMarkingAppearance",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernTrackBarFieldMarkingAppearance.xml"
+      }
+    },
+    {
+      "name": "CovModernCommandBarAppearance",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernCommandBarAppearance.xml"
+      }
+    },
+    {
+      "name": "CovModernColumnGroupCard",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernColumnGroupCard.xml"
+      }
+    },
+    {
+      "name": "CovModernUsualGroupBackColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernUsualGroupBackColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelDecorationTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelDecorationTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelDecorationBackColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelDecorationBackColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelFieldTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelFieldTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovModernButtonTextColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernButtonTextColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovModernPictureDecorationPictureColorPalette",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernPictureDecorationPictureColorPalette.xml"
+      }
+    },
+    {
+      "name": "CovModernPictureAppearanceUpArrowGray",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernPictureAppearanceUpArrowGray.xml"
+      }
+    },
+    {
+      "name": "CovModernPictureGrayedAll",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernPictureGrayedAll.xml"
+      }
+    },
+    {
+      "name": "CovModernPictureStartVideoconference",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernPictureStartVideoconference.xml"
+      }
+    },
+    {
+      "name": "CovModernPictureDontNotify",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernPictureDontNotify.xml"
+      }
+    },
+    {
+      "name": "CovModernInputPictureExternalUser",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernInputPictureExternalUser.xml"
+      }
+    },
+    {
+      "name": "CovModernInputMultipleValueEvent",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernInputMultipleValueEvent.xml"
+      }
+    },
+    {
+      "name": "CovModernGeographicalSchema",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernGeographicalSchema.xml"
+      }
+    },
+    {
+      "name": "CovModernPdfGray",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernPdfGray.xml"
+      }
+    },
+    {
+      "name": "CovModernRootExcludePreview",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernRootExcludePreview.xml"
+      }
+    },
+    {
+      "name": "CovModernRootExcludeEditList",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernRootExcludeEditList.xml"
+      }
+    },
+    {
+      "name": "CovModernChoicePeriod",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernChoicePeriod.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  }
+}

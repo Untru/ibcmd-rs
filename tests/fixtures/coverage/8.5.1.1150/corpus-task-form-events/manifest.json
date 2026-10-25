@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-task-form-events",
+  "collection": "Tasks",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "979b56cf900486d05b6a6f8e7f6c728a43d9fc4570ef23c47e70ed89e4ae6664",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 78613,
+    "decoded_sha256": "9c31f4e0920121d0b5b34136eed1ce8c433286c9af11e64746a7beb6bf87b340",
+    "encoded_sha256": "ced2a82da0400148c4bb59c57daed57f45f2f89a619bdf3d2c0c2d322964317f"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11093,
+          "sha256": "e0e697e8f0fe76d93b1ae790772585f74fdf5747ad6c4958edd367bb49a1ba1d"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "383fb4a76d671eb609d07e468fb341f7267266e20a4aecb5b029173e310c5530"
+        }
+      ]
+    },
+    {
+      "name": "CovEventTask",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Tasks/CovEventTask/Forms/EventsForm/Ext/Form/Module.bsl",
+          "size": 1052,
+          "sha256": "c481d0f8694138b275ee20d564fabb97795ecb7b471d0dc05521e1a17120ed12"
+        },
+        {
+          "path": "Tasks/CovEventTask/Forms/EventsForm/Ext/Form.xml",
+          "size": 2181,
+          "sha256": "3869e0cc57bbff767fca6140958c8b36fbd0af64ab19dbf926acab6b298081a4"
+        },
+        {
+          "path": "Tasks/CovEventTask/Forms/EventsForm.xml",
+          "size": 1628,
+          "sha256": "9441782e818be5ea355d50777cd34fc9c658bc5900a576583d25de2810d3e5e9"
+        },
+        {
+          "path": "Tasks/CovEventTask.xml",
+          "size": 4157,
+          "sha256": "c29107edcb6553c2707cc6def08a63b2b1fb0564420ccc6c979ff27e8bd8a30c"
+        }
+      ]
+    }
+  ]
+}

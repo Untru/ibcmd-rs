@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-english-composition",
+  "collection": "CommonTemplates",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "d72166553d78053adcfad2c50fee9df3f0b3be09328d711afc41cec54e0bb8cd",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 77637,
+    "decoded_sha256": "756f10d8758d41f5117f077412dce6acb1cc5cedd1dbe18e1334d88aa9b58e87",
+    "encoded_sha256": "d7269e6d8ce3be608f7e47f17ebccf5ad71ef83066b4507b976dd0c7ac7aae31"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11148,
+          "sha256": "018bd6b1d7f03c55e7f2f8f820c8ad7a204bc463cb410b19b0230302857a8d17"
+        },
+        {
+          "path": "Languages/English.xml",
+          "size": 1292,
+          "sha256": "14fd6dfa6268f7820a015dabf9fffa9d4f12c474f5a04670b0fc9c7d1d4e1ee3"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "360bc02505becb921463299bef36a4b1c53a336f815ae1517a56e96287cb5013"
+        }
+      ]
+    },
+    {
+      "name": "CovEnglishComposition",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovEnglishComposition/Ext/Template.xml",
+          "size": 1261,
+          "sha256": "c6623ed61cd86b75d48d34a3157216e9b94d61b0152798f785246ab817eda65c"
+        },
+        {
+          "path": "CommonTemplates/CovEnglishComposition.xml",
+          "size": 1225,
+          "sha256": "3988ea141a9224bf8a37e393fddaee76ba33b1a62ccfc847b7ffa5be2a9bfc9c"
+        }
+      ]
+    }
+  ]
+}

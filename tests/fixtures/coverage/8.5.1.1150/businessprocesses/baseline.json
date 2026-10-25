@@ -1,0 +1,13 @@
+{
+  "equal": [
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+    "CovExplanation_Cov",
+    "CovIncludeHelpInContents_true",
+    "CovListPresentation_Cov",
+    "CovNumberLength_11",
+    "CovTemplate",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

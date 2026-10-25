@@ -1,0 +1,73 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<ExchangePlan uuid="7503757d-4295-52e9-a01a-8d7bb10ce7ed">
+		<InternalInfo>
+			<xr:ThisNode>041295ca-c326-5a44-bc60-d01f8b59603c</xr:ThisNode>
+			<xr:GeneratedType name="ExchangePlanObject.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="Object">
+				<xr:TypeId>4de33929-0f9e-51ef-a12d-63c1539e9778</xr:TypeId>
+				<xr:ValueId>e8fca4c6-5632-5726-bef6-a812a7ff8c7c</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExchangePlanRef.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="Ref">
+				<xr:TypeId>1abe85f2-b81f-545c-b97b-0545b5a6f259</xr:TypeId>
+				<xr:ValueId>c6db27fd-f144-5283-9c4d-c971dbcbc42e</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExchangePlanSelection.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="Selection">
+				<xr:TypeId>82c06030-9668-5fd8-9e3c-b9991112fe5e</xr:TypeId>
+				<xr:ValueId>fbce832d-ab23-5120-a823-cc04968e67ff</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExchangePlanList.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="List">
+				<xr:TypeId>1145c5e7-5cd2-5b7a-895c-014e4f8804a2</xr:TypeId>
+				<xr:ValueId>ae75512d-4698-5f5d-ad98-5396cfa16693</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExchangePlanManager.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="Manager">
+				<xr:TypeId>c7d3ab1d-1bc2-5704-be09-d2861e07d1a4</xr:TypeId>
+				<xr:ValueId>a0818c15-6f6a-53a4-b043-b803447451d0</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovUpdateDataHistoryImmediatelyAfterWrite_true</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<CodeLength>9</CodeLength>
+			<CodeAllowedLength>Variable</CodeAllowedLength>
+			<DescriptionLength>25</DescriptionLength>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<EditType>InDialog</EditType>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<InputByString>
+				<xr:Field>ExchangePlan.CovUpdateDataHistoryImmediatelyAfterWrite_true.StandardAttribute.Description</xr:Field>
+				<xr:Field>ExchangePlan.CovUpdateDataHistoryImmediatelyAfterWrite_true.StandardAttribute.Code</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<Characteristics/>
+			<BasedOn/>
+			<DistributedInfoBase>false</DistributedInfoBase>
+			<IncludeConfigurationExtensions>false</IncludeConfigurationExtensions>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>true</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects/>
+	</ExchangePlan>
+</MetaDataObject>

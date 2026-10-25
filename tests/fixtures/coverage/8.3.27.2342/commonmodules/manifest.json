@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-commonmodules",
+  "collection": "CommonModules",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "f4577ea36ada8b6282d06f1cbcb24eca11191c0a85599cd9813cd0a5e26ffa0d",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 82914,
+    "decoded_sha256": "0b685d4b0640e45949c3cbff05edc80c57ada1fc4e6d2619c6b1a379d5930820",
+    "encoded_sha256": "6aa01b31561dc1a2978de0b6fcdee668fbeb781186d077123245f2cb1b3aa713"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10881,
+          "sha256": "98f455020c83f60677a53c15c29591ba5b7da7e7b12d82be845a27fbcbc4f3d8"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "27928d2ff0d3dad0d072e00441f7813905ac5d16af55f8b09349a08221199fb7"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovTemplate.xml",
+          "size": 1454,
+          "sha256": "26a6c961cd4d14fca2d3462270956b4335b83a0a47ae6213778634d27e46c541"
+        }
+      ]
+    },
+    {
+      "name": "CovGlobal_true",
+      "property": "Global",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovGlobal_true.xml",
+          "size": 1456,
+          "sha256": "6832100d1d84a37a123b29c1d290201efd1f9586320ef009b58fc6a088d8f372"
+        }
+      ]
+    },
+    {
+      "name": "CovClientManagedApplication_true",
+      "property": "ClientManagedApplication",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovClientManagedApplication_true.xml",
+          "size": 1474,
+          "sha256": "845afeac440b233d1ad154dc6343fc764b40a609b280f9e3a86a96f7f6e36fbf"
+        }
+      ]
+    },
+    {
+      "name": "CovServer_true",
+      "property": "Server",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovServer_true.xml",
+          "size": 1456,
+          "sha256": "0ae4f5a3e594bb37593486f486182fbdd9e196cb5f549c68bff80a017b4bdcb6"
+        }
+      ]
+    },
+    {
+      "name": "CovExternalConnection_true",
+      "property": "ExternalConnection",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovExternalConnection_true.xml",
+          "size": 1468,
+          "sha256": "544a1e8463e724b6928a6c485e08c0fc54a0dda2228a3add21da4367220c12c4"
+        }
+      ]
+    },
+    {
+      "name": "CovClientOrdinaryApplication_false",
+      "property": "ClientOrdinaryApplication",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovClientOrdinaryApplication_false.xml",
+          "size": 1478,
+          "sha256": "9a3378dc2c08f431221d004f7ec0e3ccf970edfde54dda39f4dc7ecc8d57d414"
+        }
+      ]
+    },
+    {
+      "name": "CovServerCall_true",
+      "property": "ServerCall",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovServerCall_true.xml",
+          "size": 1460,
+          "sha256": "c06525d53eea616df4a9b903a4e11783d4b304b01176729e249fb9fd77712959"
+        }
+      ]
+    },
+    {
+      "name": "CovPrivileged_true",
+      "property": "Privileged",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovPrivileged_true.xml",
+          "size": 1460,
+          "sha256": "38eac0af728c9b9e65e90d1d398e8e45e03f5f6a11f1d55ceaa1813dd9851930"
+        }
+      ]
+    },
+    {
+      "name": "CovReturnValuesReuse_DuringRequest",
+      "property": "ReturnValuesReuse",
+      "kind": "enum",
+      "value": "DuringRequest",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovReturnValuesReuse_DuringRequest.xml",
+          "size": 1483,
+          "sha256": "be9716267920591331685f85dbb4d7b3020c9834751cf2933993501ffbdcf753"
+        }
+      ]
+    },
+    {
+      "name": "CovReturnValuesReuse_DuringSession",
+      "property": "ReturnValuesReuse",
+      "kind": "enum",
+      "value": "DuringSession",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonModules/CovReturnValuesReuse_DuringSession.xml",
+          "size": 1483,
+          "sha256": "3521f815a2e8bf06f4ba7ad477d9502fbd6e60c7eb3a36dccdc2c363f1642ed5"
+        }
+      ]
+    }
+  ]
+}

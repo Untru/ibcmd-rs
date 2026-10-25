@@ -1,0 +1,15 @@
+{
+  "equal": [
+    "CovFacetCollapseItemsByImportanceVariant",
+    "CovFacetConversationsRepresentation",
+    "CovFacetPlannerBeforeCreate",
+    "CovFacetPlannerBeforeStartQuickEdit",
+    "CovFacetPlannerSelection",
+    "CovFacetRootFillCheckProcessingAtServer",
+    "CovFacetRootNotificationProcessing",
+    "CovFacetRootOnLoadDataFromSettingsAtServer",
+    "CovFacetRootURLProcessing",
+    "CovFacetTemplate",
+    "configuration"
+  ]
+}

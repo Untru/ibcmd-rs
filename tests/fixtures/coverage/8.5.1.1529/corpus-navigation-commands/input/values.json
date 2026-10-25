@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovNavigationAccountingRegister",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovNavigationAccountingRegister.xml"
+      }
+    },
+    {
+      "name": "CovNavigationChartOfAccounts",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovNavigationChartOfAccounts.xml"
+      }
+    },
+    {
+      "name": "CovPlannerBackCommand",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovPlannerBackCommand.xml"
+      }
+    },
+    {
+      "name": "CovExchangePlanHistory",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovExchangePlanHistory.xml"
+      }
+    },
+    {
+      "name": "CovDynamicCreateByParameter",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovDynamicCreateByParameter.xml"
+      }
+    },
+    {
+      "name": "CovDynamicEditList",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovDynamicEditList.xml"
+      }
+    },
+    {
+      "name": "CovTableOnlySelectAll",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovTableOnlySelectAll.xml"
+      }
+    },
+    {
+      "name": "CovTableOnlyDeselectAll",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovTableOnlyDeselectAll.xml"
+      }
+    },
+    {
+      "name": "CovRecordSetRowPicture",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovRecordSetRowPicture.xml"
+      }
+    },
+    {
+      "name": "CovReportExcludePreview",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovReportExcludePreview.xml"
+      }
+    },
+    {
+      "name": "CovGeneratedUserSettingsGroup",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovGeneratedUserSettingsGroup.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  }
+}

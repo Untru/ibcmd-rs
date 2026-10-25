@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-spreadsheet-standard-picture",
+  "collection": "CommonTemplates",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "e053d93cd7568a156fc9e1aa3e8fc216d6f06b801c184a6d38bc957f45d79b1b",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76861,
+    "decoded_sha256": "cdbb59ea3aef1677843c6b05bc2cc4165e4bbd3e18667aea6d2aa27071042b4e",
+    "encoded_sha256": "ac520c7942d50deae5f6be7881ebd3ed80b441aa0fda967d14719495a4583702"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10373,
+          "sha256": "a79a3a0be15a418d4b02b804b17e8f0a868522bc3703001ebbcd15fd54a4867d"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "a7e657ad0d2c679415df010765ca0b12d693369db0c73558837fe02650540a7b"
+        }
+      ]
+    },
+    {
+      "name": "CovSpreadsheetStandardPicture",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml",
+          "size": 1428,
+          "sha256": "34ba5bc3724a07c9f3be9a90e69e41293d059676a677c27b848c677d91584b68"
+        },
+        {
+          "path": "CommonTemplates/CovSpreadsheetStandardPicture.xml",
+          "size": 1176,
+          "sha256": "f8e9fddaaec0ab3baab2db6a0a73bebf096bed19be7e070d3f9357d21a36935a"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "collection": "CommonTemplates",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovSheetVerticalPageBreak",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetVerticalPageBreak.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    },
+    {
+      "name": "CovSheetPageSizeA4",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetPageSizeA4.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    },
+    {
+      "name": "CovSheetAutoFontHeight",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetAutoFontHeight.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    },
+    {
+      "name": "CovSheetOEMFixedFont",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetOEMFixedFont.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    },
+    {
+      "name": "CovSheetSandyBrown",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetSandyBrown.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    },
+    {
+      "name": "CovSheetDashDotted",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetDashDotted.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    },
+    {
+      "name": "CovSheetGapLine",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetGapLine.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    },
+    {
+      "name": "CovSheetValueListDetail",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetValueListDetail.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    },
+    {
+      "name": "CovSheetAppearanceCheckIcon",
+      "set": {},
+      "files": {
+        "Ext/Template.xml": "bodies/CovSheetAppearanceCheckIcon.xml"
+      },
+      "source": "generated:spreadsheet-facet"
+    }
+  ],
+  "template_files": {
+    "Ext/Template.xml": "bodies/default.xml"
+  }
+}

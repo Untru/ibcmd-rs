@@ -1,0 +1,406 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-form-facets",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "0f7102830214aac90f4ec62ed20671164072f6054f494044dc043f437c30e204",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 108980,
+    "decoded_sha256": "eb5623ee0c8c8e3119c1631eb69017fd24a940b22a640f8b8cccf800a8255652",
+    "encoded_sha256": "8fbcf118847e3081df5411dd63735c4b4aabbd8ed0b3a8aa0e554305a3e38177"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11389,
+          "sha256": "644f056fb57e00b8506084b4d7394c5bbfcf9252baf25f6afa06a6701a9989af"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "4307b3294744a891ded3a94cce374fc4b0757d45fde1b0ffe68998285dc33d87"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetTemplate/Ext/Form.xml",
+          "size": 1035,
+          "sha256": "a82109b8f8731a3c9cb039d555e848f9cbe50e10777e075035183ef93db1ca5b"
+        },
+        {
+          "path": "CommonForms/CovFacetTemplate.xml",
+          "size": 1500,
+          "sha256": "c5dd9854ec15066c7927a5846d8c7a14a47b1832940849c755a656b6dec75edd"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetConversationsRepresentation",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetConversationsRepresentation/Ext/Form.xml",
+          "size": 1105,
+          "sha256": "3d95e668f6653d74df5a71f902dc91041a6220e5f7f15189b6e8dbd20427685c"
+        },
+        {
+          "path": "CommonForms/CovFacetConversationsRepresentation.xml",
+          "size": 1519,
+          "sha256": "26caac0a90fe83c5e880f492cbf39352db42aeff9c7ffd22dced141b48415702"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetCollapseItemsByImportanceVariant",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetCollapseItemsByImportanceVariant/Ext/Form.xml",
+          "size": 1114,
+          "sha256": "4c1e25b8aaf39a9422f3d4e216da59d522626578022e76988db37663c8928341"
+        },
+        {
+          "path": "CommonForms/CovFacetCollapseItemsByImportanceVariant.xml",
+          "size": 1524,
+          "sha256": "705c7eea3589439cd5608d0575fd08a0e389bcc10f59dc2440ecb95597629876"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetRootURLProcessing",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetRootURLProcessing/Ext/Form.xml",
+          "size": 1110,
+          "sha256": "5b5479dd7ca8786a4d347a093e50479ed3c8eabc26102f281e5e7b7503018886"
+        },
+        {
+          "path": "CommonForms/CovFacetRootURLProcessing.xml",
+          "size": 1509,
+          "sha256": "c2f9924b3840104fb20c66e399db63953b89225426bcb31e1d5388b35dbbc30e"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetRootOnLoadDataFromSettingsAtServer",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetRootOnLoadDataFromSettingsAtServer/Ext/Form.xml",
+          "size": 1127,
+          "sha256": "4672bb434018b7a68a96bc675b63852fc35ce6e09c793759391e7823f51b5f66"
+        },
+        {
+          "path": "CommonForms/CovFacetRootOnLoadDataFromSettingsAtServer.xml",
+          "size": 1526,
+          "sha256": "fb7ef290caeac61d4132ad60de583aa7afa285aa315936e704ddb1739e104037"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetRootFillCheckProcessingAtServer",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetRootFillCheckProcessingAtServer/Ext/Form.xml",
+          "size": 1124,
+          "sha256": "cf2f07ccf89600ecca46834bd8344f6ca94582b8aa98707c3f29634483cefe0b"
+        },
+        {
+          "path": "CommonForms/CovFacetRootFillCheckProcessingAtServer.xml",
+          "size": 1523,
+          "sha256": "14c501638b88c4f09e204bdc1ab3d6baf4a612ceda3930be251d479638e29ce7"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetRootNotificationProcessing",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetRootNotificationProcessing/Ext/Form.xml",
+          "size": 1119,
+          "sha256": "d0b7e015516c87a8677c4f21810280212e5d1567056bc46e234ea200ecd39bf0"
+        },
+        {
+          "path": "CommonForms/CovFacetRootNotificationProcessing.xml",
+          "size": 1518,
+          "sha256": "1b2673243f3859353a2e21573c7a6b1114a896b26e236c467f867290f167f355"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetChartMaxWidth",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetChartMaxWidth/Ext/Form.xml",
+          "size": 1299,
+          "sha256": "4dd01975ff22adb27662fef62e0af1c9bf172a795f79bb44490af2ff1545a8d6"
+        },
+        {
+          "path": "CommonForms/CovFacetChartMaxWidth.xml",
+          "size": 1505,
+          "sha256": "8e64b01fabe8c4e2097db1c45d4ecf79496871c0e7d77d26a4e8cc86d1d2e7b8"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetChartAutoMaxWidth",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetChartAutoMaxWidth/Ext/Form.xml",
+          "size": 1310,
+          "sha256": "f309079e9e57d3d1c73966f6195e8627f1d97d282d674e39e95f0ef2e674381d"
+        },
+        {
+          "path": "CommonForms/CovFacetChartAutoMaxWidth.xml",
+          "size": 1509,
+          "sha256": "7289b9115053b2437b94936ce1f03288956f3bda0c292d23a38645d7380fe28c"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetChartAutoMaxHeight",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetChartAutoMaxHeight/Ext/Form.xml",
+          "size": 1312,
+          "sha256": "1fdce2e3343a60706c86724dd6440ad76fbc007440a2ee9ebdcb8be935ad2b97"
+        },
+        {
+          "path": "CommonForms/CovFacetChartAutoMaxHeight.xml",
+          "size": 1510,
+          "sha256": "a72470242be4ed1b4788bec6debeb6b31c9af5f0696d3f3259c845d7462cbe70"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetChartOnActivate",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetChartOnActivate/Ext/Form.xml",
+          "size": 1349,
+          "sha256": "b1254924a4136659de5d69dce12bd250acddd62588e31d4ba9a651504ee9a8a6"
+        },
+        {
+          "path": "CommonForms/CovFacetChartOnActivate.xml",
+          "size": 1507,
+          "sha256": "61e97446cf5e6c38d5c55ecd36e8d50362687c1ce63699a36edd3b6802425da5"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetPlannerBeforeCreate",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetPlannerBeforeCreate/Ext/Form.xml",
+          "size": 1355,
+          "sha256": "5d97545b0c0ed148d040423e25a18acc5b41ffff3d5bb6d91810e31a2c2d3c42"
+        },
+        {
+          "path": "CommonForms/CovFacetPlannerBeforeCreate.xml",
+          "size": 1511,
+          "sha256": "ad3b4d3ca625f3c576f67b68dae6500dd9815f71c5cc4377fb0bf8286a4d51cd"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetPlannerCommandGenerateProcessing",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetPlannerCommandGenerateProcessing/Ext/Form.xml",
+          "size": 1368,
+          "sha256": "943c855cf1f61899aaf4f3ecdbd88b218dc38f39ea0b988357d3e67d3f29e3ed"
+        },
+        {
+          "path": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml",
+          "size": 1524,
+          "sha256": "77baba5d07f9e1a6c349e3126af6f3e61e47f37b642d7ac700caa75598c7f9bd"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetPlannerBeforeStartQuickEdit",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetPlannerBeforeStartQuickEdit/Ext/Form.xml",
+          "size": 1363,
+          "sha256": "78264ffe7cd1a4f7b4671bd59d21ad02e26a2f30f21dcdbd5ed1f9b32228bad0"
+        },
+        {
+          "path": "CommonForms/CovFacetPlannerBeforeStartQuickEdit.xml",
+          "size": 1519,
+          "sha256": "da9cd7cc8f1e7971dceb33ecc61bce36b41c2619fbb4329ab297dc86f3b39602"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetPlannerSelection",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetPlannerSelection/Ext/Form.xml",
+          "size": 1352,
+          "sha256": "32792120eac38194539d3bb337df536daf88d7d93c0abe83205eeeae5d415108"
+        },
+        {
+          "path": "CommonForms/CovFacetPlannerSelection.xml",
+          "size": 1508,
+          "sha256": "6fd15d94cbdcecc7aeff25fd5d6f620de0bb8dcfccce40d8ba2e52f9365f9d7b"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetCommandSpace",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetCommandSpace/Ext/Form.xml",
+          "size": 1174,
+          "sha256": "13a0c1419ba789fc5b8340e7789c219560dd46980639e22764eb949c0a34bc15"
+        },
+        {
+          "path": "CommonForms/CovFacetCommandSpace.xml",
+          "size": 1504,
+          "sha256": "edceb72a18148e18d2c3a2704a14ad26b54172e39b684637ad230366a814d5d7"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetTableExcludesAddAutoSelectedField",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetTableExcludesAddAutoSelectedField/Ext/Form.xml",
+          "size": 3131,
+          "sha256": "57b4a60301478c8bc1111f80b0fad1805d34643cb581e3538b4c84f98a557c4e"
+        },
+        {
+          "path": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+          "size": 1525,
+          "sha256": "bef50d28039a6f3cd38b088c559028f36a0629c971e570572137ad1c99afc258"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetTableExcludesSelectAll",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFacetTableExcludesSelectAll/Ext/Form.xml",
+          "size": 3239,
+          "sha256": "5e04f9d42eff473acae8901b05f52fb4ce5f5d2cb065f4de82a0c08b34e79d7d"
+        },
+        {
+          "path": "CommonForms/CovFacetTableExcludesSelectAll.xml",
+          "size": 1514,
+          "sha256": "61888367bf3ed2bd93961cdfb0e1610a2d574ccd65a3ba9e483ca18b74abd0a8"
+        }
+      ]
+    },
+    {
+      "name": "CovFacetTableExcludesDeselectAll",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:platform-form-facet",
+      "status": "platform_refused",
+      "message": "[ERROR] Импорт конфигурации из XML завершен с ошибкой",
+      "files": []
+    }
+  ]
+}

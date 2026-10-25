@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-graphical-schema-image",
+  "collection": "CommonTemplates",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "98530028136e9e1507fd828709070729f16bf703a2f5afb9f66be229742d2aec",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79827,
+    "decoded_sha256": "8a6ad449939dd9f2335a08b494415badc33565db6380cf17a787c2cd250413a2",
+    "encoded_sha256": "2fae14ea52650cc5de74380d539482e13d568c20e2c00ec62c25695d74d926d6"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11242,
+          "sha256": "615df1bff99da3e5cdbcc141f9b772173866e3a2c3995f3ddeaff8c72dc15da6"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "360bc02505becb921463299bef36a4b1c53a336f815ae1517a56e96287cb5013"
+        }
+      ]
+    },
+    {
+      "name": "CovGraphicalSchemaImage",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaImage/Ext/Template.xml",
+          "size": 1950,
+          "sha256": "d2479b9254d51e34d7dfc6634f443321df2551a2e85dca0fec427e142d26e364"
+        },
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaImage.xml",
+          "size": 1221,
+          "sha256": "e9251b12436f0862104bd4f761cf75530bffac24899ac37595ddedce071cb008"
+        }
+      ]
+    },
+    {
+      "name": "CovGraphicalSchemaPng",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:RGBA-PNG",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaPng/Ext/Template/Items/Probe/Picture.png",
+          "size": 70,
+          "sha256": "4ff6ab670a58c14270e034e2090d9a432caa263a14e0a25785386b0c12f880b5"
+        },
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaPng/Ext/Template.xml",
+          "size": 2123,
+          "sha256": "8f654836dcc29e735690396b2cbd81f0d05fae1acf4dcee6d8191066a67b47e9"
+        },
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaPng.xml",
+          "size": 1219,
+          "sha256": "cd56bbfdcd29ada2728ff5b1e685604f51540d25936f62e9787c60832cedae3c"
+        }
+      ]
+    },
+    {
+      "name": "CovGraphicalSchemaGif",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:palette-GIF",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template/Items/Probe/Picture.gif",
+          "size": 35,
+          "sha256": "6c63cc5063ac82d8bbc925f9a31adf3a87f1510c021e0fde51854d60484b5019"
+        },
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template.xml",
+          "size": 2123,
+          "sha256": "8339da1e213cb8ae38ef00ae71746a8cae2de3aef977e0b9a77276e3bcff6036"
+        },
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaGif.xml",
+          "size": 1219,
+          "sha256": "ac5236746674b0c4ddb9fd62894a2a37e62df8a0c30f78ed97124a286f0928f5"
+        }
+      ]
+    }
+  ]
+}

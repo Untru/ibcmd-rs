@@ -1,0 +1,68 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<AutoCommandBar name="FormCommandBar" id="-1"/>
+	<ChildItems>
+		<Table name="Probe" id="1">
+			<DataPath>Rows</DataPath>
+			<RowFilter xsi:nil="true"/>
+			<ContextMenu name="ProbeContextMenu" id="4"/>
+			<AutoCommandBar name="ProbeCommandBar" id="5"/>
+			<ExtendedTooltip name="ProbeExtendedTooltip" id="6"/>
+			<SearchStringAddition name="ProbeSearchString" id="7">
+				<AdditionSource>
+					<Item>Probe</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="ProbeSearchStringContextMenu" id="8"/>
+				<ExtendedTooltip name="ProbeSearchStringExtendedTooltip" id="9"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="ProbeViewStatus" id="10">
+				<AdditionSource>
+					<Item>Probe</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="ProbeViewStatusContextMenu" id="11"/>
+				<ExtendedTooltip name="ProbeViewStatusExtendedTooltip" id="12"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="ProbeSearchControl" id="13">
+				<AdditionSource>
+					<Item>Probe</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="ProbeSearchControlContextMenu" id="14"/>
+				<ExtendedTooltip name="ProbeSearchControlExtendedTooltip" id="15"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<ColumnGroup name="Columns" id="2">
+					<ShowTitleInCard>true</ShowTitleInCard>
+					<ExtendedTooltip name="ColumnsExtendedTooltip" id="16"/>
+					<ChildItems>
+						<InputField name="Value" id="3">
+							<DataPath>Rows.Value</DataPath>
+							<ContextMenu name="ValueContextMenu" id="17"/>
+							<ExtendedTooltip name="ValueExtendedTooltip" id="18"/>
+						</InputField>
+					</ChildItems>
+				</ColumnGroup>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Rows" id="1">
+			<Type>
+				<v8:Type>v8:ValueTable</v8:Type>
+			</Type>
+			<Columns>
+				<Column name="Value" id="1">
+					<Type>
+						<v8:Type>xs:string</v8:Type>
+						<v8:StringQualifiers>
+							<v8:Length>0</v8:Length>
+							<v8:AllowedLength>Variable</v8:AllowedLength>
+						</v8:StringQualifiers>
+					</Type>
+				</Column>
+			</Columns>
+		</Attribute>
+	</Attributes>
+</Form>

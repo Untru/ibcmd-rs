@@ -199,6 +199,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'edt_release_audit_test failed' }
           python tests/scripts/linux_abi_test.py
           if ($LASTEXITCODE -ne 0) { throw 'linux_abi_test failed' }
+          python -m unittest discover -s tools/coverage -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'coverage generator tests failed' }
 
       - name: Cache Cargo artifacts
         if: steps.scope.outputs.rust == 'true'

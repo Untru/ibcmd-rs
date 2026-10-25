@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "collection": "SettingsStorages",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 1,
+  "properties": [
+    {
+      "name": "DefaultSaveForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultLoadForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliarySaveForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryLoadForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ]
+}

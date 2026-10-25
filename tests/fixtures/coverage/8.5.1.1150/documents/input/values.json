@@ -1,0 +1,391 @@
+{
+  "schema_version": 1,
+  "collection": "Documents",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 25,
+  "properties": [
+    {
+      "name": "UseStandardCommands",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Numerator",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "NumberType",
+      "kind": "enum",
+      "template": "String",
+      "values": []
+    },
+    {
+      "name": "NumberLength",
+      "kind": "number",
+      "template": "9",
+      "values": [
+        {
+          "value": "11",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "NumberAllowedLength",
+      "kind": "enum",
+      "template": "Variable",
+      "values": [
+        {
+          "value": "Fixed",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "NumberPeriodicity",
+      "kind": "enum",
+      "template": "Nonperiodical",
+      "values": [
+        {
+          "value": "Year",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "CheckUnique",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Autonumbering",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Characteristics",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "BasedOn",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "InputByString",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "CreateOnInput",
+      "kind": "enum",
+      "template": "Use",
+      "values": []
+    },
+    {
+      "name": "SearchStringModeOnInputByString",
+      "kind": "enum",
+      "template": "Begin",
+      "values": []
+    },
+    {
+      "name": "FullTextSearchOnInputByString",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": []
+    },
+    {
+      "name": "ChoiceDataGetModeOnInputByString",
+      "kind": "enum",
+      "template": "Directly",
+      "values": []
+    },
+    {
+      "name": "DefaultObjectForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultListForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DefaultChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryObjectForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryListForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Posting",
+      "kind": "enum",
+      "template": "Allow",
+      "values": [
+        {
+          "value": "Deny",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "RealTimePosting",
+      "kind": "enum",
+      "template": "Allow",
+      "values": [
+        {
+          "value": "Deny",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "RegisterRecordsDeletion",
+      "kind": "enum",
+      "template": "AutoDeleteOnUnpost",
+      "values": [
+        {
+          "value": "AutoDelete",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "AutoDeleteOff",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "RegisterRecordsWritingOnPost",
+      "kind": "enum",
+      "template": "WriteSelected",
+      "values": [
+        {
+          "value": "WriteModified",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "SequenceFilling",
+      "kind": "enum",
+      "template": "AutoFill",
+      "values": [
+        {
+          "value": "AutoFillOff",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "RegisterRecords",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "PostInPrivilegedMode",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "UnpostInPrivilegedMode",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "IncludeHelpInContents",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "DataLockFields",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DataLockControlMode",
+      "kind": "enum",
+      "template": "Managed",
+      "values": [
+        {
+          "value": "Automatic",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "FullTextSearch",
+      "kind": "enum",
+      "template": "Use",
+      "values": []
+    },
+    {
+      "name": "ObjectPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "ExtendedObjectPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "ListPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "ExtendedListPresentation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "Explanation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "template": "Auto",
+      "values": [
+        {
+          "value": "DontUse",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "DataHistory",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": []
+    },
+    {
+      "name": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    }
+  ]
+}

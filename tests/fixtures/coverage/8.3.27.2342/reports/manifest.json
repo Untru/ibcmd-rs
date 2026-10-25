@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-reports",
+  "collection": "Reports",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "f15e14c36c64679a965ea40acfaf485884005cf01527046a173a94e0889bd1f3",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79095,
+    "decoded_sha256": "ebef3068b9921dfb4785d0902a3d14196a7d8ea7c8522a8ee3841fd46118951f",
+    "encoded_sha256": "44eac329d25489b0d8bec9a95158cb8bdb229a7c94472abc42586059798cdaf1"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10529,
+          "sha256": "db63eb918ad437bcc12e34ea95f733a1c117182b62d45279429ee0a0fafec178"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "871974fb517f989903e26c2c3c21fea25e2784a4d1854c33a9803ecb63b0c6f9"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Reports/CovTemplate.xml",
+          "size": 1962,
+          "sha256": "c844e54dc0413094c49ebc673c8ca293a8a41b207cfd9f3cf096ccca3adfbaca"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Reports/CovUseStandardCommands_false.xml",
+          "size": 2014,
+          "sha256": "af3a1fe929d0cbe66d26bedc42c8b116c588597de8758115ddd7559748d966bf"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Reports/CovIncludeHelpInContents_true.xml",
+          "size": 2015,
+          "sha256": "d8189b2a0780510f29673468747eb9fe326ddac1591da61c8c8da5d8e30ffb2a"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedPresentation_Cov",
+      "property": "ExtendedPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Reports/CovExtendedPresentation_Cov.xml",
+          "size": 2131,
+          "sha256": "4d5b1722fdc3f3742f6d7f6bff44a6822930531c8f8ac1ebe7b252c35ef46100"
+        }
+      ]
+    },
+    {
+      "name": "CovExplanation_Cov",
+      "property": "Explanation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Reports/CovExplanation_Cov.xml",
+          "size": 2095,
+          "sha256": "f12829d53ad1fdcb6f67c618e02de9a00a7221d68c56ff0bdf762f0c87980610"
+        }
+      ]
+    }
+  ]
+}

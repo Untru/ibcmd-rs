@@ -1,0 +1,294 @@
+{
+  "schema_version": 1,
+  "collection": "CommonAttributes",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 7,
+  "properties": [
+    {
+      "name": "Type",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "PasswordMode",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Format",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "EditFormat",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ToolTip",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "MarkNegatives",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Mask",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "MultiLine",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ExtendedEdit",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "MinValue",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "MaxValue",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "FillFromFillingValue",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "FillValue",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "FillChecking",
+      "kind": "enum",
+      "template": "DontCheck",
+      "values": []
+    },
+    {
+      "name": "ChoiceFoldersAndItems",
+      "kind": "enum",
+      "template": "Items",
+      "values": []
+    },
+    {
+      "name": "ChoiceParameterLinks",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ChoiceParameters",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "QuickChoice",
+      "kind": "enum",
+      "template": "Auto",
+      "values": []
+    },
+    {
+      "name": "CreateOnInput",
+      "kind": "enum",
+      "template": "Auto",
+      "values": []
+    },
+    {
+      "name": "ChoiceForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "LinkByType",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "template": "Auto",
+      "values": []
+    },
+    {
+      "name": "Content",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AutoUse",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": [
+        {
+          "value": "Use",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "DataSeparation",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": [
+        {
+          "value": "Separate",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "SeparatedDataUse",
+      "kind": "enum",
+      "template": "Independently",
+      "values": [
+        {
+          "value": "IndependentlyAndSimultaneously",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "DataSeparationValue",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DataSeparationUse",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ConditionalSeparation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "UsersSeparation",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": [
+        {
+          "value": "Separate",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "AuthenticationSeparation",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": [
+        {
+          "value": "Separate",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "ConfigurationExtensionsSeparation",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": [
+        {
+          "value": "Separate",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "Indexing",
+      "kind": "enum",
+      "template": "DontIndex",
+      "values": [
+        {
+          "value": "IndexWithAdditionalOrder",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "FullTextSearch",
+      "kind": "enum",
+      "template": "Use",
+      "values": []
+    },
+    {
+      "name": "DataHistory",
+      "kind": "enum",
+      "template": "Use",
+      "values": []
+    }
+  ]
+}

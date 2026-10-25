@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "kind": "cross_version",
+  "set": "8.5.1.1150-xml-2.21-corpus-cross-forms-from27",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "unchanged source native CF -> load/apply/export twice; identical outside ConfigDumpInfo.xml",
+    "source_platform": "8.3.27.2214"
+  },
+  "sources": [
+    {
+      "set": "8.3.27.2214-xml-2.20-corpus-form-settings",
+      "path": "../8.3.27.2214/corpus-form-settings",
+      "manifest_sha256": "0ba4c64958c9a58507818d18837a4ea1381d22e90dcf2e914ea5bf47908deba2"
+    }
+  ],
+  "inputs_sha256": "af621f9013121a615d91a628b14b039fd4d91ee8ea756f0913044846e1187d3d",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 105241,
+    "decoded_sha256": "28589661b0f5d21682b789e8cc0c66d579d7598d73ba643a9b1383345627ec4e",
+    "encoded_sha256": "9a65ce3a75333558cfd1cf9c1970b52d759a8f3b83b25fa28e295360519b150a"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 12013,
+          "sha256": "3e97e85152875b417b0ea94f5d25e41325b161ac67436fb97e64ece9a2b173bd"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "fccb5fff6933a6d35cc3fd89adee66e2bb72a8a8ac6ff4c4c849d935198eaaaf"
+        }
+      ]
+    },
+    {
+      "name": "CovSettingsFormTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovSettingsFormTemplate/Ext/Form.xml",
+          "size": 1167,
+          "sha256": "fdadb18464176079798eb885bbad77d03992a55110a25a13bb66f09cac833e38"
+        },
+        {
+          "path": "CommonForms/CovSettingsFormTemplate.xml",
+          "size": 1637,
+          "sha256": "0ab950fe6c99678433a7227aedfc41b677bff19e09ad16b10982eec735b2e05a"
+        }
+      ]
+    },
+    {
+      "name": "CovVerticalScrollAlways",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovVerticalScrollAlways/Ext/Form.xml",
+          "size": 1206,
+          "sha256": "ebd4e70323a2c8bb09725690c373ce21101498d4226ad9c2834ae7ee5f4b2033"
+        },
+        {
+          "path": "CommonForms/CovVerticalScrollAlways.xml",
+          "size": 1637,
+          "sha256": "911c2bb84f67536e89b0d6a33f1281a159dcacc9c00e6147bd23c1cb9c491d01"
+        }
+      ]
+    },
+    {
+      "name": "CovPictureTitleFontStyleItem",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovPictureTitleFontStyleItem/Ext/Form.xml",
+          "size": 1468,
+          "sha256": "be172ab5dd851218a820c1bc2dcd75481a3e5a19f30b330a3ecb521b0993d855"
+        },
+        {
+          "path": "CommonForms/CovPictureTitleFontStyleItem.xml",
+          "size": 1642,
+          "sha256": "fca92e5b75d64593fe216effd2131e5440d11b5fac507453836d189dcab5fc56"
+        }
+      ]
+    },
+    {
+      "name": "CovCommandPictureGotoURL",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCommandPictureGotoURL/Ext/Form.xml",
+          "size": 1362,
+          "sha256": "cbb00828ef2fa32fb36457d7f6a20c111c1e42bfd4638563d9b35848fa52c1b4"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureGotoURL.xml",
+          "size": 1638,
+          "sha256": "4584f12ec9b0b154be15f71b2a68d393b02e10253f4d4635e0be06b2843a8468"
+        }
+      ]
+    },
+    {
+      "name": "CovCommandPictureAppearanceStarHalfFilled",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCommandPictureAppearanceStarHalfFilled/Ext/Form.xml",
+          "size": 1379,
+          "sha256": "1f88dc3ea2fd1dfc4ee6b19e58ca66acc2283ff67863d1d6bf44be417b01339d"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureAppearanceStarHalfFilled.xml",
+          "size": 1655,
+          "sha256": "cf54ef50e3494864a5ae51de79e97936e83294263f576dbe00155f0f61ddf623"
+        }
+      ]
+    },
+    {
+      "name": "CovCommandPictureFormattedString",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCommandPictureFormattedString/Ext/Form.xml",
+          "size": 1370,
+          "sha256": "a607cf71cffe233b10e74b095a143679f8e383c475bb00a0d286059789319ec4"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureFormattedString.xml",
+          "size": 1646,
+          "sha256": "04810885d72a26e7742739d7e39d1ba187dbe07671f015d05a2bfdf61df1f76d"
+        }
+      ]
+    },
+    {
+      "name": "CovCommandPictureQueryWizardTempTableDescription",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCommandPictureQueryWizardTempTableDescription/Ext/Form.xml",
+          "size": 1386,
+          "sha256": "f216af5e0286d0512c3c25170ab5758e997fc538c168290ac1e730c05635be1f"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureQueryWizardTempTableDescription.xml",
+          "size": 1662,
+          "sha256": "6c0fbc74acde3d29caed4296e58182b09c486a678a712aeafef6993bcf3ed146"
+        }
+      ]
+    },
+    {
+      "name": "CovCommandPictureToday",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCommandPictureToday/Ext/Form.xml",
+          "size": 1360,
+          "sha256": "e769c193951158aede5f24f16d492fef8c76519a76327ef0e180da9e94c39c1e"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureToday.xml",
+          "size": 1636,
+          "sha256": "8af44569bd150b7e83cc818dd0f335160e9f8568b61bb077bf7f9af991879e10"
+        }
+      ]
+    },
+    {
+      "name": "CovCommandPictureAccountingRegister",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCommandPictureAccountingRegister/Ext/Form.xml",
+          "size": 1373,
+          "sha256": "e686c5255444b1ea5730ea0bdbf796134e5a638594f11ed0f787ca9f285dce5c"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureAccountingRegister.xml",
+          "size": 1649,
+          "sha256": "aec50196bbe48d5285d329ac9b2f71dc23b5e63229efc6d5181bb812046730b5"
+        }
+      ]
+    },
+    {
+      "name": "CovCommandPictureNewConversation",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovCommandPictureNewConversation/Ext/Form.xml",
+          "size": 1370,
+          "sha256": "672ee3072689743e42d0cfb0873805d09066c9154ae88d0b8ba239b43b84c4c5"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureNewConversation.xml",
+          "size": 1646,
+          "sha256": "f8c97b8d2fb48647067ddaedcfc3769fbd0584ff1ea6aa1a2be0def05c6b4131"
+        }
+      ]
+    },
+    {
+      "name": "CovBoundTableExcludesSelectAll",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovBoundTableExcludesSelectAll/Ext/Form.xml",
+          "size": 3729,
+          "sha256": "7da13ac431e48c6114a0b2f817570a0ee2fffa3bdcb1a6b78efda92c05023269"
+        },
+        {
+          "path": "CommonForms/CovBoundTableExcludesSelectAll.xml",
+          "size": 1644,
+          "sha256": "f378929e150770602b7476b484cee7b70e711495c35911f246edb9dfae8ed3a3"
+        }
+      ]
+    },
+    {
+      "name": "CovDynamicListRowNumber",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovDynamicListRowNumber/Ext/Form.xml",
+          "size": 3895,
+          "sha256": "46603dc1ab52588d9dca3e3d7c376b175a63436518262d9f169afafea2f77822"
+        },
+        {
+          "path": "CommonForms/CovDynamicListRowNumber.xml",
+          "size": 1637,
+          "sha256": "54112460e43004d8ccd03651f9154eec1134769873b425ac2138a2e8dadd1b0a"
+        }
+      ]
+    },
+    {
+      "name": "CovRootEventChoiceProcessing",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovRootEventChoiceProcessing/Ext/Form.xml",
+          "size": 1245,
+          "sha256": "b14a3dc7d5edeeae12610773fa993af271a953ad6dc8ea14727a4a73094d86c4"
+        },
+        {
+          "path": "CommonForms/CovRootEventChoiceProcessing.xml",
+          "size": 1642,
+          "sha256": "d1c1acbc61497e3032564a93665b51f0a22bb88a2464ee93a1a24ac2c5e4a449"
+        }
+      ]
+    },
+    {
+      "name": "CovRootCollapseImportance",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:form-location-sensitive",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovRootCollapseImportance/Ext/Form.xml",
+          "size": 1167,
+          "sha256": "fdadb18464176079798eb885bbad77d03992a55110a25a13bb66f09cac833e38"
+        },
+        {
+          "path": "CommonForms/CovRootCollapseImportance.xml",
+          "size": 1639,
+          "sha256": "39b104fbfcab4bfdf7a1c7fc18db1f095eb4fa781bb102e052c81b3b7e9d79d9"
+        }
+      ]
+    },
+    {
+      "name": "CovPictureTitleFontEnterOnInput",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:font-with-upgrade-trigger",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovPictureTitleFontEnterOnInput/Ext/Form.xml",
+          "size": 1850,
+          "sha256": "59e0c4bf8835de61d2b7ea691d5aeefa8d5e7b229a8830a0643058efc5389d23"
+        },
+        {
+          "path": "CommonForms/CovPictureTitleFontEnterOnInput.xml",
+          "size": 1645,
+          "sha256": "8e81c233a24608c058be5a23613f99f26488cad2a1e1f62ad3fa0ecc8d974e5b"
+        }
+      ]
+    },
+    {
+      "name": "CovTablePictureTitleFont",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:font-with-upgrade-trigger",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovTablePictureTitleFont/Ext/Form.xml",
+          "size": 4078,
+          "sha256": "48a43bd92bf7e7a3b09aeee454c36af138dadc950a3fd39538a42d0b970ffe0f"
+        },
+        {
+          "path": "CommonForms/CovTablePictureTitleFont.xml",
+          "size": 1638,
+          "sha256": "f5c1dc867c0b9ae571f00f13c1f02b3de88bd0510dad3cf802b21597e1364b43"
+        }
+      ]
+    }
+  ]
+}

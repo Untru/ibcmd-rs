@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "collection": "CommonModules",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 790,
+  "properties": [
+    {
+      "name": "Global",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ClientManagedApplication",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Server",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ExternalConnection",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ClientOrdinaryApplication",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ServerCall",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Privileged",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ReturnValuesReuse",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": [
+        {
+          "value": "DuringRequest",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "DuringSession",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    }
+  ]
+}

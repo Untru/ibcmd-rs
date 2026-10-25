@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<Enum uuid="35329832-906b-556f-a204-7f708f3372bf">
+		<InternalInfo>
+			<xr:GeneratedType name="EnumRef.CovChoiceHistoryOnInput_DontUse" category="Ref">
+				<xr:TypeId>cd36a47d-1024-5316-aafc-a80b9d42b89e</xr:TypeId>
+				<xr:ValueId>279838ec-3991-59e4-a8b2-a2d4eb246433</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumManager.CovChoiceHistoryOnInput_DontUse" category="Manager">
+				<xr:TypeId>94d1a99d-c644-5278-9092-595481518b17</xr:TypeId>
+				<xr:ValueId>937d1ca3-f19f-5a05-9081-b47eb1ef489b</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="EnumList.CovChoiceHistoryOnInput_DontUse" category="List">
+				<xr:TypeId>95fdd7d9-66e7-56f6-a1fa-4cad3e071ebd</xr:TypeId>
+				<xr:ValueId>47ad0f4f-b821-5841-8aeb-fe605952b05d</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovChoiceHistoryOnInput_DontUse</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>false</UseStandardCommands>
+			<Characteristics/>
+			<QuickChoice>true</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<ChoiceHistoryOnInput>DontUse</ChoiceHistoryOnInput>
+		</Properties>
+		<ChildObjects/>
+	</Enum>
+</MetaDataObject>

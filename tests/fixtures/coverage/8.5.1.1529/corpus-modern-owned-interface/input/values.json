@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "collection": "DataProcessors",
+  "properties": [],
+  "combinations": [],
+  "template_files": {
+    "Forms/ModeTaxi.xml": "forms/ModeTaxi.xml",
+    "Forms/ModeTaxi/Ext/Form.xml": "forms/ModeTaxi/Form.xml",
+    "Forms/ModeVersion85.xml": "forms/ModeVersion85.xml",
+    "Forms/ModeVersion85/Ext/Form.xml": "forms/ModeVersion85/Form.xml",
+    "Forms/TableSelection.xml": "forms/TableSelection.xml",
+    "Forms/TableSelection/Ext/Form.xml": "forms/TableSelection/Form.xml",
+    "Forms/VerticalSingle.xml": "forms/VerticalSingle.xml",
+    "Forms/VerticalSingle/Ext/Form.xml": "forms/VerticalSingle/Form.xml",
+    "Forms/ChildrenAlign.xml": "forms/ChildrenAlign.xml",
+    "Forms/ChildrenAlign/Ext/Form.xml": "forms/ChildrenAlign/Form.xml",
+    "Forms/UsualGroupBackColorPalette.xml": "forms/UsualGroupBackColorPalette.xml",
+    "Forms/UsualGroupBackColorPalette/Ext/Form.xml": "forms/UsualGroupBackColorPalette/Form.xml",
+    "Forms/LabelDecorationTextColorPalette.xml": "forms/LabelDecorationTextColorPalette.xml",
+    "Forms/LabelDecorationTextColorPalette/Ext/Form.xml": "forms/LabelDecorationTextColorPalette/Form.xml",
+    "Forms/LabelDecorationTitleLevel2.xml": "forms/LabelDecorationTitleLevel2.xml",
+    "Forms/LabelDecorationTitleLevel2/Ext/Form.xml": "forms/LabelDecorationTitleLevel2/Form.xml",
+    "Forms/FillCheck.xml": "forms/FillCheck.xml",
+    "Forms/FillCheck/Ext/Form.xml": "forms/FillCheck/Form.xml",
+    "Forms/FillCheck/Ext/Form/Module.bsl": "forms/FillCheck/Module.bsl"
+  }
+}

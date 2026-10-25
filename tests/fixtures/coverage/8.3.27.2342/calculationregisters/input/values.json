@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "collection": "CalculationRegisters",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 1,
+  "properties": [
+    {
+      "name": "UseStandardCommands",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "DefaultListForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "AuxiliaryListForm",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Periodicity",
+      "kind": "enum",
+      "template": "Month",
+      "values": []
+    },
+    {
+      "name": "ActionPeriod",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "BasePeriod",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Schedule",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ScheduleValue",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ScheduleDate",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ChartOfCalculationTypes",
+      "kind": "other",
+      "template": "ChartOfCalculationTypes.CovCalculationTypes",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "IncludeHelpInContents",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "DataLockControlMode",
+      "kind": "enum",
+      "template": "Managed",
+      "values": []
+    },
+    {
+      "name": "FullTextSearch",
+      "kind": "enum",
+      "template": "DontUse",
+      "values": []
+    },
+    {
+      "name": "ListPresentation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ExtendedListPresentation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Explanation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ],
+  "recorder": {
+    "path": "Documents/CovCalculationRecorder.xml",
+    "kind": "CalculationRegister"
+  }
+}

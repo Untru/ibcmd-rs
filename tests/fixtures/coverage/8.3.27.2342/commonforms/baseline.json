@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovExplanation_Cov",
+    "CovFormType_Managed",
+    "CovIncludeHelpInContents_true",
+    "CovTemplate",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

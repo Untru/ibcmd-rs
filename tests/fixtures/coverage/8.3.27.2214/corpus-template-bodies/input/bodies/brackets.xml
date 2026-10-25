@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/scheme" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:sch="http://v8.1c.ru/8.2/data/graphscheme" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<GridEnabled>false</GridEnabled><Items><Decoration id="1"><Properties><Name>Probe</Name><Title><v8:item><v8:lang>ru</v8:lang><v8:content>Coverage</v8:content></v8:item></Title><Location top="0" left="0" bottom="100" right="100"/><Shape>VerticalBrackets</Shape></Properties></Decoration></Items></GraphicalSchema>

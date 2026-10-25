@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-template-bodies",
+  "collection": "CommonTemplates",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "a28740418c66f899cad55972042923feca9dfb88f1f0d92296cefaf994229c6e",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 82751,
+    "decoded_sha256": "25f4a40f3e49a3e2509c35aaefcf1344928375d451624f1924661c91b50fb446",
+    "encoded_sha256": "9ae9914a3865d18e52ed071418e48cc7cdd4fc1fbb934e50c4b4da6762b6b8c1"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11362,
+          "sha256": "8a7d3959e07c959e9e9b02fe776d26e55bf1ffb96666b9bea075f304128e6c42"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "360bc02505becb921463299bef36a4b1c53a336f815ae1517a56e96287cb5013"
+        }
+      ]
+    },
+    {
+      "name": "CovBodyTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovBodyTemplate/Ext/Template.xml",
+          "size": 1321,
+          "sha256": "abc54ce3e18e96248193da91885f4e2b1f47296abac1cf5dca9a04c93fda7da9"
+        },
+        {
+          "path": "CommonTemplates/CovBodyTemplate.xml",
+          "size": 1217,
+          "sha256": "b12dcf6365e92f0899d0f5f7473317b907fcdaedaade4fd75a89ce3a055f838d"
+        }
+      ]
+    },
+    {
+      "name": "CovGraphicalSchemaBody",
+      "property": [
+        "TemplateType"
+      ],
+      "kind": "combination",
+      "value": {
+        "TemplateType": "GraphicalSchema"
+      },
+      "source": "generated:template-body-class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaBody/Ext/Template.xml",
+          "size": 1950,
+          "sha256": "d2479b9254d51e34d7dfc6634f443321df2551a2e85dca0fec427e142d26e364"
+        },
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaBody.xml",
+          "size": 1220,
+          "sha256": "9b51b44d1537e467f9729eb1592fc104cfcdb95faca7cfa9b742a73580cc1659"
+        }
+      ]
+    },
+    {
+      "name": "CovDataCompositionParameters",
+      "property": [
+        "TemplateType"
+      ],
+      "kind": "combination",
+      "value": {
+        "TemplateType": "DataCompositionSchema"
+      },
+      "source": "generated:template-body-class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovDataCompositionParameters/Ext/Template.xml",
+          "size": 1274,
+          "sha256": "940f4985b7bdf67efb7f62d79966ec51553e70667d6957d71b347d7d7564c2f7"
+        },
+        {
+          "path": "CommonTemplates/CovDataCompositionParameters.xml",
+          "size": 1232,
+          "sha256": "b056f525d13f339f7cbb4ef8fdd3f771b6ccbdc586d31a3471aa2878c2da20ff"
+        }
+      ]
+    },
+    {
+      "name": "CovSpreadsheetMergedCells",
+      "property": [
+        "TemplateType"
+      ],
+      "kind": "combination",
+      "value": {
+        "TemplateType": "SpreadsheetDocument"
+      },
+      "source": "generated:template-body-class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovSpreadsheetMergedCells/Ext/Template.xml",
+          "size": 1321,
+          "sha256": "abc54ce3e18e96248193da91885f4e2b1f47296abac1cf5dca9a04c93fda7da9"
+        },
+        {
+          "path": "CommonTemplates/CovSpreadsheetMergedCells.xml",
+          "size": 1227,
+          "sha256": "833e2aa93e2d3bd307e797015118ebb759047c772a3d3afcae10b0f2aeb03326"
+        }
+      ]
+    },
+    {
+      "name": "CovVerticalBrackets",
+      "property": [
+        "TemplateType"
+      ],
+      "kind": "combination",
+      "value": {
+        "TemplateType": "GraphicalSchema"
+      },
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovVerticalBrackets/Ext/Template.xml",
+          "size": 1962,
+          "sha256": "586445c604724cc6d5aca3045dc2cafed5213c860a2305fd35f4bbce1db12021"
+        },
+        {
+          "path": "CommonTemplates/CovVerticalBrackets.xml",
+          "size": 1217,
+          "sha256": "2dded1891f17ea541e61d9b73bd87e88cecc563eeeb999ff678141bce15e9d4c"
+        }
+      ]
+    }
+  ]
+}

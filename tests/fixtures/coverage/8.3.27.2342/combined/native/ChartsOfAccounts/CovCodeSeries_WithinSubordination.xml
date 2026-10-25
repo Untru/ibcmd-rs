@@ -1,0 +1,85 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<ChartOfAccounts uuid="1ce12ef8-f137-5577-b8db-6bf177adc25c">
+		<InternalInfo>
+			<xr:GeneratedType name="ChartOfAccountsObject.CovCodeSeries_WithinSubordination" category="Object">
+				<xr:TypeId>81d4ec20-2ce2-56be-8df4-ddffe6ddab7a</xr:TypeId>
+				<xr:ValueId>24f0e76a-6d95-515a-94ef-70cb08331886</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsRef.CovCodeSeries_WithinSubordination" category="Ref">
+				<xr:TypeId>fa4a7975-5897-5de8-87b8-208bd221e020</xr:TypeId>
+				<xr:ValueId>17558c2f-2c6e-5db0-8835-c8c2644bc55a</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsSelection.CovCodeSeries_WithinSubordination" category="Selection">
+				<xr:TypeId>b470ad40-2ee3-55c1-9da2-81a8aaeba95e</xr:TypeId>
+				<xr:ValueId>4ca4b880-70b8-54c6-b516-69a266db139f</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsList.CovCodeSeries_WithinSubordination" category="List">
+				<xr:TypeId>2501961d-9e60-519d-8070-23c61be6cff7</xr:TypeId>
+				<xr:ValueId>3ce834d6-5079-5b46-96fe-85ad8d0de7a7</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsManager.CovCodeSeries_WithinSubordination" category="Manager">
+				<xr:TypeId>620f32bb-004b-5654-b3c1-14c304c6a4ee</xr:TypeId>
+				<xr:ValueId>bda1777a-57ff-5de5-ac43-f94c444b3921</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsExtDimensionTypes.CovCodeSeries_WithinSubordination" category="ExtDimensionTypes">
+				<xr:TypeId>be26c1b2-d029-5741-8c58-1e8e7d32c968</xr:TypeId>
+				<xr:ValueId>a7ffc8a8-b79c-5ea6-beeb-7abdaa93f6b2</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsExtDimensionTypesRow.CovCodeSeries_WithinSubordination" category="ExtDimensionTypesRow">
+				<xr:TypeId>73a565fb-9ef1-57be-93e8-bdf74e428ae2</xr:TypeId>
+				<xr:ValueId>6f89c7db-9d54-54da-9869-7183baf7201e</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovCodeSeries_WithinSubordination</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<BasedOn/>
+			<ExtDimensionTypes/>
+			<MaxExtDimensionCount>0</MaxExtDimensionCount>
+			<CodeMask/>
+			<CodeLength>9</CodeLength>
+			<DescriptionLength>25</DescriptionLength>
+			<CodeSeries>WithinSubordination</CodeSeries>
+			<CheckUnique>true</CheckUnique>
+			<DefaultPresentation>AsCode</DefaultPresentation>
+			<Characteristics/>
+			<PredefinedDataUpdate>Auto</PredefinedDataUpdate>
+			<EditType>InDialog</EditType>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<InputByString>
+				<xr:Field>ChartOfAccounts.CovCodeSeries_WithinSubordination.StandardAttribute.Description</xr:Field>
+				<xr:Field>ChartOfAccounts.CovCodeSeries_WithinSubordination.StandardAttribute.Code</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<AutoOrderByCode>false</AutoOrderByCode>
+			<OrderLength>0</OrderLength>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+		</Properties>
+		<ChildObjects/>
+	</ChartOfAccounts>
+</MetaDataObject>

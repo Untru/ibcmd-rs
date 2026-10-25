@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-corpus-catalog-additional-index",
+  "collection": "Catalogs",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "61abac6d105bdcf7b3f5ffbdb9f83eaf7decc9dc457203d7a90c105c1ee57e1a",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "6fac6100bc66efb6e118c86ffb8a57214d6eedce99de8ed96f0ef504ceee1084",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76927,
+    "decoded_sha256": "38a1580b7da58940b3d9fa8e3d5e39bdfe62ab18af3145b5fbda9f884e5a1904",
+    "encoded_sha256": "fc9bd12d5941a161f50c762ac6e10162cc3f47e201c8a4032b4063fd0a662c05"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11104,
+          "sha256": "99870d4a20be3760e1933639549a675e7ba89caa1d79eccf197ddd62d7f36dd2"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "b68f52aa273e40687376424154d065ff625e6ae96f510171cf939bc6f8b7ccf6"
+        }
+      ]
+    },
+    {
+      "name": "CovIndexedCatalog",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovIndexedCatalog/Ext/AdditionalIndexes.xml",
+          "size": 604,
+          "sha256": "f9702345cf9dc301ea4a2c6b45c8a140038da9b63ec9aa1dc60bd74f48e241c7"
+        },
+        {
+          "path": "Catalogs/CovIndexedCatalog.xml",
+          "size": 4593,
+          "sha256": "97b0b701610544964be70255d316612029994524dfcd0aa741e65d1b897fbb9c"
+        }
+      ]
+    }
+  ]
+}

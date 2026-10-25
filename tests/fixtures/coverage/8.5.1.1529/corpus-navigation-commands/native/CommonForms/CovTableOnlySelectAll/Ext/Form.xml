@@ -1,0 +1,67 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<AutoCommandBar name="FormCommandBar" id="-1"/>
+	<ChildItems>
+		<Table name="RowsTable" id="1">
+			<DataPath>Rows</DataPath>
+			<CommandSet>
+				<ExcludedCommand>SelectAll</ExcludedCommand>
+			</CommandSet>
+			<AutoRefresh>false</AutoRefresh>
+			<AutoRefreshPeriod>60</AutoRefreshPeriod>
+			<Period>
+				<v8:variant xsi:type="v8:StandardPeriodVariant">Custom</v8:variant>
+				<v8:startDate>0001-01-01T00:00:00</v8:startDate>
+				<v8:endDate>0001-01-01T00:00:00</v8:endDate>
+			</Period>
+			<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>
+			<RestoreCurrentRow>false</RestoreCurrentRow>
+			<TopLevelParent xsi:nil="true"/>
+			<ShowRoot>true</ShowRoot>
+			<AllowRootChoice>false</AllowRootChoice>
+			<UpdateOnDataChange>Auto</UpdateOnDataChange>
+			<AllowGettingCurrentRowURL>true</AllowGettingCurrentRowURL>
+			<ContextMenu name="RowsTableКонтекстноеМеню" id="2"/>
+			<AutoCommandBar name="RowsTableКоманднаяПанель" id="3"/>
+			<ExtendedTooltip name="RowsTableРасширеннаяПодсказка" id="4"/>
+			<SearchStringAddition name="RowsTableСтрокаПоиска" id="5">
+				<AdditionSource>
+					<Item>RowsTable</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="RowsTableСтрокаПоискаКонтекстноеМеню" id="6"/>
+				<ExtendedTooltip name="RowsTableСтрокаПоискаРасширеннаяПодсказка" id="7"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="RowsTableСостояниеПросмотра" id="8">
+				<AdditionSource>
+					<Item>RowsTable</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="RowsTableСостояниеПросмотраКонтекстноеМеню" id="9"/>
+				<ExtendedTooltip name="RowsTableСостояниеПросмотраРасширеннаяПодсказка" id="10"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="RowsTableУправлениеПоиском" id="11">
+				<AdditionSource>
+					<Item>RowsTable</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="RowsTableУправлениеПоискомКонтекстноеМеню" id="12"/>
+				<ExtendedTooltip name="RowsTableУправлениеПоискомРасширеннаяПодсказка" id="13"/>
+			</SearchControlAddition>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Rows" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>true</ManualQuery>
+				<DynamicDataRead>false</DynamicDataRead>
+				<QueryText>SELECT 1 AS Value</QueryText>
+				<ListSettings/>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>

@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1529-xml-2.21-corpus-chart-settings",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1529",
+    "source_version": "2.21",
+    "ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "3e41889b7fbc369d458194a986acb58f91a12356e9b05f57b33a5f776f05d0ae",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 87130,
+    "decoded_sha256": "1a957508eaa7c80dfc5faf32c144fa20dcfd219ff41dbb2feab26986f715972b",
+    "encoded_sha256": "ae05780e6c5a1b3ffccef0c2368299a74ab4e0c34815572fe2bf1fe564e64f92"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11314,
+          "sha256": "6977cacd2eb333cca9fe07d5c6ca0cb009190e0c8f1d89be2d20bac2d01a0023"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "9af5a667de5ea34622b685dad6625c6fb1acccd6c0972373d272b93ed227a6f8"
+        }
+      ]
+    },
+    {
+      "name": "CovChartSettingsTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovChartSettingsTemplate/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovChartSettingsTemplate.xml",
+          "size": 1638,
+          "sha256": "e3f3baea492108b2d18f2045fcc540c3efa09c9888aa957939c15c2977c1430a"
+        }
+      ]
+    },
+    {
+      "name": "CovChartTypeColumn",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovChartTypeColumn/Ext/Form.xml",
+          "size": 11289,
+          "sha256": "26b7494900f54c84035cd22d8ed8ae70f14de3b06f99f6f91cb0c37088d0dfa4"
+        },
+        {
+          "path": "CommonForms/CovChartTypeColumn.xml",
+          "size": 1632,
+          "sha256": "175dcea7d325f489eb81837fad0530feada9f7f3fe16410c61cf4e342f4d73b7"
+        }
+      ]
+    },
+    {
+      "name": "CovChartTypePie3D",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovChartTypePie3D/Ext/Form.xml",
+          "size": 11288,
+          "sha256": "a5d5a66cf840d4d8a20d018cac959dd046f30915512b7e7930d3a73878979e9a"
+        },
+        {
+          "path": "CommonForms/CovChartTypePie3D.xml",
+          "size": 1631,
+          "sha256": "228b4a7bcec0f67a594930aa6c98154c91f90008974fc7393845a738986016c6"
+        }
+      ]
+    },
+    {
+      "name": "CovChartSelectionMode",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovChartSelectionMode/Ext/Form.xml",
+          "size": 11338,
+          "sha256": "76f1715cfea9df6c164b579408ecb2d20faaf56769818f1efbf5199686045b23"
+        },
+        {
+          "path": "CommonForms/CovChartSelectionMode.xml",
+          "size": 1635,
+          "sha256": "6168bbe883477f7db58694f78f234b6de4b2384dc8c24f34b2e2e3ba2041abcc"
+        }
+      ]
+    },
+    {
+      "name": "CovChartMissingSeries",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovChartMissingSeries/Ext/Form.xml",
+          "size": 9428,
+          "sha256": "f950aff67f4a04ad0eb706719c76cfce8bcc484aee7ce8e640e646179c601a50"
+        },
+        {
+          "path": "CommonForms/CovChartMissingSeries.xml",
+          "size": 1635,
+          "sha256": "04c1de5b23c706a9985302b03e1bfbd00193e8148a108a2a422a39dceb91ed44"
+        }
+      ]
+    }
+  ]
+}

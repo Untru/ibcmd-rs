@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1529-xml-2.21-corpus-modern-spreadsheet",
+  "collection": "CommonTemplates",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1529",
+    "source_version": "2.21",
+    "ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "07ed278a9cf030c1ec20c7b42d85bfbc99f2ea26bf1173a80a512fb47d0fdb92",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 88023,
+    "decoded_sha256": "de37f8c326144b7155d7e3305464165b3ebe5596e7dca62a7235c547e5db8871",
+    "encoded_sha256": "c4a72b4666d91512133200032f68c9ddcf47ccb11ac11d26de5d35fdea035c73"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11557,
+          "sha256": "f3b7e55e585de13e2ece0191989b6bcdbd0f51c9e9b67cfebc6779bb633677eb"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "360bc02505becb921463299bef36a4b1c53a336f815ae1517a56e96287cb5013"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSpreadsheetTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovModernSpreadsheetTemplate/Ext/Template.xml",
+          "size": 1321,
+          "sha256": "abc54ce3e18e96248193da91885f4e2b1f47296abac1cf5dca9a04c93fda7da9"
+        },
+        {
+          "path": "CommonTemplates/CovModernSpreadsheetTemplate.xml",
+          "size": 1230,
+          "sha256": "c61405f2ee66172493825fea22fe1b94024118b9b94dc67a87e2c610586090a3"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSheetPalette",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovModernSheetPalette/Ext/Template.xml",
+          "size": 1356,
+          "sha256": "9adc1099a5387df72de3d5f988b3b0a6cb97064192ba318d13e104388497b255"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetPalette.xml",
+          "size": 1223,
+          "sha256": "23ef3e6ee0203a08564f6d721b8c408de0a5e2ceb420a7048234f7cc4e9ef49d"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSheetDashed",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovModernSheetDashed/Ext/Template.xml",
+          "size": 1482,
+          "sha256": "e659c603a85ba4c1869769d314e9b8b6f2fe2ee6ffee907691de3f476fae4964"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetDashed.xml",
+          "size": 1222,
+          "sha256": "d8db3a872e0d4f127de698b1b23396dca058877704db9e29aed55e3ef385d239"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSheetBuiltinFont",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovModernSheetBuiltinFont/Ext/Template.xml",
+          "size": 1241,
+          "sha256": "4c90205625257116679f0e76c9f23fb0e3fad1a29472d720b0d206d2cf617e80"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetBuiltinFont.xml",
+          "size": 1227,
+          "sha256": "75d11551c74cb3bdc283963a610f14b0e9cbcc3d7999626afd71e23fcd01c5e0"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSheetEmbeddedTable",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovModernSheetEmbeddedTable/Ext/Template.xml",
+          "size": 1321,
+          "sha256": "abc54ce3e18e96248193da91885f4e2b1f47296abac1cf5dca9a04c93fda7da9"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetEmbeddedTable.xml",
+          "size": 1229,
+          "sha256": "0d9743ab50bac4da17a4d03ce5282c546c42804817b7f054a3389c99619efd16"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSheetSkyBlue",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovModernSheetSkyBlue/Ext/Template.xml",
+          "size": 1412,
+          "sha256": "c3a7a2637c182a3cc1900bca59f8a7354af9f1bc91d43bea7d10f6ff8e12a3d8"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetSkyBlue.xml",
+          "size": 1223,
+          "sha256": "f4126c5ec98206821ab7cde8d3db05d7a15737215f9a4d72725eb68b2ae4cfc2"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSheetChartColumn",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovModernSheetChartColumn/Ext/Template.xml",
+          "size": 11452,
+          "sha256": "281c77db0d04b6f87928c1ad1ce8e818a8216859d96b5d7089241693f09f4dbd"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetChartColumn.xml",
+          "size": 1227,
+          "sha256": "d54462c264c671f29f92ab232113bffa7ca3eac3f07962934383c945f8a4bd9f"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSheetChartLine",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonTemplates/CovModernSheetChartLine/Ext/Template.xml",
+          "size": 11450,
+          "sha256": "eecad24fbd955aa9a6bf9129da8d57a9ca78c83f9cee384b70bf509a646f7e77"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetChartLine.xml",
+          "size": 1225,
+          "sha256": "12dd9eeeff0614f6937e1c422e454c44a5b6558c29793c7e0972ae877c30d7eb"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovCompatibleTable",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/table.xml"
+      }
+    },
+    {
+      "name": "CovCompatiblePictureFont",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/picture.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  }
+}

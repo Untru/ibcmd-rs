@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-documentjournals",
+  "collection": "DocumentJournals",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "580710e2e1b83f110059d5958a937353098ec1af12c3f0489b5250dec9adb709",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79893,
+    "decoded_sha256": "f8eb32e3cdf6550c8347e06068f0cc537e403431d2d16c9841786e08198eabf4",
+    "encoded_sha256": "bfc3b2e9935f9b23e0c33351295e707cfef4ac0ce17050048376cbfb00fe42cc"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11422,
+          "sha256": "e973a83be6a29690a44e371cca1e27e7a4f5363e91d8e4c155f52573102cccc9"
+        },
+        {
+          "path": "Documents/CovRecorder.xml",
+          "size": 4271,
+          "sha256": "9fd994c22d992b52bd35a436342e856cb91780b306cbf571fc2f2bc5c34ab787"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "70b221929014e619baeeb2bb30658a97ba6535b8f7910f212a1bb4c3a85cb50b"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentJournals/CovTemplate.xml",
+          "size": 2284,
+          "sha256": "e1455c833472e71aafa269db3b5fa73aa8dbb6a703a7a32a642603a23c683c38"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentJournals/CovUseStandardCommands_false.xml",
+          "size": 2353,
+          "sha256": "ce95dcb0a61fddd968c354e0afaf8e6fc4412fce0a951eb09696b8715f1f19f7"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentJournals/CovIncludeHelpInContents_true.xml",
+          "size": 2355,
+          "sha256": "0f47bed8494c516c0d9c3fe96f2f9b00c726e42a1759caea05516a45d8a49d79"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentJournals/CovListPresentation_Cov.xml",
+          "size": 2449,
+          "sha256": "8fdf7eb52e8f69744f0641b9121540526e5339eed6af9c8355b02c9ba4762e40"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedListPresentation_Cov",
+      "property": "ExtendedListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DocumentJournals/CovExtendedListPresentation_Cov.xml",
+          "size": 2489,
+          "sha256": "3e332ada435d93a45b49da6fcfd1bd05e2331d1f3f70aea72ab73db77a474b03"
+        }
+      ]
+    }
+  ]
+}

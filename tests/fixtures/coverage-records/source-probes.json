@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "scope": "Minimal generated XML properties; not a CF or SQL parity claim",
+  "cases": [
+    {
+      "id": "embedded-table",
+      "set": "8.5.1.1529/corpus-modern-spreadsheet",
+      "baseline_manifest_sha256": "41e3fdc2711859a1bbe6846585ea1b4741d238b2ac7c3788d26d5fbaf033c80a",
+      "native_platform": "8.5.1.1529",
+      "native_ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+      "native_behavior": "accepted_then_normalized_away",
+      "target": "CommonTemplates/CovModernSheetEmbeddedTable/Ext/Template.xml",
+      "failure_source": "CommonTemplates/CovModernSheetEmbeddedTable.xml",
+      "operation": {
+        "kind": "subtree_from_input",
+        "input": "input/bodies/CovModernSheetEmbeddedTable.xml",
+        "tag": "embeddedTable"
+      },
+      "expected_failure": "<embeddedTable> of a SpreadsheetDocument has no writer"
+    },
+    {
+      "id": "series-count",
+      "set": "8.5.1.1529/corpus-chart-settings",
+      "baseline_manifest_sha256": "a5fc684df8b02435fb2f80df264800cf5b4851cf0ceebe89e1cbdc735951ad20",
+      "native_platform": "8.5.1.1529",
+      "native_ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+      "native_behavior": "accepted_then_normalized_away",
+      "target": "CommonForms/CovChartMissingSeries/Ext/Form.xml",
+      "failure_source": "CommonForms/CovChartMissingSeries.xml",
+      "operation": {
+        "kind": "subtree_from_input",
+        "input": "input/bodies/CovChartMissingSeries.xml",
+        "tag": "Settings"
+      },
+      "expected_failure": "the chart declares 1 series and spells 0"
+    },
+    {
+      "id": "generated-user-settings-group",
+      "set": "8.5.1.1529/corpus-navigation-commands",
+      "baseline_manifest_sha256": "69db631fa4a8dfdb62f410ab0c1302b8ee7079aa6e063113918cf7c243454f3b",
+      "native_platform": "8.5.1.1529",
+      "native_ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+      "native_behavior": "accepted_then_normalized_away",
+      "target": "DocumentJournals/CovNavigationJournal/Forms/ListForm/Ext/Form.xml",
+      "failure_source": "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
+      "operation": {
+        "kind": "insert_before",
+        "anchor": "</Table>",
+        "fragment": "<UserSettingsGroup>ProbeПанельДействийВыделенныхСтрок</UserSettingsGroup>"
+      },
+      "expected_failure": "a table settles into ProbeПанельДействийВыделенныхСтрок, which the form does not declare"
+    },
+    {
+      "id": "legacy-create-by-parameter",
+      "set": "8.5.1.1529/corpus-navigation-commands",
+      "baseline_manifest_sha256": "69db631fa4a8dfdb62f410ab0c1302b8ee7079aa6e063113918cf7c243454f3b",
+      "native_platform": "8.5.1.1529",
+      "native_ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+      "native_behavior": "refused_by_current_native",
+      "target": "DocumentJournals/CovNavigationJournal/Forms/ListForm/Ext/Form.xml",
+      "failure_source": "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
+      "operation": {
+        "kind": "replace_once",
+        "anchor": "<CommandName>0</CommandName>",
+        "fragment": "<CommandName>Form.StandardCommand.CreateByParameter</CommandName>"
+      },
+      "expected_failure": "no measured uuid for Form.StandardCommand.CreateByParameter on cfg:DynamicList"
+    },
+    {
+      "id": "legacy-edit-list",
+      "set": "8.5.1.1529/corpus-navigation-commands",
+      "baseline_manifest_sha256": "69db631fa4a8dfdb62f410ab0c1302b8ee7079aa6e063113918cf7c243454f3b",
+      "native_platform": "8.5.1.1529",
+      "native_ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+      "native_behavior": "refused_by_current_native",
+      "target": "Catalogs/CovNavigationCatalog/Forms/EditListForm/Ext/Form.xml",
+      "failure_source": "Catalogs/CovNavigationCatalog/Forms/EditListForm.xml",
+      "operation": {
+        "kind": "insert_before",
+        "anchor": "</Form>",
+        "fragment": "<CommandSet><ExcludedCommand>EditList</ExcludedCommand></CommandSet>"
+      },
+      "expected_failure": "unsupported Form ExcludedCommand: EditList"
+    },
+    {
+      "id": "existing-interfaces-8.3.27.2342",
+      "set": "8.3.27.2342/interfaces",
+      "baseline_manifest_sha256": "fd6610e874385a283d43d2eaa424fa6d6d634aa13cd0d5de7b27401363651236",
+      "native_platform": "8.3.27.2342",
+      "native_ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+      "native_behavior": "native_cf",
+      "target": "Interfaces/CovTemplate.xml",
+      "failure_source": "Interfaces/CovTemplate.xml",
+      "operation": {
+        "kind": "identity"
+      },
+      "expected_failure": "no base-free compiler for Interface yet",
+      "reader_platform": "8.3.27.2214"
+    },
+    {
+      "id": "existing-interfaces-8.5.1.1150",
+      "set": "8.5.1.1150/interfaces",
+      "baseline_manifest_sha256": "8c21b7f210cd684c6f62702e9387e14b5484d991cc73e62ffc56d42461a061ed",
+      "native_platform": "8.5.1.1150",
+      "native_ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+      "native_behavior": "native_cf",
+      "target": "Interfaces/CovTemplate.xml",
+      "failure_source": "Interfaces/CovTemplate.xml",
+      "operation": {
+        "kind": "identity"
+      },
+      "expected_failure": "no base-free compiler for Interface yet"
+    }
+  ]
+}

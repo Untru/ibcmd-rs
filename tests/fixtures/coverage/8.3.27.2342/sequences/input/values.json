@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "collection": "Sequences",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 1,
+  "properties": [
+    {
+      "name": "MoveBoundaryOnPosting",
+      "kind": "enum",
+      "template": "Move",
+      "values": []
+    },
+    {
+      "name": "Documents",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "RegisterRecords",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DataLockControlMode",
+      "kind": "enum",
+      "template": "Managed",
+      "values": []
+    }
+  ]
+}

@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-chartsofcalculationtypes",
+  "collection": "ChartsOfCalculationTypes",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "10f3f0d3ba2c93bde7e9800e4de7e14a7545a5921da1d3ecd5a811ce28f5fb34",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 86969,
+    "decoded_sha256": "3ac1574dff5ca2ae695bf7df313c742ea2ac9f90be0d14b649a65d6ba3b6d5cc",
+    "encoded_sha256": "df2d22d7ff0b0f6a1b4695cee7b956b27d26f05e22cfef85db5b9d6d822d3671"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11941,
+          "sha256": "2a26b944f0554bf4b210cd52c07790fa603bb486b6b956139befe85694981a34"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "5af0c3405c8fcf19f169e89a954074c066d017d407244fafea7c1e3b267f5ca9"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovTemplate.xml",
+          "size": 5889,
+          "sha256": "92a3afa5a0ab359ec94a84054de397586782ecc65708f2d4dee8fba4c5bdd0b5"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovUseStandardCommands_false.xml",
+          "size": 6128,
+          "sha256": "4487bf5201608156698cd8f67d6a2e1d8aaecd6a56ca77919fe6e0dd7f3eca0f"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeLength_5",
+      "property": "CodeLength",
+      "kind": "number",
+      "value": "5",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovCodeLength_5.xml",
+          "size": 5945,
+          "sha256": "bc54ed10b8321a9bbcd07c1dcc8c91155b538eecb1d0739b8223662c2eee84aa"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_100",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "100",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovDescriptionLength_100.xml",
+          "size": 6072,
+          "sha256": "f9b5993c5cc922d8d3f2ff645ad79524fc8be30b458b1078cb6fe70d30757374"
+        }
+      ]
+    },
+    {
+      "name": "CovQuickChoice_true",
+      "property": "QuickChoice",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovQuickChoice_true.xml",
+          "size": 6000,
+          "sha256": "5f8bd450125ef1bdc970114a10b6736838abcfaa9e345f0ee6cb0a7d05c3c9b3"
+        }
+      ]
+    },
+    {
+      "name": "CovChoiceHistoryOnInput_DontUse",
+      "property": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "value": "DontUse",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovChoiceHistoryOnInput_DontUse.xml",
+          "size": 6172,
+          "sha256": "03551e3d2d5e2ae794056817ae27ee5c2f24083c36cbc7c1b26da56a9e68e62a"
+        }
+      ]
+    },
+    {
+      "name": "CovDependenceOnCalculationTypes_OnActionPeriod",
+      "property": "DependenceOnCalculationTypes",
+      "kind": "enum",
+      "value": "OnActionPeriod",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] ПланВидовРасчета.CovDependenceOnCalculationTypes_OnActionPeriod - Для плана видов расчета задана зависимость от базы и не задано ни одного базового плана видов расчета",
+      "files": []
+    },
+    {
+      "name": "CovActionPeriodUse_true",
+      "property": "ActionPeriodUse",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovActionPeriodUse_true.xml",
+          "size": 6056,
+          "sha256": "f97886c74c3e6a7795118b7c0a2364a2983186ffc5086c804fc30fd3a4b355d4"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovIncludeHelpInContents_true.xml",
+          "size": 6140,
+          "sha256": "df7e9bc91389e06abbedf67c5f71985b76b67d1a63aa9c9d3634e9bc247331c1"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovListPresentation_Cov.xml",
+          "size": 6174,
+          "sha256": "e20effc0dcbdbb4f1b0edeb8534e306296ce36c1df9b45e6dcd2bc9617cf4e7f"
+        }
+      ]
+    },
+    {
+      "name": "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+      "property": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+          "size": 6378,
+          "sha256": "46a171f77541c21987143bae1730809f85e406bbf59729e79e60805959463104"
+        }
+      ]
+    },
+    {
+      "name": "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+      "property": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+          "size": 6476,
+          "sha256": "5917e6c99cd3aaa5dbe01647bf2d7976a069276e8a697cbbf9165c2219652dd2"
+        }
+      ]
+    }
+  ]
+}

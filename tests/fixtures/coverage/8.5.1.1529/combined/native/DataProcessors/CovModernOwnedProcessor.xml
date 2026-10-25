@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<DataProcessor uuid="bbe34cfa-103c-505d-b1a2-4b83dd51b890">
+		<InternalInfo>
+			<xr:GeneratedType name="DataProcessorObject.CovModernOwnedProcessor" category="Object">
+				<xr:TypeId>acdf7116-5779-5318-a3e0-0dd6cfabf164</xr:TypeId>
+				<xr:ValueId>abff2f0a-7ddc-5051-acfa-bee66038fda8</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DataProcessorManager.CovModernOwnedProcessor" category="Manager">
+				<xr:TypeId>73477cef-91e2-5d8c-bbfd-da59baee194b</xr:TypeId>
+				<xr:ValueId>a31c0651-c876-5bd9-a517-78c974723f8d</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovModernOwnedProcessor</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<DefaultForm/>
+			<AuxiliaryForm/>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<ExtendedPresentation/>
+			<Explanation/>
+		</Properties>
+		<ChildObjects>
+			<Form>ModeTaxi</Form>
+			<Form>ModeVersion85</Form>
+			<Form>TableSelection</Form>
+			<Form>VerticalSingle</Form>
+			<Form>ChildrenAlign</Form>
+			<Form>UsualGroupBackColorPalette</Form>
+			<Form>LabelDecorationTextColorPalette</Form>
+			<Form>LabelDecorationTitleLevel2</Form>
+			<Form>FillCheck</Form>
+		</ChildObjects>
+	</DataProcessor>
+</MetaDataObject>

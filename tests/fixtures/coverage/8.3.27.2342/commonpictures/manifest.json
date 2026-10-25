@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-commonpictures",
+  "collection": "CommonPictures",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "50b5655cb67eb196157058b0e6399cfc0e3ae1bb09292bd052cb71458829ad98",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 77617,
+    "decoded_sha256": "b4b5cc2a8f99c4d64ac4e5d840ce647456fb4c27d54af76c289846bd877898e6",
+    "encoded_sha256": "4f28ef9f86899e84c5c73cbea5558f5564994fc56907e41190c77eb27bac654c"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10487,
+          "sha256": "40536b316084e34fd716ead6b3b89c19263e50e8ea4727534dd11d07aad2da10"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "1aa1be4723737a34b473e3dabb03fb8f81b0e8d83171f03a48d26a344882009d"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonPictures/CovTemplate.xml",
+          "size": 1225,
+          "sha256": "a38ff14885bebbc2ad7e567ea8859e43db58eae6af11666181d69d4f3e9da0ab"
+        }
+      ]
+    },
+    {
+      "name": "CovAvailabilityForChoice_true",
+      "property": "AvailabilityForChoice",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonPictures/CovAvailabilityForChoice_true.xml",
+          "size": 1242,
+          "sha256": "a442461dbb31ccc578fcb78fcad437f9b24f28a842378e86d123ce23fe4d3e03"
+        }
+      ]
+    },
+    {
+      "name": "CovAvailabilityForAppearance_true",
+      "property": "AvailabilityForAppearance",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonPictures/CovAvailabilityForAppearance_true.xml",
+          "size": 1246,
+          "sha256": "db8f7729ee47e6161b915ad49ef90236b75a18ed0e9325cab809b8c32ccf5a5b"
+        }
+      ]
+    }
+  ]
+}

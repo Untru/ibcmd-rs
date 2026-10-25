@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<Catalog uuid="f49f13fc-1cdb-584d-80e3-2f3ce563c459">
+		<InternalInfo>
+			<xr:GeneratedType name="CatalogObject.CovOwnedCatalogTemplate" category="Object">
+				<xr:TypeId>3b13d452-040f-54c4-a332-ac021905a7c2</xr:TypeId>
+				<xr:ValueId>b02b7903-1f0b-5b48-8b15-d0e9f96becea</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogRef.CovOwnedCatalogTemplate" category="Ref">
+				<xr:TypeId>60f4426d-4f7a-5315-99ea-e52529f764c2</xr:TypeId>
+				<xr:ValueId>089eb4c2-9f95-511f-a61d-d87c8370a043</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogSelection.CovOwnedCatalogTemplate" category="Selection">
+				<xr:TypeId>53d76080-fe49-5559-b429-d0c335ca15dc</xr:TypeId>
+				<xr:ValueId>4be0c3b0-bab5-56af-91fd-890eeaacf561</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogList.CovOwnedCatalogTemplate" category="List">
+				<xr:TypeId>04bb48ad-6119-5b18-9d44-54fee22f9d9a</xr:TypeId>
+				<xr:ValueId>c8859bb7-ebf6-5220-8002-60551911819a</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="CatalogManager.CovOwnedCatalogTemplate" category="Manager">
+				<xr:TypeId>0a876aa3-575d-589f-8248-d9841c40d886</xr:TypeId>
+				<xr:ValueId>d7d1e251-82c9-5b73-8df6-b3f1fa57d8c8</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovOwnedCatalogTemplate</Name>
+			<Synonym/>
+			<Comment/>
+			<Hierarchical>false</Hierarchical>
+			<HierarchyType>HierarchyFoldersAndItems</HierarchyType>
+			<LimitLevelCount>false</LimitLevelCount>
+			<LevelCount>2</LevelCount>
+			<FoldersOnTop>true</FoldersOnTop>
+			<UseStandardCommands>true</UseStandardCommands>
+			<Owners/>
+			<SubordinationUse>ToItems</SubordinationUse>
+			<CodeLength>9</CodeLength>
+			<DescriptionLength>25</DescriptionLength>
+			<CodeType>String</CodeType>
+			<CodeAllowedLength>Variable</CodeAllowedLength>
+			<CodeSeries>WholeCatalog</CodeSeries>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>true</Autonumbering>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<Characteristics/>
+			<PredefinedDataUpdate>Auto</PredefinedDataUpdate>
+			<EditType>InDialog</EditType>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<InputByString>
+				<xr:Field>Catalog.CovOwnedCatalogTemplate.StandardAttribute.Description</xr:Field>
+				<xr:Field>Catalog.CovOwnedCatalogTemplate.StandardAttribute.Code</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<DefaultObjectForm/>
+			<DefaultFolderForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<DefaultFolderChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryFolderForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<AuxiliaryFolderChoiceForm/>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<BasedOn/>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<CreateOnInput>Use</CreateOnInput>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects><TabularSection uuid="fbd5b354-7aee-5a1a-a382-594276082532"><InternalInfo><xr:GeneratedType name="CatalogTabularSection.CovOwnedCatalogTemplate.Goods" category="TabularSection"><xr:TypeId>ba699a05-8a14-558a-884e-b124f7705f71</xr:TypeId><xr:ValueId>a9b2a34b-2394-54f9-bde7-ef8ffdeccb17</xr:ValueId></xr:GeneratedType><xr:GeneratedType name="CatalogTabularSectionRow.CovOwnedCatalogTemplate.Goods" category="TabularSectionRow"><xr:TypeId>65232411-cfcc-5d64-b553-4aa317e96adf</xr:TypeId><xr:ValueId>eefc6808-04d8-5add-91f6-bfe7d963a353</xr:ValueId></xr:GeneratedType></InternalInfo><Properties><Name>Goods</Name></Properties><ChildObjects><Attribute uuid="abdfbd50-dda6-5ecc-8554-638828c736f1"><Properties><Name>Product</Name><Type><v8:Type>cfg:CatalogRef.CovOwnedProducts</v8:Type><v8:Type>cfg:CatalogRef.CovOwnedProductsAlt</v8:Type></Type></Properties></Attribute></ChildObjects></TabularSection><Form>TableForm</Form></ChildObjects>
+	</Catalog>
+</MetaDataObject>
+

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-mobile-permission-messages",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "b8805ca7c0c776b3e2f29827f9769dc85cd59b37a42ef42d972970a736eb6628",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76182,
+    "decoded_sha256": "8aeffd9a7f78d6fc78e1d3b690b80cbc3301d2c915596488cb5fafa968660e12",
+    "encoded_sha256": "5efe98ae2883f1fce058ad6f0356e85c2282c725ebc6014d01a23b1074fc28f9"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10639,
+          "sha256": "0f3550ffa0b631125786fb5c5c4f58f982c34428f8789b6a03ba731caed282b3"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "4307b3294744a891ded3a94cce374fc4b0757d45fde1b0ffe68998285dc33d87"
+        }
+      ]
+    },
+    {
+      "name": "CovMobilePermissionMessages",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovMobilePermissionMessages.xml",
+          "size": 1512,
+          "sha256": "8d282c7e87650a8a63ab4c6c090289d6b477fa460797178df626fdd9e0021629"
+        }
+      ]
+    }
+  ]
+}

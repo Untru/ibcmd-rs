@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovModernModeTaxi",
+      "set": {
+        "UseInInterfaceCompatibilityMode": "Taxi"
+      },
+      "source": "observed:UNF; platform enum only"
+    },
+    {
+      "name": "CovModernModeVersion85",
+      "set": {
+        "UseInInterfaceCompatibilityMode": "Version85"
+      },
+      "source": "observed:UNF; platform enum only"
+    },
+    {
+      "name": "CovModernParentButton",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernParentButton.xml"
+      }
+    },
+    {
+      "name": "CovModernReducedText",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernReducedText.xml"
+      }
+    },
+    {
+      "name": "CovModernBrokenTilt",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernBrokenTilt.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelDecorationFont",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelDecorationFont.xml"
+      }
+    },
+    {
+      "name": "CovModernLabelFieldFont",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernLabelFieldFont.xml"
+      }
+    },
+    {
+      "name": "CovModernCollapseUse",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernCollapseUse.xml"
+      }
+    },
+    {
+      "name": "CovModernPictureChar",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernPictureChar.xml"
+      }
+    },
+    {
+      "name": "CovModernSheetFormattedString",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovModernSheetFormattedString.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  }
+}

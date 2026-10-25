@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovDeepProductBinding",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovDeepProductBinding.xml"
+      }
+    },
+    {
+      "name": "CovDeepComposerBinding",
+      "set": {},
+      "files": {
+        "Ext/Form.xml": "bodies/CovDeepComposerBinding.xml"
+      }
+    }
+  ],
+  "template_files": {
+    "Ext/Form.xml": "bodies/empty.xml"
+  }
+}

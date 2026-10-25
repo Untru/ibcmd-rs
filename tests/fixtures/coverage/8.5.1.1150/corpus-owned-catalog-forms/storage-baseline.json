@@ -1,0 +1,24 @@
+{
+  "equal": [
+    "Catalogs/CovOwnedBindingCatalog.xml",
+    "Catalogs/CovOwnedBindingCatalog/Forms/DeepForm.xml",
+    "Catalogs/CovOwnedBindingCatalog/Forms/DeepForm/Ext/Form.xml",
+    "Catalogs/CovOwnedBindingCatalog/Forms/EventsForm.xml",
+    "Catalogs/CovOwnedBindingCatalog/Forms/EventsForm/Ext/Form.xml",
+    "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+    "Catalogs/CovOwnedBindingCatalog/Forms/TableForm.xml",
+    "Catalogs/CovOwnedCatalogTemplate.xml",
+    "Catalogs/CovOwnedDefinedCatalog.xml",
+    "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml",
+    "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm/Ext/Form.xml",
+    "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml",
+    "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm/Ext/Form.xml",
+    "Catalogs/CovOwnedDefinedCatalog/Forms/TableForm.xml",
+    "Catalogs/CovOwnedUnionCatalog.xml",
+    "Catalogs/CovOwnedUnionCatalog/Forms/TableForm.xml",
+    "Catalogs/CovOwnedUnits.xml",
+    "Configuration.xml",
+    "DefinedTypes/CovOwnedProductType.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+  ]
+}

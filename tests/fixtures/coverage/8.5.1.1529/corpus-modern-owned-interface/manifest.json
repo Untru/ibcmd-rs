@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1529-xml-2.21-corpus-modern-owned-interface",
+  "collection": "DataProcessors",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1529",
+    "source_version": "2.21",
+    "ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "1bb8067ac0f0afc80af8972e98241ee764fc3cb003e57adfebf98f0bd228e77a",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 93176,
+    "decoded_sha256": "3d5a5df693772922426585d08cb2aedc69f636221c4590563e49a980efacb1a9",
+    "encoded_sha256": "30e38595dba9613ca965627d6422a27e4088d7af35b16b7f49ba77be3dd7a154"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11122,
+          "sha256": "ff62d3424e2f0d338dfb55553fcaeadc948e631adb670d40d1d3c3a6bbfb6213"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "97bfc36ba565bd1294d7895564bff064acfddbad76d534075dc478728c638ac1"
+        }
+      ]
+    },
+    {
+      "name": "CovModernOwnedProcessor",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/ChildrenAlign/Ext/Form.xml",
+          "size": 1346,
+          "sha256": "1d8ed5379f1f54ab7d125707387e690ed92da3a4ba7507e59652d53ecdaa5ed0"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/ChildrenAlign.xml",
+          "size": 1657,
+          "sha256": "4c510a6ac8972a17f189736abdb0db425f47f0d412d136c4608c0e82d04ce6c7"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/FillCheck/Ext/Form/Module.bsl",
+          "size": 80,
+          "sha256": "90928090c37a5577bfdc7de20c1f8cc9d7b807a18f79bd4d4ec49a7d5180bbd6"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/FillCheck/Ext/Form.xml",
+          "size": 1770,
+          "sha256": "9e087e317af5ab90be7287086db37c5cb8683ff50f3d554db304518e64c37d33"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/FillCheck.xml",
+          "size": 1653,
+          "sha256": "4065513eac4c65e98a01b9ed184a2d4af48955d347e072295c225faaaa0f871d"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/LabelDecorationTextColorPalette/Ext/Form.xml",
+          "size": 1576,
+          "sha256": "29dd13e8aebc87353d49c4d6b6dd4df32b676bab8dcd64e4cbe9221db917894a"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/LabelDecorationTextColorPalette.xml",
+          "size": 1675,
+          "sha256": "de954f4967c1b17de4fcb0536c953606d6e370957ed0c7d22eba5b06be49a538"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/LabelDecorationTitleLevel2/Ext/Form.xml",
+          "size": 1593,
+          "sha256": "f50265b8a0432182daa3d1b8125e9ee7d0f915c7bd416d44c31584e4a339842b"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/LabelDecorationTitleLevel2.xml",
+          "size": 1670,
+          "sha256": "897b0458ee5fbc38aaaecb280d1247855eac3ee0f147c30e3a4cf65d6c5afc96"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi/Ext/Form.xml",
+          "size": 1292,
+          "sha256": "e547dbb83129f43a6ee7d7362a779ea087e0caf4263bb6436cbff2f783c4a727"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml",
+          "size": 1653,
+          "sha256": "7bdea9f46893e1b7378469590bf33aba8cf7ca5644fa5995c63833e8060472ab"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85/Ext/Form.xml",
+          "size": 1292,
+          "sha256": "e547dbb83129f43a6ee7d7362a779ea087e0caf4263bb6436cbff2f783c4a727"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml",
+          "size": 1668,
+          "sha256": "11fd54a4277e8694d58a465adf3dea36ff72dbf749f122e0f24f15db9af15087"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection/Ext/Form.xml",
+          "size": 3934,
+          "sha256": "641a620b854f29dc7300654eeb72468a3c20818ae3185028374a48877feb8d55"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml",
+          "size": 1664,
+          "sha256": "b1f1fdaa76831969fcc0bc46b816660d664acfd9c9bd46cac35ef7da2b0dddc2"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/UsualGroupBackColorPalette/Ext/Form.xml",
+          "size": 1497,
+          "sha256": "3a6e70ae3292241042d6114705d6bd8c8539651e8e279f84285b3b84e83df516"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/UsualGroupBackColorPalette.xml",
+          "size": 1670,
+          "sha256": "1d8912b4f9b4aed408532bfec9685580663b5d1c1d16aade656c0bce8926a969"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/VerticalSingle/Ext/Form.xml",
+          "size": 1364,
+          "sha256": "7998dbe1e3862b57e5bf9bc1a7cb5a3a184ef470b3d5d0514bb8aef7fadf02a5"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/VerticalSingle.xml",
+          "size": 1658,
+          "sha256": "28f15bcc25edd20fc1cbafa6e6fe53923d700f8a4e4c868b9afc242e15f8447b"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor.xml",
+          "size": 2254,
+          "sha256": "20f5a906aa2e4801f7b47cf60dfe4a13734f82788705b96d4be9876ac56d378c"
+        }
+      ]
+    }
+  ]
+}

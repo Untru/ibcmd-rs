@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "collection": "DocumentNumerators",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150/Documents",
+  "corpus_objects": 25,
+  "properties": [
+    {
+      "name": "NumberType",
+      "kind": "enum",
+      "template": "String",
+      "values": []
+    },
+    {
+      "name": "NumberLength",
+      "kind": "number",
+      "template": "9",
+      "values": [
+        {
+          "value": "11",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150/Documents"
+        }
+      ]
+    },
+    {
+      "name": "NumberAllowedLength",
+      "kind": "enum",
+      "template": "Variable",
+      "values": [
+        {
+          "value": "Fixed",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150/Documents"
+        }
+      ]
+    },
+    {
+      "name": "NumberPeriodicity",
+      "kind": "enum",
+      "template": "Nonperiodical",
+      "values": [
+        {
+          "value": "Year",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150/Documents"
+        }
+      ]
+    },
+    {
+      "name": "CheckUnique",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    }
+  ]
+}

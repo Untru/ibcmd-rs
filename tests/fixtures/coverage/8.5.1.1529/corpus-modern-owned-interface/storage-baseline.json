@@ -1,0 +1,22 @@
+{
+  "equal": [
+    "Configuration.xml",
+    "DataProcessors/CovModernOwnedProcessor.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/ChildrenAlign.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/ChildrenAlign/Ext/Form.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/FillCheck.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/FillCheck/Ext/Form.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/LabelDecorationTextColorPalette.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/LabelDecorationTextColorPalette/Ext/Form.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/LabelDecorationTitleLevel2.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/LabelDecorationTitleLevel2/Ext/Form.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi/Ext/Form.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85/Ext/Form.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/UsualGroupBackColorPalette.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/UsualGroupBackColorPalette/Ext/Form.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/VerticalSingle.xml",
+    "DataProcessors/CovModernOwnedProcessor/Forms/VerticalSingle/Ext/Form.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+  ]
+}

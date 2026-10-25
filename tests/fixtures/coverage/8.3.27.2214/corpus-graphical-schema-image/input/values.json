@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "collection": "CommonTemplates",
+  "properties": [],
+  "combinations": [
+    {
+      "name": "CovGraphicalSchemaPng",
+      "set": {},
+      "source": "generated:RGBA-PNG",
+      "files": {
+        "Ext/Template.xml": "bodies/schema.xml",
+        "Ext/Template/Items/Probe/Pixel.png": {
+          "path": "bodies/pixel.png",
+          "binary": true
+        }
+      }
+    },
+    {
+      "name": "CovGraphicalSchemaGif",
+      "set": {},
+      "source": "generated:palette-GIF",
+      "files": {
+        "Ext/Template.xml": "bodies/gif.xml",
+        "Ext/Template/Items/Probe/Pixel.gif": {
+          "path": "bodies/pixel.gif",
+          "binary": true
+        }
+      }
+    }
+  ],
+  "corpus": "clean-room-language-and-graph-assets",
+  "template_files": {
+    "Ext/Template.xml": "bodies/empty.xml"
+  }
+}

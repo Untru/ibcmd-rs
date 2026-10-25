@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1529-xml-2.21-corpus-modern-forms",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.5.1.1529",
+    "source_version": "2.21",
+    "ibcmd_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "4b995858ddf87d881fc1278439e07648fabf5d1a0d1eb186d9ea5f7fec8dc4eb",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 96009,
+    "decoded_sha256": "0f141e519be26f61acb7ddf854564c5ec6c8bb4ed80f4ddd78495c08bdf1093a",
+    "encoded_sha256": "09e597196c8cbd198d22c740f0fe5f99410a77f0122a758bdda84f64e0c95a9f"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11633,
+          "sha256": "619aff234f9af0f9792ec2ee773a8abe886bb7b20233f41d283d5d571cea5c5d"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "9af5a667de5ea34622b685dad6625c6fb1acccd6c0972373d272b93ed227a6f8"
+        }
+      ]
+    },
+    {
+      "name": "CovModernFormTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernFormTemplate/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovModernFormTemplate.xml",
+          "size": 1635,
+          "sha256": "cfbcbca1f1df1c0f88b1f170978e0d04458bacd69c9126dbdd0d6e74402c59cf"
+        }
+      ]
+    },
+    {
+      "name": "CovModernModeTaxi",
+      "property": [
+        "UseInInterfaceCompatibilityMode"
+      ],
+      "kind": "combination",
+      "value": {
+        "UseInInterfaceCompatibilityMode": "Taxi"
+      },
+      "source": "observed:UNF; platform enum only",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernModeTaxi/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovModernModeTaxi.xml",
+          "size": 1632,
+          "sha256": "459e71da3e1932d7e76f59ab0fbe94bd12b9791fd658c5455642c301d30fd679"
+        }
+      ]
+    },
+    {
+      "name": "CovModernModeVersion85",
+      "property": [
+        "UseInInterfaceCompatibilityMode"
+      ],
+      "kind": "combination",
+      "value": {
+        "UseInInterfaceCompatibilityMode": "Version85"
+      },
+      "source": "observed:UNF; platform enum only",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernModeVersion85/Ext/Form.xml",
+          "size": 1090,
+          "sha256": "2ec4f73b5ce4575ee6b49ff37548185055a3dff8c6dc079381cc90eae923e482"
+        },
+        {
+          "path": "CommonForms/CovModernModeVersion85.xml",
+          "size": 1642,
+          "sha256": "2fb6faafa373f222cf50a8db3f95e0226864613153f36932de5cad0f6bcaa849"
+        }
+      ]
+    },
+    {
+      "name": "CovModernParentButton",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernParentButton/Ext/Form.xml",
+          "size": 1771,
+          "sha256": "3afa925301da9d4e06e4496849b27dee58c76e3cd28ade2c0bb55689b8f38f51"
+        },
+        {
+          "path": "CommonForms/CovModernParentButton.xml",
+          "size": 1635,
+          "sha256": "76425a79b563812573a2a36a1062a419cfb9d3f9b71748fea43f2a58eb1ef5b6"
+        }
+      ]
+    },
+    {
+      "name": "CovModernReducedText",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernReducedText/Ext/Form.xml",
+          "size": 1651,
+          "sha256": "322b21ba55cd1a3fcdd821d39758267e32a42b8162363308c717a15aec83ea89"
+        },
+        {
+          "path": "CommonForms/CovModernReducedText.xml",
+          "size": 1634,
+          "sha256": "487a66c914ff56f0b005af002d247b3f4f35cfc871380a0bc753f62957360833"
+        }
+      ]
+    },
+    {
+      "name": "CovModernBrokenTilt",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernBrokenTilt/Ext/Form.xml",
+          "size": 1717,
+          "sha256": "a738c77ffd1d36f0ae35627f0cbbb1e04c56523e824401721e6f83abd994af23"
+        },
+        {
+          "path": "CommonForms/CovModernBrokenTilt.xml",
+          "size": 1633,
+          "sha256": "598fc1586a0de2eca62d9f89de47b475c3fa94e57d369a1878b6843706977adb"
+        }
+      ]
+    },
+    {
+      "name": "CovModernLabelDecorationFont",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernLabelDecorationFont/Ext/Form.xml",
+          "size": 1419,
+          "sha256": "9ff9bfa0dbb958fef47f571ac70539bd84966c762a4ce9883c454776d8383fd7"
+        },
+        {
+          "path": "CommonForms/CovModernLabelDecorationFont.xml",
+          "size": 1642,
+          "sha256": "0d52d9c0bf3300d5d1af036a2f4d3c9e4c39da362d3c1b233bb0d8022a4950cc"
+        }
+      ]
+    },
+    {
+      "name": "CovModernLabelFieldFont",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernLabelFieldFont/Ext/Form.xml",
+          "size": 1409,
+          "sha256": "d98d9fb5fad0fe3561ceb750fb95f980c32e3fb860623a98a224134ef9dbfe2d"
+        },
+        {
+          "path": "CommonForms/CovModernLabelFieldFont.xml",
+          "size": 1637,
+          "sha256": "601fc415987e7faba5af2b8f471550e121970c2480e74319ae7a346baeda76cf"
+        }
+      ]
+    },
+    {
+      "name": "CovModernCollapseUse",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernCollapseUse/Ext/Form.xml",
+          "size": 1165,
+          "sha256": "e2a71364f9c428bdff27c65debada18817218c04c52bd6af5d5a19ada1ca7208"
+        },
+        {
+          "path": "CommonForms/CovModernCollapseUse.xml",
+          "size": 1634,
+          "sha256": "cf0816cf5948349d5738465c298ced0426d54723aa7a57f0e8e4de837e84c756"
+        }
+      ]
+    },
+    {
+      "name": "CovModernPictureChar",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernPictureChar/Ext/Form.xml",
+          "size": 1429,
+          "sha256": "7ee63b6bc22354f377911cc8a3ea1c3fe7b4436d040e0288441271c10c0f388b"
+        },
+        {
+          "path": "CommonForms/CovModernPictureChar.xml",
+          "size": 1634,
+          "sha256": "917a71cb1859dd189f785d6f066031fa45c9b9709d34927d477ca916a43ca767"
+        }
+      ]
+    },
+    {
+      "name": "CovModernSheetFormattedString",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "combination",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovModernSheetFormattedString/Ext/Form.xml",
+          "size": 3050,
+          "sha256": "758390e91ecaf3c4ef60f0e460415ad446714f786707827cd04e9df0d7a0343c"
+        },
+        {
+          "path": "CommonForms/CovModernSheetFormattedString.xml",
+          "size": 1643,
+          "sha256": "26d4573a0e7b7936f197a1cba1767748f52baa8df0c4704916b2e9fb70d765b9"
+        }
+      ]
+    }
+  ]
+}

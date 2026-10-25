@@ -1,0 +1,99 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21">
+	<ChartOfCalculationTypes uuid="71b6e7a2-3f26-5ce8-b660-e52909914ec8">
+		<InternalInfo>
+			<xr:GeneratedType name="ChartOfCalculationTypesObject.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="Object">
+				<xr:TypeId>7abe20ab-3fd1-5616-980e-2a0e0fad31dc</xr:TypeId>
+				<xr:ValueId>90b509c1-83de-5ab2-afbc-d9a0d27537a0</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfCalculationTypesRef.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="Ref">
+				<xr:TypeId>8755f885-5e53-577f-8e62-2b1cfeffd617</xr:TypeId>
+				<xr:ValueId>dda36e76-6013-5082-bc02-d8e1731a5dd9</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfCalculationTypesSelection.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="Selection">
+				<xr:TypeId>da822262-a197-5fc6-a285-6bc5715c626f</xr:TypeId>
+				<xr:ValueId>12e6ac61-2a04-598f-99bc-1725ed9528c6</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfCalculationTypesList.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="List">
+				<xr:TypeId>cc5c5ae0-e989-56d4-acd8-e55d411a65a4</xr:TypeId>
+				<xr:ValueId>09f0ccc8-79d4-5d44-8563-3f7f106d877c</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfCalculationTypesManager.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="Manager">
+				<xr:TypeId>e2fde523-4858-59c9-814b-07970ea236a5</xr:TypeId>
+				<xr:ValueId>ebe78c79-dfc4-58d6-bc41-2669151aebf6</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DisplacingCalculationTypes.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="DisplacingCalculationTypes">
+				<xr:TypeId>00498ad0-e3e1-5ab9-b448-67874a31d6f0</xr:TypeId>
+				<xr:ValueId>81aa72c1-c032-5da1-a64a-c3b19316e22d</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DisplacingCalculationTypesRow.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="DisplacingCalculationTypesRow">
+				<xr:TypeId>3a85ede4-a929-5ad9-be10-e748526c63e4</xr:TypeId>
+				<xr:ValueId>531161a5-9c5a-54bb-bd8c-dbb81a085967</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="BaseCalculationTypes.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="BaseCalculationTypes">
+				<xr:TypeId>70dc0d88-8a5f-5b5e-ab91-418ae1fa2cd9</xr:TypeId>
+				<xr:ValueId>7fcb152e-551b-588b-9235-ed1246c21eda</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="BaseCalculationTypesRow.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="BaseCalculationTypesRow">
+				<xr:TypeId>7bbb5b34-ce9c-577b-bbc7-1cb7f620364d</xr:TypeId>
+				<xr:ValueId>29c173ba-db39-538c-a6ab-d45f6ba901e1</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="LeadingCalculationTypes.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="LeadingCalculationTypes">
+				<xr:TypeId>5f32e5ab-6840-5db6-a3ec-31be201a344c</xr:TypeId>
+				<xr:ValueId>f76d276b-a1ac-5623-b94e-e7fcb6becc61</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="LeadingCalculationTypesRow.CovUpdateDataHistoryImmediatelyAfterWrite_true" category="LeadingCalculationTypesRow">
+				<xr:TypeId>4c0725e9-2128-5616-8c28-afdbc7b15103</xr:TypeId>
+				<xr:ValueId>fe8ea08e-9c86-572d-976c-ce26603032ee</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovUpdateDataHistoryImmediatelyAfterWrite_true</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<CodeLength>9</CodeLength>
+			<DescriptionLength>40</DescriptionLength>
+			<CodeType>String</CodeType>
+			<CodeAllowedLength>Variable</CodeAllowedLength>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<EditType>InDialog</EditType>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<InputByString>
+				<xr:Field>ChartOfCalculationTypes.CovUpdateDataHistoryImmediatelyAfterWrite_true.StandardAttribute.Description</xr:Field>
+				<xr:Field>ChartOfCalculationTypes.CovUpdateDataHistoryImmediatelyAfterWrite_true.StandardAttribute.Code</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<BasedOn/>
+			<DependenceOnCalculationTypes>DontUse</DependenceOnCalculationTypes>
+			<BaseCalculationTypes/>
+			<ActionPeriodUse>false</ActionPeriodUse>
+			<Characteristics/>
+			<PredefinedDataUpdate>Auto</PredefinedDataUpdate>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>true</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects/>
+	</ChartOfCalculationTypes>
+</MetaDataObject>

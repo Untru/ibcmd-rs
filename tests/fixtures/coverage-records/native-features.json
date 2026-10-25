@@ -1,0 +1,608 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "style-colour",
+      "set": "corpus-style-colors",
+      "file": "StyleItems/CovStyleColorTomato.xml",
+      "contains": [
+        ":Tomato</"
+      ]
+    },
+    {
+      "id": "form-colour",
+      "set": "corpus-managed-forms",
+      "file": "CommonForms/CovLabelDecorationTextColorMediumGreen/Ext/Form.xml",
+      "contains": [
+        "<TextColor>",
+        ":MediumGreen</"
+      ]
+    },
+    {
+      "id": "form-picture",
+      "set": "corpus-managed-forms",
+      "file": "CommonForms/CovButtonPictureGotoURL/Ext/Form.xml",
+      "contains": [
+        ">StdPicture.GotoURL<"
+      ]
+    },
+    {
+      "id": "graphical-field",
+      "set": "corpus-managed-forms",
+      "file": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato/Ext/Form.xml",
+      "contains": [
+        "<GraphicalSchemaField ",
+        "<BorderColor>"
+      ]
+    },
+    {
+      "id": "period-field",
+      "set": "corpus-managed-forms",
+      "file": "CommonForms/CovPeriodField/Ext/Form.xml",
+      "contains": [
+        "<PeriodField "
+      ]
+    },
+    {
+      "id": "embedded-spreadsheet",
+      "set": "corpus-managed-forms",
+      "file": "CommonForms/CovEmbeddedSpreadsheetCells/Ext/Form.xml",
+      "contains": [
+        "SpreadsheetDocument\"",
+        "rowsItem>",
+        ">Coverage<"
+      ]
+    },
+    {
+      "id": "vertical-scroll",
+      "set": "corpus-form-settings",
+      "file": "CommonForms/CovVerticalScrollAlways/Ext/Form.xml",
+      "contains": [
+        "<VerticalScroll>use</VerticalScroll>"
+      ]
+    },
+    {
+      "id": "dynamic-list-key",
+      "set": "corpus-form-settings",
+      "file": "CommonForms/CovDynamicListRowNumber/Ext/Form.xml",
+      "contains": [
+        "<KeyType>RowNumber</KeyType>"
+      ]
+    },
+    {
+      "id": "font-with-upgrade-trigger",
+      "set": "corpus-form-settings",
+      "file": "CommonForms/CovPictureTitleFontEnterOnInput/Ext/Form.xml",
+      "contains": [
+        "<TitleFont ",
+        "<EditMode>EnterOnInput</EditMode>"
+      ]
+    },
+    {
+      "id": "chart-extent",
+      "set": "corpus-form-facets",
+      "file": "CommonForms/CovFacetChartAutoMaxWidth/Ext/Form.xml",
+      "contains": [
+        "<ChartField ",
+        "<AutoMaxWidth>false</AutoMaxWidth>"
+      ]
+    },
+    {
+      "id": "chart-event",
+      "set": "corpus-form-facets",
+      "file": "CommonForms/CovFacetChartOnActivate/Ext/Form.xml",
+      "contains": [
+        "<ChartField ",
+        "name=\"OnActivate\""
+      ]
+    },
+    {
+      "id": "planner-event",
+      "set": "corpus-form-facets",
+      "file": "CommonForms/CovFacetPlannerCommandGenerateProcessing/Ext/Form.xml",
+      "contains": [
+        "<PlannerField ",
+        "name=\"CommandGenerateProcessing\""
+      ]
+    },
+    {
+      "id": "selection-command",
+      "set": "corpus-form-facets",
+      "file": "CommonForms/CovFacetTableExcludesAddAutoSelectedField/Ext/Form.xml",
+      "contains": [
+        "<DataPath>Rows.SettingsComposer.Settings.Selection</DataPath>",
+        "<ExcludedCommand>AddAutoSelectedField</ExcludedCommand>"
+      ]
+    },
+    {
+      "id": "owned-shortcut",
+      "set": "corpus-owned-catalog-forms",
+      "file": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm/Ext/Form.xml",
+      "contains": [
+        "<MainAttribute>true</MainAttribute>",
+        "<Shortcut>Space</Shortcut>",
+        "<Action>ProbeHandler</Action>"
+      ]
+    },
+    {
+      "id": "owned-defined-type-path",
+      "set": "corpus-owned-catalog-forms",
+      "file": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm/Ext/Form.xml",
+      "contains": [
+        "<DataPath>Object.Goods.Product.UnitOfMeasure</DataPath>",
+        "<MainAttribute>true</MainAttribute>"
+      ]
+    },
+    {
+      "id": "composer-path",
+      "set": "corpus-form-deep-bindings",
+      "file": "CommonForms/CovDeepComposerBinding/Ext/Form.xml",
+      "contains": [
+        "<DataPath>Report.SettingsComposer.Settings.Selection.Use</DataPath>"
+      ]
+    },
+    {
+      "id": "catalog-picture-zero",
+      "set": "corpus-orphan-catalog-facets",
+      "file": "Catalogs/CovOrphanCatalogTemplate.xml",
+      "contains": [
+        "<xr:Ref>0</xr:Ref>"
+      ]
+    },
+    {
+      "id": "characteristic-sentinel",
+      "set": "corpus-orphan-characteristics",
+      "file": "Catalogs/CovOrphanCharacteristics.xml",
+      "contains": [
+        "KeyField>-2</"
+      ]
+    },
+    {
+      "id": "catalog-index",
+      "set": "corpus-catalog-additional-index",
+      "file": "Catalogs/CovIndexedCatalog/Ext/AdditionalIndexes.xml",
+      "contains": [
+        "<Name>CovCodeDescription</Name>",
+        "<Field>Code</Field>"
+      ]
+    },
+    {
+      "id": "layout-height",
+      "set": "corpus-client-application-interface",
+      "file": "Ext/ClientApplicationInterface.xml",
+      "contains": [
+        "<height>1</height>"
+      ]
+    },
+    {
+      "id": "mobile-permission-message",
+      "set": "corpus-mobile-permission-messages",
+      "file": "Configuration.xml",
+      "contains": [
+        "<app:permissionMessage>",
+        ">Biometrics<"
+      ]
+    },
+    {
+      "id": "english-script",
+      "set": "corpus-english-composition",
+      "file": "Configuration.xml",
+      "contains": [
+        "<ScriptVariant>English</ScriptVariant>"
+      ]
+    },
+    {
+      "id": "english-composition-parameter",
+      "set": "corpus-english-composition",
+      "file": "CommonTemplates/CovEnglishComposition/Ext/Template.xml",
+      "contains": [
+        "parameter>Title</"
+      ]
+    },
+    {
+      "id": "page-break",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml",
+      "contains": [
+        "<verticalPageBreak>"
+      ]
+    },
+    {
+      "id": "page-size",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+      "contains": [
+        "<pageSize>A4</pageSize>"
+      ]
+    },
+    {
+      "id": "automatic-font-extent",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+      "contains": [
+        "kind=\"AutoFont\"",
+        "height=\"9\""
+      ]
+    },
+    {
+      "id": "system-font",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+      "contains": [
+        "sys:OEMFixedFont"
+      ]
+    },
+    {
+      "id": "sheet-colour",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+      "contains": [
+        ":SandyBrown</"
+      ]
+    },
+    {
+      "id": "drawing-line-style",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+      "contains": [
+        ">DashDotted</"
+      ]
+    },
+    {
+      "id": "line-gap",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+      "contains": [
+        "gap=\"true\""
+      ]
+    },
+    {
+      "id": "detail-value-list",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+      "contains": [
+        "v8:ValueListType\""
+      ]
+    },
+    {
+      "id": "spreadsheet-standard-picture",
+      "set": "corpus-spreadsheet-facets",
+      "file": "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+      "contains": [
+        ":AppearanceCheckIcon\""
+      ]
+    },
+    {
+      "id": "flowchart-processing-control",
+      "set": "corpus-business-process-flowchart",
+      "file": "BusinessProcesses/CovProcessingFlowchart/Ext/Flowchart.xml",
+      "contains": [
+        "<Processing "
+      ]
+    },
+    {
+      "id": "flowchart-print-parameters",
+      "set": "corpus-business-process-flowchart",
+      "file": "BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml",
+      "contains": [
+        "<Paper xsi:type=\"xs:decimal\">9</Paper>",
+        "<PaperSource xsi:type=\"xs:decimal\">7</PaperSource>"
+      ],
+      "platforms": [
+        "8.3.27.2214",
+        "8.5.1.1150"
+      ]
+    },
+    {
+      "id": "shape-vertical-brackets",
+      "set": "corpus-template-bodies",
+      "file": "CommonTemplates/CovVerticalBrackets/Ext/Template.xml",
+      "contains": [
+        "<Shape>VerticalBrackets</Shape>"
+      ],
+      "platforms": [
+        "8.3.27.2214",
+        "8.5.1.1150"
+      ]
+    },
+    {
+      "id": "CovModernParentButton",
+      "set": "corpus-modern-forms",
+      "file": "CommonForms/CovModernParentButton/Ext/Form.xml",
+      "contains": [
+        "<ControlRepresentation>ButtonInParentElement</ControlRepresentation>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernReducedText",
+      "set": "corpus-modern-forms",
+      "file": "CommonForms/CovModernReducedText/Ext/Form.xml",
+      "contains": [
+        "<TextSize>Reduced</TextSize>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernBrokenTilt",
+      "set": "corpus-modern-forms",
+      "file": "CommonForms/CovModernBrokenTilt/Ext/Form.xml",
+      "contains": [
+        "<Representation>BrokenTilt</Representation>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernSheetFormattedString",
+      "set": "corpus-modern-forms",
+      "file": "CommonForms/CovModernSheetFormattedString/Ext/Form.xml",
+      "contains": [
+        "<ExcludedCommand>FormattedString</ExcludedCommand>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernLabelFieldUseCopy",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernLabelFieldUseCopy/Ext/Form.xml",
+      "contains": [
+        "<UseCopy>false</UseCopy>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernLabelFieldCellHyperlinkRepresentation",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernLabelFieldCellHyperlinkRepresentation/Ext/Form.xml",
+      "contains": [
+        "<CellHyperlinkRepresentation>DontShow</CellHyperlinkRepresentation>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernInputFieldWidthInCard",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernInputFieldWidthInCard/Ext/Form.xml",
+      "contains": [
+        "<WidthInCard>Full</WidthInCard>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernColumnGroupCard",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernColumnGroupCard/Ext/Form.xml",
+      "contains": [
+        "<ShowTitleInCard>true</ShowTitleInCard>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernCommandBarAppearance",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernCommandBarAppearance/Ext/Form.xml",
+      "contains": [
+        "<AppearanceMode>UsualGroup</AppearanceMode>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernInputFieldAutofillHint",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernInputFieldAutofillHint/Ext/Form.xml",
+      "contains": [
+        "<AutofillHint>PhoneNumber</AutofillHint>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernTrackBarFieldMarkingAppearance",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernTrackBarFieldMarkingAppearance/Ext/Form.xml",
+      "contains": [
+        "<MarkingAppearance>BothSides</MarkingAppearance>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernChoicePeriod",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernChoicePeriod/Ext/Form.xml",
+      "contains": [
+        "xsi:type=\"v8:StandardPeriod\""
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernInputMultipleValueEvent",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernInputMultipleValueEvent/Ext/Form.xml",
+      "contains": [
+        "name=\"MultipleValueURLProcessing\""
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernPdfGray",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernPdfGray/Ext/Form.xml",
+      "contains": [
+        "<ExcludedCommand>ConvertToGrayScale</ExcludedCommand>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernInputPictureExternalUser",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernInputPictureExternalUser/Ext/Form.xml",
+      "contains": [
+        ">StdPicture.CollaborationSystemExternalUser<"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "CovModernLabelDecorationTitleLevel4",
+      "set": "corpus-modern-details",
+      "file": "CommonForms/CovModernLabelDecorationTitleLevel4/Ext/Form.xml",
+      "contains": [
+        "ref=\"style:TitleLevel4\""
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "form-owned-interface-mode",
+      "set": "corpus-modern-owned-interface",
+      "file": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml",
+      "contains": [
+        "<UseInInterfaceCompatibilityMode>Version85</UseInInterfaceCompatibilityMode>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "table-deselect",
+      "set": "corpus-modern-owned-interface",
+      "file": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection/Ext/Form.xml",
+      "contains": [
+        "<ExcludedCommand>DeselectAll</ExcludedCommand>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "hybrid-interface-mode",
+      "set": "corpus-hybrid-interface",
+      "file": "Configuration.xml",
+      "contains": [
+        "<InterfaceCompatibilityMode>TaxiEnableVersion8_5</InterfaceCompatibilityMode>"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "chart-Column",
+      "set": "corpus-chart-settings",
+      "file": "CommonForms/CovChartTypeColumn/Ext/Form.xml",
+      "contains": [
+        ">Column</"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "chart-Pie3D",
+      "set": "corpus-chart-settings",
+      "file": "CommonForms/CovChartTypePie3D/Ext/Form.xml",
+      "contains": [
+        ">Pie3D</"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "spreadsheet-dashed",
+      "set": "corpus-modern-spreadsheet",
+      "file": "CommonTemplates/CovModernSheetDashed/Ext/Template.xml",
+      "contains": [
+        ">Dashed</"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "spreadsheet-builtin-font",
+      "set": "corpus-modern-spreadsheet",
+      "file": "CommonTemplates/CovModernSheetBuiltinFont/Ext/Template.xml",
+      "contains": [
+        "ref=\"style:TitleLevel2\""
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "task-object-events",
+      "set": "corpus-task-form-events",
+      "file": "Tasks/CovEventTask/Forms/EventsForm/Ext/Form.xml",
+      "contains": [
+        "cfg:TaskObject.CovEventTask",
+        "name=\"AfterWrite\"",
+        "name=\"BeforeWriteAtServer\""
+      ]
+    },
+    {
+      "id": "mixed-help-references",
+      "set": "corpus-palette-help-and-interface",
+      "file": "Catalogs/CovHelpCatalog/Ext/Help/ru.html",
+      "contains": [
+        "about:../id",
+        "Catalog.CovHelpTarget/Help"
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "nonempty-root-spacing",
+      "set": "corpus-legacy-form-properties",
+      "file": "CommonForms/CovLegacyVerticalSingle/Ext/Form.xml",
+      "contains": [
+        "<VerticalSpacing>Single</VerticalSpacing>",
+        "<LabelDecoration "
+      ],
+      "platforms": [
+        "8.5.1.1529"
+      ]
+    },
+    {
+      "id": "mixed-recordset-sources",
+      "set": "corpus-recordset-references",
+      "file": "EventSubscriptions/CovRsSources.xml",
+      "contains": [
+        "InformationRegisterRecordSet.CovRsAlpha",
+        "InformationRegisterRecordSet.CovRsBeta",
+        "InformationRegisterRecordSet.CovRsGamma",
+        "InformationRegisterRecordSet.CovRsDelta",
+        "InformationRegisterRecordSet.CovRsEpsilon"
+      ]
+    }
+  ]
+}

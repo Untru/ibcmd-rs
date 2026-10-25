@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:mxl="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" version="2.21">
+
+<AutoCommandBar name="FormCommandBar" id="-1"/>
+<ChildItems><Table name="Probe" id="1"><Representation>List</Representation><DataPath>Rows</DataPath><CommandSet><ExcludedCommand>DeselectAll</ExcludedCommand></CommandSet></Table></ChildItems>
+<Attributes><Attribute name="Rows" id="1"><Type><v8:Type>v8:ValueTable</v8:Type></Type><Columns><Column name="Value" id="1"><Type><v8:Type>xs:string</v8:Type></Type></Column></Columns></Attribute></Attributes>
+
+</Form>

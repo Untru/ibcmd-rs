@@ -1,0 +1,53 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<UseForFoldersAndItems>Items</UseForFoldersAndItems>
+	<AutoCommandBar name="FormCommandBar" id="-1"/>
+	<ChildItems>
+		<Table name="Probe" id="1">
+			<DataPath>Object.Goods</DataPath>
+			<RowFilter xsi:nil="true"/>
+			<ContextMenu name="ProbeКонтекстноеМеню" id="3"/>
+			<AutoCommandBar name="ProbeКоманднаяПанель" id="4"/>
+			<ExtendedTooltip name="ProbeРасширеннаяПодсказка" id="5"/>
+			<SearchStringAddition name="ProbeСтрокаПоиска" id="6">
+				<AdditionSource>
+					<Item>Probe</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="ProbeСтрокаПоискаКонтекстноеМеню" id="7"/>
+				<ExtendedTooltip name="ProbeСтрокаПоискаРасширеннаяПодсказка" id="8"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="ProbeСостояниеПросмотра" id="9">
+				<AdditionSource>
+					<Item>Probe</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="ProbeСостояниеПросмотраКонтекстноеМеню" id="10"/>
+				<ExtendedTooltip name="ProbeСостояниеПросмотраРасширеннаяПодсказка" id="11"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="ProbeУправлениеПоиском" id="12">
+				<AdditionSource>
+					<Item>Probe</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="ProbeУправлениеПоискомКонтекстноеМеню" id="13"/>
+				<ExtendedTooltip name="ProbeУправлениеПоискомРасширеннаяПодсказка" id="14"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<InputField name="Product" id="2">
+					<DataPath>Object.Goods.Product</DataPath>
+					<ContextMenu name="ProductКонтекстноеМеню" id="15"/>
+					<ExtendedTooltip name="ProductРасширеннаяПодсказка" id="16"/>
+				</InputField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Object" id="1">
+			<Type>
+				<v8:Type>cfg:CatalogObject.CovOwnedDefinedCatalog</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+		</Attribute>
+	</Attributes>
+</Form>

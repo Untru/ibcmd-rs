@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-filtercriteria",
+  "collection": "FilterCriteria",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "23a5350b9cd47ba375f66ec4389b18b2f85afdc25f8000d42367f453eca4d333",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 77631,
+    "decoded_sha256": "6aaf71fe62bc98ea5c024975c058562ecffa3389b198e26b59bb8187d1e87013",
+    "encoded_sha256": "4dfc7313313a38593e784970aa404a7ab2b81f0a66612a50295586fdf26c6c3d"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10462,
+          "sha256": "4f69cf762ea87e1136e02734363188bb10716611bee1375d22712aeb6fbac8d8"
+        },
+        {
+          "path": "Documents/CovRecorder.xml",
+          "size": 4216,
+          "sha256": "4b01f371d591d20f65133a12ee600f15c3aec47720de13f0ef6e0f9c2ff2680a"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "05671d43c815f5f150794385dd1ce7d7f80028b3adcfa5366101715f831709a7"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "FilterCriteria/CovTemplate.xml",
+          "size": 1894,
+          "sha256": "6d59ce02c5319d858a95405126ff0b1fbcf055be053a112beb9588d756153418"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "FilterCriteria/CovUseStandardCommands_false.xml",
+          "size": 1946,
+          "sha256": "9307c320de29742a7cc99e4e98b8a4beb95de5db2df4a3d78e62079d59ab8950"
+        }
+      ]
+    }
+  ]
+}

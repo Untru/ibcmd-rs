@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "properties": [],
+  "combinations": [],
+  "corpus": "clean-room-corpus-permissions-rights-pictures",
+  "configuration_properties": [
+    "UsedMobileApplicationFunctionalities"
+  ]
+}

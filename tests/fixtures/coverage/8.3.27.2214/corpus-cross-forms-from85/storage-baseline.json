@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CommonForms/CovCompatibleFormTemplate.xml",
+    "CommonForms/CovCompatibleFormTemplate/Ext/Form.xml",
+    "CommonForms/CovCompatiblePictureFont.xml",
+    "CommonForms/CovCompatiblePictureFont/Ext/Form.xml",
+    "CommonForms/CovCompatibleTable.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+  ]
+}

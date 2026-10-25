@@ -1,0 +1,496 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2214-xml-2.20-corpus-managed-forms",
+  "collection": "CommonForms",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "fe06ccb3fdd8f22df013712ef7be4bb6f9864e80c010798d3b1a7b0cfcba619e",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 118346,
+    "decoded_sha256": "c1b9f0504f35f999ca61c8a8e4262eeac5c5e225eb3e9c2def0d139322d06c77",
+    "encoded_sha256": "e5c444c006346208ef0177c45350ef01e08bf81d507e641b7d564f6ba5521f7d"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11655,
+          "sha256": "4f46e81b9d6ed1bad28cfa2e273483931c1694458a2425d1a9704ab0ebab1c73"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "4307b3294744a891ded3a94cce374fc4b0757d45fde1b0ffe68998285dc33d87"
+        }
+      ]
+    },
+    {
+      "name": "CovManagedFormTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovManagedFormTemplate/Ext/Form.xml",
+          "size": 1035,
+          "sha256": "a82109b8f8731a3c9cb039d555e848f9cbe50e10777e075035183ef93db1ca5b"
+        },
+        {
+          "path": "CommonForms/CovManagedFormTemplate.xml",
+          "size": 1506,
+          "sha256": "b461ff5c5ab08857172a7ccfa5d621a061f9f7ff0aaa41f335f8a3381b3aeb64"
+        }
+      ]
+    },
+    {
+      "name": "CovPeriodField",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovPeriodField/Ext/Form.xml",
+          "size": 1276,
+          "sha256": "21f53e2d906e7cf7007d619f2c5fd723c447449d543f2e3061fd72debf9afa1d"
+        },
+        {
+          "path": "CommonForms/CovPeriodField.xml",
+          "size": 1498,
+          "sha256": "c695b5cf8287f3d33069e7fb88f2c3c285669463284e869e1d7eeff3196c0bb7"
+        }
+      ]
+    },
+    {
+      "name": "CovLabelDecorationTextColorTomato",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLabelDecorationTextColorTomato/Ext/Form.xml",
+          "size": 1319,
+          "sha256": "71ded175d015cb21450d32c826387c5ffe5422950548dea4cc73f7f7e3110c7a"
+        },
+        {
+          "path": "CommonForms/CovLabelDecorationTextColorTomato.xml",
+          "size": 1517,
+          "sha256": "4edaa037f5d6687a24a99a6442b7a29a35eddf1fff214bf16caa17a466cd4411"
+        }
+      ]
+    },
+    {
+      "name": "CovLabelDecorationTextColorMediumGreen",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLabelDecorationTextColorMediumGreen/Ext/Form.xml",
+          "size": 1324,
+          "sha256": "0d95b17d9ab2d1598df3c68585a42f76f431ff3633539674f6c04206394045f2"
+        },
+        {
+          "path": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml",
+          "size": 1522,
+          "sha256": "fe708a0e1d1e1ddbbfee922b6aed1c5a874f73e89c08c2eede3593d1860dafb9"
+        }
+      ]
+    },
+    {
+      "name": "CovLabelFieldTextColorTomato",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLabelFieldTextColorTomato/Ext/Form.xml",
+          "size": 1309,
+          "sha256": "a158256dd5ada20435b64115a54e7faf32de615d4212c64afbb0a7357509e935"
+        },
+        {
+          "path": "CommonForms/CovLabelFieldTextColorTomato.xml",
+          "size": 1512,
+          "sha256": "7181216974b79275e4dc2b95b6020cd748a00f47e1f29784b0fa03cbcbd0b759"
+        }
+      ]
+    },
+    {
+      "name": "CovLabelFieldTextColorMediumGreen",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovLabelFieldTextColorMediumGreen/Ext/Form.xml",
+          "size": 1314,
+          "sha256": "d1d6b1c4cd51c9f2ddfff572364ace9587ee43b2187b4a5d0c0b90c1b821bf6e"
+        },
+        {
+          "path": "CommonForms/CovLabelFieldTextColorMediumGreen.xml",
+          "size": 1517,
+          "sha256": "78273f7a333554a07886f1bdce99ea04464b49712e4c683ba86ebaa27c7827c3"
+        }
+      ]
+    },
+    {
+      "name": "CovUsualGroupBackColorTomato",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovUsualGroupBackColorTomato/Ext/Form.xml",
+          "size": 1240,
+          "sha256": "ec8fb141fc0b78371913e8b19064f09fd9967d2458d68382e8c2a2ec0dfd4e8c"
+        },
+        {
+          "path": "CommonForms/CovUsualGroupBackColorTomato.xml",
+          "size": 1512,
+          "sha256": "549b37d88ac2f1651f999d095102f8b9229a476b81a5a15277b616e97849cb90"
+        }
+      ]
+    },
+    {
+      "name": "CovUsualGroupBackColorMediumGreen",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovUsualGroupBackColorMediumGreen/Ext/Form.xml",
+          "size": 1245,
+          "sha256": "846167acd2ebd8af6f1a44a72ef09eb8126178d0c7fa4ff21c0fefff29040347"
+        },
+        {
+          "path": "CommonForms/CovUsualGroupBackColorMediumGreen.xml",
+          "size": 1517,
+          "sha256": "3d6cba39f694fce7342263d8b064fcec390242b466d49f2b41b1acc25c9ea1fb"
+        }
+      ]
+    },
+    {
+      "name": "CovGraphicalSchemaFieldBorderColorTomato",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato/Ext/Form.xml",
+          "size": 1333,
+          "sha256": "dac071dac4ade8d16d3e48d65b7cb05f4c4842ff8e3c4b9db38f29d087f2b983"
+        },
+        {
+          "path": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml",
+          "size": 1524,
+          "sha256": "2a33b68e31af499ba6c44d4f37a172121a1bdfe486ac6c255488a56fe034fa76"
+        }
+      ]
+    },
+    {
+      "name": "CovGraphicalSchemaFieldBorderColorMediumGreen",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen/Ext/Form.xml",
+          "size": 1338,
+          "sha256": "0d641011544513a68ebd047b3e370689fa45150f08fa0ed4d73136d3a355df11"
+        },
+        {
+          "path": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
+          "size": 1529,
+          "sha256": "69b9e53d4ee903bb6f629eec633ca916dd12e15a8fe8c2df540ed500ef890fee"
+        }
+      ]
+    },
+    {
+      "name": "CovButtonPictureGotoURL",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovButtonPictureGotoURL/Ext/Form.xml",
+          "size": 1377,
+          "sha256": "6b07067b414902511f646568cb630b4aa0584b2f3a42fb916024e9f43de92ada"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureGotoURL.xml",
+          "size": 1507,
+          "sha256": "c692018b9af5d20442617306313e98e8e3708c6189198d2dd1698f3f03695564"
+        }
+      ]
+    },
+    {
+      "name": "CovButtonPictureAppearanceStarHalfFilled",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovButtonPictureAppearanceStarHalfFilled/Ext/Form.xml",
+          "size": 1394,
+          "sha256": "f9c4d3b4e938906d5012646415dc1566a59276f82974f4a7b361db2c5376aeb2"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+          "size": 1524,
+          "sha256": "94d09c40b6d31527c27a5187fcd44901d8715ab4bf5b928a38d373286eeca3df"
+        }
+      ]
+    },
+    {
+      "name": "CovButtonPictureFormattedString",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovButtonPictureFormattedString/Ext/Form.xml",
+          "size": 1385,
+          "sha256": "4e45ad4396b6fd2bc006c71ad4c68e5cbfb2707d7d63287145f150fb2cccbd5a"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureFormattedString.xml",
+          "size": 1515,
+          "sha256": "d2ad5405074d6a34e3b593e38df06b77c9c2fcf594f3faf1bdbacb7e54256546"
+        }
+      ]
+    },
+    {
+      "name": "CovButtonPictureQueryWizardTempTableDescription",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovButtonPictureQueryWizardTempTableDescription/Ext/Form.xml",
+          "size": 1401,
+          "sha256": "d42511abb4bc695915050162d5877e925ef99a158f2f92282042417349af47e9"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+          "size": 1531,
+          "sha256": "04262d8ff72620465445725b72fab20f71638fcbdff83751179ba40bcf7e54f1"
+        }
+      ]
+    },
+    {
+      "name": "CovButtonPictureToday",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovButtonPictureToday/Ext/Form.xml",
+          "size": 1375,
+          "sha256": "d9a8aca525972fe044edb3d9564acb2bd3a9ed7d5a42212ac7e98fb70f7fc7d1"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureToday.xml",
+          "size": 1505,
+          "sha256": "a530f127ca0644ae9ad4de7e2e1e5645c2035fdfb09feb7417512fdc166b8879"
+        }
+      ]
+    },
+    {
+      "name": "CovButtonPictureAccountingRegister",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovButtonPictureAccountingRegister/Ext/Form.xml",
+          "size": 1388,
+          "sha256": "89427be89962466ab54595d2c102de8032fc05191ece027a7657686893032436"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureAccountingRegister.xml",
+          "size": 1518,
+          "sha256": "2521d35695edf3dcb2d0420585024692b36dd2146685e7fd946bf8dc5dcf21bd"
+        }
+      ]
+    },
+    {
+      "name": "CovButtonPictureNewConversation",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovButtonPictureNewConversation/Ext/Form.xml",
+          "size": 1385,
+          "sha256": "65772457107741fe52d5eb064eb9456e1799393a49586a0cdbd17bd2447b7b6d"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureNewConversation.xml",
+          "size": 1515,
+          "sha256": "1ea8bcc8ae470af838486efb85db1c01eac452d6155362e2dc5738d8c7c5fda5"
+        }
+      ]
+    },
+    {
+      "name": "CovFormEventOnOpen",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFormEventOnOpen/Ext/Form.xml",
+          "size": 1102,
+          "sha256": "c86ee263f94639d18a3752a1cabcd3cceef446db575de194ffed28defa0305c8"
+        },
+        {
+          "path": "CommonForms/CovFormEventOnOpen.xml",
+          "size": 1502,
+          "sha256": "e664aa586785c0684b848c71aaf85c74d53149f32fce954e5b8a26e14a34a684"
+        }
+      ]
+    },
+    {
+      "name": "CovFormCommandSpace",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovFormCommandSpace/Ext/Form.xml",
+          "size": 1140,
+          "sha256": "1b07b47a8b6de0c00568fae427a1e9b9c53ede60a33dbcc82004d4dedd56e0db"
+        },
+        {
+          "path": "CommonForms/CovFormCommandSpace.xml",
+          "size": 1503,
+          "sha256": "8759b4f007b40357009fe6fe1db8b34cd4f3f57c5dc22aabf1946f7e14fb92a5"
+        }
+      ]
+    },
+    {
+      "name": "CovEmbeddedSpreadsheetCells",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovEmbeddedSpreadsheetCells/Ext/Form.xml",
+          "size": 2904,
+          "sha256": "14667bd45f3be1f9ff926d22cece04018f16e6e280a1b6caab8b31c9490300d2"
+        },
+        {
+          "path": "CommonForms/CovEmbeddedSpreadsheetCells.xml",
+          "size": 1511,
+          "sha256": "63a03dced48f25900a15bbd8c4f60e8a6ab0d41f462e67e3f52ca26577040c24"
+        }
+      ]
+    },
+    {
+      "name": "CovValueTableChildDataPath",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovValueTableChildDataPath/Ext/Form.xml",
+          "size": 3401,
+          "sha256": "9ab772af18679602f46f5e556ebdca1894f0825a1c31bd200f3a929c9202771d"
+        },
+        {
+          "path": "CommonForms/CovValueTableChildDataPath.xml",
+          "size": 1510,
+          "sha256": "3cb2305506d8126049dde94c5f80a54e39f0b7f090bb85bb154662e0e616e1c1"
+        }
+      ]
+    },
+    {
+      "name": "CovChartField",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovChartField/Ext/Form.xml",
+          "size": 1310,
+          "sha256": "0a48f55a695535b60e96f3ccd9dae745f3f1f27ec6ee7340013afd4774803aba"
+        },
+        {
+          "path": "CommonForms/CovChartField.xml",
+          "size": 1497,
+          "sha256": "7e5287d64f1b8cd926dd39b39ac5ec3a420c29cda5af7f5e73f0d5ba17e67410"
+        }
+      ]
+    },
+    {
+      "name": "CovPlannerField",
+      "property": [],
+      "kind": "combination",
+      "value": {},
+      "source": "generated:corpus structural class",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommonForms/CovPlannerField/Ext/Form.xml",
+          "size": 1275,
+          "sha256": "99566a447cf41f0dcd5e886cddb17538bbcfa5c4395f88f5bb721e09c51cd224"
+        },
+        {
+          "path": "CommonForms/CovPlannerField.xml",
+          "size": 1499,
+          "sha256": "4bbb560054fdb53dd7227127d0dceb30604ce826b6f20649228a43df5e1f405f"
+        }
+      ]
+    }
+  ]
+}
