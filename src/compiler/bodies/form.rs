@@ -316,6 +316,64 @@ mod tests {
         }
     }
 
+    #[test]
+    fn search_control_addition_width_survives_native_and_xml_projection() {
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<AutoCommandBar name="FormBar" id="-1"/>
+	<ChildItems>
+		<Table name="Rows" id="1">
+			<ContextMenu name="RowsMenu" id="6"/>
+			<AutoCommandBar name="RowsBar" id="2"/>
+			<ExtendedTooltip name="RowsTip" id="7"/>
+			<SearchStringAddition name="SearchString" id="8">
+				<AdditionSource><Item>Rows</Item></AdditionSource>
+				<ContextMenu name="SearchStringMenu" id="9"/>
+				<ExtendedTooltip name="SearchStringTip" id="10"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="ViewStatus" id="11">
+				<AdditionSource><Item>Rows</Item></AdditionSource>
+				<ContextMenu name="ViewStatusMenu" id="12"/>
+				<ExtendedTooltip name="ViewStatusTip" id="13"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="SearchControl" id="3">
+				<AdditionSource><Item>Rows</Item></AdditionSource>
+				<Width>8</Width>
+				<ContextMenu name="SearchMenu" id="4"/>
+				<ExtendedTooltip name="SearchTip" id="5"/>
+			</SearchControlAddition>
+		</Table>
+	</ChildItems>
+</Form>"#;
+        let blob = crate::module_blob::pack_native_form_body_blob(xml, None, None, None)
+            .unwrap()
+            .blob;
+        let body = crate::module_blob::parse_form_body_blob(&blob).unwrap();
+        let layout = body.layout.split_whitespace().collect::<String>();
+        assert!(
+            layout.contains("{1,8,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0,2}"),
+            "the native search-control options lost Width=8"
+        );
+
+        let exported = crate::mssql_dump::extract_form_body_xml(&blob, &BTreeMap::new())
+            .expect("the witnessed search-control width must be exportable");
+        assert!(exported.contains("<Width>8</Width>"), "{exported}");
+    }
+
+    #[test]
+    fn source_button_without_type_uses_the_native_usual_button_default() {
+        let source = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><AutoCommandBar name="FormBar" id="-1"/><ChildItems><Button name="Action" id="1"><CommandName>0</CommandName><ExtendedTooltip name="ActionTooltip" id="2"/></Button></ChildItems></Form>"#;
+        let blob = crate::module_blob::pack_native_form_body_blob(source, None, None, None)
+            .expect("a supported ordinary source button")
+            .blob;
+        let exported = crate::mssql_dump::extract_form_body_xml(&blob, &BTreeMap::new())
+            .expect("the button must be exportable");
+        assert!(exported.contains("<Type>UsualButton</Type>"), "{exported}");
+        assert!(
+            !exported.contains("<Type>CommandBarButton</Type>"),
+            "{exported}"
+        );
+    }
+
     /// Measures — rather than assumes — what the base-free packer can do with a
     /// real platform form.
     ///

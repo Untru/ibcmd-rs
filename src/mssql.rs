@@ -3843,11 +3843,6 @@ pub fn import_target_state(
     args: &MssqlStageSourceObjectsArgs,
     configuration_uuid: &str,
 ) -> Result<ImportTargetState> {
-    #[derive(Deserialize)]
-    struct Counts {
-        config_rows: i64,
-        configuration_rows: i64,
-    }
     let sql_password = resolve_sqlcmd_password(
         args.sql_user.as_deref(),
         args.sql_pwd.as_deref(),
@@ -3861,13 +3856,46 @@ pub fn import_target_state(
         sql_password.as_deref(),
         &args.sql_pwd_env,
     )?;
+    import_target_state_with_sql(&sql, &args.database, configuration_uuid)
+}
+
+fn import_target_state_with_sql(
+    sql: &SqlExec,
+    database: &str,
+    configuration_uuid: &str,
+) -> Result<ImportTargetState> {
+    if let SqlBackend::Client(client) = sql.backend()
+        && client.uses_mssql_2012_compatibility()
+    {
+        ensure_online("run a query")?;
+        let query = format!(
+            "SET NOCOUNT ON; USE {db}; SELECT COUNT_BIG(*) AS config_rows, COUNT_BIG(CASE WHEN FileName = N'{uuid}' THEN 1 END) AS configuration_rows FROM dbo.Config;",
+            db = quote_ident(database),
+            uuid = quote_string(configuration_uuid),
+        );
+        let rows = client
+            .query_rows(&query, &[])
+            .with_context(|| format!("failed to read the Config table of {database}"))?;
+        let counts = rows
+            .first()
+            .ok_or_else(|| anyhow!("the Config row count query returned no row"))?;
+        return Ok(ImportTargetState {
+            config_rows: counts.i64(0)?,
+            holds_configuration: counts.i64(1)? > 0,
+        });
+    }
+    #[derive(Deserialize)]
+    struct Counts {
+        config_rows: i64,
+        configuration_rows: i64,
+    }
     let query = format!(
         "SET NOCOUNT ON; USE {db}; SELECT COUNT_BIG(*) AS config_rows, COUNT_BIG(CASE WHEN FileName = N'{uuid}' THEN 1 END) AS configuration_rows FROM dbo.Config FOR JSON PATH;",
-        db = quote_ident(&args.database),
+        db = quote_ident(database),
         uuid = quote_string(configuration_uuid),
     );
-    let json = query_json_required(&sql, &query, "import_target_state")
-        .with_context(|| format!("failed to read the Config table of {}", args.database))?;
+    let json = query_json_required(sql, &query, "import_target_state")
+        .with_context(|| format!("failed to read the Config table of {database}"))?;
     let counts: Vec<Counts> =
         serde_json::from_str(&json).context("failed to parse the Config row counts")?;
     let counts = counts
@@ -4643,6 +4671,14 @@ fn is_stage_metadata_xml(path: &str) -> bool {
         || is_nested_subsystem_xml(path)
         || is_template_metadata_xml(path)
         || is_form_metadata_xml(path)
+        || is_external_data_source_table_xml(path)
+}
+
+fn is_external_data_source_table_xml(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_ascii_lowercase();
+    let parts = lower.split('/').collect::<Vec<_>>();
+    matches!(parts.as_slice(), ["externaldatasources", owner, "tables", table]
+        if !owner.is_empty() && table.ends_with(".xml") && table.len() > ".xml".len())
 }
 
 /// The folder of subsystems, at the root and inside a subsystem.
@@ -8222,6 +8258,35 @@ fn load_database_files(sql: &SqlExec, database: &str) -> Result<Vec<DatabaseFile
 }
 
 fn storage_table_stats(sql: &SqlExec, database: &str, table: &str) -> Result<StorageTableManifest> {
+    if let SqlBackend::Client(client) = sql.backend()
+        && client.uses_mssql_2012_compatibility()
+    {
+        ensure_online("run a query")?;
+        let query = format!(
+            "SET NOCOUNT ON; USE {db}; SELECT N'{table}' AS table_name, COUNT_BIG(*) AS row_count, ISNULL(SUM(CONVERT(bigint, DATALENGTH(BinaryData))), 0) AS binary_bytes, CONVERT(bigint, CHECKSUM_AGG(BINARY_CHECKSUM(*))) AS row_checksum FROM {table_ident};",
+            db = quote_ident(database),
+            table = quote_string(table),
+            table_ident = quote_ident(table),
+        );
+        let mut rows = client
+            .query_rows(&query, &[])
+            .with_context(|| format!("storage_table_stats({table}): the query failed"))?;
+        let mut row = rows
+            .pop()
+            .ok_or_else(|| anyhow!("storage stats query returned no rows for {table}"))?;
+        let row_checksum = if row.value(3)?.is_null() {
+            None
+        } else {
+            Some(row.i64(3)?)
+        };
+        return Ok(StorageTableManifest {
+            table_name: row.take_text(0)?,
+            file_name: format!("{table}.bcp"),
+            row_count: row.i64(1)?,
+            binary_bytes: row.i64(2)?,
+            row_checksum,
+        });
+    }
     let query = format!(
         "SET NOCOUNT ON; USE {db}; SELECT N'{table}' AS table_name, COUNT_BIG(*) AS row_count, ISNULL(SUM(CONVERT(bigint, DATALENGTH(BinaryData))), 0) AS binary_bytes, CONVERT(bigint, CHECKSUM_AGG(BINARY_CHECKSUM(*))) AS row_checksum FROM {table_ident} FOR JSON PATH;",
         db = quote_ident(database),
@@ -18103,3 +18168,9 @@ mod onecdec_tests;
 
 #[cfg(test)]
 mod original_source_tests;
+
+#[cfg(test)]
+mod import_compat_tests;
+
+#[cfg(test)]
+mod external_data_source_table_tests;

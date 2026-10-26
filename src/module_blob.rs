@@ -40,13 +40,14 @@ use crate::compiler::bodies::form_native::{
 };
 use crate::compiler::bodies::role_rights_writer::SourceTreeRoleRightsSource;
 use crate::form_schema::{
-    FormCheckBoxFieldSchema, FormColumnGroupSchema, FormConditionalTableSchema,
-    FormControlBorderSchema, FormControlBorderStyle, FormFieldGroupHorizontalAlign,
-    FormFieldSchema, FormFieldVerticalAlign, FormFixingInTable,
+    FormCheckBoxFieldSchema, FormChildItemGroupSchema, FormChildItemShowTitleSchema,
+    FormColumnGroupSchema, FormConditionalTableSchema, FormControlBorderSchema,
+    FormControlBorderStyle, FormFieldGroupHorizontalAlign, FormFieldSchema, FormFieldVerticalAlign,
+    FormFixingInTable, FormHistoricalUsualGroupSchema,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
     FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
     FormTableHorizontalScrollBar, FormTableInitialListView, FormTablePropertyBagKey as TableBagKey,
-    FormTableSchema, FormTableSearchOnInput, FormTooltipRepresentation,
+    FormTableSchema, FormTableSearchOnInput, FormTooltipRepresentation, FormUsualGroupSchema,
     FormWarningOnEditRepresentation, encode_form_table_command_bar_location,
     form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
     normalize_form_table_command_bar_location_xml,
@@ -1950,6 +1951,11 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
     let plain = inflate_raw(base_blob).context("failed to inflate metadata blob")?;
     let text = String::from_utf8(plain).context("metadata blob is not valid UTF-8")?;
     let patched = match properties.kind.as_str() {
+        ibcmd_schema::external_data_source_children::TABLE_KIND => {
+            crate::metadata_model::external_data_source_children::patch_table_data_type_text(
+                &text, xml,
+            )?
+        }
         "Constant" => {
             let constant = parse_constant_xml_properties(xml, source)?;
             patch_constant_metadata_text(text, &constant)?
@@ -1967,6 +1973,13 @@ pub fn pack_simple_metadata_blob_from_xml_with_source(
             patch_command_group_metadata_text(text, &command_group)?
         }
         "Configuration" => patch_configuration_source_metadata(text, &properties, xml)?,
+        crate::metadata_model::document_fill::KIND => {
+            crate::metadata_model::document_fill::patch_document_ts_fill_text(
+                &patch_simple_metadata_header_text(text, &properties)?,
+                xml,
+                source,
+            )?
+        }
         _ => patch_simple_metadata_header_text(text, &properties)?,
     };
     let plain = patched.into_bytes();
@@ -4491,17 +4504,16 @@ fn format_native_child_item(
             group_vertical_align: item
                 .group_vertical_align
                 .map(native_vertical_align_spelling),
-            // `<Type>` is the kind of button -- member 4 coarsely and member
-            // 47 finely. It lands in the typed `item_type`, whose own arm
-            // comes before the catch-all that fills the scalar bag, so the bag
-            // never held it and every button was written with the command-bar
-            // code: 11 750 ERP УХ and 803 BSP records, in 4 209 and 245 forms.
-            // Every button of both corpora spells the element, and the four
-            // spellings map to 0, 0, 1 and 2 with no absence anywhere.
-            button_type: item
-                .item_type
-                .as_deref()
-                .or_else(|| item.scalars.get("Type").map(String::as_str)),
+            // Designer XML omission is UsualButton, witnessed by a native
+            // 8.3.27/XML 2.20 load/export. Keep this source-dialect default at
+            // the XML boundary: internal command-bar constructors still use
+            // their own explicit/native formatter defaults.
+            button_type: Some(
+                item.item_type
+                    .as_deref()
+                    .or_else(|| item.scalars.get("Type").map(String::as_str))
+                    .unwrap_or("UsualButton"),
+            ),
             representation_in_context_menu: item
                 .scalars
                 .get("RepresentationInContextMenu")
@@ -5458,7 +5470,10 @@ fn native_table_addition(
             item.horizontal_stretch,
         )
         .ok_or_else(|| anyhow!("a view status addition names an unmeasured location"))?,
-        _ => native::format_search_control_addition_payload(auto_max_width),
+        _ => native::format_search_control_addition_payload(
+            item.width.as_deref().unwrap_or("0"),
+            auto_max_width,
+        ),
     };
 
     native::format_table_addition(&native::NativeTableAddition {
@@ -21883,22 +21898,10 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((data_path_range.clone(), data_path_ref));
     }
-    if matches!(
-        item.tag.as_str(),
-        "CommandBar"
-            | "AutoCommandBar"
-            | "UsualGroup"
-            | "Popup"
-            | "Pages"
-            | "Page"
-            | "ButtonGroup"
-            | "ContextMenu"
-    ) && let Some(group) = item.group
-        && form_layout_usual_group_extended_options_range(text, fields).is_none()
-        && let Some(group_code) = form_child_group_code(group)
-        && let Some(group_range) = form_layout_child_item_group_range(text, fields, item)
-    {
-        replacements.push((group_range.clone(), group_code.to_string()));
+    if let Some(group) = item.group {
+        replacements.extend(form_layout_child_item_group_replacements(
+            text, fields, item, group,
+        )?);
     }
     if item.tag == "UsualGroup"
         && (item.group.is_some() || item.behavior.is_some() || item.representation.is_some())
@@ -21926,6 +21929,14 @@ fn patch_form_layout_child_item_entry(
         replacements.push((settings_range.clone(), settings));
     }
     if item.tag == "UsualGroup" {
+        if let Some((schema, _)) = form_layout_usual_group_schema(text, fields)
+            && let Some(content_change_range) = fields.get(schema.enable_content_change_slot())
+        {
+            replacements.push((
+                content_change_range.clone(),
+                u8::from(item.enable_content_change.unwrap_or(false)).to_string(),
+            ));
+        }
         if item.title_text_color.is_some() {
             let style_range = fields.get(16).ok_or_else(|| {
                 anyhow!(
@@ -21956,18 +21967,9 @@ fn patch_form_layout_child_item_entry(
             }
         }
     }
-    if matches!(
-        item.tag.as_str(),
-        "CommandBar"
-            | "AutoCommandBar"
-            | "UsualGroup"
-            | "Popup"
-            | "Pages"
-            | "Page"
-            | "ButtonGroup"
-            | "ContextMenu"
-    ) && let Some(show_title) = item.show_title
-        && let Some(show_title_range) = form_layout_child_item_show_title_range(text, fields, item)
+    if FormChildItemShowTitleSchema::supports_patch_tag(&item.tag)
+        && let Some(show_title) = item.show_title
+        && let Some(show_title_range) = form_layout_child_item_show_title_range(text, fields, item)?
     {
         replacements.push((
             show_title_range.clone(),
@@ -22044,6 +22046,67 @@ fn patch_form_layout_child_item_entry(
     Ok(())
 }
 
+fn form_layout_child_item_group_replacements(
+    text: &str,
+    fields: &[Range<usize>],
+    item: &FormXmlChildItem,
+    group: FormXmlGroup,
+) -> Result<Vec<(Range<usize>, String)>> {
+    if !FormChildItemGroupSchema::supports_patch_tag(&item.tag) {
+        return Ok(Vec::new());
+    }
+    if FormUsualGroupSchema::is_tag(&item.tag) {
+        if let Some((schema, options)) = form_layout_usual_group_schema(text, fields) {
+            let changes = schema
+                .group_option_changes(native_group_spelling(group))
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Form UsualGroup Group has no supported native spelling for {}",
+                        item.name,
+                    )
+                })?;
+            return changes
+                .into_iter()
+                .map(|(slot, value)| {
+                    let range = options.get(slot).cloned().ok_or_else(|| {
+                        anyhow!(
+                            "Form UsualGroup Group requires a complete options tuple for {}",
+                            item.name,
+                        )
+                    })?;
+                    Ok((range, value.to_string()))
+                })
+                .collect();
+        }
+        let schema = form_layout_historical_usual_group_schema(text, fields).ok_or_else(|| {
+            anyhow!(
+                "Form UsualGroup Group requires a supported strict layout for {}",
+                item.name,
+            )
+        })?;
+        // Historical revision38 options are patched as one tuple below.
+        if form_layout_usual_group_extended_options_range(text, fields).is_some() {
+            return Ok(Vec::new());
+        }
+        let range = fields.get(schema.group_slot()).cloned().ok_or_else(|| {
+            anyhow!(
+                "Form historical UsualGroup Group slot is missing for {}",
+                item.name,
+            )
+        })?;
+        return Ok(form_child_group_code(group)
+            .map(|value| vec![(range, value.to_string())])
+            .unwrap_or_default());
+    }
+    if form_layout_usual_group_extended_options_range(text, fields).is_some() {
+        return Ok(Vec::new());
+    }
+    Ok(form_child_group_code(group)
+        .zip(form_layout_child_item_group_range(text, fields, item))
+        .map(|(value, range)| vec![(range, value.to_string())])
+        .unwrap_or_default())
+}
+
 fn form_layout_child_item_group_range(
     text: &str,
     fields: &[Range<usize>],
@@ -22065,19 +22128,73 @@ fn form_layout_child_item_group_range(
     }
 }
 
+fn form_layout_usual_group_schema(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<(FormUsualGroupSchema, Vec<Range<usize>>)> {
+    let options_range = fields.get(FormUsualGroupSchema::OPTIONS_SLOT)?;
+    if scan_1c_braced_value_range(text, options_range.start) != Some(options_range.clone()) {
+        return None;
+    }
+    let options = scan_braced_fields(text, options_range.start).ok()?;
+    let option_values = options
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let field_values = fields
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let schema = FormUsualGroupSchema::from_fields(&field_values, &option_values)?;
+    Some((schema, options))
+}
+
+fn form_layout_historical_usual_group_schema(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<FormHistoricalUsualGroupSchema> {
+    let field_values = fields
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let options = fields
+        .get(FormUsualGroupSchema::OPTIONS_SLOT)
+        .filter(|range| scan_1c_braced_value_range(text, range.start) == Some((*range).clone()))
+        .and_then(|range| scan_braced_fields(text, range.start).ok());
+    let option_values = options.as_ref().map(|options| {
+        options
+            .iter()
+            .map(|range| &text[range.clone()])
+            .collect::<Vec<_>>()
+    });
+    FormHistoricalUsualGroupSchema::from_fields(&field_values, option_values.as_deref())
+}
+
 fn form_layout_child_item_show_title_range(
     text: &str,
     fields: &[Range<usize>],
     item: &FormXmlChildItem,
-) -> Option<Range<usize>> {
+) -> Result<Option<Range<usize>>> {
+    if FormUsualGroupSchema::is_tag(&item.tag) {
+        if let Some((schema, options)) = form_layout_usual_group_schema(text, fields) {
+            return Ok(options.get(schema.show_title_option_slot()).cloned());
+        }
+        let schema = form_layout_historical_usual_group_schema(text, fields).ok_or_else(|| {
+            anyhow!(
+                "Form UsualGroup ShowTitle requires a supported strict layout for {}",
+                item.name,
+            )
+        })?;
+        return Ok(fields.get(schema.show_title_slot()).cloned());
+    }
     if matches!(item.tag.as_str(), "Pages" | "Page")
         && fields
             .get(8)
             .is_some_and(|range| text[range.clone()].trim_start().starts_with('{'))
     {
-        return fields.get(10).cloned();
+        return Ok(fields.get(10).cloned());
     }
-    fields.get(9).cloned()
+    Ok(fields.get(9).cloned())
 }
 
 fn form_layout_page_scroll_on_compress_range(
@@ -40181,6 +40298,340 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
 
+        Ok(())
+    }
+
+    // This literal is the PUBLIC, already tracked 8.3.27/XML2.20 native evidence
+    // form-usual-group-options/plain MainGroup record (not a private ERP fixture).
+    const NATIVE_DEFAULT_USUAL_GROUP: &str = r###"{22,{200,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,1,{"ru","Main group"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,1,0,2,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},1,0,0,1,{1,0},0,0,3,3,2,0,1,2,{3,4,{0}},0,2,0,2,3},0,1,0,1,{12,{0},0,0,0,0,"MainGroupРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},0,3,3,0}"###;
+
+    #[test]
+    fn patches_native_usual_group_show_title_without_changing_content_change() -> anyhow::Result<()>
+    {
+        // Cross both initial content-change states. Source omission/false means
+        // native default0; true is independently1. ShowTitle has its own option4.
+        for old_content_change in ["0", "1"] {
+            for (show_xml, expected_show) in [
+                ("<ShowTitle>true</ShowTitle>", "1"),
+                ("", "1"),
+                ("<ShowTitle>false</ShowTitle>", "0"),
+            ] {
+                for (content_xml, expected_content) in [
+                    ("", "0"),
+                    ("<EnableContentChange>false</EnableContentChange>", "0"),
+                    ("<EnableContentChange>true</EnableContentChange>", "1"),
+                ] {
+                    let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+                    super::replace_braced_field(&mut group, 9, old_content_change)?;
+                    let base = super::deflate_raw(format!(
+                        r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{group}}},"Old module",{{0}}}}"#,
+                    ).as_bytes())?;
+                    let xml = format!(
+                        r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><UsualGroup name="MainGroup" id="200">{content_xml}{show_xml}<ExtendedTooltip name="MainGroupРасширеннаяПодсказка" id="0"/></UsualGroup></ChildItems></Form>"#,
+                    );
+                    let packed =
+                        super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)?;
+                    let parsed = super::parse_form_body_blob(&packed.blob)?;
+                    let root_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+                    let group_fields =
+                        super::scan_braced_fields(&parsed.layout, root_fields[3].start)?;
+                    let options =
+                        super::scan_braced_fields(&parsed.layout, group_fields[20].start)?;
+
+                    assert_eq!(group_fields.len(), 30, "native group shape changed");
+                    assert_eq!(&parsed.layout[options[0].clone()], "29");
+                    assert_eq!(
+                        &parsed.layout[options[4].clone()],
+                        expected_show,
+                        "ShowTitle: {show_xml:?}; content: {content_xml:?}; old: {old_content_change}"
+                    );
+                    assert_eq!(
+                        &parsed.layout[group_fields[9].clone()],
+                        expected_content,
+                        "ShowTitle must not alias EnableContentChange; ShowTitle: {show_xml:?}; content: {content_xml:?}; old: {old_content_change}"
+                    );
+                    assert_eq!(
+                        &parsed.layout[group_fields[10].clone()],
+                        "1",
+                        "Enabled changed"
+                    );
+                    assert_eq!(
+                        &parsed.layout[group_fields[11].clone()],
+                        "0",
+                        "ReadOnly changed"
+                    );
+                    assert_eq!(parsed.module_text, "Old module");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn patch_native_usual_group_show_title(
+        group: &str,
+    ) -> anyhow::Result<super::PackedRawDeflatedBlob> {
+        let base = super::deflate_raw(
+            format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{group}}},"Old module",{{0}}}}"#,
+            )
+            .as_bytes(),
+        )?;
+        super::pack_form_body_blob_from_form_xml(
+            &base,
+            r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><UsualGroup name="MainGroup" id="200"><ShowTitle>true</ShowTitle><ExtendedTooltip name="MainGroupРасширеннаяПодсказка" id="0"/></UsualGroup></ChildItems></Form>"#.as_bytes(),
+            None,
+        )
+    }
+
+    #[test]
+    fn refuses_usual_group_show_title_on_unadmitted_modern_revision() -> anyhow::Result<()> {
+        let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+        let fields = super::scan_braced_fields(&group, 0)?;
+        let options = super::scan_braced_fields(&group, fields[20].start)?;
+        group.replace_range(options[0].clone(), "77");
+
+        assert!(patch_native_usual_group_show_title(&group).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_usual_group_show_title_on_unadmitted_compact_bag() -> anyhow::Result<()> {
+        let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+        let fields = super::scan_braced_fields(&group, 0)?;
+        let options = super::scan_braced_fields(&group, fields[20].start)?;
+        let bag = format!(
+            "{{28,{}}}",
+            options
+                .iter()
+                .skip(1)
+                .take(27)
+                .map(|range| &group[range.clone()])
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        super::replace_braced_field(&mut group, 20, &bag)?;
+
+        // Compact revision28 is reader evidence; this general group patch
+        // cohort has not admitted it and must not borrow the header flag9.
+        assert!(patch_native_usual_group_show_title(&group).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_usual_group_show_title_on_malformed_options_arity() -> anyhow::Result<()> {
+        let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+        let fields = super::scan_braced_fields(&group, 0)?;
+        let options = super::scan_braced_fields(&group, fields[20].start)?;
+        let bag = format!(
+            "{{{}}}",
+            options
+                .iter()
+                .take(28)
+                .map(|range| &group[range.clone()])
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        super::replace_braced_field(&mut group, 20, &bag)?;
+
+        assert!(patch_native_usual_group_show_title(&group).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_usual_group_show_title_on_malformed_outer_arity() -> anyhow::Result<()> {
+        let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+        group.pop();
+        group.push_str(",0}");
+
+        assert!(patch_native_usual_group_show_title(&group).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn preserves_short_historical_usual_group_show_title_routing() -> anyhow::Result<()> {
+        let group =
+            r#"{22,{200,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{0},0,0,0}"#;
+        let base = super::deflate_raw(
+            format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{group}}},"Old module",{{0}}}}"#,
+            )
+            .as_bytes(),
+        )?;
+        let packed = super::pack_form_body_blob_from_form_xml(
+            &base,
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><UsualGroup name="MainGroup" id="200"><ShowTitle>true</ShowTitle></UsualGroup></ChildItems></Form>"#,
+            None,
+        )?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let root_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let fields = super::scan_braced_fields(&parsed.layout, root_fields[3].start)?;
+
+        assert_eq!(fields.len(), 11);
+        assert_eq!(&parsed.layout[fields[9].clone()], "1");
+        assert_eq!(&parsed.layout[fields[10].clone()], "0");
+        Ok(())
+    }
+
+    fn patch_native_usual_group_group(
+        group: &str,
+        value: &str,
+    ) -> anyhow::Result<super::PackedRawDeflatedBlob> {
+        let base = super::deflate_raw(
+            format!(
+                r#"{{4,{{59,1,11111111-1111-4111-8111-111111111111,{group}}},"Old module",{{0}}}}"#,
+            )
+            .as_bytes(),
+        )?;
+        let xml = format!(
+            r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><UsualGroup name="MainGroup" id="200"><Group>{value}</Group><ExtendedTooltip name="MainGroupРасширеннаяПодсказка" id="0"/></UsualGroup></ChildItems></Form>"#,
+        );
+        super::pack_form_body_blob_from_form_xml(&base, xml.as_bytes(), None)
+    }
+
+    #[test]
+    fn patches_modern_usual_group_group_without_corrupting_tooltip_header() -> anyhow::Result<()> {
+        let original_fields = super::scan_braced_fields(NATIVE_DEFAULT_USUAL_GROUP, 0)?;
+        let original_options =
+            super::scan_braced_fields(NATIVE_DEFAULT_USUAL_GROUP, original_fields[20].start)?;
+        for (value, expected_triplet) in [
+            ("Vertical", ["0", "0", "0"]),
+            ("Horizontal", ["1", "1", "1"]),
+            ("AlwaysHorizontal", ["1", "1", "3"]),
+        ] {
+            let packed = patch_native_usual_group_group(NATIVE_DEFAULT_USUAL_GROUP, value)?;
+            let parsed = super::parse_form_body_blob(&packed.blob)?;
+            let root_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+            let fields = super::scan_braced_fields(&parsed.layout, root_fields[3].start)?;
+            let options = super::scan_braced_fields(&parsed.layout, fields[20].start)?;
+
+            assert_eq!(fields.len(), 30);
+            assert_eq!(
+                &parsed.layout[fields[8].clone()],
+                "{1,0}",
+                "modern {value} Group overwrote the localized tooltip header"
+            );
+            assert_eq!(
+                &parsed.layout[fields[9].clone()],
+                "0",
+                "content flag changed"
+            );
+            assert_eq!(options.len(), 29);
+            for (slot, expected) in [1, 22, 27].into_iter().zip(expected_triplet) {
+                assert_eq!(
+                    &parsed.layout[options[slot].clone()],
+                    expected,
+                    "{value} Group option {slot}"
+                );
+            }
+            for slot in (0..29).filter(|slot| ![1, 22, 27].contains(slot)) {
+                assert_eq!(
+                    &parsed.layout[options[slot].clone()],
+                    &NATIVE_DEFAULT_USUAL_GROUP[original_options[slot].clone()],
+                    "unrelated {value} option {slot} changed",
+                );
+            }
+            assert_eq!(parsed.module_text, "Old module");
+            let mut expected_group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+            for (slot, expected) in [1, 22, 27].into_iter().zip(expected_triplet).rev() {
+                expected_group.replace_range(original_options[slot].clone(), expected);
+            }
+            assert_eq!(
+                parsed.layout,
+                format!("{{59,1,11111111-1111-4111-8111-111111111111,{expected_group}}}"),
+                "unrelated outer coordinates or child tails changed for {value}",
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_modern_usual_group_horizontal_if_possible() -> anyhow::Result<()> {
+        assert!(
+            patch_native_usual_group_group(NATIVE_DEFAULT_USUAL_GROUP, "HorizontalIfPossible",)
+                .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_modern_usual_group_group_on_unknown_revision() -> anyhow::Result<()> {
+        let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+        let fields = super::scan_braced_fields(&group, 0)?;
+        let options = super::scan_braced_fields(&group, fields[20].start)?;
+        group.replace_range(options[0].clone(), "77");
+
+        assert!(patch_native_usual_group_group(&group, "Vertical").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_modern_usual_group_group_on_unadmitted_compact_bag() -> anyhow::Result<()> {
+        let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+        let fields = super::scan_braced_fields(&group, 0)?;
+        let options = super::scan_braced_fields(&group, fields[20].start)?;
+        let bag = format!(
+            "{{28,{}}}",
+            options
+                .iter()
+                .skip(1)
+                .take(27)
+                .map(|range| &group[range.clone()])
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        super::replace_braced_field(&mut group, 20, &bag)?;
+
+        assert!(patch_native_usual_group_group(&group, "Vertical").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_modern_usual_group_group_on_malformed_options_arity() -> anyhow::Result<()> {
+        let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+        let fields = super::scan_braced_fields(&group, 0)?;
+        let options = super::scan_braced_fields(&group, fields[20].start)?;
+        let bag = format!(
+            "{{{}}}",
+            options
+                .iter()
+                .take(28)
+                .map(|range| &group[range.clone()])
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        super::replace_braced_field(&mut group, 20, &bag)?;
+
+        assert!(patch_native_usual_group_group(&group, "Vertical").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_modern_usual_group_group_on_malformed_outer_arity() -> anyhow::Result<()> {
+        let mut group = NATIVE_DEFAULT_USUAL_GROUP.to_string();
+        group.pop();
+        group.push_str(",0}");
+
+        assert!(patch_native_usual_group_group(&group, "Vertical").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn preserves_short_historical_usual_group_group_routing() -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{200,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{0},0,0,0}},"Old module",{0}}"#,
+        )?;
+        let packed = super::pack_form_body_blob_from_form_xml(
+            &base,
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><UsualGroup name="MainGroup" id="200"><Group>HorizontalIfPossible</Group></UsualGroup></ChildItems></Form>"#,
+            None,
+        )?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let root_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let fields = super::scan_braced_fields(&parsed.layout, root_fields[3].start)?;
+
+        assert_eq!(fields.len(), 11);
+        assert_eq!(&parsed.layout[fields[8].clone()], "3");
+        assert_eq!(&parsed.layout[fields[9].clone()], "0");
         Ok(())
     }
 

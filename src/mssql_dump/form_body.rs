@@ -5632,7 +5632,7 @@ pub(super) fn apply_form_attribute_scoped_use_always_bindings(
             }) {
                 continue;
             }
-            let Some(old_suffix) = components
+            let old_suffix = components
                 .iter()
                 .map(|component| {
                     form_attribute_use_always_segment_name(
@@ -5644,10 +5644,7 @@ pub(super) fn apply_form_attribute_scoped_use_always_bindings(
                     )
                 })
                 .collect::<Option<Vec<_>>>()
-                .map(|parts| parts.join("."))
-            else {
-                continue;
-            };
+                .map(|parts| parts.join("."));
             let Some((resolved, _)) = walk_form_bound_chain_members(
                 &components,
                 &attribute.id,
@@ -5660,11 +5657,12 @@ pub(super) fn apply_form_attribute_scoped_use_always_bindings(
             ) else {
                 continue;
             };
-            let provisional = format!("{}.{}", attribute.name, old_suffix);
-            if provisional == resolved {
-                continue;
+            if let Some(old_suffix) = old_suffix {
+                let provisional = format!("{}.{}", attribute.name, old_suffix);
+                if provisional != resolved {
+                    attribute.use_always.retain(|path| path != &provisional);
+                }
             }
-            attribute.use_always.retain(|path| path != &provisional);
             if !attribute.use_always.contains(&resolved) {
                 attribute.use_always.push(resolved);
             }
@@ -17032,8 +17030,13 @@ fn parse_form_control_color_space(
             .trim()
             .parse::<i32>()
             .ok()
-            .and_then(form_control_web_color_name)
-            .map(ToOwned::to_owned),
+            .and_then(|code| {
+                form_control_web_color_name(code)
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        crate::compiler::bodies::form_native::form_web_color_reference(code)
+                    })
+            }),
         "3" if payload.len() == 1 => payload
             .first()?
             .trim()
@@ -27469,7 +27472,7 @@ fn form_standard_attribute_table_for_type_reference(
             Some(CATALOG_OBJECT_STANDARD_ATTRIBUTES)
         }
         (GeneratedMetadataOwnerFamily::Catalog, GeneratedMetadataOwnerRole::Ref) => {
-            Some(CATALOG_REF_STANDARD_ATTRIBUTES)
+            Some(crate::form_schema::FORM_CATALOG_REF_STANDARD_ATTRIBUTES)
         }
         (GeneratedMetadataOwnerFamily::Task, GeneratedMetadataOwnerRole::Object) => {
             Some(TASK_OBJECT_STANDARD_ATTRIBUTES)
@@ -27524,33 +27527,6 @@ const CATALOG_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-4", "Parent"),
     ("-5", "Owner"),
     ("-8", "Ref"),
-];
-/// Reached by dereferencing a value whose declared type is exactly one catalog
-/// reference, whether that value is a form column or a metadata field.
-///
-/// `-5` joined the table when metadata fields started reaching it. Evidence:
-/// UT 11.5.27.75, the 7 forms whose chain reaches
-/// `Объект.ПодарочныеСертификаты.ПодарочныйСертификат` -- a field declared
-/// `cfg:CatalogRef.ПодарочныеСертификаты` -- and then carries `{-5}`; the
-/// platform writes `Owner` on every one, and writes no other standard attribute
-/// under that prefix. The same marker is `Owner` under `cfg:CatalogObject` too,
-/// and this is the only role a catalog reference was observed to carry it in.
-///
-/// `-7` joined the table the same way. Evidence: Документооборот КОРП 3.0.21.3
-/// `Documents/ВыгрузкаВССТУ/Forms/ФормаДокумента`, whose CheckBoxField
-/// `ОбращенияОбращениеПометкаУдаления` carries
-/// `{4,{1},{0,9849b475-…},{0,c1204302-…},{-7}}` -- the tabular section
-/// `Обращения` of the document, then its column `Обращение`, declared
-/// `cfg:CatalogRef.ДокументыПредприятия` -- and the platform writes
-/// `Объект.Обращения.Обращение.DeletionMark`, the same path its Table writes as
-/// `<RowPictureDataPath>`. `.DeletionMark` is written 18 times over the eight
-/// native trees and this is the only one of them a chain reaches through a
-/// declared type; there is no counter-example anywhere.
-const CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
-    ("-2", "Code"),
-    ("-3", "Description"),
-    ("-5", "Owner"),
-    ("-7", "DeletionMark"),
 ];
 /// Reached by dereferencing a value whose declared type is exactly one chart of
 /// accounts reference — a form attribute, one of its columns, or a metadata

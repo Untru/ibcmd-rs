@@ -133,8 +133,7 @@ impl MxlSpreadsheetWritePlan {
         output_format_index_map: BTreeMap<usize, usize>,
         format_count: usize,
     ) -> Result<Self, MxlDiagnostic> {
-        let projection_complete = format_count > 0
-            && output_format_indices.len() == format_count
+        let projection_complete = output_format_indices.len() == format_count
             && output_format_index_map.len() == format_count
             && output_format_indices
                 .iter()
@@ -164,7 +163,8 @@ impl MxlSpreadsheetWritePlan {
                 canonical_to_xml,
                 xml_to_canonical,
             } => {
-                canonical_to_xml.len() == format_count
+                !canonical_to_xml.is_empty()
+                    && canonical_to_xml.len() == format_count
                     && xml_to_canonical.len() == format_count
                     && canonical_to_xml.iter().all(|(canonical, xml)| {
                         *canonical > 0
@@ -213,6 +213,84 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan.output_format_indices, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn write_plan_accepts_empty_identity_projection() {
+        let plan = MxlSpreadsheetWritePlan::new(
+            palette(),
+            MxlFormatReferenceMap::identity(0),
+            Vec::new(),
+            BTreeMap::new(),
+            0,
+        )
+        .unwrap();
+        assert!(plan.output_format_indices.is_empty());
+        assert!(plan.output_format_index_map.is_empty());
+        assert_eq!(plan.format_map, MxlFormatReferenceMap::identity(0));
+    }
+
+    #[test]
+    fn write_plan_rejects_inconsistent_empty_projections() {
+        let cases = [
+            (
+                "empty explicit map is not a proven identity",
+                MxlFormatReferenceMap::Explicit {
+                    canonical_to_xml: BTreeMap::new(),
+                    xml_to_canonical: BTreeMap::new(),
+                },
+                Vec::new(),
+                BTreeMap::new(),
+                0,
+            ),
+            (
+                "identity slot count exceeds empty pool",
+                MxlFormatReferenceMap::identity(1),
+                Vec::new(),
+                BTreeMap::new(),
+                0,
+            ),
+            (
+                "slot zero is not a pool entry",
+                MxlFormatReferenceMap::identity(0),
+                vec![0],
+                BTreeMap::from([(0, 0)]),
+                0,
+            ),
+            (
+                "empty pool has output order",
+                MxlFormatReferenceMap::identity(0),
+                vec![1],
+                BTreeMap::new(),
+                0,
+            ),
+            (
+                "empty pool has output map",
+                MxlFormatReferenceMap::identity(0),
+                Vec::new(),
+                BTreeMap::from([(1, 1)]),
+                0,
+            ),
+            (
+                "nonempty pool has no projection",
+                MxlFormatReferenceMap::identity(1),
+                Vec::new(),
+                BTreeMap::new(),
+                1,
+            ),
+        ];
+        for (case, format_map, output_indices, output_map, format_count) in cases {
+            let error = MxlSpreadsheetWritePlan::new(
+                palette(),
+                format_map,
+                output_indices,
+                output_map,
+                format_count,
+            )
+            .expect_err(case);
+            assert_eq!(error.stage(), MxlDiagnosticStage::Writer, "{case}");
+            assert_eq!(error.code(), "mxl.writer.format-plan-incomplete", "{case}");
+        }
     }
 
     #[test]

@@ -1782,6 +1782,9 @@ pub struct MoxelPrintSettings {
     pub black_and_white: Option<bool>,
     pub printer_name: Option<String>,
     pub paper: Option<usize>,
+    /// Native print key 0 stores either a numeric paper code or a string size.
+    /// The string alternative includes an explicitly empty pageSize.
+    pub page_size: Option<String>,
     pub paper_source: Option<usize>,
     /// Page geometry is a decimal, not an integer: key 16 stores `60.5` in
     /// three of the corpus's 56 print-settings records, and reading the whole
@@ -1790,6 +1793,8 @@ pub struct MoxelPrintSettings {
     /// carries that record. The token is published as stored.
     pub page_width: Option<String>,
     pub page_height: Option<String>,
+    /// Native print key 18/value 0 publishes printAccuracy Auto.
+    pub print_accuracy: Option<&'static str>,
     pub duplex_type: Option<&'static str>,
     pub page_placement_alternation: Option<&'static str>,
     /// Key 21, published as `<firstPageNumber>` behind
@@ -9015,7 +9020,7 @@ pub fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings
     let mut seen_keys = BTreeSet::new();
     for pair in fields[2..].chunks_exact(2) {
         let key = pair.first()?.trim().parse::<usize>().ok()?;
-        if !matches!(key, 0..=17 | 19 | 20 | 21) || !seen_keys.insert(key) {
+        if !matches!(key, 0..=21) || !seen_keys.insert(key) {
             return None;
         }
         let value = parse_moxel_print_settings_value(pair.get(1)?)?;
@@ -9024,7 +9029,14 @@ pub fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings
             // reader cannot spell refuses the record rather than dropping the
             // member - the strictness the value parser used to get by refusing
             // any `"N"` that was not an integer.
-            0 => settings.paper = Some(value.as_usize()?),
+            0 => match value {
+                MoxelPrintSettingsValue::Number(number) => {
+                    settings.paper = Some(number.parse::<usize>().ok()?);
+                }
+                MoxelPrintSettingsValue::Text(_) => {
+                    settings.page_size = Some(parse_moxel_string_page_size(pair.get(1)?)?);
+                }
+            },
             1 => settings.page_orientation = value.as_usize().and_then(moxel_page_orientation),
             2 => settings.scale = Some(value.as_usize()?),
             3 => settings.collate = Some(value.as_bool()?),
@@ -9042,6 +9054,7 @@ pub fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings
             15 => settings.paper_source = Some(value.as_usize()?),
             16 => settings.page_width = Some(value.into_number_token()?),
             17 => settings.page_height = Some(value.into_number_token()?),
+            18 => settings.print_accuracy = Some((value.as_usize()? == 0).then_some("Auto")?),
             19 => {
                 settings.duplex_type = Some(moxel_duplex_type(value.as_usize()?)?);
             }
@@ -9063,6 +9076,29 @@ pub fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings
     // set", so it is gone: the declared count, the key domain and the
     // duplicate check above are the record's whole shape.
     Some(settings)
+}
+
+// Keep the strict two-string shape used by the descriptor tree parser without
+// depending on the root crate. Page-size strings use literal doubled quotes;
+// bare values, interrupted literals and trailing text remain refusals.
+fn parse_moxel_string_page_size(text: &str) -> Option<String> {
+    let text = text.trim();
+    if ibcmd_1c_text::scan_1c_braced_value(text, 0)? != text.len() {
+        return None;
+    }
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 2 || fields.first()?.trim() != "\"S\"" {
+        return None;
+    }
+    let value = fields.get(1)?.trim();
+    let inner = value.strip_prefix('"')?.strip_suffix('"')?;
+    let mut characters = inner.chars();
+    while let Some(character) = characters.next() {
+        if character == '"' && characters.next() != Some('"') {
+            return None;
+        }
+    }
+    Some(inner.replace("\"\"", "\""))
 }
 
 pub enum MoxelPrintSettingsValue {
@@ -10845,6 +10881,7 @@ pub fn moxel_embedded_style_ref_for_uuid(
 /// | 11 | `InactiveBorder` | 6 | 1 each |
 fn parse_moxel_windows_color(value: &str) -> Option<String> {
     match value.parse::<u32>().ok()? {
+        0 => Some("windows:ScrollBar".to_string()),
         2 => Some("windows:ActiveTitleBar".to_string()),
         // Code 3 is `InactiveTitleBar`, paired in two ERP УХ 3.2.12.6
         // documents. `DataProcessors/МатрицаПравДоступаВидыОтчетов/Templates/
@@ -13211,9 +13248,11 @@ pub fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPrintSett
     push_moxel_format_bool(xml, "blackAndWhite", settings.black_and_white);
     push_moxel_format_text(xml, "printerName", settings.printer_name.as_deref());
     push_moxel_format_usize(xml, "paper", settings.paper);
+    push_moxel_format_text(xml, "pageSize", settings.page_size.as_deref());
     push_moxel_format_usize(xml, "paperSource", settings.paper_source);
     push_moxel_format_text(xml, "pageWidth", settings.page_width.as_deref());
     push_moxel_format_text(xml, "pageHeight", settings.page_height.as_deref());
+    push_moxel_format_text(xml, "printAccuracy", settings.print_accuracy);
     push_moxel_format_text(xml, "duplexType", settings.duplex_type);
     push_moxel_format_text(
         xml,
@@ -13241,9 +13280,11 @@ impl MoxelPrintSettings {
             && self.black_and_white.is_none()
             && self.printer_name.is_none()
             && self.paper.is_none()
+            && self.page_size.is_none()
             && self.paper_source.is_none()
             && self.page_width.is_none()
             && self.page_height.is_none()
+            && self.print_accuracy.is_none()
             && self.duplex_type.is_none()
             && self.page_placement_alternation.is_none()
             && self.first_page_number.is_none()
@@ -15542,6 +15583,55 @@ mod moxel_exact_parity_tests {
         assert!(xml.contains("\t\t<pageHeight>40</pageHeight>\r\n"));
     }
 
+    #[test]
+    fn mxl_native_print_record_preserves_string_size_and_auto_accuracy() {
+        let settings = parse_moxel_print_settings_field(
+            r#"{{0,4,0,{"S",""},16,{"N",210},17,{"N",297},18,{"N",0}}}"#,
+        )
+        .expect("native string page size and accuracy must be readable");
+        let mut xml = String::new();
+        push_moxel_print_settings_xml(&mut xml, &settings);
+        assert!(xml.contains("<pageSize></pageSize>"), "{xml}");
+        assert!(!xml.contains("<paper>"), "{xml}");
+        assert!(xml.contains("<pageWidth>210</pageWidth>"));
+        assert!(xml.contains("<pageHeight>297</pageHeight>"));
+        assert!(xml.contains("<printAccuracy>Auto</printAccuracy>"));
+        assert!(!settings.is_default_margins_only());
+    }
+
+    #[test]
+    fn mxl_native_print_record_refuses_malformed_page_size_strings() {
+        for raw in [
+            r#"{0,1,0,{"S",9}}"#,
+            r#"{0,1,0,{"S",{1}}}"#,
+            r#"{0,1,0,{"S",unquoted}}"#,
+            r#"{0,1,0,{"S","size"junk}}"#,
+            r#"{0,1,0,{S,"size"}}"#,
+            r#"{0,1,0,{"S","one""two"junk"}}"#,
+            r#"{0,1,0,{"S","size"}junk}"#,
+        ] {
+            assert!(
+                parse_moxel_print_settings_field(raw).is_none(),
+                "accepted {raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn mxl_native_print_record_refuses_unknown_accuracy_and_duplicate_size() {
+        for raw in [
+            r#"{0,1,18,{"N",1}}"#,
+            r#"{0,1,18,{"N",-1}}"#,
+            r#"{0,1,18,{"S","Auto"}}"#,
+            r#"{0,2,0,{"S",""},0,{"N",9}}"#,
+        ] {
+            assert!(
+                parse_moxel_print_settings_field(raw).is_none(),
+                "accepted {raw}"
+            );
+        }
+    }
+
     /// The three language records the corpus stores, and the block the
     /// platform answers each with.
     #[test]
@@ -15841,10 +15931,10 @@ mod moxel_exact_parity_tests {
     fn raw_palette_provenance_precedes_compatibility_synthesis() {
         let fields = [
             "5",
-            "{3,1,{0}}",
-            "{3,1,{0}}",
+            "{3,1,{4294967295}}",
+            "{3,1,{4294967295}}",
             "{3,3,{-28}}",
-            "{3,1,{0}}",
+            "{3,1,{4294967295}}",
             "{3,4,{0}}",
         ];
         let resolved = parse_moxel_style_refs(&fields, &BTreeMap::new());
@@ -15858,7 +15948,7 @@ mod moxel_exact_parity_tests {
                 .map(|slot| (*slot).to_string())
                 .collect::<Vec<_>>()
         );
-        assert_eq!(provenance.raw_slots[1], "{3,1,{0}}");
+        assert_eq!(provenance.raw_slots[1], "{3,1,{4294967295}}");
     }
 
     #[test]

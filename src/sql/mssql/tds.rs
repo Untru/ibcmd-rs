@@ -6,15 +6,14 @@ use std::borrow::Cow;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use futures_util::TryStreamExt;
-use tiberius::{
-    AuthMethod, Client, ColumnData, Config, EncryptionLevel, Query, QueryItem, Row, SqlBrowser,
-};
+use tiberius::{AuthMethod, Client, ColumnData, Config, Query, QueryItem, Row, SqlBrowser};
 use tokio::net::TcpStream;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 use super::address::ServerAddress;
+use super::encryption::{MssqlConnectionPolicy, MssqlEncryption};
 use super::script::{ScriptBatch, split_batches};
 use crate::sql::{ScriptVariables, SqlLogin, SqlParam, SqlRow, SqlTarget, SqlValue};
 
@@ -102,6 +101,14 @@ pub struct TdsConnection {
 impl TdsConnection {
     /// Opens a connection, retrying transient connect failures.
     pub fn open(target: &SqlTarget, address: &ServerAddress) -> Result<Self> {
+        Self::open_with_policy(target, address, MssqlConnectionPolicy::from_env()?)
+    }
+
+    fn open_with_policy(
+        target: &SqlTarget,
+        address: &ServerAddress,
+        policy: MssqlConnectionPolicy,
+    ) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_io()
             .enable_time()
@@ -110,7 +117,7 @@ impl TdsConnection {
         let mut attempt = 0u32;
         loop {
             attempt += 1;
-            let result = runtime.block_on(connect(target, address));
+            let result = runtime.block_on(connect(target, address, policy.encryption));
             match result {
                 Ok(client) => {
                     let mut connection = Self {
@@ -119,7 +126,7 @@ impl TdsConnection {
                         home_database: String::new(),
                     };
                     connection
-                        .initialize_session()
+                        .initialize_session(policy.sql_server_2012)
                         .with_context(|| format!("SQL Server {}", target.server))?;
                     return Ok(connection);
                 }
@@ -143,7 +150,20 @@ impl TdsConnection {
     /// written for sqlcmd behave the same: it switches QUOTED_IDENTIFIER off
     /// (the only option in which the two sessions differ; checked with
     /// `@@OPTIONS`: 5688 under sqlcmd, 5944 under a bare TDS login).
-    fn initialize_session(&mut self) -> Result<()> {
+    fn initialize_session(&mut self, sql_server_2012: bool) -> Result<()> {
+        if sql_server_2012 {
+            let mut version = None;
+            self.query_each(
+                "SELECT CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(128));",
+                &[],
+                |row| {
+                    version = row.try_get::<&str, _>(0)?.map(ToOwned::to_owned);
+                    Ok(())
+                },
+            )?;
+            validate_sql_server_2012_version(version.as_deref())?;
+        }
+
         self.run_batch("SET QUOTED_IDENTIFIER OFF;")?;
         let mut home = None;
         self.query_each("SELECT DB_NAME()", &[], |row| {
@@ -257,8 +277,33 @@ fn is_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'@' | b'#' | b'$') || byte >= 0x80
 }
 
-async fn connect(target: &SqlTarget, address: &ServerAddress) -> tiberius::Result<TdsClient> {
-    let mut config = tiberius_config(target, address)?;
+fn validate_sql_server_2012_version(version: Option<&str>) -> Result<()> {
+    let components = version
+        .unwrap_or_default()
+        .trim()
+        .split('.')
+        .map(|component| {
+            if component.is_empty() || !component.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            component.parse::<u32>().ok()
+        })
+        .collect::<Option<Vec<_>>>();
+    if !matches!(components.as_deref(), Some([11, _, _, _])) {
+        bail!(
+            "SQL Server 2012 compatibility requires an actual ProductVersion of 11.x.x.x \
+             with four numeric components"
+        );
+    }
+    Ok(())
+}
+
+async fn connect(
+    target: &SqlTarget,
+    address: &ServerAddress,
+    encryption: MssqlEncryption,
+) -> tiberius::Result<TdsClient> {
+    let mut config = tiberius_config(target, address, encryption)?;
     let mut named = address.browser_instance().is_some();
     let mut routed = false;
     loop {
@@ -269,7 +314,7 @@ async fn connect(target: &SqlTarget, address: &ServerAddress) -> tiberius::Resul
             Err(tiberius::error::Error::Routing { host, port }) if !routed => {
                 routed = true;
                 named = false;
-                config = tiberius_config(target, address)?;
+                config = tiberius_config(target, address, encryption)?;
                 config.host(host);
                 config.port(port);
             }
@@ -305,7 +350,11 @@ async fn tcp_connect(config: &Config, named: bool) -> tiberius::Result<TcpStream
     Ok(stream)
 }
 
-fn tiberius_config(target: &SqlTarget, address: &ServerAddress) -> tiberius::Result<Config> {
+fn tiberius_config(
+    target: &SqlTarget,
+    address: &ServerAddress,
+    encryption: MssqlEncryption,
+) -> tiberius::Result<Config> {
     let mut config = Config::new();
     config.host(&address.host);
     match address.browser_instance() {
@@ -317,8 +366,7 @@ fn tiberius_config(target: &SqlTarget, address: &ServerAddress) -> tiberius::Res
     }
     config.application_name("ibcmd-rs");
     config.authentication(authentication(&target.login)?);
-    // ODBC 18's sqlcmd encrypts every connection; so does the built-in client.
-    config.encryption(EncryptionLevel::Required);
+    config.encryption(encryption.tds_level());
     if target.trust_server_certificate {
         config.trust_cert();
     }
@@ -375,6 +423,9 @@ fn connect_error_is_transient(error: &tiberius::error::Error) -> bool {
 pub struct TdsPool {
     target: SqlTarget,
     address: ServerAddress,
+    /// Both settings are fixed before any connection, including dedicated
+    /// connections, retries and gateway redirects.
+    policy: MssqlConnectionPolicy,
     capacity: usize,
     state: Mutex<PoolState>,
     returned: Condvar,
@@ -388,10 +439,12 @@ struct PoolState {
 impl TdsPool {
     /// A pool for `target`; nothing connects until the first call.
     pub fn new(target: SqlTarget, capacity: usize) -> Result<Self> {
+        let policy = MssqlConnectionPolicy::from_env()?;
         let address = ServerAddress::parse(&target.server)?;
         Ok(Self {
             target,
             address,
+            policy,
             capacity: capacity.max(1),
             state: Mutex::new(PoolState {
                 idle: Vec::new(),
@@ -411,6 +464,11 @@ impl TdsPool {
 
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Whether every connection must confirm that it is SQL Server 2012.
+    pub fn uses_mssql_2012_compatibility(&self) -> bool {
+        self.policy.sql_server_2012
     }
 
     /// Runs `work` on a pooled connection. `work` must not ask the same pool
@@ -433,7 +491,7 @@ impl TdsPool {
     /// pooled connection: a script's batches share `USE`, `SET` and temporary
     /// tables, exactly as they do in one sqlcmd run.
     pub fn dedicated(&self) -> Result<TdsConnection> {
-        TdsConnection::open(&self.target, &self.address)
+        TdsConnection::open_with_policy(&self.target, &self.address, self.policy)
     }
 
     /// Runs every row the query returns through `row`.
@@ -505,7 +563,7 @@ impl TdsPool {
                 .unwrap_or_else(PoisonError::into_inner);
         }
         drop(state);
-        match TdsConnection::open(&self.target, &self.address) {
+        match TdsConnection::open_with_policy(&self.target, &self.address, self.policy) {
             Ok(connection) => Ok(Lease {
                 pool: self,
                 connection: Some(connection),
@@ -551,12 +609,251 @@ impl Drop for Lease<'_> {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::ffi::OsStr;
+    use std::process::Command;
 
     use tiberius::ColumnData;
     use tiberius::numeric::Numeric;
 
-    use super::{mentions_use, sql_value};
-    use crate::sql::SqlValue;
+    use super::{
+        TdsConnection, TdsPool, mentions_use, sql_value, tiberius_config,
+        validate_sql_server_2012_version,
+    };
+    use crate::sql::{SqlLogin, SqlTarget, SqlValue};
+
+    const ENCRYPTION_SETTING: &str = "IBCMD_RS_MSSQL_ENCRYPTION";
+    const COMPATIBILITY_SETTING: &str = "IBCMD_RS_MSSQL_COMPATIBILITY";
+    const ENCRYPTION_CASE: &str = "IBCMD_RS_TDS_ENCRYPTION_TEST_CASE";
+
+    #[test]
+    fn sql2012_version_gate_accepts_actual_four_component_major_11() {
+        for version in ["11.0.7001.0", "11.0.7507.2", " 11.0.2100.60\r\n"] {
+            validate_sql_server_2012_version(Some(version)).unwrap();
+        }
+    }
+
+    #[test]
+    fn sql2012_version_gate_rejects_other_servers_and_malformed_versions() {
+        for version in [
+            None,
+            Some(""),
+            Some("10.50.6000.34"),
+            Some("12.0.7000.0"),
+            Some("13.0.7000.0"),
+            Some("15.0.7000.0"),
+            Some("16.0.7000.0"),
+            Some("17.0.7000.0"),
+            Some("110.0.0.0"),
+            Some("11"),
+            Some("11.0.7001"),
+            Some("11.0.7001.0.1"),
+            Some("11..7001.0"),
+            Some("11.0.bad.0"),
+            Some("+11.0.7001.0"),
+            Some("11.0.7001.-1"),
+            Some("11.0.4294967296.0"),
+            Some("11.0.7001.0 (SQL Server 2012)"),
+        ] {
+            assert!(
+                validate_sql_server_2012_version(version).is_err(),
+                "unsupported ProductVersion accepted: {version:?}"
+            );
+        }
+    }
+
+    fn encryption_case(case: &str, compatibility: Option<&OsStr>, encryption: Option<&OsStr>) {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "sql::mssql::tds::tests::encryption_environment_case",
+            "--test-threads=1",
+            "--nocapture",
+        ]);
+        command.env(ENCRYPTION_CASE, case);
+        match encryption {
+            Some(setting) => command.env(ENCRYPTION_SETTING, setting),
+            None => command.env_remove(ENCRYPTION_SETTING),
+        };
+        match compatibility {
+            Some(setting) => command.env(COMPATIBILITY_SETTING, setting),
+            None => command.env_remove(COMPATIBILITY_SETTING),
+        };
+        let output = command.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "isolated encryption case {case} failed: {stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn missing_encryption_setting_requires_tls() {
+        encryption_case("Required", None, None);
+    }
+
+    #[test]
+    fn explicit_required_setting_requires_tls() {
+        encryption_case("Required", None, Some(OsStr::new("required")));
+    }
+
+    #[test]
+    fn sql2012_opt_in_preserves_required_tls_by_default() {
+        encryption_case("Required2012", Some(OsStr::new("2012")), None);
+    }
+
+    #[test]
+    fn login_only_setting_configures_login_tls() {
+        encryption_case(
+            "Off",
+            Some(OsStr::new("2012")),
+            Some(OsStr::new("login-only")),
+        );
+    }
+
+    #[test]
+    fn disabled_setting_configures_unencrypted_login() {
+        encryption_case(
+            "NotSupported",
+            Some(OsStr::new("2012")),
+            Some(OsStr::new("disabled")),
+        );
+    }
+
+    #[test]
+    fn transport_override_requires_sql2012_opt_in() {
+        for setting in ["login-only", "disabled"] {
+            encryption_case("CompatibilityRequired", None, Some(OsStr::new(setting)));
+        }
+    }
+
+    #[test]
+    fn invalid_compatibility_setting_fails_before_connecting() {
+        for setting in ["", "private-invalid-compatibility", "2019", "110"] {
+            encryption_case("InvalidCompatibility", Some(OsStr::new(setting)), None);
+        }
+    }
+
+    #[test]
+    fn invalid_encryption_setting_fails_before_connecting() {
+        encryption_case(
+            "InvalidEncryption",
+            Some(OsStr::new("2012")),
+            Some(OsStr::new("private-invalid-mode")),
+        );
+        encryption_case(
+            "InvalidEncryption",
+            Some(OsStr::new("2012")),
+            Some(OsStr::new("")),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_unicode_encryption_setting_fails_before_connecting() {
+        use std::os::unix::ffi::OsStrExt;
+
+        encryption_case(
+            "InvalidEncryption",
+            Some(OsStr::new("2012")),
+            Some(OsStr::from_bytes(b"private-\xff")),
+        );
+        encryption_case(
+            "InvalidCompatibility",
+            Some(OsStr::from_bytes(b"private-\xff")),
+            None,
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn non_unicode_encryption_setting_fails_before_connecting() {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+
+        let setting = OsString::from_wide(&[b'p' as u16, b'r' as u16, 0xd800]);
+        encryption_case(
+            "InvalidEncryption",
+            Some(OsStr::new("2012")),
+            Some(&setting),
+        );
+        encryption_case("InvalidCompatibility", Some(&setting), None);
+    }
+
+    #[test]
+    fn encryption_environment_case() {
+        let Ok(case) = std::env::var(ENCRYPTION_CASE) else {
+            return;
+        };
+        let mut target = SqlTarget {
+            server: "localhost,1".to_owned(),
+            database: Some("policy_test".to_owned()),
+            login: SqlLogin::Sql {
+                user: "policy_test".to_owned(),
+                password: Some("synthetic-password".to_owned()),
+            },
+            trust_server_certificate: false,
+        };
+        if case.starts_with("Invalid") || case == "CompatibilityRequired" {
+            let expected_setting = if case == "InvalidEncryption" {
+                ENCRYPTION_SETTING
+            } else {
+                COMPATIBILITY_SETTING
+            };
+            let error = TdsPool::new(target.clone(), 2)
+                .err()
+                .expect("invalid transport policy must fail during pool construction")
+                .to_string();
+            assert!(error.contains(expected_setting));
+            assert!(!error.contains("private-invalid-mode"));
+            assert!(!error.contains("private-invalid-compatibility"));
+            assert!(!error.contains("private-"));
+
+            // Missing authentication stops a regression before any network
+            // access even if the standalone path forgets policy validation.
+            target.login = SqlLogin::Sql {
+                user: "policy_test".to_owned(),
+                password: None,
+            };
+            let address = super::ServerAddress::parse(&target.server).unwrap();
+            let error = TdsConnection::open(&target, &address)
+                .err()
+                .expect("invalid transport policy must fail before connecting")
+                .to_string();
+            assert!(error.contains(expected_setting));
+            assert!(!error.contains("private-invalid-mode"));
+            assert!(!error.contains("private-invalid-compatibility"));
+            return;
+        }
+
+        let pool = TdsPool::new(target, 2).unwrap();
+        let config = tiberius_config(&pool.target, &pool.address, pool.policy.encryption).unwrap();
+        // Config has no public encryption getter. Inspect only that field
+        // from the real config made with synthetic credentials.
+        let description = format!("{config:?}");
+        let encryption = description
+            .split_once("encryption: ")
+            .unwrap()
+            .1
+            .split(',')
+            .next()
+            .unwrap();
+        let expected_encryption = if case == "Required2012" {
+            "Required"
+        } else {
+            &case
+        };
+        assert_eq!(encryption, expected_encryption);
+
+        let expected_compatibility =
+            matches!(case.as_str(), "Required2012" | "Off" | "NotSupported");
+        assert_eq!(pool.uses_mssql_2012_compatibility(), expected_compatibility);
+        let client = super::super::MssqlClient::new(pool.target.clone(), 1).unwrap();
+        assert_eq!(
+            crate::sql::SqlClient::uses_mssql_2012_compatibility(&client),
+            expected_compatibility
+        );
+    }
 
     #[test]
     fn use_statements_are_spotted_in_any_spelling() {

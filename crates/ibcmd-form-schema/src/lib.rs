@@ -1500,6 +1500,59 @@ impl FormUsualGroupXmlProperty {
     }
 }
 
+/// Older placeholder records keep Group and ShowTitle in their header.
+/// Keep those existing codec shapes separate from modern native groups,
+/// whose corresponding members are the tooltip and EnableContentChange.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct FormHistoricalUsualGroupSchema;
+
+impl FormHistoricalUsualGroupSchema {
+    pub fn from_fields(fields: &[&str], options: Option<&[&str]>) -> Option<Self> {
+        let [wrapper, _, _, _, _, discriminator, ..] = fields else {
+            return None;
+        };
+        if wrapper.trim() != "22" || discriminator.trim() != "5" {
+            return None;
+        }
+        let short_placeholder = fields.len() == 11;
+        // These are the two revision38 tuples already serialized and covered
+        // by the historical group tests; neither is a modern native tuple.
+        let extended_placeholder = fields.len() >= 29
+            && options.is_some_and(|options| {
+                matches!(options.len(), 42 | 49)
+                    && options.first().map(|option| option.trim()) == Some("38")
+            });
+        (short_placeholder || extended_placeholder).then_some(Self)
+    }
+
+    pub const fn show_title_slot(self) -> usize {
+        9
+    }
+
+    pub const fn group_slot(self) -> usize {
+        8
+    }
+}
+
+/// Item families handled by the existing Group patch contract.
+pub struct FormChildItemGroupSchema;
+
+impl FormChildItemGroupSchema {
+    pub fn supports_patch_tag(item_tag: &str) -> bool {
+        matches!(
+            item_tag,
+            "CommandBar"
+                | "AutoCommandBar"
+                | "UsualGroup"
+                | "Popup"
+                | "Pages"
+                | "Page"
+                | "ButtonGroup"
+                | "ContextMenu"
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FormUsualGroupSchema;
 
@@ -1576,7 +1629,32 @@ impl FormGroupAssociatedTableElementSchema {
 }
 
 impl FormUsualGroupSchema {
+    pub fn is_tag(item_tag: &str) -> bool {
+        item_tag == "UsualGroup"
+    }
+
     pub const OPTIONS_SLOT: usize = 20;
+    const GROUP_ORIENTATION_OPTION_SLOT: usize = 1;
+    const GROUP_NAMED_OPTION_SLOT: usize = 22;
+    const GROUP_LAYOUT_OPTION_SLOT: usize = 27;
+
+    /// Only the native writer's measured group spellings are patchable.
+    /// HorizontalIfPossible has no admitted modern UsualGroup encoding.
+    pub fn group_option_changes(self, spelling: &str) -> Option<[(usize, &'static str); 3]> {
+        let (orientation, named, layout) = match spelling {
+            "Vertical" => ("0", "0", "0"),
+            "Horizontal" => ("1", "1", "1"),
+            "AlwaysHorizontal" => ("1", "1", "3"),
+            _ => return None,
+        };
+        Some([
+            (Self::GROUP_ORIENTATION_OPTION_SLOT, orientation),
+            (Self::GROUP_NAMED_OPTION_SLOT, named),
+            (Self::GROUP_LAYOUT_OPTION_SLOT, layout),
+        ])
+    }
+
+    const ENABLE_CONTENT_CHANGE_SLOT: usize = 9;
     const GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET: usize = 3;
     const GROUP_VERTICAL_ALIGN_REVERSE_OFFSET: usize = 2;
     /// UT 11.5.27.75 native tree, 26 258 traced groups: option slot 15 is a
@@ -1618,12 +1696,37 @@ impl FormUsualGroupSchema {
         .then_some(Self)
     }
 
+    /// The same witnessed modern group header used for property decoding and patching.
+    pub fn from_fields(fields: &[&str], options: &[&str]) -> Option<Self> {
+        let [wrapper, _, _, _, _, discriminator, ..] = fields else {
+            return None;
+        };
+        Self::from_raw_layout(
+            wrapper,
+            fields.len(),
+            "UsualGroup",
+            Some(discriminator),
+            options,
+        )
+    }
+
+    pub const fn enable_content_change_slot(self) -> usize {
+        Self::ENABLE_CONTENT_CHANGE_SLOT
+    }
+
+    pub const fn show_title_option_slot(self) -> usize {
+        FormChildItemShowTitleSchema::USUAL_GROUP_SHOW_TITLE_OPTION_SLOT
+    }
+
     pub fn properties(self, fields: &[&str], options: &[&str]) -> FormUsualGroupProperties {
         FormUsualGroupProperties {
             enabled: (fields.get(10).map(|field| field.trim()) == Some("0")).then_some(false),
             read_only: (fields.get(11).map(|field| field.trim()) == Some("1")).then_some(true),
-            enable_content_change: (fields.get(9).map(|field| field.trim()) == Some("1"))
-                .then_some(true),
+            enable_content_change: (fields
+                .get(Self::ENABLE_CONTENT_CHANGE_SLOT)
+                .map(|field| field.trim())
+                == Some("1"))
+            .then_some(true),
             group_horizontal_align: self.group_horizontal_align(fields),
             group_vertical_align: self.group_vertical_align(fields),
             // The two right-titled codes used to be missing from the table.
@@ -5061,10 +5164,11 @@ impl FormButtonShapeSchema {
 /// `<ToolTipRepresentation>`; 3 `ViewStatusAddition` carry `<AutoMaxWidth>`
 /// (read by `parse_form_view_status_addition_auto_max_width`, from its own
 /// member 13) and 4 a `<ToolTipRepresentation>` (read from the top-level slot
-/// by `list_addition_tooltip_representation`). Neither kind carries `<Width>`,
-/// `<MaxWidth>`, `<HorizontalStretch>` or `<GroupHorizontalAlign>` anywhere in
-/// the corpus, so the one coordinate this schema adds for them is the search
-/// control's `AutoMaxWidth`: option member 7 is `1` on all 19 496 search
+/// by `list_addition_tooltip_representation`). That original corpus carries no
+/// `<Width>`, `<MaxWidth>`, `<HorizontalStretch>` or `<GroupHorizontalAlign>`
+/// for either kind. Two later paired native 8.3.27 forms add the search
+/// control's width at option member 1. Its `AutoMaxWidth` remains option
+/// member 7, which is `1` on all 19 496 search
 /// controls without the element and `0` on all 6 records that carry
 /// `<AutoMaxWidth>false</AutoMaxWidth>`, across all eight corpora, with no
 /// counter-example.
@@ -5105,13 +5209,15 @@ impl FormSearchStringAdditionSchema {
             // string's but is *not* the same tuple: it spends member 2 on the
             // first of its three colours where the search string holds
             // `HorizontalStretch`, and ends with a member the search string
-            // does not have. Only `AutoMaxWidth` is claimed for it, at the
-            // member measured below; its `ToolTipRepresentation` is answered
+            // does not have. Width is member 1: two paired native 8.3.27
+            // forms store 8 there and publish `<Width>8</Width>`. Its
+            // `AutoMaxWidth` is at the member measured below; its
+            // `ToolTipRepresentation` is answered
             // from the top-level slot by `list_addition_tooltip_representation`,
             // which covers this kind and its view-status sibling, so it stays
             // unclaimed here rather than being read a second way.
             ("SearchControlAddition", 11) => Some(Self {
-                width_option_slot: None,
+                width_option_slot: Some(1),
                 horizontal_stretch_option_slot: None,
                 auto_max_width_option_slot: Some(7),
                 max_width_option_slot: None,
@@ -6084,7 +6190,23 @@ impl FormContainerReadOnlySchema {
 }
 
 impl FormChildItemShowTitleSchema {
+    /// Item families handled by the existing ShowTitle patch contract.
+    pub fn supports_patch_tag(item_tag: &str) -> bool {
+        matches!(
+            item_tag,
+            "CommandBar"
+                | "AutoCommandBar"
+                | "UsualGroup"
+                | "Popup"
+                | "Pages"
+                | "Page"
+                | "ButtonGroup"
+                | "ContextMenu"
+        )
+    }
+
     pub const OPTIONS_SLOT: usize = FormPageSchema::OPTIONS_SLOT;
+    const USUAL_GROUP_SHOW_TITLE_OPTION_SLOT: usize = 4;
 
     pub fn from_raw_layout(
         wrapper: &str,
@@ -6141,7 +6263,9 @@ impl FormChildItemShowTitleSchema {
                 options.first().map(|field| field.trim()),
             ) {
                 ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None, None),
-                ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9), Some(23)),
+                ("UsualGroup", Some("5"), 29, Some("29")) => {
+                    (Self::USUAL_GROUP_SHOW_TITLE_OPTION_SLOT, Some(9), Some(23))
+                }
                 // The compact/legacy 28-member bag keeps `ShowTitle` at the
                 // same slot 4 the wide bag uses; see
                 // `parse_form_usual_group_extended_options`'s `"28"` arm for
@@ -6165,7 +6289,9 @@ impl FormChildItemShowTitleSchema {
                 // compact bag reads `{3,4,{0}}` on all 662 records and no
                 // compact-bag group carries the element, so the corpus says
                 // nothing about that coordinate either way.
-                ("UsualGroup", Some("5"), 28, Some("28")) => (4, Some(9), None),
+                ("UsualGroup", Some("5"), 28, Some("28")) => {
+                    (Self::USUAL_GROUP_SHOW_TITLE_OPTION_SLOT, Some(9), None)
+                }
                 _ => return None,
             };
         Some(Self {
@@ -10020,6 +10146,20 @@ impl FormContainerCurrentRowSchema {
         }
     }
 }
+
+/// Standard members reached through an exactly typed catalog reference.
+/// Code/Description come from declared columns; Owner is also witnessed by
+/// seven UT 11.5.27.75 chains through a metadata field. DeletionMark is
+/// witnessed by Document Management 3.0.21.3's catalog-reference column and
+/// its row-picture binding. A paired native 8.3.27/XML 2.20 value-table column
+/// adds Parent at -4. No other family or unmeasured marker uses this table.
+pub const FORM_CATALOG_REF_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
+    ("-2", "Code"),
+    ("-3", "Description"),
+    ("-4", "Parent"),
+    ("-5", "Owner"),
+    ("-7", "DeletionMark"),
+];
 
 /// Built-in binding members have owner-specific physical markers. Period
 /// stays physical when undeclared; Ref preserves the referenced owner type.

@@ -5,11 +5,13 @@
 mod comparison;
 pub mod config_dump_info;
 pub mod dcs;
+mod dcs_comparison;
 pub mod dcs_schema;
 pub mod dcs_storage;
 pub mod dcs_template;
 mod dialect;
 mod form_choice_parameters;
+mod form_comparison;
 pub mod metadata;
 mod node;
 pub mod palette;
@@ -17,7 +19,9 @@ mod reader;
 pub mod source_tree;
 mod writer;
 
-pub use comparison::equal_ignoring_structural_line_endings;
+pub use comparison::{
+    equal_ignoring_structural_indentation, equal_ignoring_structural_line_endings,
+};
 pub use dcs::{
     DCS_WRITER_EVIDENCE, DCS_WRITER_EVIDENCE_INVALID_CODE, DCS_WRITER_EVIDENCE_PENDING_CODE,
     DCS_WRITER_EVIDENCE_RELEASE, DcsChildParseOutcome, DcsListSettingsTailError,
@@ -44,6 +48,7 @@ pub use dcs::{
     preflight_dcs_settings_serialization, rewrite_dcs_settings_children,
     validate_dcs_inline_settings_fragment_structure,
 };
+pub use dcs_comparison::equal_dcs_source_documents;
 pub use dcs_schema::{
     DcsInlineSettingsFragment, DcsInnerSchemaError, TypeRunMember,
     emit_dcs_area_template_source_fragment, emit_dcs_area_template_storage_document,
@@ -81,6 +86,7 @@ pub use dialect::{
 pub use form_choice_parameters::{
     FormChoiceParametersEmitError, emit_form_choice_parameter_links, emit_form_choice_parameters,
 };
+pub use form_comparison::equal_form_source_documents;
 pub use metadata::{
     CctTemplateChildrenError, CharacteristicsXmlError, MetadataDecodeError, MetadataEncodeError,
     MetadataEnvelope, MetadataFamilyCodec, MetadataOrderError, MetadataRegistry,

@@ -74,6 +74,64 @@ pub struct ClientApplicationInterfaceModel {
     pub panel_defs: Vec<ClientApplicationPanelDef>,
 }
 
+/// The non-default panel height witnessed in paired native storage and XML.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientApplicationPanelHeight {
+    One,
+}
+
+const CLIENT_APPLICATION_PANEL_REVISION: &str = "0";
+const CLIENT_APPLICATION_PANEL_KIND: &str = "2";
+const CLIENT_APPLICATION_PANEL_DEFAULT_HEIGHT: &str = "0";
+const CLIENT_APPLICATION_PANEL_HEIGHT_ONE: &str = "1";
+
+/// A decoded panel record; the metadata adapter validates both UUIDs before
+/// retaining the record or projecting it to XML.
+pub(crate) struct ClientApplicationPanelRecord<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) uuid: &'a str,
+    pub(crate) height: Option<ClientApplicationPanelHeight>,
+}
+
+pub(crate) fn decode_client_application_panel_fields<'a>(
+    fields: &[&'a str],
+) -> Option<ClientApplicationPanelRecord<'a>> {
+    let [revision, id, uuid, kind, height] = fields else {
+        return None;
+    };
+    if revision.trim() != CLIENT_APPLICATION_PANEL_REVISION
+        || kind.trim() != CLIENT_APPLICATION_PANEL_KIND
+    {
+        return None;
+    }
+
+    let height = match height.trim() {
+        CLIENT_APPLICATION_PANEL_DEFAULT_HEIGHT => None,
+        CLIENT_APPLICATION_PANEL_HEIGHT_ONE => Some(ClientApplicationPanelHeight::One),
+        _ => return None,
+    };
+    Some(ClientApplicationPanelRecord {
+        id: id.trim(),
+        uuid: uuid.trim(),
+        height,
+    })
+}
+
+impl ClientApplicationPanelRecord<'_> {
+    pub(crate) fn push_xml(&self, xml: &mut String, indent: usize) {
+        let tab = "\t".repeat(indent);
+        xml.push_str(&format!(
+            "{tab}<panel id=\"{}\">\r\n{tab}\t<uuid>{}</uuid>\r\n",
+            quick_xml::escape::escape(self.id),
+            quick_xml::escape::escape(self.uuid)
+        ));
+        if let Some(ClientApplicationPanelHeight::One) = self.height {
+            xml.push_str(&format!("{tab}\t<height>1</height>\r\n"));
+        }
+        xml.push_str(&format!("{tab}</panel>\r\n"));
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientApplicationNode {
     /// `{0,<id>,0,{0,<count>,<marker>,<child>,…}}`.
@@ -81,8 +139,12 @@ pub enum ClientApplicationNode {
         id: ObjectUuid,
         children: Vec<ClientApplicationNode>,
     },
-    /// `{0,<id>,<panel uuid>,2,0}`.
-    Panel { id: ObjectUuid, uuid: ObjectUuid },
+    /// `{0,<id>,<panel uuid>,2,<height>}`; absent height is stored as `0`.
+    Panel {
+        id: ObjectUuid,
+        uuid: ObjectUuid,
+        height: Option<ClientApplicationPanelHeight>,
+    },
 }
 
 /// One `<panelDef>`: `2,{<id>,0}` for one of the platform's standard
@@ -152,14 +214,19 @@ fn client_application_children(nodes: &[ClientApplicationNode]) -> NativeValue {
                     client_application_children(children),
                 ]));
             }
-            ClientApplicationNode::Panel { id, uuid } => {
+            ClientApplicationNode::Panel { id, uuid, height } => {
                 fields.push(token(CLIENT_APPLICATION_PANEL_MARKER));
                 fields.push(platform_list(vec![
-                    token("0"),
+                    token(CLIENT_APPLICATION_PANEL_REVISION),
                     token(id.to_string()),
                     token(uuid.to_string()),
-                    token("2"),
-                    token("0"),
+                    token(CLIENT_APPLICATION_PANEL_KIND),
+                    token(match height {
+                        None => CLIENT_APPLICATION_PANEL_DEFAULT_HEIGHT,
+                        Some(ClientApplicationPanelHeight::One) => {
+                            CLIENT_APPLICATION_PANEL_HEIGHT_ONE
+                        }
+                    }),
                 ]));
             }
         }

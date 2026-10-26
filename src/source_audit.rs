@@ -570,7 +570,7 @@ pub fn audit_spreadsheet_template_roundtrip(
     let root = fs::canonicalize(root)
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
     let source = MetadataSourceContext::new(root.clone());
-    let object_refs = common_picture_object_refs(&root)?;
+    let object_refs = source.moxel_object_refs()?;
     let mut template_xml_files = 0usize;
     let mut templates = Vec::new();
 
@@ -1093,33 +1093,6 @@ fn is_ignored(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name == ".git" || name == ".vscode" || name == "target")
-}
-
-fn common_picture_object_refs(root: &Path) -> Result<BTreeMap<String, String>> {
-    let mut refs = BTreeMap::new();
-    let common_pictures = root.join("CommonPictures");
-    if !common_pictures.is_dir() {
-        return Ok(refs);
-    }
-    for entry in fs::read_dir(&common_pictures)
-        .with_context(|| format!("failed to read {}", common_pictures.display()))?
-    {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
-            continue;
-        }
-        let xml = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
-        let properties = parse_simple_metadata_xml_properties(&xml)
-            .with_context(|| format!("failed to parse {}", path.display()))?;
-        if properties.kind == "CommonPicture" {
-            refs.insert(
-                properties.uuid,
-                format!("CommonPicture.{}", properties.name),
-            );
-        }
-    }
-    Ok(refs)
 }
 
 fn roundtrip_difference_message(first: &str, second: &str) -> String {
@@ -3492,6 +3465,101 @@ mod tests {
         assert_eq!(report.failed, 0);
         assert!(report.errors.is_empty());
 
+        Ok(())
+    }
+
+    fn write_spreadsheet_font_audit_fixture(xml: &str) -> anyhow::Result<PathBuf> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-audit-spreadsheet-font-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(root.join("CommonTemplates/FontSample/Ext"))?;
+        fs::create_dir_all(root.join("StyleItems"))?;
+        fs::write(
+            root.join("CommonTemplates/FontSample.xml"),
+            br#"<MetaDataObject><CommonTemplate uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"><Properties><Name>FontSample</Name><TemplateType>SpreadsheetDocument</TemplateType></Properties></CommonTemplate></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("StyleItems/AccentFont.xml"),
+            br#"<MetaDataObject><StyleItem uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"><Properties><Name>AccentFont</Name></Properties></StyleItem></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("CommonTemplates/FontSample/Ext/Template.xml"),
+            xml,
+        )?;
+        Ok(root)
+    }
+
+    const SPREADSHEET_CUSTOM_FONT_XML: &str = r#"<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+  <columns><size>1</size></columns>
+  <rowsItem><index>0</index><row><c><c><f>1</f><tl><v8:item><v8:lang>en</v8:lang><v8:content>Sample</v8:content></v8:item></tl></c></c></row></rowsItem>
+  <defaultFormatIndex>1</defaultFormatIndex>
+  <font ref="style:NormalTextFont" kind="StyleItem"/>
+  <font ref="style:AccentFont" kind="StyleItem"/>
+  <format><font>0</font><width>72</width></format>
+  <format><font>1</font></format>
+</document>"#;
+
+    #[test]
+    fn audits_spreadsheet_template_roundtrip_preserves_custom_style_font() -> anyhow::Result<()> {
+        let root = write_spreadsheet_font_audit_fixture(SPREADSHEET_CUSTOM_FONT_XML)?;
+        let source = MetadataSourceContext::new(root.clone());
+        let packed = pack_moxel_spreadsheet_blob_from_xml_with_source(
+            SPREADSHEET_CUSTOM_FONT_XML.as_bytes(),
+            Some(&source),
+        )?;
+        let extracted = extract_moxel_spreadsheet_xml(&packed.blob, &source.moxel_object_refs()?)
+            .ok_or_else(|| anyhow!("failed to extract clean-room font fixture"))?;
+        let report = audit_spreadsheet_template_roundtrip(&root)?;
+        fs::remove_dir_all(&root)?;
+
+        assert!(extracted.contains("<font ref=\"style:NormalTextFont\" kind=\"StyleItem\"/>"));
+        assert!(extracted.contains("<font ref=\"style:AccentFont\" kind=\"StyleItem\"/>"));
+        assert_eq!(report.template_xml_files, 1);
+        assert_eq!(report.spreadsheet_templates, 1);
+        assert_eq!(report.packed, 1);
+        assert_eq!(report.extracted, 1);
+        assert_eq!(report.repacked, 1, "{:?}", report.errors);
+        assert_eq!(report.matched, 1);
+        assert_eq!(report.different, 0);
+        assert_eq!(report.failed, 0);
+        assert!(report.errors.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn audits_spreadsheet_template_roundtrip_rejects_missing_style_font() -> anyhow::Result<()> {
+        let xml = SPREADSHEET_CUSTOM_FONT_XML.replace("style:AccentFont", "style:MissingFont");
+        let root = write_spreadsheet_font_audit_fixture(&xml)?;
+        let report = audit_spreadsheet_template_roundtrip(&root)?;
+        fs::remove_dir_all(&root)?;
+
+        assert_eq!(report.packed, 0);
+        assert_eq!(report.extracted, 0);
+        assert_eq!(report.repacked, 0);
+        assert_eq!(report.matched, 0);
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(report.errors[0].phase, "pack");
+        assert!(report.errors[0].message.contains("MissingFont.xml"));
+        Ok(())
+    }
+
+    #[test]
+    fn audits_spreadsheet_template_roundtrip_rejects_dangling_font_index() -> anyhow::Result<()> {
+        let xml = SPREADSHEET_CUSTOM_FONT_XML.replace("<font>1</font>", "<font>2</font>");
+        let root = write_spreadsheet_font_audit_fixture(&xml)?;
+        let report = audit_spreadsheet_template_roundtrip(&root)?;
+        fs::remove_dir_all(&root)?;
+
+        assert_eq!(report.packed, 0);
+        assert_eq!(report.extracted, 0);
+        assert_eq!(report.repacked, 0);
+        assert_eq!(report.matched, 0);
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(report.errors[0].phase, "pack");
+        assert!(report.errors[0].message.contains("names font 2 of 2"));
         Ok(())
     }
 

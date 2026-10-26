@@ -1733,6 +1733,11 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             let what = format!("<printSettings><{}>", member.name);
             let (key, stored) = match member.name.as_str() {
                 "paper" => (0, number(value, &what)?),
+                "pageSize" => {
+                    member.only_children(&[], "pageSize")?;
+                    member.only_attributes(&[], "pageSize")?;
+                    (0, format!("{{\"S\",{}}}", quote(value)))
+                }
                 "pageOrientation" => (
                     1,
                     match value {
@@ -1757,6 +1762,15 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 "paperSource" => (15, number(value, &what)?),
                 "pageWidth" => (16, decimal(value, &what)?),
                 "pageHeight" => (17, decimal(value, &what)?),
+                "printAccuracy" => {
+                    member.only_children(&[], "printAccuracy")?;
+                    member.only_attributes(&[], "printAccuracy")?;
+                    let stored = match value {
+                        "Auto" => "{\"N\",0}".to_string(),
+                        other => bail!("{what} {other} has no stored code"),
+                    };
+                    (18, stored)
+                }
                 "duplexType" => (
                     19,
                     match value {
@@ -3105,6 +3119,7 @@ fn web_color_code(name: &str) -> Option<u32> {
 
 fn windows_color_code(name: &str) -> Option<u32> {
     Some(match name {
+        "ScrollBar" => 0,
         "ActiveTitleBar" => 2,
         "InactiveTitleBar" => 3,
         "MenuBar" => 4,
@@ -3454,6 +3469,102 @@ mod tests {
         );
         let error = write_native_moxel_body(columns.as_bytes(), None).unwrap_err();
         assert!(error.to_string().contains("names columns"), "{error:#}");
+    }
+
+    #[test]
+    fn mxl_document_without_a_format_pool_round_trips() {
+        let xml = br#"<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+<columns><size>1</size></columns>
+<rowsItem><index>0</index><row><empty>true</empty></row></rowsItem>
+</document>"#;
+        let body = write_native_moxel_body(xml, None).unwrap();
+        let exported = read_back(&body);
+        assert!(!exported.contains("<format>"), "{exported}");
+        assert_eq!(
+            write_native_moxel_body(exported.as_bytes(), None).unwrap(),
+            body
+        );
+    }
+
+    #[test]
+    fn mxl_windows_scroll_bar_round_trips_native_zero_ordinal() {
+        let xml = br#"<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+<columns><size>1</size></columns>
+<rowsItem><index>0</index><row><c><c><f>1</f></c></c></row></rowsItem>
+<format><width>72</width><backColor xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows">win:ScrollBar</backColor></format>
+</document>"#;
+        let body = write_native_moxel_body(xml, None).unwrap();
+        assert!(body.replace("\r\n", "").contains("{3,1,{0}}"));
+        let exported = read_back(&body);
+        assert!(exported.contains(":ScrollBar</backColor>"), "{exported}");
+        assert!(exported.contains("http://v8.1c.ru/8.1/data/ui/colors/windows"));
+        assert_eq!(
+            write_native_moxel_body(exported.as_bytes(), None).unwrap(),
+            body
+        );
+
+        let unknown = String::from_utf8(xml.to_vec())
+            .unwrap()
+            .replace("win:ScrollBar", "win:UnmappedColour");
+        assert!(write_native_moxel_body(unknown.as_bytes(), None).is_err());
+    }
+
+    #[test]
+    fn mxl_string_page_size_and_auto_accuracy_round_trip_as_typed_properties() {
+        for (name, stored) in [
+            ("", r#"{"S",""}"#),
+            ("CustomSize", r#"{"S","CustomSize"}"#),
+            ("A \"Custom\"", r#"{"S","A ""Custom"""}"#),
+        ] {
+            let xml = format!(
+                r#"<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+<columns><size>1</size></columns>
+<rowsItem><index>0</index><row><c><c><f>1</f></c></c></row></rowsItem>
+<format><width>72</width></format>
+<printSettings><pageSize>{name}</pageSize><pageWidth>210</pageWidth><pageHeight>297</pageHeight><printAccuracy>Auto</printAccuracy><duplexType>UsePrinterSettings</duplexType></printSettings>
+</document>"#
+            );
+            let body = write_native_moxel_body(xml.as_bytes(), None).unwrap();
+            let expected = format!(
+                r#"{{0,5,0,{stored},16,{{"N",210}},17,{{"N",297}},18,{{"N",0}},19,{{"N",4}}}}"#
+            );
+            assert!(body.replace("\r\n", "").contains(&expected), "{body}");
+            let exported = read_back(&body);
+            assert!(
+                exported.contains(&format!("<pageSize>{name}</pageSize>")),
+                "{exported}"
+            );
+            assert!(exported.contains("<pageWidth>210</pageWidth>"));
+            assert!(exported.contains("<pageHeight>297</pageHeight>"));
+            assert!(exported.contains("<printAccuracy>Auto</printAccuracy>"));
+            assert_eq!(
+                write_native_moxel_body(exported.as_bytes(), None).unwrap(),
+                body
+            );
+        }
+    }
+
+    #[test]
+    fn mxl_page_properties_reject_ambiguous_unknown_and_nested_values() {
+        for members in [
+            "<paper>9</paper><pageSize/>",
+            "<pageSize/><paper>9</paper>",
+            "<pageSize/><pageSize/>",
+            "<printAccuracy>UnknownAccuracy</printAccuracy>",
+            "<printAccuracy>1</printAccuracy>",
+            "<pageSize><unknown/></pageSize>",
+            "<pageSize unknown=\"true\"/>",
+            "<printAccuracy><unknown/>Auto</printAccuracy>",
+            "<printAccuracy unknown=\"true\">Auto</printAccuracy>",
+        ] {
+            let xml = format!(
+                r#"<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet"><columns><size>1</size></columns><printSettings>{members}</printSettings></document>"#
+            );
+            assert!(
+                write_native_moxel_body(xml.as_bytes(), None).is_err(),
+                "accepted {members}"
+            );
+        }
     }
 
     #[test]

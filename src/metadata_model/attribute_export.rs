@@ -15,6 +15,7 @@ use crate::metadata_model::export::values::{
 use crate::metadata_model::export::{
     Build, ExportContext, NameIndex, atom, el, item, leaf, list, number, short, string, xml_text,
 };
+use crate::metadata_model::types::empty_string_value;
 use crate::metadata_model::types::export::{data_path_text, type_element, value_element};
 use crate::metadata_model::xml::Element;
 
@@ -104,6 +105,27 @@ pub(crate) fn choice_parameters_element(
 // ---------------------------------------------------------------------------
 // The attribute body.
 
+// The shared attribute body's documented fill slots (see `attribute.rs`).
+const FILL_VALUE_SLOT: usize = 19;
+const FILL_FROM_FILLING_VALUE_SLOT: usize = 20;
+
+fn attribute_body_slots(body: &Brace) -> Result<&[Brace]> {
+    let slots = list(body)?;
+    if atom(item(slots, 0)?)? != "27" || slots.len() != 23 {
+        bail!("not an attribute body: {}", short(body));
+    }
+    Ok(slots)
+}
+
+/// Whether a Document tabular-section attribute needs explicit fill properties.
+/// Its legacy omitted pair is exactly the stored empty string and false flag;
+/// nil and all other values must pass through the normal typed-value exporter.
+pub(crate) fn attribute_has_nondefault_fill(body: &Brace) -> Result<bool> {
+    let slots = attribute_body_slots(body)?;
+    let fill_from = bool_text(&slots[FILL_FROM_FILLING_VALUE_SLOT])?;
+    Ok(fill_from != "false" || slots[FILL_VALUE_SLOT] != empty_string_value())
+}
+
 /// The uuid of an attribute body `{27,{2,<md base>,<pattern>},...}`.
 pub(crate) fn attribute_header(body: &Brace) -> Result<Header> {
     let slots = list(body)?;
@@ -125,10 +147,7 @@ pub(crate) fn attribute_properties(
     context: &ExportContext,
 ) -> Result<Element> {
     let names = &context.names;
-    let slots = list(body)?;
-    if atom(item(slots, 0)?)? != "27" || slots.len() != 23 {
-        bail!("not an attribute body: {}", short(body));
-    }
+    let slots = attribute_body_slots(body)?;
     let typed = list(item(slots, 1)?)?;
     let head = header(item(typed, 1)?)?;
     let [name, synonym, comment] = header_elements(&head)?;
@@ -149,8 +168,11 @@ pub(crate) fn attribute_properties(
         .child(value_element("MaxValue", &slots[9], names)?);
     if with_fill {
         properties = properties
-            .child(leaf("FillFromFillingValue", bool_text(&slots[20])?))
-            .child(value_element("FillValue", &slots[19], names)?);
+            .child(leaf(
+                "FillFromFillingValue",
+                bool_text(&slots[FILL_FROM_FILLING_VALUE_SLOT])?,
+            ))
+            .child(value_element("FillValue", &slots[FILL_VALUE_SLOT], names)?);
     }
     properties = properties
         .child(leaf("FillChecking", code_text(&slots[13], FILL_CHECKING)?))

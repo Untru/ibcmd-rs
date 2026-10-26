@@ -5,6 +5,7 @@
 //! documents split over rows, and bulk writes into `varbinary(max)` columns.
 
 mod address;
+mod encryption;
 #[cfg(all(test, feature = "mssql-live-tests"))]
 mod live_tests;
 mod script;
@@ -55,6 +56,10 @@ impl MssqlClient {
 impl SqlClient for MssqlClient {
     fn dbms(&self) -> Dbms {
         Dbms::SqlServer
+    }
+
+    fn uses_mssql_2012_compatibility(&self) -> bool {
+        self.pool.uses_mssql_2012_compatibility()
     }
 
     fn max_connections(&self) -> usize {

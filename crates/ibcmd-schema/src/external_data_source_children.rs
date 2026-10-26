@@ -21,6 +21,8 @@ pub const DIMENSION_TABLE_BODY_ARITY: usize = 33;
 pub const CUBE_RECORD_CODE: &str = "0";
 pub const TABLE_RECORD_CODE: &str = "11";
 pub const DIMENSION_TABLE_RECORD_CODE: &str = "0";
+/// The descriptor body's position in `{1,<body>,<collection count>,...}`.
+pub const ROW_PAYLOAD_SLOT: usize = 1;
 
 /// One generated-type category of a child descriptor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -239,8 +241,26 @@ pub struct UnmodeledDefault {
 }
 
 pub const TABLE_PRESENTATION_SLOT: usize = 32;
+/// TableDataType: non-object records (`0`) or object/reference data (`1`).
+pub const TABLE_DATA_TYPE_SLOT: usize = 20;
 pub const TABLE_KEY_FIELDS_SLOT: usize = 18;
 pub const TABLE_INPUT_BY_STRING_SLOT: usize = 33;
+
+pub fn table_data_type_code(value: &str) -> Option<i64> {
+    match value {
+        "NonobjectData" => Some(0),
+        "ObjectData" => Some(1),
+        _ => None,
+    }
+}
+
+pub fn table_data_type_name(code: &str) -> Option<&'static str> {
+    match code {
+        "0" => Some("NonobjectData"),
+        "1" => Some("ObjectData"),
+        _ => None,
+    }
+}
 pub const CUBE_UNMODELED_DEFAULTS: &[UnmodeledDefault] = &[
     UnmodeledDefault {
         body_slot: 15,

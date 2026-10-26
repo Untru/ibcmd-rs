@@ -39,7 +39,9 @@ use super::empty_stage::{
 };
 use super::patch_refusal::ObjectFailure;
 use super::stage_guard::{in_scope, normalize_prefix};
-use super::{PreparedMetadataBodyStage, PreparedMetadataObjectStage, query_json, quote_ident};
+use super::{
+    PreparedMetadataBodyStage, PreparedMetadataObjectStage, ensure_online, query_json, quote_ident,
+};
 use crate::apply_check::{ObjectOp, check_tree_against_db};
 use crate::cli::MssqlStageSourceObjectsArgs;
 use crate::metadata_model::brace::{Brace, parse_row, serialize_row};
@@ -48,7 +50,7 @@ use crate::module_blob::{
     deflate_raw, hex_sha256, inflate_raw, parse_simple_metadata_xml_properties,
 };
 use crate::source_listing;
-use crate::sql::SqlExec;
+use crate::sql::{SqlBackend, SqlExec};
 
 /// The row that lists what an import removes (`docs/import/patch-mode.md`,
 /// section 7).
@@ -461,6 +463,25 @@ pub(super) fn rows_of_objects(versions: &[String], ids: &[String]) -> Vec<String
 /// The rows an online update of the target left pending: the platform's own
 /// import lists them in `deleted` and its apply removes them.
 pub(super) fn dynamic_update_rows(sql: &SqlExec, database: &str) -> Result<Vec<String>> {
+    if let SqlBackend::Client(client) = sql.backend()
+        && client.uses_mssql_2012_compatibility()
+    {
+        ensure_online("run a query")?;
+        let query = format!(
+            "SET NOCOUNT ON; USE {db}; SELECT FileName AS name FROM dbo.Config \
+             WHERE PartNo = 0 AND (FileName = N'DynamicallyUpdated' OR FileName LIKE N'%[_]dynupdate[_]%') \
+             ORDER BY FileName;",
+            db = quote_ident(database)
+        );
+        let mut names = client
+            .query_rows(&query, &[])
+            .context("dynamic update rows: the query failed")?
+            .into_iter()
+            .map(|mut row| row.take_text(0))
+            .collect::<Result<Vec<_>>>()?;
+        names.sort_by_key(|name| name.to_lowercase());
+        return Ok(names);
+    }
     let query = format!(
         "SET NOCOUNT ON; USE {db}; SELECT FileName AS name FROM dbo.Config \
          WHERE PartNo = 0 AND (FileName = N'DynamicallyUpdated' OR FileName LIKE N'%[_]dynupdate[_]%') \

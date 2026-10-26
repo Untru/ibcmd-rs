@@ -22,6 +22,10 @@ use super::export::{
 };
 use super::xml::Element;
 
+#[path = "external_data_source_table_patch.rs"]
+mod table_patch;
+pub(crate) use table_patch::patch_table_data_type_text;
+
 /// The owner payload of a child descriptor: `{<code>,<header>,<types...>,...}`.
 struct Row<'a> {
     root: &'a [Brace],
@@ -34,7 +38,7 @@ impl<'a> Row<'a> {
         if atom(item(root, 0)?)? != "1" {
             bail!("{kind}: not a descriptor row");
         }
-        let payload = list(item(root, 1)?)?;
+        let payload = list(item(root, schema::ROW_PAYLOAD_SLOT)?)?;
         if payload.len() != schema::body_arity(kind)
             || atom(item(payload, 0)?)? != schema::record_code(kind)
         {
@@ -248,11 +252,9 @@ fn table_properties(row: &Row<'_>, head: &Header, full: &str) -> Result<Element>
         "0" | "1" => "Table",
         other => bail!("Table: unknown TableType code {other}"),
     };
-    let table_data_type = match atom(item(p, 20)?)? {
-        "0" => "NonobjectData",
-        "1" => "ObjectData",
-        other => bail!("Table: unknown TableDataType code {other}"),
-    };
+    let data_type_code = atom(item(p, schema::TABLE_DATA_TYPE_SLOT)?)?;
+    let table_data_type = schema::table_data_type_name(data_type_code)
+        .ok_or_else(|| anyhow!("Table: unknown TableDataType code {data_type_code}"))?;
     let (key_fields, input_by_string) = table_ref_lists(row)?;
     Ok(el("Properties")
         .child(name)

@@ -1,0 +1,11 @@
+# Preserve full-import semantics through final verification
+
+The guarded complete ERP import compiled all required bodies but refused 19 of 122550 compared files. ConfigSave remained empty and the database configuration unchanged. This follow-up addresses demonstrated codec loss separately from comparison-only spelling/order differences. Keep SQL Server 2012 compatibility scoped to verified major version 11. Never modify ERP XML/BSL, disable verification, create an infobase, force overwrite, or change the physical-adapter policy baseline.
+
+1. Reproduce each supported case with clean-room tests and private paired native evidence. Root runs the shared Cargo queue; review agents own disjoint tests and wait for captured RED before implementation.
+2. Correct narrow final-comparison cases: owner-gated DCS unused prefixes, paired/self-closing empty leaves and unordered unique metadata type declarations. Preserve missing values, used namespaces and changed qualifiers as failures.
+3. Preserve demonstrated form properties through typed codecs: MediumGreen native code 88 and SearchControlAddition width. Diagnose remaining form defaults and actual property loss against the corrected authored XML and compatible native evidence, without rewriting source forms.
+4. Admit and compile the witnessed existing external Table semantic edit, including stage selection and negative unsupported-property controls. Do not publish stale target rows or invent unsupported layout coordinates.
+5. Diagnose FillValue, rights object ordering and remaining form properties before deciding whether typed writer/exporter or a bounded comparison rule is required. Real rights, data binding and property changes must remain visible.
+6. Run focused tests, repository checks, physical-adapter guard, strict OpenSpec and independent review. Rebuild the binary and reproduce exact previously failed inputs offline before another complete guarded import into the approved existing SQL Server test database.
+7. Measure actual import separately from compilation and database apply. Native terminal success is required before claiming successful applied configuration. Retain receipts, source snapshots and native CF backup.

@@ -18,9 +18,9 @@ use crate::compiler::bodies::command_interface::{
 };
 use crate::compiler::bodies::interface_assets::{
     ClientApplicationInterfaceModel, ClientApplicationNode, ClientApplicationPanelDef,
-    HomePageWorkAreaItem, HomePageWorkAreaModel, StandaloneContentExtended, StandaloneContentModel,
-    client_application_interface_plaintext, home_page_work_area_plaintext,
-    standalone_content_plaintext,
+    ClientApplicationPanelHeight, HomePageWorkAreaItem, HomePageWorkAreaModel,
+    StandaloneContentExtended, StandaloneContentModel, client_application_interface_plaintext,
+    home_page_work_area_plaintext, standalone_content_plaintext,
 };
 use crate::mssql_dump::{
     COMMAND_INTERFACE_PLACEMENTS, COMMON_COMMAND_GROUPS, HOME_PAGE_WORK_AREA_TEMPLATES,
@@ -1064,8 +1064,19 @@ fn client_application_panel(panel: &Node) -> Result<ClientApplicationNode> {
     let text = uuid.leaf()?.trim();
     let uuid =
         parse_raw_uuid(text).ok_or_else(|| anyhow!("<panel> uuid `{text}` is not a uuid"))?;
+
+    let height = if let Some(height) = children.optional("height") {
+        height.only_attributes(&[])?;
+        ensure!(
+            height.leaf()?.trim() == "1",
+            "the client panel writer has evidence only for an absent height or <height>1</height>"
+        );
+        Some(ClientApplicationPanelHeight::One)
+    } else {
+        None
+    };
     children.finish()?;
-    Ok(ClientApplicationNode::Panel { id, uuid })
+    Ok(ClientApplicationNode::Panel { id, uuid, height })
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,6 +1176,60 @@ mod tests {
     const SUBSYSTEM: &str = "55555555-5555-4555-8555-555555555555";
     const ROLE: &str = "66666666-6666-4666-8666-666666666666";
     const CONSTANT: &str = "77777777-7777-4777-8777-777777777777";
+
+    fn nested_client_application_panel_xml(height: &str) -> String {
+        format!(
+            "<ClientApplicationInterface xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\"><top><group id=\"11111111-1111-4111-8111-111111111111\"><group><panel id=\"22222222-2222-4222-8222-222222222222\"><uuid>33333333-3333-4333-8333-333333333333</uuid>{height}</panel></group></group></top></ClientApplicationInterface>"
+        )
+    }
+
+    #[test]
+    fn writes_witnessed_nested_client_panel_heights_to_exact_native_bytes() {
+        for (height, native_height) in [("", "0"), ("<height>1</height>", "1")] {
+            let xml = nested_client_application_panel_xml(height);
+            let plain = interface_asset_plaintext(
+                InterfaceAssetSource::ClientApplicationInterface,
+                xml.as_bytes(),
+                None,
+            )
+            .unwrap();
+
+            assert_eq!(
+                plain,
+                format!(
+                    "\u{feff}{{1,\r\n{{0,1,\r\n{{0,1,f1d2a809-46ac-46ab-8b37-b2135ac5b323,\r\n{{0,11111111-1111-4111-8111-111111111111,0,\r\n{{0,1,8b252cb5-d895-4c40-8ccb-581ce795fb80,\r\n{{0,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,2,{native_height}}}\r\n}}\r\n}}\r\n}}\r\n}},\r\n{{0,2,\r\n{{0,0}}\r\n}},\r\n{{0,3,\r\n{{0,0}}\r\n}},\r\n{{0,4,\r\n{{0,0}}\r\n}},0}}"
+                )
+                .into_bytes(),
+                "XML panel height {height:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unwitnessed_or_malformed_client_panel_height_xml() {
+        for height in [
+            "<height>0</height>",
+            "<height>2</height>",
+            "<height>-1</height>",
+            "<height>NaN</height>",
+            "<height/>",
+            "<height>1</height><height>1</height>",
+            "<height>1</height><width>1</width>",
+            "<height unit=\"rows\">1</height>",
+            "<height><value>1</value></height>",
+        ] {
+            let xml = nested_client_application_panel_xml(height);
+            assert!(
+                interface_asset_plaintext(
+                    InterfaceAssetSource::ClientApplicationInterface,
+                    xml.as_bytes(),
+                    None,
+                )
+                .is_err(),
+                "accepted unwitnessed panel XML {height:?}"
+            );
+        }
+    }
 
     fn metadata(root: &Path, relative: &str, body: &str) {
         let path = root.join(relative);

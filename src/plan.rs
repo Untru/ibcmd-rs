@@ -1404,7 +1404,7 @@ pub(crate) fn parse_indexed_xml_values(xml: &[u8]) -> Result<BTreeMap<String, St
     let mut values = BTreeMap::<String, String>::new();
     let mut path = Vec::<String>::new();
     let mut sibling_counts = vec![BTreeMap::<String, usize>::new()];
-    let mut text_stack = Vec::<String>::new();
+    let mut text_stack = Vec::<(String, bool)>::new();
     let mut root_elements = 0usize;
 
     loop {
@@ -1416,15 +1416,17 @@ pub(crate) fn parse_indexed_xml_values(xml: &[u8]) -> Result<BTreeMap<String, St
                 let segment = next_indexed_segment(&mut sibling_counts, local_name(&event));
                 path.push(segment);
                 let current = path.join("/");
+                let mut had_attribute = false;
                 for attribute in event.attributes() {
                     let attribute = attribute?;
                     let name =
                         String::from_utf8_lossy(attribute.key.local_name().as_ref()).to_string();
                     let value = attribute.unescape_value()?.into_owned();
                     values.insert(format!("{current}/@{name}"), value);
+                    had_attribute = true;
                 }
                 sibling_counts.push(BTreeMap::new());
-                text_stack.push(String::new());
+                text_stack.push((String::new(), had_attribute));
             }
             Ok(Event::Empty(event)) => {
                 if path.is_empty() {
@@ -1449,17 +1451,32 @@ pub(crate) fn parse_indexed_xml_values(xml: &[u8]) -> Result<BTreeMap<String, St
             }
             Ok(Event::Text(text)) => {
                 if let Some(current) = text_stack.last_mut() {
-                    current.push_str(text.xml_content()?.as_ref());
+                    current.0.push_str(text.xml_content()?.as_ref());
                 }
             }
             Ok(Event::CData(text)) => {
                 if let Some(current) = text_stack.last_mut() {
-                    current.push_str(text.xml_content()?.as_ref());
+                    current.0.push_str(text.xml_content()?.as_ref());
                 }
             }
+            Ok(Event::GeneralRef(reference)) => {
+                let value = if let Some(character) = reference.resolve_char_ref()? {
+                    character.to_string()
+                } else {
+                    let name = reference.decode()?;
+                    quick_xml::escape::resolve_xml_entity(&name)
+                        .ok_or_else(|| anyhow!("unsupported XML entity &{name};"))?
+                        .to_owned()
+                };
+                let current = text_stack
+                    .last_mut()
+                    .ok_or_else(|| anyhow!("XML reference outside the root element"))?;
+                current.0.push_str(&value);
+            }
             Ok(Event::End(_)) => {
-                let text = text_stack.pop().unwrap_or_default();
-                if !text.trim().is_empty() && !path.is_empty() {
+                let (text, had_attribute) = text_stack.pop().unwrap_or_default();
+                let leaf = sibling_counts.last().is_some_and(BTreeMap::is_empty);
+                if !path.is_empty() && (!text.trim().is_empty() || (leaf && !had_attribute)) {
                     values.insert(path.join("/"), text.trim().to_string());
                 }
                 sibling_counts.pop();

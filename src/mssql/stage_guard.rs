@@ -612,7 +612,8 @@ impl FileSink for TreeComparer {
             None => Some(Difference::OnlyInState),
             Some(TreeFile {
                 sha256: Some(known),
-            }) if *known == sha256_hex(bytes) => None,
+            }) if *known == sha256_hex(bytes) => compare_content(&relative, bytes, bytes)
+                .map(|leaves| Difference::Changed { leaves }),
             Some(_) => {
                 let tree_path = relative
                     .split('/')
@@ -716,7 +717,22 @@ fn content_kind(relative: &str) -> ContentKind {
 /// `None` when the two contents are the same file; otherwise where they
 /// differ (a few lines of text for a message).
 fn compare_content(relative: &str, state: &[u8], tree: &[u8]) -> Option<Vec<String>> {
+    if is_role_rights_path(relative)
+        && (ambiguous_role_root_index_keys(state) || ambiguous_role_root_index_keys(tree))
+    {
+        return Some(vec![
+            "XML прав содержит неоднозначные атрибуты корня".to_owned(),
+        ]);
+    }
     if state == tree {
+        if content_kind(relative) == ContentKind::Xml
+            && uses_managed_form_policy(state)
+            && !ibcmd_xml::equal_form_source_documents(state, tree)
+        {
+            return Some(vec![
+                "XML формы содержит неподдерживаемое свойство или структуру".to_owned(),
+            ]);
+        }
         return None;
     }
     match content_kind(relative) {
@@ -730,12 +746,44 @@ fn compare_content(relative: &str, state: &[u8], tree: &[u8]) -> Option<Vec<Stri
     }
 }
 
+fn is_role_rights_path(relative: &str) -> bool {
+    let role_folder = relative
+        .split('/')
+        .next()
+        .is_some_and(|part| part.eq_ignore_ascii_case("Roles"));
+    let mut tail = relative.rsplit('/');
+    role_folder
+        && tail
+            .next()
+            .is_some_and(|part| part.eq_ignore_ascii_case("Rights.xml"))
+        && tail
+            .next()
+            .is_some_and(|part| part.eq_ignore_ascii_case("Ext"))
+}
+
+fn uses_managed_form_policy(xml: &[u8]) -> bool {
+    has_xml_root(xml, "Form", "http://v8.1c.ru/8.3/xcf/logform")
+            && ibcmd_xml::XmlReader::from_slice(xml).is_ok_and(|document| {
+                document.root().attributes().iter().any(|attribute| {
+                    matches!(attribute.kind(), ibcmd_xml::AttributeKind::Ordinary(name) if name.raw() == "version")
+                        && attribute.value() == "2.20"
+                })
+            })
+}
+
 fn compare_xml(state: &[u8], tree: &[u8]) -> Option<Vec<String>> {
-    let tree_values = match parse_indexed_xml_values(tree) {
+    if crate::compiler::bodies::dcs::equivalent_schema_source_documents(state, tree) {
+        return None;
+    }
+    let form_policy = [state, tree].into_iter().all(uses_managed_form_policy);
+    if form_policy && ibcmd_xml::equal_form_source_documents(state, tree) {
+        return None;
+    }
+    let mut tree_values = match parse_indexed_xml_values(tree) {
         Ok(values) => values,
         Err(error) => return Some(vec![format!("XML дерева не разбирается: {error}")]),
     };
-    let state_values = match parse_indexed_xml_values(state) {
+    let mut state_values = match parse_indexed_xml_values(state) {
         Ok(values) => values,
         Err(error) => {
             return Some(vec![format!(
@@ -743,8 +791,40 @@ fn compare_xml(state: &[u8], tree: &[u8]) -> Option<Vec<String>> {
             )]);
         }
     };
+    if has_xml_root(tree, "MetaDataObject", "http://v8.1c.ru/8.3/MDClasses")
+        && has_xml_root(state, "MetaDataObject", "http://v8.1c.ru/8.3/MDClasses")
+        && let (Some(tree_types), Some(state_types)) = (
+            metadata_type_description_paths(tree),
+            metadata_type_description_paths(state),
+        )
+    {
+        normalize_unique_metadata_type_members(&mut tree_values, &tree_types);
+        normalize_unique_metadata_type_members(&mut state_values, &state_types);
+    }
+    if has_xml_root(tree, "Rights", "http://v8.1c.ru/8.2/roles")
+        && has_xml_root(state, "Rights", "http://v8.1c.ru/8.2/roles")
+    {
+        if ambiguous_role_root_index_keys(tree) || ambiguous_role_root_index_keys(state) {
+            return Some(vec![
+                "XML прав содержит неоднозначные атрибуты корня".to_owned(),
+            ]);
+        }
+        if let (Some(tree_roles), Some(state_roles)) = (
+            role_values_by_object_name(tree, &tree_values),
+            role_values_by_object_name(state, &state_values),
+        ) {
+            tree_values = tree_roles;
+            state_values = state_roles;
+        }
+    }
     let differences = diff_indexed_xml_values(&tree_values, &state_values, &[]);
     if differences.is_empty() {
+        if form_policy {
+            return Some(vec![
+                "XML формы различается по пространствам имён, содержимому или порядку элементов"
+                    .to_owned(),
+            ]);
+        }
         return None;
     }
     let described = describe_differences(&tree_values, &state_values, &differences);
@@ -760,6 +840,295 @@ fn compare_xml(state: &[u8], tree: &[u8]) -> Option<Vec<String>> {
         ));
     }
     Some(leaves)
+}
+
+fn has_xml_root(xml: &[u8], name: &str, namespace: &str) -> bool {
+    ibcmd_xml::XmlReader::from_slice(xml).is_ok_and(|document| {
+        document.root().name().raw() == name
+            && document.root().attributes().iter().any(|attribute| {
+                matches!(attribute.kind(), ibcmd_xml::AttributeKind::Namespace(None))
+                    && attribute.value() == namespace
+            })
+    })
+}
+
+// Derive normalization scopes from resolved QNames before consulting the
+// local-name leaf index. Foreign properties or ancestors never become a
+// metadata TypeDescription, even when their local names happen to match.
+fn metadata_type_description_paths(xml: &[u8]) -> Option<BTreeSet<String>> {
+    const METADATA_NS: &str = "http://v8.1c.ru/8.3/MDClasses";
+    const CORE_NS: &str = "http://v8.1c.ru/8.1/data/core";
+    let document = ibcmd_xml::XmlReader::from_slice(xml).ok()?;
+    fn bindings_for(
+        element: &ibcmd_xml::XmlElement,
+        inherited: &BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        let mut bindings = inherited.clone();
+        for attribute in element.attributes() {
+            if let ibcmd_xml::AttributeKind::Namespace(prefix) = attribute.kind() {
+                bindings.insert(
+                    prefix.clone().unwrap_or_default(),
+                    attribute.value().to_owned(),
+                );
+            }
+        }
+        bindings
+    }
+    fn namespace<'a>(
+        element: &ibcmd_xml::XmlElement,
+        bindings: &'a BTreeMap<String, String>,
+    ) -> Option<&'a str> {
+        bindings
+            .get(element.name().prefix().unwrap_or_default())
+            .map(String::as_str)
+    }
+    fn visit(
+        element: &ibcmd_xml::XmlElement,
+        path: &str,
+        inherited: &BTreeMap<String, String>,
+        parent_metadata: bool,
+        parent_properties: bool,
+        paths: &mut BTreeSet<String>,
+    ) {
+        let bindings = bindings_for(element, inherited);
+        let metadata = parent_metadata && namespace(element, &bindings) == Some(METADATA_NS);
+        if metadata && parent_properties && element.name().local() == "Type" {
+            let members = element
+                .children()
+                .iter()
+                .filter_map(|node| match node {
+                    ibcmd_xml::XmlNode::Element(child) if child.name().local() == "Type" => {
+                        Some(child)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if !members.is_empty()
+                && members.iter().all(|member| {
+                    let child_bindings = bindings_for(member, &bindings);
+                    namespace(member, &child_bindings) == Some(CORE_NS)
+                        && member.attributes().is_empty()
+                        && member
+                            .children()
+                            .iter()
+                            .all(|node| matches!(node, ibcmd_xml::XmlNode::Text(_)))
+                })
+            {
+                paths.insert(path.to_owned());
+            }
+        }
+        let mut siblings = BTreeMap::<&str, usize>::new();
+        for child in element.children().iter().filter_map(|node| match node {
+            ibcmd_xml::XmlNode::Element(child) => Some(child),
+            _ => None,
+        }) {
+            let index = siblings.entry(child.name().local()).or_default();
+            *index += 1;
+            visit(
+                child,
+                &format!("{path}/{}[{index}]", child.name().local()),
+                &bindings,
+                metadata,
+                metadata && element.name().local() == "Properties",
+                paths,
+            );
+        }
+    }
+    let mut paths = BTreeSet::new();
+    visit(
+        document.root(),
+        "MetaDataObject[1]",
+        &BTreeMap::new(),
+        true,
+        false,
+        &mut paths,
+    );
+    Some(paths)
+}
+
+// TypeDescription members are a set. Preserve every qualifier and any
+// ambiguous/structured/duplicate member rather than normalizing arbitrary XML.
+fn normalize_unique_metadata_type_members(
+    values: &mut BTreeMap<String, String>,
+    allowed: &BTreeSet<String>,
+) {
+    let mut groups = BTreeMap::<String, Vec<String>>::new();
+    for key in values.keys() {
+        let Some((parent, segment)) = key.rsplit_once('/') else {
+            continue;
+        };
+        let type_member = segment == "Type"
+            || segment
+                .strip_prefix("Type[")
+                .and_then(|rest| rest.strip_suffix(']'))
+                .and_then(|index| index.parse::<usize>().ok())
+                .is_some_and(|index| index >= 1);
+        if allowed.contains(parent) && type_member {
+            groups
+                .entry(parent.to_owned())
+                .or_default()
+                .push(key.clone());
+        }
+    }
+    for keys in groups.into_values() {
+        if keys.len() < 2
+            || keys.iter().any(|key| {
+                values[key].is_empty()
+                    || values
+                        .range(format!("{key}/")..)
+                        .next()
+                        .is_some_and(|(candidate, _)| candidate.starts_with(&format!("{key}/")))
+            })
+        {
+            continue;
+        }
+        let mut members = keys
+            .iter()
+            .map(|key| values[key].clone())
+            .collect::<Vec<_>>();
+        members.sort();
+        if members.windows(2).any(|pair| pair[0] == pair[1]) {
+            continue;
+        }
+        for (key, member) in keys.into_iter().zip(members) {
+            values.insert(key, member);
+        }
+    }
+}
+
+// The legacy index uses the local name of every root attribute, including
+// namespace declarations. Reject collisions before that index can discard a
+// value; this is narrower than the conservative role-content normalization gate.
+fn role_root_index_keys_are_unique(root: &ibcmd_xml::XmlElement) -> bool {
+    let mut keys = HashSet::new();
+    root.attributes().iter().all(|attribute| {
+        let key = match attribute.kind() {
+            ibcmd_xml::AttributeKind::Ordinary(name) => name.local(),
+            ibcmd_xml::AttributeKind::Namespace(Some(prefix)) => prefix.as_str(),
+            ibcmd_xml::AttributeKind::Namespace(None) => "xmlns",
+        };
+        keys.insert(key)
+    })
+}
+
+fn ambiguous_role_root_index_keys(xml: &[u8]) -> bool {
+    let Ok(document) = ibcmd_xml::XmlReader::from_slice(xml) else {
+        return false;
+    };
+    let root = document.root();
+    let role_root = root.name().raw() == "Rights"
+        && root.attributes().iter().any(|attribute| {
+            matches!(attribute.kind(), ibcmd_xml::AttributeKind::Namespace(None))
+                && attribute.value() == "http://v8.1c.ru/8.2/roles"
+        });
+    role_root && !role_root_index_keys_are_unique(root)
+}
+
+// Rights XML uses the root's default namespace throughout. The legacy leaf
+// index and rights parser erase QName prefixes, so reject foreign/rebound
+// content before assigning identity to an object by its local-name children.
+// The one admitted qualified attribute is the bound root XSI type Rights;
+// its indexed value and all namespace declarations remain in the comparison.
+fn unqualified_role_content(xml: &[u8]) -> bool {
+    const ROLE_NS: &str = "http://v8.1c.ru/8.2/roles";
+    const XSI_NS: &str = "http://www.w3.org/2001/XMLSchema-instance";
+    let Ok(document) = ibcmd_xml::XmlReader::from_slice(xml) else {
+        return false;
+    };
+    let root_bindings = document
+        .root()
+        .attributes()
+        .iter()
+        .filter_map(|attribute| match attribute.kind() {
+            ibcmd_xml::AttributeKind::Namespace(prefix) => {
+                Some((prefix.as_deref().unwrap_or_default(), attribute.value()))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    if root_bindings.get("").copied() != Some(ROLE_NS)
+        || !role_root_index_keys_are_unique(document.root())
+    {
+        return false;
+    }
+
+    fn supported(
+        element: &ibcmd_xml::XmlElement,
+        root: bool,
+        root_bindings: &BTreeMap<&str, &str>,
+    ) -> bool {
+        if element.name().prefix().is_some()
+            || element
+                .attributes()
+                .iter()
+                .any(|attribute| match attribute.kind() {
+                    ibcmd_xml::AttributeKind::Ordinary(name) => {
+                        name.prefix().is_some_and(|prefix| {
+                            !(root
+                                && !matches!(prefix, "xml" | "xmlns")
+                                && name.local() == "type"
+                                && attribute.value() == "Rights"
+                                && root_bindings.get(prefix).copied() == Some(XSI_NS))
+                        })
+                    }
+                    ibcmd_xml::AttributeKind::Namespace(_) => !root,
+                })
+        {
+            return false;
+        }
+        element.children().iter().all(|node| match node {
+            ibcmd_xml::XmlNode::Element(child) => supported(child, false, root_bindings),
+            _ => true,
+        })
+    }
+    supported(document.root(), true, &root_bindings)
+}
+
+// RightsObject identity is its unique metadata name. Rekey every indexed leaf,
+// including attributes and restrictions, without sorting or discarding rights.
+fn role_values_by_object_name(
+    xml: &[u8],
+    values: &BTreeMap<String, String>,
+) -> Option<BTreeMap<String, String>> {
+    if !unqualified_role_content(xml) {
+        return None;
+    }
+    let document = crate::compiler::bodies::role_rights_writer::parse_rights_xml(xml).ok()?;
+    let mut names = BTreeSet::new();
+    let mut prefixes = Vec::new();
+    for object in &document.objects {
+        if object.name.is_empty() || !names.insert(object.name.as_str()) {
+            return None;
+        }
+        let token = object
+            .name
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let new = format!("Rights[1]/object[{token}]");
+        prefixes.push(new);
+    }
+    let mut normalized = BTreeMap::new();
+    for (key, value) in values {
+        let target = key
+            .strip_prefix("Rights[1]/object[")
+            .and_then(|rest| rest.split_once(']'))
+            .filter(|(_, suffix)| suffix.is_empty() || suffix.starts_with('/'))
+            .and_then(|(index, suffix)| {
+                index
+                    .parse::<usize>()
+                    .ok()?
+                    .checked_sub(1)
+                    .and_then(|index| prefixes.get(index))
+                    .map(|prefix| format!("{prefix}{suffix}"))
+            })
+            .unwrap_or_else(|| key.clone());
+        if normalized.insert(target, value.clone()).is_some() {
+            return None;
+        }
+    }
+    Some(normalized)
 }
 
 /// The differences as a reader counts them:
@@ -1948,5 +2317,670 @@ mod tests {
         assert!(wanted_with(Some("on"), false));
         assert!(wanted_with(Some("perhaps"), true));
         assert!(!wanted_with(Some("perhaps"), false));
+    }
+
+    #[test]
+    fn full_guard_accepts_only_proven_unused_dcs_namespace_changes() {
+        let left = br#"<?xml version="1.0" encoding="UTF-8"?><DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:v8ui="urn:unused"><dataSet><query>select 1</query></dataSet></DataCompositionSchema>"#;
+        let right = br#"<?xml version="1.0" encoding="utf-8"?><DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:cfg="urn:unused"><dataSet><query>select 1</query></dataSet></DataCompositionSchema>"#;
+        assert!(
+            super::compare_content(
+                "Reports/Probe/Templates/Schema/Ext/Template.xml",
+                left,
+                right
+            )
+            .is_none()
+        );
+        let changed = String::from_utf8(right.to_vec())
+            .unwrap()
+            .replace("select 1", "select 2");
+        assert!(
+            super::compare_content(
+                "Reports/Probe/Templates/Schema/Ext/Template.xml",
+                left,
+                changed.as_bytes()
+            )
+            .is_some()
+        );
+        let used_left = br#"<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:cfg="urn:left"><value>cfg:Thing</value></DataCompositionSchema>"#;
+        let used_right = br#"<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:cfg="urn:right"><value>cfg:Thing</value></DataCompositionSchema>"#;
+        assert!(
+            super::compare_content(
+                "Reports/Probe/Templates/Schema/Ext/Template.xml",
+                used_left,
+                used_right
+            )
+            .is_some()
+        );
+        assert!(
+            super::compare_content(
+                "Other.xml",
+                br#"<Other xmlns:p="urn:unused"/>"#,
+                b"<Other/>"
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn full_guard_accepts_only_typed_form_defaults() {
+        let source = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><CheckBoxField name="Flag" id="1"/></ChildItems></Form>"#;
+        let native = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><CheckBoxField name="Flag" id="1"><CheckBoxType>Auto</CheckBoxType></CheckBoxField></ChildItems></Form>"#;
+        assert_eq!(super::compare_xml(native, source), None);
+        let changed = String::from_utf8(native.to_vec())
+            .unwrap()
+            .replace("Auto", "Switcher");
+        assert!(super::compare_xml(changed.as_bytes(), source).is_some());
+    }
+
+    #[test]
+    fn full_guard_form_refusal_cannot_fall_back_to_local_name_equality() {
+        let source = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><InputField name="A" id="1"/><Button name="B" id="2"/></ChildItems></Form>"#;
+        let reordered = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><Button name="B" id="2"/><InputField name="A" id="1"/></ChildItems></Form>"#;
+        assert!(super::compare_xml(reordered, source).is_some());
+    }
+
+    #[test]
+    fn full_guard_preserves_empty_leaves_with_either_xml_spelling() {
+        let compact =
+            b"<document><printSettings><printerName/><pageSize/></printSettings></document>";
+        let paired = b"<document><printSettings><printerName></printerName><pageSize></pageSize></printSettings></document>";
+        assert!(
+            super::compare_content("Templates/Sheet/Ext/Template.xml", compact, paired).is_none()
+        );
+        assert!(
+            super::compare_content(
+                "Templates/Sheet/Ext/Template.xml",
+                compact,
+                b"<document><printSettings><pageSize/></printSettings></document>"
+            )
+            .is_some()
+        );
+        assert!(super::compare_content("Templates/Sheet/Ext/Template.xml", compact, b"<document><printSettings><printerName>Office</printerName><pageSize/></printSettings></document>").is_some());
+    }
+
+    #[test]
+    fn full_guard_compares_unique_metadata_type_members_as_a_set() {
+        let first = br#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core"><Document><ChildObjects><Attribute><Properties><Type><v8:Type>cfg:DocumentRef.A</v8:Type><v8:Type>cfg:DocumentRef.B</v8:Type><StringQualifiers><Length>10</Length></StringQualifiers></Type></Properties></Attribute></ChildObjects></Document></MetaDataObject>"#;
+        let reversed = br#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core"><Document><ChildObjects><Attribute><Properties><Type><v8:Type>cfg:DocumentRef.B</v8:Type><v8:Type>cfg:DocumentRef.A</v8:Type><StringQualifiers><Length>10</Length></StringQualifiers></Type></Properties></Attribute></ChildObjects></Document></MetaDataObject>"#;
+        assert!(super::compare_content("Documents/Probe.xml", first, reversed).is_none());
+        for changed in [
+            String::from_utf8(reversed.to_vec())
+                .unwrap()
+                .replace("cfg:DocumentRef.A", "cfg:DocumentRef.C"),
+            String::from_utf8(reversed.to_vec())
+                .unwrap()
+                .replace("<v8:Type>cfg:DocumentRef.A</v8:Type>", ""),
+            String::from_utf8(reversed.to_vec())
+                .unwrap()
+                .replace("<Length>10</Length>", "<Length>11</Length>"),
+            String::from_utf8(reversed.to_vec())
+                .unwrap()
+                .replace("cfg:DocumentRef.A", "cfg:DocumentRef.B"),
+        ] {
+            assert!(
+                super::compare_content("Documents/Probe.xml", first, changed.as_bytes()).is_some(),
+                "{changed}"
+            );
+        }
+        assert!(
+            super::compare_content(
+                "Other.xml",
+                b"<Other><Type>A</Type><Type>B</Type></Other>",
+                b"<Other><Type>B</Type><Type>A</Type></Other>"
+            )
+            .is_some()
+        );
+        let non_core_first = String::from_utf8(first.to_vec())
+            .unwrap()
+            .replace("http://v8.1c.ru/8.1/data/core", "urn:not-core");
+        let non_core_reversed = String::from_utf8(reversed.to_vec())
+            .unwrap()
+            .replace("http://v8.1c.ru/8.1/data/core", "urn:not-core");
+        assert!(
+            super::compare_content(
+                "Documents/Probe.xml",
+                non_core_first.as_bytes(),
+                non_core_reversed.as_bytes()
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    #[ignore = "external paired XML evidence required"]
+    fn verifies_external_paired_stage_guard_documents() {
+        let manifest = std::env::var("IBCMD_RS_STAGE_GUARD_PAIRS")
+            .expect("set IBCMD_RS_STAGE_GUARD_PAIRS to a JSON pairs manifest");
+        let pairs: Vec<(String, String, String)> = serde_json::from_slice(
+            &std::fs::read(&manifest).expect("read external paired XML manifest"),
+        )
+        .expect("parse (relative_path, source_path, candidate_path) pairs");
+        assert!(
+            !pairs.is_empty(),
+            "external paired XML manifest must not be empty"
+        );
+
+        let mut failures = Vec::new();
+        for (relative, source_path, candidate_path) in &pairs {
+            let source = std::fs::read(source_path).expect("read source XML pair");
+            let candidate = std::fs::read(candidate_path).expect("read candidate XML pair");
+            match super::compare_content(relative, &candidate, &source) {
+                None => eprintln!("paired stage guard accepted: {relative}"),
+                Some(leaves) => failures.push(format!("{relative}: {leaves:?}")),
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        eprintln!("paired stage guard checked {} documents", pairs.len());
+    }
+
+    fn role_guard_xml(body: &str, xsi_prefix: Option<&str>) -> String {
+        let xsi = xsi_prefix.map(|prefix| format!(
+            r#" xmlns:{prefix}="http://www.w3.org/2001/XMLSchema-instance" {prefix}:type="Rights""#,
+        )).unwrap_or_default();
+        format!(
+            r#"<Rights xmlns="http://v8.1c.ru/8.2/roles"{xsi} version="2.20"><setForNewObjects>false</setForNewObjects><setForAttributesByDefault>true</setForAttributesByDefault><independentRightsOfChildObjects>false</independentRightsOfChildObjects>{body}</Rights>"#,
+        )
+    }
+
+    const ROLE_GUARD_A: &str = "<object><name>Catalog.A</name><right><name>Read</name><value>true</value><restrictionByCondition><field>Code</field><condition>x=1</condition></restrictionByCondition></right><right><name>Update</name><value>false</value></right></object>";
+    const ROLE_GUARD_B: &str = "<object><name>Catalog.B</name><right><name>Read</name><value>false</value></right></object>";
+    const ROLE_GUARD_A_REVERSED_RIGHTS: &str = "<object><name>Catalog.A</name><right><name>Update</name><value>false</value></right><right><name>Read</name><value>true</value><restrictionByCondition><field>Code</field><condition>x=1</condition></restrictionByCondition></right></object>";
+
+    #[test]
+    fn full_guard_role_root_xsi_type_allows_unique_object_reordering() {
+        for prefix in ["xsi", "schemaInstance"] {
+            let first = role_guard_xml(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"), Some(prefix));
+            let reordered = role_guard_xml(&format!("{ROLE_GUARD_B}{ROLE_GUARD_A}"), Some(prefix));
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    first.as_bytes(),
+                    reordered.as_bytes(),
+                )
+                .is_none(),
+                "bound XSI prefix {prefix}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_role_root_xsi_prefix_alias_keeps_type_identity() {
+        let first = role_guard_xml(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"), Some("other"));
+        let reordered = role_guard_xml(&format!("{ROLE_GUARD_B}{ROLE_GUARD_A}"), Some("other"));
+        assert!(
+            super::compare_content(
+                "Roles/Probe/Ext/Rights.xml",
+                first.as_bytes(),
+                reordered.as_bytes(),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn full_guard_role_right_order_remains_strict() {
+        for prefix in [None, Some("xsi")] {
+            let first = role_guard_xml(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"), prefix);
+            let reordered_rights = role_guard_xml(
+                &format!("{ROLE_GUARD_B}{ROLE_GUARD_A_REVERSED_RIGHTS}"),
+                prefix,
+            );
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    first.as_bytes(),
+                    reordered_rights.as_bytes(),
+                )
+                .is_some(),
+                "right order unexpectedly normalized: {prefix:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_role_reordering_preserves_revocations_rls_and_every_attribute() {
+        let first = role_guard_xml(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"), Some("xsi"));
+        let reordered = role_guard_xml(&format!("{ROLE_GUARD_B}{ROLE_GUARD_A}"), Some("xsi"));
+        for changed in [
+            reordered.replace("<value>false</value>", "<value>true</value>"),
+            reordered.replace("<value>true</value>", "<value>false</value>"),
+            role_guard_xml(ROLE_GUARD_B, Some("xsi")),
+            reordered.replace("<name>Update</name>", "<name>Delete</name>"),
+            reordered.replace("<condition>x=1</condition>", "<condition>x=2</condition>"),
+            reordered.replace("<field>Code</field>", "<field>Description</field>"),
+            reordered.replace("<setForNewObjects>false", "<setForNewObjects>true"),
+            reordered.replace("version=\"2.20\"", "version=\"2.21\""),
+            reordered.replace("<object>", "<object audit=\"changed\">"),
+            reordered.replace("<right>", "<right audit=\"changed\">"),
+            reordered.replace("<condition>", "<condition audit=\"changed\">"),
+        ] {
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    first.as_bytes(),
+                    changed.as_bytes(),
+                )
+                .is_some(),
+                "changed role passed: {changed}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_role_duplicate_names_are_not_discarded() {
+        let duplicate_objects = role_guard_xml(&format!("{ROLE_GUARD_A}{ROLE_GUARD_A}"), None);
+        let values = super::parse_indexed_xml_values(duplicate_objects.as_bytes()).unwrap();
+        assert!(super::role_values_by_object_name(duplicate_objects.as_bytes(), &values).is_none());
+
+        let legitimate = role_guard_xml(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"), Some("xsi"));
+        let duplicate_rights = "<object><name>Catalog.A</name><right><name>Read</name><value>true</value></right><right><name>Read</name><value>false</value></right></object>";
+        for body in [
+            format!("{ROLE_GUARD_A}{ROLE_GUARD_A}"),
+            duplicate_rights.to_owned(),
+        ] {
+            let xml = role_guard_xml(&body, Some("xsi"));
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    legitimate.as_bytes(),
+                    xml.as_bytes(),
+                )
+                .is_some(),
+                "duplicate names were discarded: {xml}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_role_duplicate_expanded_root_xsi_type_is_refused() {
+        let with_alias = |xml: String| {
+            xml.replace(
+                "version=\"2.20\"",
+                "xmlns:alias=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\"",
+            )
+        };
+        let legitimate = with_alias(role_guard_xml(
+            &format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"),
+            Some("xsi"),
+        ));
+        let duplicated = with_alias(role_guard_xml(
+            &format!("{ROLE_GUARD_B}{ROLE_GUARD_A}"),
+            Some("xsi"),
+        ))
+        .replace(
+            "xsi:type=\"Rights\"",
+            "xsi:type=\"Rights\" alias:type=\"Rights\"",
+        );
+
+        assert!(super::unqualified_role_content(legitimate.as_bytes()));
+        assert!(!super::unqualified_role_content(duplicated.as_bytes()));
+        assert!(
+            super::compare_content(
+                "Roles/Probe/Ext/Rights.xml",
+                legitimate.as_bytes(),
+                duplicated.as_bytes(),
+            )
+            .is_some(),
+            "duplicate expanded XSI type collapsed into a single indexed attribute"
+        );
+    }
+
+    fn role_guard_root_index_collisions(body: &str) -> (String, Vec<String>) {
+        let legitimate = role_guard_xml(body, Some("xsi")).replace(
+            "version=\"2.20\"",
+            "xmlns:alias=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\"",
+        );
+        let collisions = [
+            "type=\"Rights\" xsi:type=\"Rights\"",
+            "xmlns:type=\"urn:otherwise-unused\" xsi:type=\"Rights\"",
+            "alias:type=\"Rights\" xsi:type=\"Rights\"",
+            "xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"Rights\"",
+        ]
+        .into_iter()
+        .map(|attributes| legitimate.replace("xsi:type=\"Rights\"", attributes))
+        .collect();
+        (legitimate, collisions)
+    }
+
+    #[test]
+    fn full_guard_role_ambiguous_root_index_keys_refuse_before_leaf_fallback() {
+        let (legitimate, same_order) =
+            role_guard_root_index_collisions(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"));
+        let (_, reversed) =
+            role_guard_root_index_collisions(&format!("{ROLE_GUARD_B}{ROLE_GUARD_A}"));
+        assert!(super::unqualified_role_content(legitimate.as_bytes()));
+        for ambiguous in same_order.iter().chain(&reversed) {
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    legitimate.as_bytes(),
+                    ambiguous.as_bytes(),
+                )
+                .is_some(),
+                "ambiguous root fell through leaf comparison: {ambiguous}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_role_ambiguous_root_index_keys_refuse_identical_bytes() {
+        let (_, ambiguous) = role_guard_root_index_collisions(ROLE_GUARD_A);
+        for xml in ambiguous {
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    xml.as_bytes(),
+                    xml.as_bytes(),
+                )
+                .is_some(),
+                "byte identity bypassed ambiguous role root: {xml}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_role_hash_identity_cannot_bypass_ambiguous_root_index_keys() {
+        let (_, ambiguous) = role_guard_root_index_collisions(ROLE_GUARD_A);
+        let relative = "Roles/Probe/Ext/Rights.xml";
+        for xml in ambiguous {
+            let (comparer, root) = comparer(&[(relative, xml.as_bytes())], &[]);
+            produce(&comparer, relative, xml.as_bytes());
+            let result = comparer.finish().unwrap();
+            fs::remove_dir_all(root).ok();
+
+            assert_eq!(
+                result.identical, 0,
+                "hash identity bypassed ambiguous role root"
+            );
+            assert_eq!(result.differences.len(), 1);
+            assert_eq!(result.differences[0].path, relative);
+        }
+    }
+
+    #[test]
+    fn full_guard_role_unadmitted_rls_qnames_keep_conservative_fallback() {
+        let foreign_rls = |body: &str| {
+            role_guard_xml(body, Some("xsi"))
+                .replace(
+                    "version=\"2.20\"",
+                    "xmlns:e=\"urn:rls-note\" version=\"2.20\"",
+                )
+                .replace(
+                    "<restrictionByCondition>",
+                    "<restrictionByCondition e:note=\"kept\">",
+                )
+        };
+        let first = foreign_rls(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"));
+        let reordered = foreign_rls(&format!("{ROLE_GUARD_B}{ROLE_GUARD_A}"));
+        assert!(!super::unqualified_role_content(first.as_bytes()));
+        assert!(
+            super::compare_content(
+                "Roles/Probe/Ext/Rights.xml",
+                first.as_bytes(),
+                first.as_bytes(),
+            )
+            .is_none(),
+            "foreign RLS normalization refusal became a global identity rejection"
+        );
+        assert!(
+            super::compare_content(
+                "Roles/Probe/Ext/Rights.xml",
+                first.as_bytes(),
+                reordered.as_bytes(),
+            )
+            .is_some(),
+            "foreign RLS content acquired object identity normalization"
+        );
+    }
+
+    fn assert_role_reserved_xsi_alias_is_not_admitted(prefix: &str) {
+        let first = role_guard_xml(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"), Some(prefix));
+        let reordered = role_guard_xml(&format!("{ROLE_GUARD_B}{ROLE_GUARD_A}"), Some(prefix));
+        assert!(
+            !super::unqualified_role_content(first.as_bytes()),
+            "reserved prefix {prefix} became a root XSI type alias"
+        );
+        assert!(
+            super::compare_content(
+                "Roles/Probe/Ext/Rights.xml",
+                first.as_bytes(),
+                reordered.as_bytes(),
+            )
+            .is_some(),
+            "reserved prefix {prefix} acquired object-order normalization"
+        );
+    }
+
+    #[test]
+    fn full_guard_role_reserved_xml_prefix_is_not_a_root_xsi_alias() {
+        assert_role_reserved_xsi_alias_is_not_admitted("xml");
+    }
+
+    #[test]
+    fn full_guard_role_reserved_xmlns_prefix_is_not_a_root_xsi_alias() {
+        assert_role_reserved_xsi_alias_is_not_admitted("xmlns");
+    }
+
+    #[test]
+    fn full_guard_role_xsi_admission_stays_root_and_namespace_scoped() {
+        let legitimate = role_guard_xml(&format!("{ROLE_GUARD_A}{ROLE_GUARD_B}"), Some("xsi"));
+        let reordered = role_guard_xml(&format!("{ROLE_GUARD_B}{ROLE_GUARD_A}"), Some("xsi"));
+        for changed in [
+            reordered.replace("http://www.w3.org/2001/XMLSchema-instance", "urn:foreign"),
+            reordered.replace("http://v8.1c.ru/8.2/roles", "urn:foreign"),
+            reordered.replace(
+                " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"",
+                "",
+            ),
+            reordered.replace("xsi:type=\"Rights\"", "xsi:type=\"OtherType\""),
+            reordered.replace("<object>", "<object xsi:type=\"Rights\">"),
+            reordered.replace("<right>", "<right xmlns=\"urn:foreign\">"),
+            reordered.replace("<right>", "<right xmlns:xsi=\"urn:foreign\">"),
+            reordered
+                .replace("<object>", "<foreign:object xmlns:foreign=\"urn:foreign\">")
+                .replace("</object>", "</foreign:object>"),
+        ] {
+            assert!(
+                !super::unqualified_role_content(changed.as_bytes()),
+                "foreign or unsupported root type admitted: {changed}"
+            );
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    legitimate.as_bytes(),
+                    changed.as_bytes(),
+                )
+                .is_some(),
+                "foreign role content normalized: {changed}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_matches_role_objects_by_name_without_losing_revocations() {
+        let a = "<object><name>Catalog.A</name><right><name>Read</name><value>true</value></right></object>";
+        let b = "<object><name>Catalog.B</name><right><name>Update</name><value>false</value></right></object>";
+        let wrap = |body: &str| {
+            format!(
+                "<Rights xmlns=\"http://v8.1c.ru/8.2/roles\"><setForNewObjects>false</setForNewObjects><setForAttributesByDefault>true</setForAttributesByDefault><independentRightsOfChildObjects>false</independentRightsOfChildObjects>{body}</Rights>"
+            )
+        };
+        let first = wrap(&format!("{a}{b}"));
+        let reversed = wrap(&format!("{b}{a}"));
+        assert!(
+            super::compare_content(
+                "Roles/Probe/Ext/Rights.xml",
+                first.as_bytes(),
+                reversed.as_bytes()
+            )
+            .is_none()
+        );
+        for changed in [
+            reversed.replace("<value>false</value>", "<value>true</value>"),
+            reversed.replace(
+                "<name>Update</name><value>false</value>",
+                "<name>Edit</name><value>true</value>",
+            ),
+            wrap(a),
+            wrap(&format!("{a}{a}")),
+            reversed.replace(
+                "</object>",
+                "<right><name>Edit</name><value>true</value></right></object>",
+            ),
+            reversed.replace("<setForNewObjects>false", "<setForNewObjects>true"),
+            reversed.replace("<object>", "<object extra=\"changed\">"),
+        ] {
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    first.as_bytes(),
+                    changed.as_bytes()
+                )
+                .is_some(),
+                "{changed}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_never_reorders_foreign_metadata_type_nodes() {
+        let wrap = |body: &str| {
+            format!(
+                "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:e=\"urn:foreign\"><Document>{body}</Document></MetaDataObject>"
+            )
+        };
+        let left = wrap(
+            "<e:Properties><e:Type><e:Type>A</e:Type><e:Type>B</e:Type></e:Type></e:Properties>",
+        );
+        let right = wrap(
+            "<e:Properties><e:Type><e:Type>B</e:Type><e:Type>A</e:Type></e:Type></e:Properties>",
+        );
+        assert!(
+            super::compare_content("Documents/Probe.xml", left.as_bytes(), right.as_bytes())
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn full_guard_never_reorders_foreign_role_objects() {
+        for foreign in ["e:object", "object xmlns='urn:foreign'"] {
+            let (opening, closing) = if foreign.starts_with("e:") {
+                (foreign, "e:object")
+            } else {
+                (foreign, "object")
+            };
+            let a = format!("<{opening}><name>Catalog.A</name></{closing}>");
+            let b = format!("<{opening}><name>Catalog.B</name></{closing}>");
+            let wrap = |body: &str| {
+                format!(
+                    "<Rights xmlns=\"http://v8.1c.ru/8.2/roles\" xmlns:e=\"urn:foreign\"><setForNewObjects>false</setForNewObjects><setForAttributesByDefault>true</setForAttributesByDefault><independentRightsOfChildObjects>false</independentRightsOfChildObjects>{body}</Rights>"
+                )
+            };
+            assert!(
+                super::compare_content(
+                    "Roles/Probe/Ext/Rights.xml",
+                    wrap(&format!("{a}{b}")).as_bytes(),
+                    wrap(&format!("{b}{a}")).as_bytes()
+                )
+                .is_some(),
+                "{foreign}"
+            );
+        }
+    }
+
+    #[test]
+    fn full_guard_preserves_encoded_type_members_during_reordering() {
+        let wrap = |body: &str| {
+            format!(
+                "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\"><Document><ChildObjects><Attribute><Properties><Type>{body}</Type></Properties></Attribute></ChildObjects></Document></MetaDataObject>"
+            )
+        };
+        let first = wrap(
+            "<v8:Type>cfg:DocumentRef.A&#88;</v8:Type><v8:Type>cfg:DocumentRef.B&#89;</v8:Type>",
+        );
+        let changed = wrap(
+            "<v8:Type>cfg:DocumentRef.B&#88;</v8:Type><v8:Type>cfg:DocumentRef.A&#89;</v8:Type>",
+        );
+        assert!(
+            super::compare_content("Documents/Probe.xml", first.as_bytes(), changed.as_bytes())
+                .is_some()
+        );
+        let equivalent =
+            wrap("<v8:Type>cfg:DocumentRef.BY</v8:Type><v8:Type>cfg:DocumentRef.AX</v8:Type>");
+        assert!(
+            super::compare_content(
+                "Documents/Probe.xml",
+                first.as_bytes(),
+                equivalent.as_bytes()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn full_guard_refuses_identical_unsupported_usual_group() {
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><UsualGroup name="Group" id="1"><Group>HorizontalIfPossible</Group></UsualGroup></ChildItems></Form>"#;
+        assert!(
+            super::compare_content("DataProcessors/Probe/Forms/Form/Ext/Form.xml", xml, xml)
+                .is_some()
+        );
+        let supported = std::str::from_utf8(xml)
+            .unwrap()
+            .replace("HorizontalIfPossible", "Horizontal");
+        assert!(
+            super::compare_content(
+                "DataProcessors/Probe/Forms/Form/Ext/Form.xml",
+                supported.as_bytes(),
+                supported.as_bytes()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn full_guard_hash_identity_cannot_bypass_unsupported_usual_group() {
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><UsualGroup name="Group" id="1"><Group>HorizontalIfPossible</Group></UsualGroup></ChildItems></Form>"#;
+        let relative = "DataProcessors/Probe/Forms/Form/Ext/Form.xml";
+        let (comparer, root) = comparer(&[(relative, xml)], &[]);
+        produce(&comparer, relative, xml);
+        let result = comparer.finish().unwrap();
+        fs::remove_dir_all(root).ok();
+        assert_eq!(result.identical, 0);
+        assert_eq!(result.differences.len(), 1);
+        assert_eq!(result.differences[0].path, relative);
+    }
+
+    #[test]
+    fn full_guard_preserves_encoded_role_conditions_during_reordering() {
+        let object = |name: &str, condition: &str| {
+            format!(
+                "<object><name>Catalog.{name}</name><right><name>Read</name><value>true</value><restrictionByCondition><condition>{condition}</condition></restrictionByCondition></right></object>"
+            )
+        };
+        let wrap = |body: &str| {
+            format!(
+                "<Rights xmlns=\"http://v8.1c.ru/8.2/roles\"><setForNewObjects>false</setForNewObjects><setForAttributesByDefault>true</setForAttributesByDefault><independentRightsOfChildObjects>false</independentRightsOfChildObjects>{body}</Rights>"
+            )
+        };
+        let first = wrap(&format!("{}{}", object("A", "x=&#49;"), object("B", "x=7")));
+        let changed = wrap(&format!("{}{}", object("B", "x=7"), object("A", "x=&#50;")));
+        assert!(
+            super::compare_content(
+                "Roles/Probe/Ext/Rights.xml",
+                first.as_bytes(),
+                changed.as_bytes()
+            )
+            .is_some()
+        );
+        let equivalent = wrap(&format!("{}{}", object("B", "x=7"), object("A", "x=1")));
+        assert!(
+            super::compare_content(
+                "Roles/Probe/Ext/Rights.xml",
+                first.as_bytes(),
+                equivalent.as_bytes()
+            )
+            .is_none()
+        );
     }
 }
