@@ -23,6 +23,19 @@ cargo test --locked -p ibcmd-rs --lib --no-default-features
 
 `cargo xtask ci` runs the same commands locally.
 
+`cargo xtask affected` prints focused test commands for changed packages and
+root integration suites. For workspace package changes it also asks Cargo
+for reverse dependencies, including all features and targets. When the root
+is a direct or transitive consumer, it recommends covering root unit tests,
+integration suites and `cargo xtask ci`; `cargo xtask check` prints the same
+guidance without automatically running the unfiltered root unit harness.
+The graph lookup is locked and offline. If it fails (for example, an
+all-target dependency is absent from the local cache), it reports the error
+and conservatively recommends root checks rather than claiming no consumers.
+
+The task runner has its own dependency-free workspace. Run its regression
+tests with `cargo test --locked --manifest-path xtask/Cargo.toml`.
+
 A pull request runs only the lanes its changed files can affect
 (`scripts/ci_scope.py`): Markdown that no source, test, profile or tool
 names, and `editors/`, skip every Rust step; changes confined to `src/` and

@@ -43,6 +43,13 @@ const NOTE_SHARED_TESTS: &str =
     "tests/common or tests/fixtures changed: run the suites that use them, or `cargo xtask ci`";
 const NOTE_GATES: &str =
     "manifests, workflows, tools, scripts or OpenSpec changed: run `cargo xtask ci`";
+const NOTE_ROOT_DEPENDENCY: &str = "the root may be affected by changed workspace dependencies: \
+    run the covering root unit tests (`cargo test --locked -p ibcmd-rs --lib <module> --no-default-features`) \
+    and integration suites (`cargo test --locked -p ibcmd-rs --test integration <suite>:: --no-default-features`, \
+    `--test <suite>` for a standalone target), \
+    then `cargo xtask ci`";
+const NOTE_DEPENDENCIES_UNAVAILABLE: &str =
+    "reverse dependency graph unavailable: conservatively check the root consumers";
 
 fn main() -> ExitCode {
     let mut task = None;
@@ -568,7 +575,56 @@ fn affected(root: &Path, files: &[String]) -> Affected {
             _ => {}
         }
     }
+    for package in &affected.packages {
+        match root_depends_on(root, package) {
+            Ok(false) => {}
+            Ok(true) => {
+                affected.notes.insert(NOTE_ROOT_DEPENDENCY);
+                break;
+            }
+            Err(error) => {
+                eprintln!("xtask: {error}");
+                affected.notes.insert(NOTE_DEPENDENCIES_UNAVAILABLE);
+                affected.notes.insert(NOTE_ROOT_DEPENDENCY);
+                break;
+            }
+        }
+    }
     affected
+}
+
+/// Let Cargo resolve aliases, transitive, optional and platform-specific
+/// edges. Offline/locked lookup never downloads sources or edits the lockfile;
+/// an incomplete local cache must produce guidance rather than hide consumers.
+fn root_depends_on(root: &Path, package: &str) -> Result<bool, String> {
+    let output = Command::new("cargo")
+        .args([
+            "tree",
+            "--locked",
+            "--offline",
+            "--workspace",
+            "--all-features",
+            "--target",
+            "all",
+            "--invert",
+            package,
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+        ])
+        .current_dir(root)
+        .output()
+        .map_err(|error| format!("cargo tree --invert {package}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cargo tree --invert {package}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| line.split_whitespace().next() == Some(ROOT_PACKAGE)))
 }
 
 fn affected_test_steps(affected: &Affected) -> Vec<Step> {
@@ -862,6 +918,164 @@ fn json_value_start<'a>(json: &'a str, key: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct DependencyWorkspace(PathBuf);
+
+    impl DependencyWorkspace {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let root = env::temp_dir().join(format!(
+                "ibcmd-xtask-dependencies-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(root.join("src")).unwrap();
+            fs::write(root.join("src/lib.rs"), "").unwrap();
+            fs::write(
+                root.join("Cargo.toml"),
+                r#"[package]
+name = "ibcmd-rs"
+version = "0.0.0"
+edition = "2024"
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+[dependencies]
+renamed = { package = "direct", path = "crates/direct" }
+optional = { path = "crates/optional", optional = true }
+[build-dependencies]
+builder = { path = "crates/builder" }
+[dev-dependencies]
+development = { path = "crates/development" }
+[target.'cfg(target_os = "none")'.dependencies]
+targeted = { path = "crates/targeted" }
+"#,
+            )
+            .unwrap();
+            for name in [
+                "direct",
+                "leaf",
+                "optional",
+                "builder",
+                "development",
+                "targeted",
+                "unrelated",
+            ] {
+                let path = root.join("crates").join(name);
+                fs::create_dir_all(path.join("src")).unwrap();
+                fs::write(path.join("src/lib.rs"), "").unwrap();
+                let dependencies = if name == "direct" {
+                    "[dependencies]\nleaf = { path = \"../leaf\" }\n"
+                } else {
+                    ""
+                };
+                fs::write(
+                    path.join("Cargo.toml"),
+                    format!(
+                        "[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n{dependencies}"
+                    ),
+                )
+                .unwrap();
+            }
+            let output = Command::new("cargo")
+                .args(["generate-lockfile", "--offline"])
+                .current_dir(&root)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            Self(root)
+        }
+    }
+
+    impl Drop for DependencyWorkspace {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn changed_dependencies_recommend_root_tests() {
+        let workspace = DependencyWorkspace::new();
+        let lockfile = fs::read(workspace.0.join("Cargo.lock")).unwrap();
+        for package in [
+            "direct",
+            "leaf",
+            "optional",
+            "builder",
+            "development",
+            "targeted",
+        ] {
+            let affected = affected(&workspace.0, &[format!("crates/{package}/src/lib.rs")]);
+            let guidance = affected
+                .notes
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(guidance.contains("--lib"), "{package}: {guidance}");
+            assert!(guidance.contains("--test"), "{package}: {guidance}");
+            assert!(
+                guidance.contains("--test integration <suite>::"),
+                "{package}: {guidance}"
+            );
+            assert!(guidance.contains("cargo xtask ci"), "{package}: {guidance}");
+            assert!(!guidance.contains("unavailable"), "{package}: {guidance}");
+            assert_eq!(affected.packages, BTreeSet::from([package.to_owned()]));
+        }
+        assert_eq!(fs::read(workspace.0.join("Cargo.lock")).unwrap(), lockfile);
+    }
+
+    #[test]
+    fn unrelated_changes_do_not_recommend_root_tests() {
+        let workspace = DependencyWorkspace::new();
+        let result = affected(&workspace.0, &["crates/unrelated/src/lib.rs".into()]);
+        assert!(result.notes.is_empty());
+        assert_eq!(result.packages, BTreeSet::from(["unrelated".into()]));
+        assert!(
+            affected(&workspace.0, &["README.md".into()])
+                .notes
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn missing_dependency_graph_recommends_conservative_root_tests() {
+        let workspace = DependencyWorkspace::new();
+        fs::write(workspace.0.join("crates/leaf/Cargo.toml"), "invalid TOML").unwrap();
+        let affected = affected(&workspace.0, &["crates/direct/src/lib.rs".into()]);
+        let guidance = affected
+            .notes
+            .iter()
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(guidance.contains("--lib"), "{guidance}");
+        assert!(guidance.contains("--test"), "{guidance}");
+        assert!(guidance.contains("unavailable"), "{guidance}");
+    }
+
+    #[test]
+    fn repeated_dependency_changes_emit_one_root_hint() {
+        let workspace = DependencyWorkspace::new();
+        let affected = affected(
+            &workspace.0,
+            &[
+                "crates/direct/src/lib.rs".into(),
+                "crates/direct/src/other.rs".into(),
+                "crates/leaf/src/lib.rs".into(),
+            ],
+        );
+        assert_eq!(
+            affected
+                .notes
+                .iter()
+                .filter(|note| note.contains("--lib"))
+                .count(),
+            1
+        );
+        assert_eq!(affected_test_steps(&affected).len(), 2);
+    }
 
     #[test]
     fn reads_hook_payload_fields() {
