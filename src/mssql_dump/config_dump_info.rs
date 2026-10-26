@@ -540,6 +540,7 @@ fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<Co
         .get(1)
         .and_then(|field| field.trim().parse::<usize>().ok())
         .ok_or_else(|| anyhow!("Config versions row has no valid pair count"))?;
+    let mut generation_uncounted = false;
     if origin.states_its_count() {
         let expected_fields = 2usize
             .checked_add(
@@ -548,7 +549,13 @@ fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<Co
                     .ok_or_else(|| anyhow!("Config versions pair count overflows"))?,
             )
             .ok_or_else(|| anyhow!("Config versions field count overflows"))?;
-        if fields.len() != expected_fields {
+        // The 8.3.27.2214 corpus CFs state one pair less than they hold when
+        // their first pair is the unnamed generation entry: `corpus-managed-forms`
+        // declares 48 for 49 pairs, `corpus-owned-observed-scalars` 828 for 829.
+        // The platform lists every named pair, so that generation pair is the
+        // uncounted one; any other arity still fails.
+        generation_uncounted = fields.len() == expected_fields + 2;
+        if fields.len() != expected_fields && !generation_uncounted {
             bail!(
                 "Config versions row declares {count} pairs but contains {} fields",
                 fields.len()
@@ -581,9 +588,13 @@ fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<Co
             generation_seen = true;
             continue;
         }
-        // The generation entry is the first of the `count` pairs.
+        // The generation entry is the first of the `count` pairs. When the
+        // row left that entry out of its count (the 8.3.27.2214 CFs), every
+        // named pair is counted, so the generation slot shifts the bound
+        // by one.
+        let counted_before = count + usize::from(generation_uncounted);
         if named
-            .insert(name.clone(), (version, pair_index < count))
+            .insert(name.clone(), (version, pair_index < counted_before))
             .is_some()
         {
             bail!("Config versions row contains duplicate entry {name}");
@@ -1366,4 +1377,29 @@ mod tests {
         let row = encoder.finish().unwrap();
         assert!(parse_versions_blob(&row, VersionsBlobOrigin::MssqlConfigTable).is_err());
     }
+}
+
+#[test]
+fn a_legacy_cf_versions_row_that_omits_the_generation_pair_is_read_whole() {
+    use flate2::{Compression, write::DeflateEncoder};
+    use std::io::Write;
+
+    let version = "00000000-0000-0000-0000-000000000001";
+    // Declared 2 pairs, holds 3 including the unnamed generation pair: the
+    // 8.3.27.2214 corpus shape (`corpus-managed-forms`: 48 for 49).
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(
+            format!("{{1,2,\"\",{version},\"a\",{version},\"b\",{version}}}").as_bytes(),
+        )
+        .unwrap();
+    let row = encoder.finish().unwrap();
+    let entries = parse_versions_blob(&row, VersionsBlobOrigin::CfStorageImage).unwrap();
+    assert_eq!(
+        entries
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry.counted))
+            .collect::<Vec<_>>(),
+        [("a", true), ("b", true)]
+    );
 }
