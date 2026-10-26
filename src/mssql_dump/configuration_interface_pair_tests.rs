@@ -329,7 +329,12 @@ fn older_single_coordinate_modes_keep_their_original_mapping_both_editions() {
 
 #[test]
 fn all_known_v76_modes_keep_whole_root_profile_refusal_without_partial_publication() {
-    for mode in ["Taxi", "TaxiEnableVersion8_2", "Version8_5EnableTaxi"] {
+    // The platform itself writes a V76 root under XML 2.20 when the stored
+    // interface mode has a 2.20 spelling and the compatibility is 8.3.27:
+    // every 8.3.27.2214 `corpus-stored-*` set saved from 8.5 storage exports
+    // `<InterfaceCompatibilityMode>Taxi</...>` (issue #638). The 8.5-only mode
+    // stays refused by `v76_new_interface_mode_refuses_unrepresentable_read_and_source_editions`.
+    for mode in ["Taxi", "TaxiEnableVersion8_2"] {
         let (row, context) = fixture("2.21", mode, true);
         let original = row.clone();
         assert_eq!(
@@ -338,19 +343,15 @@ fn all_known_v76_modes_keep_whole_root_profile_refusal_without_partial_publicati
                 .xml,
             canonical(&row, &context, "2.21").unwrap().as_bytes()
         );
-        let failure = canonical(&row, &context, "2.20").err().unwrap();
+        let xml = physical(&row, &context, InfobaseConfigSourceVersion::V2_20)
+            .unwrap()
+            .xml;
+        let text = String::from_utf8_lossy(&xml);
         assert!(
-            failure
-                .to_string()
-                .contains("does not read a configuration")
+            text.contains("<InterfaceCompatibilityMode>")
+                && !text.contains("Version85InterfaceMigrationMode"),
+            "2.20 must spell the interface mode without the 8.5 migration member: {text}"
         );
-        let failure = physical(&row, &context, InfobaseConfigSourceVersion::V2_20)
-            .err()
-            .unwrap();
-        assert_eq!(failure.class, MetadataSourceFailureClass::Unsupported);
-        assert_eq!(failure.family, "Configuration");
-        assert_eq!(failure.parser_stage, "configuration_root_profile");
-        assert_eq!(failure.structural_signature, "v76_root_requires_xml_2_21");
         assert!(
             refs::extract_configuration_source_xml(
                 &serialize(&row),
@@ -358,7 +359,7 @@ fn all_known_v76_modes_keep_whole_root_profile_refusal_without_partial_publicati
                 &BTreeMap::new(),
                 InfobaseConfigSourceVersion::V2_20
             )
-            .is_none()
+            .is_some()
         );
         assert_eq!(row, original);
     }

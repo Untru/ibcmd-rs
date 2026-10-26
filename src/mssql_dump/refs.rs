@@ -3897,7 +3897,10 @@ pub(super) fn extract_configuration_source_xml(
     // Shared mode vocabulary does not prove the whole V76 root representable
     // in XML 2.20: keep canonical profile admission and refuse partial output.
     let interface = configuration_v76_interface_mode(text, uuid).ok()?;
-    if interface.is_some() && source_version != InfobaseConfigSourceVersion::V2_21 {
+    if interface.is_some()
+        && source_version != InfobaseConfigSourceVersion::V2_21
+        && configuration_v76_requires_xml_2_21(text, uuid)
+    {
         return None;
     }
     let header_uuid = parse_configuration_header_uuid(text)?;
@@ -4861,6 +4864,29 @@ fn configuration_root_stored_property_fields<'a>(
 /// Exact V76 interface pair from the validated Configuration owner, never a
 /// nested textual `{76,` hit or the normalized 61-field projection.
 /// Err commits the recognized V76 family to an addressed publication refusal.
+/// Whether a V76 root can only be written as XML 2.21: the 8.5 interface
+/// migration mode has no 2.20 spelling, and a configuration whose stored
+/// compatibility is above 8.3.27 is not a 2.20 configuration at all.
+pub(super) fn configuration_v76_requires_xml_2_21(text: &str, uuid: &str) -> bool {
+    if configuration_v76_interface_mode(text, uuid)
+        == Ok(Some(ibcmd_schema::configuration_root::V76InterfaceCompatibility::Version8_5EnableTaxi))
+    {
+        return true;
+    }
+    let Some(fields) = configuration_root_stored_property_fields(text, uuid) else {
+        return false;
+    };
+    // Field 26 is the configuration's own compatibility; field 43 is the
+    // *requested* extension compatibility, which 8.3.27 caps to its own
+    // edition when it prints (the target fixture stores 80501 there and the
+    // platform still writes Version8_3_27), so it must not gate the read.
+    fields
+        .get(26)
+        .map(|field| field.trim())
+        .and_then(|field| field.parse::<u32>().ok())
+        .is_some_and(|version| version > 80327)
+}
+
 pub(super) fn configuration_v76_interface_mode(
     text: &str,
     uuid: &str,

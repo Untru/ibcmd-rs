@@ -13170,7 +13170,10 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             ));
             return None;
         }
-        Ok(Some(_)) if source_version != InfobaseConfigSourceVersion::V2_21 => {
+        Ok(Some(_))
+            if source_version != InfobaseConfigSourceVersion::V2_21
+                && refs::configuration_v76_requires_xml_2_21(text, uuid) =>
+        {
             *owner_graph_diagnostic = Some(MetadataSourceExtractionDiagnostic::new(
                 MetadataSourceFailureClass::Unsupported,
                 "Configuration",

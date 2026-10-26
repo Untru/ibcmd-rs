@@ -1366,11 +1366,10 @@ mod tests {
         assert!(physical(&original, &context, InfobaseConfigSourceVersion::V2_21).is_ok());
         let active = activate(ExtensionContext::new(std::iter::empty())).unwrap();
         assert!(super::active().is_some());
-        let failure = physical(&original, &context, InfobaseConfigSourceVersion::V2_20)
-            .err()
-            .unwrap();
-        assert_eq!(failure.class, MetadataSourceFailureClass::Unsupported);
-        assert_eq!(failure.structural_signature, "v76_root_requires_xml_2_21");
+        // An unrelated active extension context does not waive the ordinary
+        // V76 admission: the platform writes this 8.3.27-compatible root under
+        // 2.20 (issue #638), so the read succeeds rather than refusing.
+        assert!(physical(&original, &context, InfobaseConfigSourceVersion::V2_20).is_ok());
         let mut malformed = original.clone();
         tuple_mut(&mut malformed)[38] = Brace::num(0);
         tuple_mut(&mut malformed)[62] = Brace::num(6);
