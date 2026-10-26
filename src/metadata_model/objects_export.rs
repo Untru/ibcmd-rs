@@ -13,6 +13,7 @@ use anyhow::{Context, Result, anyhow, bail};
 
 use super::parts::{AttributeWrapper, Coll, CommandWrapper, Compat, Layout, Slot, TsWrapper};
 use super::{layout, line_number_marker};
+use crate::metadata_model::attribute::export::attribute_has_nondefault_fill;
 use crate::metadata_model::brace::Brace;
 use crate::metadata_model::export::values::{
     Header, Owner, attribute_header, attribute_properties, bool_text, code_text, field_text,
@@ -45,6 +46,493 @@ struct Spec {
 }
 
 const REFERENCE_TAIL: &[&str] = &["Indexing", "FullTextSearch", "DataHistory"];
+
+#[cfg(test)]
+mod fill_export_tests {
+    use super::*;
+    use crate::brace_list;
+    use crate::metadata_model::attribute::attribute_body;
+    use crate::metadata_model::export::NameIndex;
+    use crate::metadata_model::types::tests::{context, element};
+
+    fn attribute_with_fill(fill: &str) -> Brace {
+        let properties = element(&format!(
+            r#"<Properties xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Name>Amount</Name><Synonym/><Comment/><Type><v8:Type>xs:decimal</v8:Type><v8:NumberQualifiers><v8:Digits>10</v8:Digits><v8:FractionDigits>2</v8:FractionDigits><v8:AllowedSign>Any</v8:AllowedSign></v8:NumberQualifiers></Type>{fill}</Properties>"#
+        ));
+        attribute_body(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            &properties,
+            &context(),
+        )
+        .unwrap()
+    }
+
+    fn section_attribute_properties(kind: &str, body: Brace) -> Result<Element> {
+        let section_properties = element("<Properties><Name>Lines</Name></Properties>");
+        let section = brace_list![
+            Brace::num(11),
+            Brace::nil_uuid(),
+            Brace::nil_uuid(),
+            Brace::nil_uuid(),
+            Brace::nil_uuid(),
+            brace_list![
+                Brace::num(0),
+                crate::metadata_model::md_base(
+                    "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                    &section_properties
+                ),
+            ],
+            Brace::num(0),
+            brace_list![Brace::num(0)],
+            brace_list![Brace::num(0)],
+        ];
+        let (wrapper, wrapped) = if kind == "Catalog" {
+            (
+                TsWrapper::UseAndLength(2),
+                brace_list![Brace::num(2), section, Brace::num(0), Brace::num(5)],
+            )
+        } else {
+            (
+                TsWrapper::Length(2),
+                brace_list![Brace::num(2), section, Brace::num(5)],
+            )
+        };
+        let stored = brace_list![
+            wrapped,
+            Brace::num(1),
+            brace_list![
+                Brace::uuid("88888888-8888-4888-8888-888888888888"),
+                Brace::num(1),
+                brace_list![
+                    brace_list![
+                        Brace::num(8),
+                        body,
+                        Brace::num(0),
+                        Brace::num(1),
+                        Brace::num(0)
+                    ],
+                    Brace::num(0),
+                ],
+            ],
+        ];
+        let full_name = format!("{kind}.Probe");
+        let context = ExportContext {
+            names: NameIndex::default(),
+            version: "2.20".to_string(),
+            compat: Compat(8, 3, 27),
+        };
+        let section = tabular_section(
+            kind,
+            &spec(kind)?,
+            &stored,
+            wrapper,
+            AttributeWrapper::TabularSection,
+            Owner {
+                kind,
+                full_name: &full_name,
+            },
+            &context,
+        )?;
+        Ok(section
+            .path(&["ChildObjects", "Attribute", "Properties"])
+            .unwrap()
+            .clone())
+    }
+
+    fn assert_decimal_qualifiers(properties: &Element) {
+        let value_type = properties.child("Type").unwrap();
+        assert_eq!(value_type.child_text("Type"), Some("xs:decimal"));
+        let qualifiers = value_type.child("NumberQualifiers").unwrap();
+        assert_eq!(qualifiers.child_text("Digits"), Some("10"));
+        assert_eq!(qualifiers.child_text("FractionDigits"), Some("2"));
+        assert_eq!(qualifiers.child_text("AllowedSign"), Some("Any"));
+    }
+
+    #[test]
+    fn document_section_legacy_empty_string_false_fill_remains_omitted() {
+        // Absence compiles to the exact legacy stored pair {"S",""},0.
+        let properties = section_attribute_properties("Document", attribute_with_fill("")).unwrap();
+        assert!(Element::child(&properties, "FillFromFillingValue").is_none());
+        assert!(Element::child(&properties, "FillValue").is_none());
+        assert_decimal_qualifiers(&properties);
+    }
+
+    #[test]
+    fn document_section_explicit_nil_false_fill_is_preserved() {
+        let body = attribute_with_fill(
+            r#"<FillFromFillingValue>false</FillFromFillingValue><FillValue xsi:nil="true"/>"#,
+        );
+        let properties = section_attribute_properties("Document", body).unwrap();
+        assert_eq!(properties.child_text("FillFromFillingValue"), Some("false"));
+        let value = Element::child(&properties, "FillValue").unwrap();
+        assert_eq!(value.attr("nil"), Some("true"));
+        assert!(value.attr("type").is_none());
+        assert_decimal_qualifiers(&properties);
+    }
+
+    #[test]
+    fn document_section_explicit_number_true_fill_is_preserved() {
+        let body = attribute_with_fill(
+            r#"<FillFromFillingValue>true</FillFromFillingValue><FillValue xsi:type="xs:decimal">42</FillValue>"#,
+        );
+        let properties = section_attribute_properties("Document", body).unwrap();
+        assert_eq!(properties.child_text("FillFromFillingValue"), Some("true"));
+        let value = Element::child(&properties, "FillValue").unwrap();
+        assert_eq!(value.attr("type"), Some("xs:decimal"));
+        assert_eq!(value.text, "42");
+        assert_decimal_qualifiers(&properties);
+    }
+
+    #[test]
+    fn catalog_section_legacy_fill_omission_policy_is_unchanged() {
+        let properties = section_attribute_properties("Catalog", attribute_with_fill("")).unwrap();
+        assert!(Element::child(&properties, "FillFromFillingValue").is_none());
+        assert!(Element::child(&properties, "FillValue").is_none());
+        assert_decimal_qualifiers(&properties);
+    }
+
+    #[test]
+    fn document_root_attribute_still_emits_legacy_fill_properties() {
+        let body = attribute_with_fill("");
+        let context = ExportContext {
+            names: NameIndex::default(),
+            version: "2.20".to_string(),
+            compat: Compat(8, 3, 27),
+        };
+        let properties = attribute_properties(
+            &body,
+            spec("Document").unwrap().attribute_fill,
+            Vec::new(),
+            Owner {
+                kind: "Document",
+                full_name: "Document.Probe",
+            },
+            &context,
+        )
+        .unwrap();
+        assert_eq!(properties.child_text("FillFromFillingValue"), Some("false"));
+        let value = Element::child(&properties, "FillValue").unwrap();
+        assert_eq!(value.attr("type"), Some("xs:string"));
+        assert!(value.text.is_empty());
+        assert_decimal_qualifiers(&properties);
+    }
+
+    #[test]
+    fn document_section_unsupported_fill_flag_is_refused() {
+        let mut invalid_flag = attribute_with_fill("");
+        invalid_flag.as_list_mut().unwrap()[20] = Brace::num(2);
+        assert!(section_attribute_properties("Document", invalid_flag).is_err());
+    }
+
+    #[test]
+    fn document_section_unsupported_fill_value_is_refused() {
+        let mut invalid_value = attribute_with_fill("");
+        invalid_value.as_list_mut().unwrap()[19] = brace_list![Brace::str("Unknown")];
+        assert!(section_attribute_properties("Document", invalid_value).is_err());
+    }
+
+    // A clean-room complete Document descriptor, not a private source fixture.
+    // These tests use the same base-patch entry point as metadata staging.
+    fn patch_document_xml(fill: &str) -> String {
+        let generated = |category: &str, index: usize| {
+            format!(
+                r#"<xr:GeneratedType name="Document{category}.Probe" category="{category}"><xr:TypeId>11111111-1111-4111-8111-{index:012}</xr:TypeId><xr:ValueId>22222222-2222-4222-8222-{index:012}</xr:ValueId></xr:GeneratedType>"#
+            )
+        };
+        let internal = ["Object", "Ref", "Selection", "List", "Manager"]
+            .iter()
+            .enumerate()
+            .map(|(index, category)| generated(category, index + 1))
+            .collect::<String>();
+        format!(
+            r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<Document uuid="dddddddd-dddd-4ddd-8ddd-dddddddddddd"><InternalInfo>{internal}</InternalInfo>
+<Properties><Name>Probe</Name><Synonym/><Comment>untouched owner</Comment>
+<UseStandardCommands>true</UseStandardCommands><NumberType>String</NumberType><NumberLength>9</NumberLength><NumberAllowedLength>Variable</NumberAllowedLength><NumberPeriodicity>Nonperiodical</NumberPeriodicity><CheckUnique>true</CheckUnique><Autonumbering>true</Autonumbering>
+<Posting>Deny</Posting><RealTimePosting>Deny</RealTimePosting><RegisterRecordsDeletion>AutoDelete</RegisterRecordsDeletion><RegisterRecordsWritingOnPost>WriteSelected</RegisterRecordsWritingOnPost><SequenceFilling>AutoFill</SequenceFilling><PostInPrivilegedMode>true</PostInPrivilegedMode><UnpostInPrivilegedMode>true</UnpostInPrivilegedMode><IncludeHelpInContents>false</IncludeHelpInContents>
+<DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>DontUse</FullTextSearch><CreateOnInput>Auto</CreateOnInput><SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString><FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString><ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing></Properties>
+<ChildObjects><TabularSection uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"><InternalInfo>
+<xr:GeneratedType name="DocumentTabularSection.Probe.Lines" category="TabularSection"><xr:TypeId>11111111-1111-4111-8111-000000000006</xr:TypeId><xr:ValueId>22222222-2222-4222-8222-000000000006</xr:ValueId></xr:GeneratedType>
+<xr:GeneratedType name="DocumentTabularSectionRow.Probe.Lines" category="TabularSectionRow"><xr:TypeId>11111111-1111-4111-8111-000000000007</xr:TypeId><xr:ValueId>22222222-2222-4222-8222-000000000007</xr:ValueId></xr:GeneratedType></InternalInfo>
+<Properties><Name>Lines</Name><Synonym/><Comment>untouched section</Comment><ToolTip/><FillChecking>DontCheck</FillChecking><LineNumberLength>5</LineNumberLength></Properties>
+<ChildObjects><Attribute uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"><Properties><Name>Amount</Name><Synonym/><Comment>untouched attribute</Comment><Type><v8:Type>xs:decimal</v8:Type><v8:NumberQualifiers><v8:Digits>10</v8:Digits><v8:FractionDigits>2</v8:FractionDigits><v8:AllowedSign>Any</v8:AllowedSign></v8:NumberQualifiers></Type>{fill}<Indexing>DontIndex</Indexing><FullTextSearch>Use</FullTextSearch><DataHistory>DontUse</DataHistory></Properties></Attribute></ChildObjects>
+</TabularSection></ChildObjects></Document></MetaDataObject>"#
+        )
+    }
+
+    fn patch_document_fixture() -> Result<(Brace, ExportContext)> {
+        use crate::metadata_model::{DescriptorContext, compile_descriptor};
+        use std::{path::Path, sync::Arc};
+
+        let root = Path::new("/offline-document-fill");
+        let path = root.join("Documents/Probe.xml");
+        let xml = patch_document_xml("");
+        let context = DescriptorContext::with_files(
+            root,
+            "2.20",
+            &[(path.clone(), Arc::new(xml.as_bytes().to_vec()))],
+        )?;
+        let plain = compile_descriptor("Document", &path, xml.as_bytes(), &context)?;
+        let base = crate::metadata_model::brace::parse_row(&plain)?;
+        let export = ExportContext {
+            names: NameIndex::from_config_index(&context.index),
+            version: "2.20".to_string(),
+            compat: Compat(8, 3, 27),
+        };
+        // Validate the fixture before exercising the selected stage patcher.
+        crate::metadata_model::export::decode_object("Document", &base, &export)?;
+        Ok((base, export))
+    }
+
+    fn patch_document(base: &Brace, xml: &str) -> Result<Brace> {
+        use crate::metadata_model::brace::{parse_row, serialize_row};
+        use crate::module_blob::{
+            deflate_raw, inflate_raw, pack_simple_metadata_blob_from_xml_with_source,
+        };
+
+        let blob = deflate_raw(&serialize_row(base))?;
+        let staged = pack_simple_metadata_blob_from_xml_with_source(&blob, xml.as_bytes(), None)?;
+        parse_row(&inflate_raw(&staged.blob)?)
+    }
+
+    fn patch_attribute_body(tree: &mut Brace) -> Option<&mut Brace> {
+        if attribute_header(tree)
+            .is_ok_and(|head| head.uuid == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        {
+            return Some(tree);
+        }
+        tree.as_list_mut()?
+            .iter_mut()
+            .find_map(patch_attribute_body)
+    }
+
+    fn assert_document_fill_patch(fill: &str, value: Brace, flag: bool) -> Result<()> {
+        let (base, context) = patch_document_fixture()?;
+        let mut expected = base.clone();
+        let body = patch_attribute_body(&mut expected)
+            .unwrap()
+            .as_list_mut()
+            .unwrap();
+        assert_eq!(body[19], brace_list![Brace::str("S"), Brace::str("")]);
+        assert_eq!(body[20], Brace::flag(false));
+        body[19] = value;
+        body[20] = Brace::flag(flag);
+
+        let xml = patch_document_xml(fill);
+        let actual = patch_document(&base, &xml)?;
+        assert_eq!(
+            actual, expected,
+            "only the two explicit Fill slots may change"
+        );
+        let object = crate::metadata_model::export::decode_object("Document", &actual, &context)?;
+        let properties = object
+            .path(&[
+                "ChildObjects",
+                "TabularSection",
+                "ChildObjects",
+                "Attribute",
+                "Properties",
+            ])
+            .unwrap();
+        assert_decimal_qualifiers(properties);
+        assert!(properties.child("FillValue").is_some());
+        assert_eq!(
+            properties.child_text("FillFromFillingValue"),
+            Some(if flag { "true" } else { "false" })
+        );
+        assert_eq!(patch_document(&actual, &xml)?, expected, "idempotent patch");
+        Ok(())
+    }
+
+    #[test]
+    fn document_stage_patch_transfers_explicit_nil_false_fill() -> Result<()> {
+        assert_document_fill_patch(
+            r#"<FillFromFillingValue>false</FillFromFillingValue><FillValue xsi:nil="true"/>"#,
+            brace_list![Brace::str("U")],
+            false,
+        )
+    }
+
+    #[test]
+    fn document_stage_patch_transfers_explicit_number_true_fill() -> Result<()> {
+        assert_document_fill_patch(
+            r#"<FillFromFillingValue>true</FillFromFillingValue><FillValue xsi:type="xs:decimal">42</FillValue>"#,
+            brace_list![Brace::str("N"), Brace::num(42)],
+            true,
+        )
+    }
+
+    #[test]
+    fn document_stage_patch_keeps_legacy_omission_unchanged() -> Result<()> {
+        let (base, _) = patch_document_fixture()?;
+        assert_eq!(patch_document(&base, &patch_document_xml(""))?, base);
+        Ok(())
+    }
+
+    #[test]
+    fn document_stage_patch_refuses_unsupported_fill_source_values() -> Result<()> {
+        let (base, _) = patch_document_fixture()?;
+        for fill in [
+            "<FillFromFillingValue>unknown</FillFromFillingValue>",
+            r#"<FillValue xsi:type="Unknown">value</FillValue>"#,
+        ] {
+            assert!(
+                patch_document(&base, &patch_document_xml(fill)).is_err(),
+                "{fill}"
+            );
+        }
+        Ok(())
+    }
+
+    fn stage_patch_accepts_fill_xml(base: &Brace, xml: &str) -> Result<bool> {
+        use crate::metadata_model::brace::serialize_row;
+        use crate::module_blob::{deflate_raw, pack_simple_metadata_blob_from_xml_with_source};
+
+        let blob = deflate_raw(&serialize_row(base))?;
+        // Assert refusal at the real pack boundary, before any test-only
+        // reparse could hide an invalid or injected native atom.
+        Ok(pack_simple_metadata_blob_from_xml_with_source(&blob, xml.as_bytes(), None).is_ok())
+    }
+
+    #[test]
+    fn document_stage_patch_refuses_invalid_numeric_fill_tokens() -> Result<()> {
+        let (base, _) = patch_document_fixture()?;
+        let mut accepted = Vec::new();
+        for number in [
+            "NaN",
+            "INF",
+            "-INF",
+            "not-a-number",
+            "1,2",
+            "1,{0}",
+            "{0}",
+            "42}",
+            "4 2",
+            "1e3",
+        ] {
+            let xml = patch_document_xml(&format!(
+                r#"<FillValue xsi:type="xs:decimal">{number}</FillValue>"#
+            ));
+            if stage_patch_accepts_fill_xml(&base, &xml)? {
+                accepted.push(number);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "accepted invalid numeric atoms: {accepted:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn document_stage_patch_requires_resolved_known_type_value_namespaces() -> Result<()> {
+        let (base, _) = patch_document_fixture()?;
+        let mut accepted = Vec::new();
+        for (prefix, kind, value, uri) in [
+            ("xs", "decimal", "42", "http://www.w3.org/2001/XMLSchema"),
+            (
+                "xr",
+                "DesignTimeRef",
+                "33333333-3333-4333-8333-333333333333.44444444-4444-4444-8444-444444444444",
+                "http://v8.1c.ru/8.3/xcf/readable",
+            ),
+            ("v8", "TypeDescription", "", "http://v8.1c.ru/8.1/data/core"),
+            (
+                "ent",
+                "AccountType",
+                "Active",
+                "http://v8.1c.ru/8.1/data/enterprise",
+            ),
+        ] {
+            let fill = format!(r#"<FillValue xsi:type="{prefix}:{kind}">{value}</FillValue>"#);
+            let mut undeclared =
+                patch_document_xml(&fill).replace(&format!(r#" xmlns:{prefix}="{uri}""#), "");
+            // Keep unrelated element names well bound, so each refusal must
+            // protect the xsi:type QName value at FillValue's own scope.
+            if prefix == "xr" {
+                undeclared = undeclared.replace(
+                    "<InternalInfo>",
+                    &format!(r#"<InternalInfo xmlns:xr="{uri}">"#),
+                );
+            }
+            if prefix == "v8" {
+                undeclared = undeclared.replace("<Type>", &format!(r#"<Type xmlns:v8="{uri}">"#));
+            }
+            let rebound = patch_document_xml(&fill.replace(
+                "<FillValue ",
+                &format!(r#"<FillValue xmlns:{prefix}="urn:foreign" "#),
+            ));
+            for (scope, xml) in [("undeclared", undeclared), ("rebound", rebound)] {
+                if stage_patch_accepts_fill_xml(&base, &xml)? {
+                    accepted.push(format!("{scope} {prefix}:{kind}"));
+                }
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "accepted unresolved/foreign type values: {accepted:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn document_stage_patch_refuses_invalid_calendar_fill_values() -> Result<()> {
+        let (base, _) = patch_document_fixture()?;
+        let mut accepted = Vec::new();
+        for date in [
+            "2026-02-30T12:00:00",
+            "0000-01-01T00:00:00",
+            "2026-01-01T25:00:00",
+            "2025-02-29T12:00:00",
+            "2026-01-00T12:00:00",
+            "2026-13-01T12:00:00",
+            "2026-01-01T12:60:00",
+            "2026-01-01T12:00:60",
+        ] {
+            let xml = patch_document_xml(&format!(
+                r#"<FillValue xsi:type="xs:dateTime">{date}</FillValue>"#
+            ));
+            if stage_patch_accepts_fill_xml(&base, &xml)? {
+                accepted.push(date);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "accepted invalid calendar dates: {accepted:?}"
+        );
+        Ok(())
+    }
+    #[test]
+    fn document_stage_patch_preserves_valid_scalar_fill_values() -> Result<()> {
+        // Typed scalar preservation controls; these are not a claim about a
+        // platform import's assignment rules for an attribute's declared type.
+        for (fill, expected) in [
+            (
+                r#"<FillValue xsi:type="xs:boolean">true</FillValue>"#,
+                brace_list![Brace::str("B"), Brace::flag(true)],
+            ),
+            (
+                r#"<FillValue xsi:type="xs:boolean">false</FillValue>"#,
+                brace_list![Brace::str("B"), Brace::flag(false)],
+            ),
+            (
+                r#"<FillValue xsi:type="xs:string">a,&quot;{b}&lt;&gt;&amp;</FillValue>"#,
+                brace_list![Brace::str("S"), Brace::str("a,\"{b}<>&")],
+            ),
+            (
+                r#"<FillValue xsi:type="xs:decimal">-42.25</FillValue>"#,
+                brace_list![Brace::str("N"), Brace::atom("-42.25")],
+            ),
+            (
+                r#"<FillValue xsi:type="xs:dateTime">2024-02-29T23:59:59</FillValue>"#,
+                brace_list![Brace::str("D"), Brace::atom("20240229235959")],
+            ),
+        ] {
+            assert_document_fill_patch(fill, expected, false)?;
+        }
+        Ok(())
+    }
+}
 
 fn spec(kind: &str) -> Result<Spec> {
     let reference = |properties, children| Spec {
@@ -1311,11 +1799,13 @@ fn tabular_section(
     let mut children = el("ChildObjects");
     for stored_attribute in attributes.iter().skip(2).take(count) {
         let record = list(item(list(stored_attribute)?, 0)?)?;
+        let with_fill = spec.section_attribute_fill
+            || (kind == "Document" && attribute_has_nondefault_fill(item(record, 1)?)?);
         children.children.push(attribute(
             "Attribute",
             record,
             attribute_wrapper,
-            spec.section_attribute_fill,
+            with_fill,
             spec.section_attribute_tail,
             owner,
             context,

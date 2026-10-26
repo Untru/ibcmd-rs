@@ -67,6 +67,11 @@ pub enum ScriptVariables {
 pub trait SqlClient: Send + Sync {
     fn dbms(&self) -> Dbms;
 
+    /// Whether this client explicitly selects the SQL Server 2012 import reads.
+    fn uses_mssql_2012_compatibility(&self) -> bool {
+        false
+    }
+
     /// Why every request fails, for a handle that reaches no database
     /// (`SqlExec::detached`); `None` for a real client.
     fn detached_reason(&self) -> Option<&'static str> {

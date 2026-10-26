@@ -58,6 +58,94 @@ pub fn equal_ignoring_structural_line_endings(left: &[u8], right: &[u8]) -> bool
     }
 }
 
+/// The writer reindents element-only containers. Keep every other lexical
+/// coordinate exact, including leaf whitespace, references and query newlines.
+pub fn equal_ignoring_structural_indentation(left: &[u8], right: &[u8]) -> bool {
+    fn indentation(node: &XmlNode) -> bool {
+        matches!(node, XmlNode::Text(_))
+            && node.raw().is_some_and(|raw| {
+                raw.bytes()
+                    .all(|byte| matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+            })
+    }
+
+    fn element_only(element: &XmlElement) -> bool {
+        element
+            .children()
+            .iter()
+            .any(|node| matches!(node, XmlNode::Element(_)))
+            && element.children().iter().all(|node| {
+                indentation(node)
+                    || matches!(
+                        node,
+                        XmlNode::Element(_)
+                            | XmlNode::Comment(_)
+                            | XmlNode::ProcessingInstruction(_)
+                    )
+            })
+    }
+
+    fn preserves_space(element: &XmlElement, inherited: bool) -> bool {
+        element.attributes().iter().find_map(|attribute| {
+            if matches!(attribute.kind(), AttributeKind::Ordinary(name) if name.raw() == "xml:space") {
+                Some(attribute.value() != "default")
+            } else {
+                None
+            }
+        }).unwrap_or(inherited)
+    }
+
+    // Parse even identical inputs: malformed XML must never prove a round trip.
+    let (Ok(left), Ok(right)) = (XmlReader::from_slice(left), XmlReader::from_slice(right)) else {
+        return false;
+    };
+    if left.has_utf8_bom() != right.has_utf8_bom()
+        || left.declaration_raw() != right.declaration_raw()
+    {
+        return false;
+    }
+
+    let mut pending = vec![
+        (left.before_root(), right.before_root(), true, false),
+        (left.after_root(), right.after_root(), true, false),
+    ];
+    let mut elements = vec![(left.root(), right.root(), false)];
+    loop {
+        while let Some((left, right, inherited_space)) = elements.pop() {
+            if left.raw_start() != right.raw_start() || left.raw_end() != right.raw_end() {
+                return false;
+            }
+
+            let preserve_space = preserves_space(left, inherited_space);
+            pending.push((
+                left.children(),
+                right.children(),
+                !preserve_space && element_only(left) && element_only(right),
+                preserve_space,
+            ));
+        }
+        let Some((left, right, structural, preserve_space)) = pending.pop() else {
+            return true;
+        };
+        let mut left = left
+            .iter()
+            .filter(|node| !(structural && indentation(node)));
+        let mut right = right
+            .iter()
+            .filter(|node| !(structural && indentation(node)));
+        loop {
+            match (left.next(), right.next()) {
+                (Some(XmlNode::Element(left)), Some(XmlNode::Element(right))) => {
+                    elements.push((left, right, preserve_space));
+                }
+                (Some(left), Some(right)) if left == right => {}
+                (None, None) => break,
+                _ => return false,
+            }
+        }
+    }
+}
+
 fn preserves_space(element: &XmlElement, inherited: bool) -> bool {
     element.attributes().iter().find_map(|attribute| {
         if matches!(attribute.kind(), AttributeKind::Ordinary(name) if name.raw() == "xml:space") {
@@ -92,6 +180,17 @@ fn normalized_whitespace(text: &str) -> impl Iterator<Item = u8> + '_ {
 #[cfg(test)]
 mod tests {
     use super::equal_ignoring_structural_line_endings as same;
+
+    #[test]
+    fn existing_public_comparisons_keep_unused_namespace_declarations_exact() {
+        let left = b"<r xmlns:unused=\"urn:one\"><v>text</v></r>";
+        let right = b"<r xmlns:unused=\"urn:two\"><v>text</v></r>";
+        let absent = b"<r><v>text</v></r>";
+        assert!(!same(left, right));
+        assert!(!same(left, absent));
+        assert!(!super::equal_ignoring_structural_indentation(left, right));
+        assert!(!super::equal_ignoring_structural_indentation(left, absent));
+    }
 
     #[test]
     fn structural_line_endings_are_equivalent() {

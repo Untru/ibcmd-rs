@@ -7,6 +7,7 @@ use std::ops::Range;
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::profile::EffectiveProfile;
+use ibcmd_xml::equal_dcs_source_documents as schema_documents_equal;
 use ibcmd_xml::{
     DcsSchemaTemplateError, DcsStorageTypeResolver, DcsStorageTypeSpelling,
     analyze_dcs_schema_template_documents_with_references, compile_dcs_schema_storage_documents,
@@ -225,7 +226,8 @@ type SchemaReadBackIndexes = (DcsTypeIndex, BTreeMap<String, String>);
 
 /// Proves the compiled body reads back as the source: the exporter's own
 /// normalizer, given the body and the resolutions the writer made, has to
-/// reproduce the source document after its BOM and XML declaration.
+/// reproduce source markup and scalar content after its BOM and XML declaration,
+/// allowing only structural indentation to differ.
 fn verify_schema_round_trip(
     source: &[u8],
     body: &DcsBody,
@@ -249,7 +251,7 @@ fn verify_schema_round_trip(
     let expected = document_without_shell(source);
     let exported = export("xml-2.20")?;
     let actual = document_without_shell(&exported);
-    if expected == actual {
+    if schema_documents_equal(expected, actual) {
         return Ok(());
     }
     // A platform 8.5 source is written in dialect 2.21, which declares the
@@ -257,7 +259,7 @@ fn verify_schema_round_trip(
     let exported_xml_2_21 =
         crate::mssql_dump::declare_palette_namespace_beside_style(export("xml-2.21")?);
     let actual_xml_2_21 = document_without_shell(&exported_xml_2_21);
-    if expected == actual_xml_2_21 {
+    if schema_documents_equal(expected, actual_xml_2_21) {
         return Ok(());
     }
     // Diagnostic: both readings of a refused schema, beside its source.
@@ -296,6 +298,23 @@ fn verify_schema_round_trip(
         window(expected),
         window(actual),
     )))
+}
+
+/// The final configuration guard uses the same bounded source policy as the
+/// DCS codec, after identifying both documents by their schema root.
+pub(crate) fn equivalent_schema_source_documents(left: &[u8], right: &[u8]) -> bool {
+    let is_schema = |xml: &[u8]| {
+        ibcmd_xml::XmlReader::from_slice(xml).is_ok_and(|document| {
+            document.root().name().raw() == "DataCompositionSchema"
+                && document.root().attributes().iter().any(|attribute| {
+                    matches!(attribute.kind(), ibcmd_xml::AttributeKind::Namespace(None))
+                        && attribute.value() == "http://v8.1c.ru/8.1/data-composition-system/schema"
+                })
+        })
+    };
+    is_schema(left)
+        && is_schema(right)
+        && schema_documents_equal(document_without_shell(left), document_without_shell(right))
 }
 
 /// A document after an optional UTF-8 BOM and XML declaration: the export
@@ -1252,6 +1271,72 @@ mod tests {
             &exported,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn schema_with_lf_layout_preserves_arbitrary_data_source_and_dataset_bindings() {
+        let native_source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/native-template.xml.b64"
+        )));
+        let canonical = String::from_utf8(native_source)
+            .unwrap()
+            .replace("ИсточникДанных1", "SalesInput");
+
+        // The native fixture pins the whole schema, including both source
+        // bindings, query bodies and the QueryRows -> UnionRows link. Changing
+        // XML layout must not rename or otherwise rewrite any of those values.
+        for (layout, newline) in [("LF", "\n"), ("CR", "\r")] {
+            let query = format!("ВЫБРАТЬ{newline}\"A\"");
+            let source = canonical
+                .replace("\r\n", newline)
+                .replace("ВЫБРАТЬ \"A\"", &query);
+            // Storage-to-source transliteration regenerates the XML layout
+            // as CRLF while preserving the query's raw character data.
+            let expected = canonical.replace("ВЫБРАТЬ \"A\"", &query);
+            let unresolved = |_: &str| None::<String>;
+            let (plain, type_index, object_refs) =
+                compile_schema_plain(source.as_bytes(), &BTreeMap::new(), &unresolved).unwrap();
+            let blob = deflate_bytes(&plain).unwrap();
+            let exported = export_body(&blob, &type_index, &object_refs);
+
+            assert_eq!(
+                document_without_shell(&exported),
+                document_without_shell(expected.as_bytes()),
+                "{layout}: names, bindings and multiline queries must survive"
+            );
+            compile_dcs(
+                &DcsCodecProfile::fixture(),
+                DcsTemplateKind::Schema,
+                source.as_bytes(),
+            )
+            .unwrap_or_else(|error| panic!("XML {layout} layout must compile: {error}"));
+        }
+    }
+
+    #[test]
+    fn schema_round_trip_still_rejects_changed_names_and_character_references() {
+        let source = String::from_utf8(simple_schema())
+            .unwrap()
+            .replace("Source1", "Sales\nInput");
+        let unresolved = |_: &str| None::<String>;
+        let (plain, type_index, object_refs) =
+            compile_schema_plain(source.as_bytes(), &BTreeMap::new(), &unresolved).unwrap();
+        let blob = deflate_bytes(&plain).unwrap();
+        let body = decode_compatible_dcs(DcsTemplateKind::Schema, &blob).unwrap();
+        verify_schema_round_trip(source.as_bytes(), &body, &type_index, &object_refs)
+            .expect("the unchanged schema must pass before checking content changes");
+
+        for changed_name in ["PurchasesInput", "Sales&#13;Input", "Sales&#xD;Input"] {
+            let changed = source.replace("Sales\nInput", changed_name);
+            assert!(
+                matches!(
+                    verify_schema_round_trip(changed.as_bytes(), &body, &type_index, &object_refs),
+                    Err(DcsCodecError::RoundTrip(_))
+                ),
+                "a changed name or a character-reference CR must not equal a literal LF"
+            );
+        }
     }
 
     /// DCS-QUERY-SECOND-FIELD-01: both directions for the second evidenced
@@ -2711,6 +2796,372 @@ mod tests {
         canonical_source(&format!(
             "\t<settingsVariant>\n\t\t<dcsset:name>Main</dcsset:name>\n\t\t<dcsset:presentation xsi:type=\"xs:string\">Main</dcsset:presentation>\n\t\t<dcsset:settings{{settings}}>\n{settings_children}\n\t\t</dcsset:settings>\n\t</settingsVariant>"
         ))
+    }
+
+    fn scalar_parameter_fixture_with_date() -> String {
+        let native = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-parameter-scalar-types/native-template.xml.b64"
+        )));
+        let date_parameter = concat!(
+            "\t<parameter>\n",
+            "\t\t<name>RunDate</name>\n",
+            "\t\t<title xsi:type=\"v8:LocalStringType\">\n",
+            "\t\t\t<v8:item>\n",
+            "\t\t\t\t<v8:lang>en</v8:lang>\n",
+            "\t\t\t\t<v8:content>Run date</v8:content>\n",
+            "\t\t\t</v8:item>\n",
+            "\t\t</title>\n",
+            "\t\t<valueType>\n",
+            "\t\t\t<v8:Type>xs:dateTime</v8:Type>\n",
+            "\t\t\t<v8:DateQualifiers>\n",
+            "\t\t\t\t<v8:DateFractions>DateTime</v8:DateFractions>\n",
+            "\t\t\t</v8:DateQualifiers>\n",
+            "\t\t</valueType>\n",
+            "\t\t<value xsi:type=\"xs:dateTime\">2026-01-02T03:04:05</value>\n",
+            "\t\t<useRestriction>false</useRestriction>\n",
+            "\t</parameter>\n",
+        )
+        .replace('\n', "\r\n");
+        String::from_utf8(native).unwrap().replace(
+            "\t<settingsVariant>",
+            &format!("{date_parameter}\t<settingsVariant>"),
+        )
+    }
+
+    fn compact_fixture_elements(source: &str, start: &str, end: &str) -> String {
+        let mut out = String::new();
+        let mut remaining = source;
+        while let Some(begin) = remaining.find(start) {
+            let finish = begin + remaining[begin..].find(end).unwrap() + end.len();
+            out.push_str(&remaining[..begin]);
+            for line in remaining[begin..finish].lines() {
+                out.push_str(line.trim());
+            }
+            remaining = &remaining[finish..];
+        }
+        out.push_str(remaining);
+        out
+    }
+
+    #[test]
+    fn schema_compact_types_and_selection_compile_without_changing_scalar_parameters() {
+        let expected = scalar_parameter_fixture_with_date();
+        let source = compact_fixture_elements(&expected, "<valueType>", "</valueType>");
+        let source = compact_fixture_elements(
+            &source,
+            "<dcsset:item xsi:type=\"dcsset:SelectedItemField\">",
+            "</dcsset:item>",
+        );
+        let unresolved = |_: &str| None::<String>;
+        let (plain, type_index, object_refs) =
+            compile_schema_plain(source.as_bytes(), &BTreeMap::new(), &unresolved).unwrap();
+        let blob = deflate_bytes(&plain).unwrap();
+        let exported = export_body(&blob, &type_index, &object_refs);
+
+        // Expected values and layout come from the native fixture plus the
+        // explicit synthetic date parameter, independently of the exporter.
+        assert_eq!(
+            document_without_shell(&exported),
+            document_without_shell(expected.as_bytes())
+        );
+        let compiled = compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            source.as_bytes(),
+        )
+        .expect("compact type and selection containers must preserve their scalar values");
+        let reexported = export_body(&compiled, &type_index, &object_refs);
+        compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &reexported,
+        )
+        .expect("expanded output must remain compilable");
+    }
+
+    #[test]
+    fn schema_round_trip_rejects_changed_qualifiers_and_scalar_whitespace() {
+        let source = scalar_parameter_fixture_with_date();
+        let unresolved = |_: &str| None::<String>;
+        let (plain, type_index, object_refs) =
+            compile_schema_plain(source.as_bytes(), &BTreeMap::new(), &unresolved).unwrap();
+        let blob = deflate_bytes(&plain).unwrap();
+        let body = decode_compatible_dcs(DcsTemplateKind::Schema, &blob).unwrap();
+        verify_schema_round_trip(source.as_bytes(), &body, &type_index, &object_refs).unwrap();
+
+        for (before, after) in [
+            ("<v8:DateFractions>DateTime", "<v8:DateFractions>Date"),
+            ("<v8:Digits>10", "<v8:Digits>11"),
+            ("<v8:Length>40", "<v8:Length>41"),
+            ("<v8:DateFractions>DateTime", "<v8:DateFractions> DateTime"),
+            ("<v8:Digits>10", "<v8:Digits> 10"),
+            ("<v8:Length>40", "<v8:Length>40 "),
+            ("<name>RunDate</name>", "<name> RunDate</name>"),
+        ] {
+            let changed = source.replace(before, after);
+            assert_ne!(changed, source, "the fixture must contain {before}");
+            assert!(
+                matches!(
+                    verify_schema_round_trip(changed.as_bytes(), &body, &type_index, &object_refs),
+                    Err(DcsCodecError::RoundTrip(_))
+                ),
+                "changed scalar content must be refused: {after}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_compiler_accepts_only_unused_prefixed_namespace_declaration_changes() {
+        let native = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/native-template.xml.b64"
+        )));
+        let source = String::from_utf8(native.clone()).unwrap().replace(
+            " xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\"",
+            " xmlns:cfg=\"urn:ibcmd-rs:unused-config\"",
+        );
+        assert!(!source.contains("v8ui:"));
+        assert!(!source.contains("cfg:"));
+
+        let unresolved = |_: &str| None::<String>;
+        let (plain, type_index, object_refs) =
+            compile_schema_plain(source.as_bytes(), &BTreeMap::new(), &unresolved).unwrap();
+        let blob = deflate_bytes(&plain).unwrap();
+        let exported = export_body(&blob, &type_index, &object_refs);
+        assert_eq!(
+            document_without_shell(&exported),
+            document_without_shell(&native)
+        );
+
+        let compiled = compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            source.as_bytes(),
+        )
+        .expect("an unused cfg declaration must not reject unchanged schema content");
+        let reexported = export_body(&compiled, &type_index, &object_refs);
+        compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &reexported,
+        )
+        .expect("the native namespace spelling must still compile");
+    }
+
+    #[test]
+    fn schema_documents_comparison_accepts_proven_unused_prefixed_declarations() {
+        for (left, right) in [
+            (
+                "<r xmlns:cfg=\"urn:unused\"><v>one</v></r>",
+                "<r xmlns:v8ui=\"urn:other\"><v>one</v></r>",
+            ),
+            ("<r xmlns:p=\"urn:one\"/>", "<r xmlns:p=\"urn:two\"/>"),
+            (
+                "<r><v xmlns:extra='urn:unused'>one</v></r>",
+                "<r><v>one</v></r>",
+            ),
+            (
+                "<r a=\"1\" xmlns:extra=\"urn:unused\" b=\"2\"><v/></r>",
+                "<r a=\"1\" b=\"2\">\n <v/>\n</r>",
+            ),
+        ] {
+            assert!(
+                schema_documents_equal(left.as_bytes(), right.as_bytes()),
+                "{left:?}"
+            );
+            assert!(
+                schema_documents_equal(right.as_bytes(), left.as_bytes()),
+                "{right:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_documents_comparison_never_drops_used_or_default_namespace_bindings() {
+        for (left, right) in [
+            (
+                "<r xmlns=\"urn:one\"><v/></r>",
+                "<r xmlns=\"urn:two\"><v/></r>",
+            ),
+            ("<r xmlns=\"\"><v/></r>", "<r><v/></r>"),
+            (
+                "<r xmlns:p=\"urn:one\"><p:v/></r>",
+                "<r xmlns:p=\"urn:two\"><p:v/></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v p:flag=\"1\"/></r>",
+                "<r xmlns:p=\"urn:two\"><v p:flag=\"1\"/></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v type=\"p:Thing\"/></r>",
+                "<r xmlns:p=\"urn:two\"><v type=\"p:Thing\"/></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v>p:Thing</v></r>",
+                "<r xmlns:p=\"urn:two\"><v>p:Thing</v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v>p&#58;Thing</v></r>",
+                "<r xmlns:p=\"urn:two\"><v>p&#58;Thing</v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v>&#112;:Thing</v></r>",
+                "<r xmlns:p=\"urn:two\"><v>&#112;:Thing</v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v type=\"p&#58;Thing\"/></r>",
+                "<r xmlns:p=\"urn:two\"><v type=\"p&#58;Thing\"/></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v type=\"&#112;:Thing\"/></r>",
+                "<r xmlns:p=\"urn:two\"><v type=\"&#112;:Thing\"/></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v type=\"&#112;&#58;Thing\"/></r>",
+                "<r xmlns:p=\"urn:two\"><v type=\"&#112;&#58;Thing\"/></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v>p<!--gap-->:Thing</v></r>",
+                "<r xmlns:p=\"urn:two\"><v>p<!--gap-->:Thing</v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v>p<![CDATA[:]]>Thing</v></r>",
+                "<r xmlns:p=\"urn:two\"><v>p<![CDATA[:]]>Thing</v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:one\"><v>p<part/>:Thing</v></r>",
+                "<r xmlns:p=\"urn:two\"><v>p<part/>:Thing</v></r>",
+            ),
+            (
+                "<r xmlns:cfg=\"urn:one\"><v>cf<!--gap-->g:Thing</v></r>",
+                "<r xmlns:cfg=\"urn:two\"><v>cf<!--gap-->g:Thing</v></r>",
+            ),
+            (
+                "<r xmlns:cfg=\"urn:one\"><v>cf<part>g</part>:Thing</v></r>",
+                "<r xmlns:cfg=\"urn:two\"><v>cf<part>g</part>:Thing</v></r>",
+            ),
+            (
+                "<r xmlns:cfg=\"urn:one\"><v>c&#102;<!--gap--><![CDATA[g]]>&#58;Thing</v></r>",
+                "<r xmlns:cfg=\"urn:two\"><v>c&#102;<!--gap--><![CDATA[g]]>&#58;Thing</v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:outer-one\"><v xmlns:p=\"urn:inner\"><p:w/></v></r>",
+                "<r xmlns:p=\"urn:outer-two\"><v xmlns:p=\"urn:inner\"><p:w/></v></r>",
+            ),
+        ] {
+            assert!(
+                !schema_documents_equal(left.as_bytes(), right.as_bytes()),
+                "{left:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_unused_namespace_comparison_preserves_remaining_lexical_coordinates() {
+        for (left, right) in [
+            (
+                "<r xmlns:p=\"urn:unused\" a=\"1\" b=\"2\"><v/></r>",
+                "<r b=\"2\" a=\"1\"><v/></r>",
+            ),
+            ("<r xmlns:p=\"urn:unused\" a=\"1\"/>", "<r a='1'/>"),
+            ("<r xmlns:p=\"urn:unused\" a=\"&#49;\"/>", "<r a=\"1\"/>"),
+            (
+                "<r xmlns:p=\"urn:unused\"><v>one</v></r>",
+                "<r><v>two</v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:unused\"><v> one</v></r>",
+                "<r><v>one</v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:unused\"><v>&#32;</v></r>",
+                "<r><v> </v></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:unused\"><v>a\r\nb</v></r>",
+                "<r><v>a\nb</v></r>",
+            ),
+            ("<r xmlns:p=\"urn:unused\">text <v/></r>", "<r>text<v/></r>"),
+            (
+                "<r xmlns:p=\"urn:unused\"><![CDATA[ ]]><v/></r>",
+                "<r> <v/></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:unused\"><!--one--><v/></r>",
+                "<r><!--two--><v/></r>",
+            ),
+            (
+                "<r xmlns:p=\"urn:unused\" xml:space=\"preserve\">\n<v/></r>",
+                "<r xml:space=\"preserve\"><v/></r>",
+            ),
+        ] {
+            assert!(
+                !schema_documents_equal(left.as_bytes(), right.as_bytes()),
+                "{left:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_documents_comparison_ignores_only_element_container_indentation() {
+        for (left, right) in [
+            (
+                "<r><g><v>1</v></g></r>",
+                "<r>\n <g>\r\n\t<v>1</v>\n </g>\n</r>",
+            ),
+            ("<r>\r<g>\r<v>1</v>\r</g>\r</r>", "<r><g><v>1</v></g></r>"),
+            (
+                "<r xml:space=\"preserve\"><g xml:space=\"default\"><v>1</v></g></r>",
+                "<r xml:space=\"preserve\"><g xml:space=\"default\">\n <v>1</v>\n</g></r>",
+            ),
+        ] {
+            assert!(
+                schema_documents_equal(left.as_bytes(), right.as_bytes()),
+                "{left:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_documents_comparison_preserves_every_non_indentation_lexical_difference() {
+        for (left, right) in [
+            ("<r><v>a\r\nb</v></r>", "<r><v>a\nb</v></r>"),
+            ("<r><v>a\rb</v></r>", "<r><v>a\nb</v></r>"),
+            ("<r><v> \n </v></r>", "<r><v>\n</v></r>"),
+            ("<r><v></v></r>", "<r><v> </v></r>"),
+            ("<r>text <v/> tail</r>", "<r>text<v/> tail</r>"),
+            ("<r>\r\n<v/>tail</r>", "<r>\n<v/>tail</r>"),
+            ("<r><![CDATA[a\r\nb]]></r>", "<r><![CDATA[a\nb]]></r>"),
+            ("<r><![CDATA[ ]]><v/></r>", "<r> <v/></r>"),
+            ("<r><v>&#13;</v></r>", "<r><v>\n</v></r>"),
+            ("<r><v>&#xD;</v></r>", "<r><v>\n</v></r>"),
+            ("<r><v>&#32;</v><g/></r>", "<r><v> </v><g/></r>"),
+            ("<r>&#32;<v/></r>", "<r><v/></r>"),
+            ("<r>&#10;<v/></r>", "<r>\n<v/></r>"),
+            ("<r a=\"a\r\nb\"/>", "<r a=\"a\nb\"/>"),
+            ("<r><!--a\r\nb--><v/></r>", "<r><!--a\nb--><v/></r>"),
+            ("<r><?probe a\r\nb?><v/></r>", "<r><?probe a\nb?><v/></r>"),
+            ("<r><v a=\"1\"/></r>", "<r><v a='1'/></r>"),
+            ("<r xmlns=\"urn:a\"><v/></r>", "<r xmlns=\"urn:b\"><v/></r>"),
+            (
+                "<r xml:space=\"preserve\">\n<v/></r>",
+                "<r xml:space=\"preserve\"><v/></r>",
+            ),
+            (
+                "<r xml:space=\"preserve\"><g>\n<v/></g></r>",
+                "<r xml:space=\"preserve\"><g><v/></g></r>",
+            ),
+            ("<r><v>one</v></r>", "<r><v>two</v></r>"),
+            ("<r><a/><b/></r>", "<r><b/><a/></r>"),
+            ("<r><a/></r>", "<r><a/><b/></r>"),
+            ("<r><v></r>", "<r><v></r>"),
+        ] {
+            assert!(
+                !schema_documents_equal(left.as_bytes(), right.as_bytes()),
+                "{left:?}"
+            );
+        }
     }
 
     /// Which settings children a body may carry is no longer an enumerated

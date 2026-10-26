@@ -23331,6 +23331,14 @@ fn reads_every_form_control_colour_space_the_platform_writes() {
     );
 }
 
+#[test]
+fn reads_witnessed_medium_green_form_colour() {
+    assert_eq!(
+        parse_form_control_color("{3,2,{88}}", &BTreeMap::new()).as_deref(),
+        Some("web:MediumGreen")
+    );
+}
+
 /// A field control carries `TitleTextColor` in the top-level slot right ahead
 /// of its title font, the same relation the grouping controls and `Table` keep.
 /// Layout below is the native `CheckBoxField` "FBS" of
@@ -70447,6 +70455,34 @@ fn resolves_scoped_use_always_members_in_the_nested_collection_namespace() {
 }
 
 #[test]
+fn restores_scoped_use_always_without_a_provisional_unscoped_column_name() {
+    let section_uuid = "11111111-1111-4111-8111-111111111111";
+    let scope = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let mut attribute = data_path_form_attribute("1", "Object", None);
+    attribute.additional_columns = vec![FormAttributeAdditionalColumns {
+        table: "Object.Rows".to_string(),
+        columns: vec![chain_walk_column("35", "Presentation", None)],
+    }];
+    let object_refs = BTreeMap::from([(
+        section_uuid.to_string(),
+        "DataProcessor.Work.TabularSection.Rows".to_string(),
+    )]);
+    let mut attributes = vec![attribute];
+    let indexes = chain_walk_indexes(&attributes);
+    let trailing = vec![format!(
+        r#"{{4,1,{{9,{{1}},0,"Object",{{1,0}},{{"Pattern"}},{{0}},{{0}},{{0,1,{{2,{{0,{section_uuid}}},{{35,{scope}}}}}}}}},0}}"#
+    )];
+
+    apply_form_attribute_scoped_use_always_bindings(
+        &mut attributes,
+        &trailing,
+        indexes.owner_scoped_bindings_for_test(),
+        &object_refs,
+    );
+    assert_eq!(attributes[0].use_always, vec!["Object.Rows.Presentation"]);
+}
+
+#[test]
 fn resolves_dynamic_list_field_map_member_for_additional_columns_table() {
     let dynamic_list_uuid = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
     let mut attribute = data_path_form_attribute("1", "TestList", Some(dynamic_list_uuid));
@@ -71612,6 +71648,41 @@ fn resolves_the_standard_period_variant_column() {
 /// the platform writes `Заказы.Ссылка.Number`; `DataProcessors/ПрайсЛист/Forms/Форма`
 /// carries the same `-2` against a column of type `cfg:CatalogRef.Номенклатура`
 /// and the platform writes `ДеревоЦен.Номенклатура.Code`.
+#[test]
+fn dereferences_a_catalog_reference_column_to_its_parent() {
+    let mut attribute = data_path_form_attribute("18", "Rows", None);
+    attribute.columns = vec![chain_walk_column(
+        "10",
+        "Item",
+        Some("cfg:CatalogRef.Items"),
+    )];
+    let attributes = vec![attribute];
+    let indexes = chain_walk_indexes(&attributes);
+    let names = form_attribute_metadata_owners_by_id(&attributes);
+
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            "{3,{18},{10},{-4}}",
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &BTreeMap::new(),
+            false,
+        )
+        .as_deref(),
+        Some("Rows.Item.Parent")
+    );
+    assert_eq!(
+        resolve_form_bound_chain_member_path(
+            "{3,{18},{10},{-999}}",
+            &names,
+            indexes.owner_scoped_bindings_for_test(),
+            &BTreeMap::new(),
+            false,
+        ),
+        None
+    );
+}
+
 #[test]
 fn dereferences_a_declared_column_through_its_own_type_family() {
     for (reference, marker, expected) in [

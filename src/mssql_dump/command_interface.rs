@@ -1,5 +1,10 @@
 use super::*;
 
+use crate::compiler::bodies::interface_assets::{
+    ClientApplicationPanelHeight, ClientApplicationPanelRecord,
+    decode_client_application_panel_fields,
+};
+
 const MAX_COMMAND_INTERFACE_SECTION_ITEMS: usize = 100_000;
 const MAX_COMMAND_INTERFACE_ROOT_FIELDS: usize = 12 + 9 * MAX_COMMAND_INTERFACE_SECTION_ITEMS;
 
@@ -174,7 +179,11 @@ pub(super) struct ClientApplicationInterfaceGroup {
 
 pub(super) enum ClientApplicationInterfaceNode {
     Group(ClientApplicationInterfaceGroup),
-    Panel { id: String, uuid: String },
+    Panel {
+        id: String,
+        uuid: String,
+        height: Option<ClientApplicationPanelHeight>,
+    },
 }
 
 pub(super) fn parse_command_interface_blob(
@@ -830,9 +839,11 @@ fn parse_client_application_interface_children_with_panel_wrapper(
                 parse_client_application_interface_group(fields.get(index - 1)?, true)?,
             ));
         } else {
-            let id = parse_non_zero_uuid(child_fields.get(1)?.trim())?;
-            let uuid = parse_non_zero_uuid(child_fields.get(2)?.trim())?;
-            let panel = ClientApplicationInterfaceNode::Panel { id, uuid };
+            let record = decode_client_application_panel_fields(&child_fields)?;
+            let id = parse_non_zero_uuid(record.id)?;
+            let uuid = parse_non_zero_uuid(record.uuid)?;
+            let height = record.height;
+            let panel = ClientApplicationInterfaceNode::Panel { id, uuid, height };
             if wrap_panels_in_anonymous_group {
                 children.push(ClientApplicationInterfaceNode::Group(
                     ClientApplicationInterfaceGroup {
@@ -1154,15 +1165,13 @@ fn push_client_application_interface_node_xml(
         ClientApplicationInterfaceNode::Group(group) => {
             push_client_application_interface_group_xml(xml, group, indent);
         }
-        ClientApplicationInterfaceNode::Panel { id, uuid } => {
-            let tab = "\t".repeat(indent);
-            xml.push_str(&format!(
-                "{tab}<panel id=\"{}\">\r\n\
-{tab}\t<uuid>{}</uuid>\r\n\
-{tab}</panel>\r\n",
-                escape_xml_text(id),
-                escape_xml_text(uuid)
-            ));
+        ClientApplicationInterfaceNode::Panel { id, uuid, height } => {
+            ClientApplicationPanelRecord {
+                id,
+                uuid,
+                height: *height,
+            }
+            .push_xml(xml, indent);
         }
     }
 }
@@ -1190,6 +1199,50 @@ mod tests {
 
     const COMMAND_UUID: &str = "11111111-1111-4111-8111-111111111111";
     const COMMON_FLAG: &str = r#"{0,{{0,{{"B",1}},0}}}"#;
+
+    fn nested_client_application_panel_text(panel: &str) -> String {
+        "{1,{0,1,{0,1,f1d2a809-46ac-46ab-8b37-b2135ac5b323,{0,11111111-1111-4111-8111-111111111111,0,{0,1,8b252cb5-d895-4c40-8ccb-581ce795fb80,{@PANEL@}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},0}"
+            .replace("@PANEL@", panel)
+    }
+
+    #[test]
+    fn exports_witnessed_nested_client_panel_heights_to_exact_xml() {
+        for (native_height, height_xml) in [("0", ""), ("1", "\t\t\t\t\t<height>1</height>\r\n")] {
+            let text = nested_client_application_panel_text(&format!(
+                "0,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,2,{native_height}"
+            ));
+            let interface = parse_client_application_interface_text(&text).unwrap();
+
+            assert_eq!(
+                format_client_application_interface_xml(&interface),
+                format!(
+                    "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n\t<top>\r\n\t\t<group id=\"11111111-1111-4111-8111-111111111111\">\r\n\t\t\t<group>\r\n\t\t\t\t<panel id=\"22222222-2222-4222-8222-222222222222\">\r\n\t\t\t\t\t<uuid>33333333-3333-4333-8333-333333333333</uuid>\r\n{height_xml}\t\t\t\t</panel>\r\n\t\t\t</group>\r\n\t\t</group>\r\n\t</top>\r\n</ClientApplicationInterface>"
+                ),
+                "native panel height {native_height}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_or_incomplete_client_panel_native_profiles() {
+        for (revision, tail) in [
+            ("1", "2,1"),
+            ("0", "3,1"),
+            ("0", "2,2"),
+            ("0", "2,-1"),
+            ("0", "2,NaN"),
+            ("0", "2"),
+            ("0", "2,1,0"),
+        ] {
+            let text = nested_client_application_panel_text(&format!(
+                "{revision},22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,{tail}"
+            ));
+            assert!(
+                parse_client_application_interface_text(&text).is_none(),
+                "accepted panel revision {revision} with tail {tail:?}"
+            );
+        }
+    }
 
     fn visibility_only_fields<'a>(tail: &[&'a str]) -> Vec<&'a str> {
         let mut fields = vec![

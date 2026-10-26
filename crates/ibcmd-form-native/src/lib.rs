@@ -321,6 +321,13 @@ pub const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("Yellow", "145"),
 ];
 
+/// The same witnessed web-colour table in the native-to-XML direction.
+pub fn form_web_color_reference(code: i32) -> Option<String> {
+    WEB_COLOR_CODES.iter().find_map(|(name, native)| {
+        (native.parse::<i32>().ok() == Some(code)).then(|| format!("web:{name}"))
+    })
+}
+
 /// The Windows system colours the corpus names, with the index a body stores
 /// under `{3,1,{n}}` -- the ones the form exporter reads back.
 pub const WINDOWS_COLOR_CODES: &[(&str, &str)] = &[
@@ -6419,10 +6426,10 @@ pub fn format_search_string_addition_payload(
     )
 }
 
-/// Member 13 of a `<SearchControlAddition>` -- eleven slots, one of them read.
-pub fn format_search_control_addition_payload(auto_max_width: bool) -> String {
+/// Member 13 of a `<SearchControlAddition>` -- eleven slots, including width.
+pub fn format_search_control_addition_payload(width: &str, auto_max_width: bool) -> String {
     format!(
-        "{{1,0,{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,1,0}},\
+        "{{1,{width},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,1,0}},\
          {auto_max_width},0,0,2}}",
         auto_max_width = u8::from(auto_max_width),
     )
@@ -10142,6 +10149,14 @@ fn resolve_metadata_data_path_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_witnessed_medium_green_form_colour() {
+        assert_eq!(
+            format_native_color(Some("web:MediumGreen"), |_| None).as_deref(),
+            Some("{3,2,{88}}")
+        );
+    }
 
     #[test]
     fn extension_activation_colors_match_native_coverage() {
