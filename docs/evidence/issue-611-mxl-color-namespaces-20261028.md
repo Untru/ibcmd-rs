@@ -59,9 +59,9 @@ command, both before and after the fix.
 
 | case | CF / database files equal | native and candidate tree SHA-256 |
 | --- | --- | --- |
-| existing | 5/5 + 5/5 | `a174237c0df1aad5892d8179ac90c2da305a39b3c364720902ac95e684b8472c` |
-| all-web | 5/5 + 5/5 | `8a882541a2fd338a998e9dec2fb7dad435d2db588e393f8d7f8818a8efa34242` |
-| windows | 5/5 + 5/5 | `59a32c3b507db5027cc2b520e41bc0ada2ef463c5779a48acc7a53bdcd5d8606` |
+| existing | 5/5 + 5/5 | `68860be4ee40b6f985b7a901ecb6739b3afba2a4369b17190223b9f6034b699b` |
+| all-web | 5/5 + 5/5 | `1e77f9f8850ae0e8b4a9ded6f84062b3cfe2eefd219115655f93848ad7ce88b6` |
+| windows | 5/5 + 5/5 | `92622486e5a46bb16dbd34e77005816abe08b688bcde1e812762f6c90bf9b91c` |
 
 Tree hashes encode sorted UTF-8 path + NUL + lowercase file SHA-256 + NUL +
 decimal byte size + LF. Full native trees and databases stay outside Git.
@@ -80,3 +80,36 @@ native CF records with PATH empty; it is not a live SQL Server measurement.
 Fresh native runtime measurements used 8.3.27.2214. 8.5 checks use the
 immutable native 8.5.1.1150/1529 corpus, not a freshly installed 8.5 runtime.
 Other known coverage differences/refusals remain outside #611.
+
+## Final local gate and production binary
+
+`cargo xtask ci` on Rust 1.95.0 passed **29 steps**, including pinned fixture
+validation and the temporary-directory cleanup check. Standard harness
+summaries: workspace 2032 passed / 81 ignored; root integration 551 passed /
+4 ignored; root library 3551 passed / 15 ignored, all with zero failures.
+The separate original-process profile and RAC scenarios also passed.
+No required local step was skipped because of a missing tool.
+
+Across all 242 coverage sets, equal variant instances increased from 8060 to
+8071; different instances decreased from 5039 to 5028. Converter refusals
+stayed at 137; 49 platform-refused variants were unchanged. Combined sets
+repeat class-set variants, so these are instances, not a support percentage.
+
+The default-feature `cargo build --locked --profile iter` passed. Production
+binary (without platform-oracle):
+
+- Source commit: `fec9d07e14278330d800c54350b84311a7ea7873`.
+- Version: `ibcmd-rs 0.4.1`.
+- SHA-256: `ce9694eff6a686968c7f9cf3f91c5a42fcd931aba9686e01698a3e2304865a57`.
+
+All six native comparisons were repeated with that binary in fresh output
+directories. Result: 30/30 complete files equal, zero differences including
+ConfigDumpInfo.xml, return code 0 for every command, database bytes unchanged.
+The canonical tree hashes in the table above also match this final run.
+No Rust source or baseline changed after the full gate; subsequent changes
+only record/correct this evidence. The table uses relative-string path
+sorting, as stated, rather than filesystem Path-component sorting.
+
+The separate offline-matrix release build, native micro-corpus, SBOM and
+release audit were not run locally; xtask reports those additional lanes.
+Fresh live 8.5 and SQL Server acceptance remain for the corresponding lab.
