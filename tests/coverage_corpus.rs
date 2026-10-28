@@ -662,6 +662,8 @@ fn coverage_sets_hold_their_baseline() {
     );
 }
 
+/// Compares complete group-color templates with the pinned native 2.20/2.21
+/// fixtures, protecting both QName declarations and their values.
 #[test]
 fn spreadsheet_group_colors_keep_native_local_namespaces() {
     let relative = "CommonTemplates/CovObservedSheetGroupColours/Ext/Template.xml";

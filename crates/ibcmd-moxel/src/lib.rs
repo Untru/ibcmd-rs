@@ -11956,13 +11956,18 @@ fn render_moxel_spreadsheet_xml(
     xml
 }
 
+/// Emits a group/header color with its native document-local namespace.
+///
+/// The decoded palette uses `d3p1:` for web colors and `windows:` for Windows
+/// colors; both become locally bound `d2p1` QNames here. Style references and
+/// RGB literals keep their existing spelling and escaping. Format-level
+/// colors are serialized separately with their native `d3p1` binding.
 fn push_moxel_group_header_color_xml(xml: &mut String, tag: &str, color: &str) {
     let qualified = color
         .strip_prefix("d3p1:")
         .map(|name| ("web", name))
         .or_else(|| color.strip_prefix("windows:").map(|name| ("windows", name)));
     if let Some((namespace, name)) = qualified {
-        // Native document-level colors use d2p1; format-level colors use d3p1.
         _ = write!(
             xml,
             "\t<{tag} xmlns:d2p1=\"http://v8.1c.ru/8.1/data/ui/colors/{namespace}\">d2p1:{}</{tag}>\r\n",

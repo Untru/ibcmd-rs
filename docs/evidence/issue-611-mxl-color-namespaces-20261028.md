@@ -106,8 +106,11 @@ All six native comparisons were repeated with that binary in fresh output
 directories. Result: 30/30 complete files equal, zero differences including
 ConfigDumpInfo.xml, return code 0 for every command, database bytes unchanged.
 The canonical tree hashes in the table above also match this final run.
-No Rust source or baseline changed after the full gate; subsequent changes
-only record/correct this evidence. The table uses relative-string path
+No executable Rust logic, test assertions or baseline changed after the full
+gate. Subsequent documentation changes record/correct this evidence and add
+Rustdoc for the namespace helper and native-template regression. Comment-stripped
+source comparison and Rust 1.95.0 `cargo fmt --all --check` passed for that
+follow-up. The table uses relative-string path
 sorting, as stated, rather than filesystem Path-component sorting.
 
 The separate offline-matrix release build, native micro-corpus, SBOM and
