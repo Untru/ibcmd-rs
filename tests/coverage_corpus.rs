@@ -25,6 +25,71 @@ use sha2::{Digest, Sha256};
 
 const DUMP_INFO: &str = "ConfigDumpInfo.xml";
 
+/// Native chart descriptors must round-trip through the compiler and the
+/// database exporter without inventing absent standard tabular sections.
+#[test]
+fn native_chart_trees_pass_import_self_check() {
+    for (platform, version) in [("8.3.27.2342", "8.3.27"), ("8.5.1.1150", "8.5.1")] {
+        for name in [
+            "chartsofaccounts",
+            "chartsofcalculationtypes",
+            "calculationregisters",
+        ] {
+            let tree = coverage_paths::root()
+                .join("coverage")
+                .join(platform)
+                .join(name)
+                .join("native");
+            let scratch = TempDirectory::new();
+            fs::create_dir(scratch.0.join("rows")).unwrap();
+            let result = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .arg("audit-empty-stage")
+                .arg(&tree)
+                .arg(scratch.0.join("rows"))
+                .arg("--rows-out")
+                .arg(scratch.0.join("compiled"))
+                .args(["--platform", version, "--output"])
+                .arg(scratch.0.join("audit.json"))
+                .env("PATH", "")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{platform}/{name}: {}\n{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let report: Value =
+                serde_json::from_slice(&fs::read(scratch.0.join("audit.json")).unwrap()).unwrap();
+            assert_eq!(report["failures"], 0, "{platform}/{name}: {report:#}");
+            let options = ibcmd_rs::metadata_model::export::audit::ExportAuditOptions {
+                kinds: vec!["ChartOfAccounts".into(), "ChartOfCalculationTypes".into()],
+                ..Default::default()
+            };
+            let dialect = if platform.starts_with("8.3") {
+                "2.20"
+            } else {
+                "2.21"
+            };
+            let exported = ibcmd_rs::metadata_model::export::audit::audit_export(
+                &tree,
+                &scratch.0.join("compiled"),
+                dialect,
+                &options,
+            )
+            .unwrap();
+            assert!(
+                exported.objects > 0,
+                "{platform}/{name}: no chart descriptors"
+            );
+            assert_eq!(
+                exported.identical, exported.objects,
+                "{platform}/{name}: {exported:#?}"
+            );
+        }
+    }
+}
+
 struct TempDirectory(PathBuf);
 
 impl TempDirectory {
