@@ -248,10 +248,9 @@ fn the_extension_registers_and_charts_compile_to_their_stored_rows() {
     }
 }
 
-/// And the stored rows read back to every scalar property the platform
-/// exported. (The main export writes `<StandardTabularSections/>` where the
-/// extension's charts have none, which is the extension export's business, so
-/// the comparison is per property line and not per file.)
+/// The stored rows read back to every scalar property the platform exported.
+/// This comparison isolates scalar slots; the generated coverage tests also
+/// compare complete chart descriptors, including absent collections.
 #[test]
 fn the_stored_rows_export_to_the_native_properties() {
     let tree = Tree::new();
