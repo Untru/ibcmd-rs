@@ -710,7 +710,7 @@ pub(crate) fn decode(kind: &str, row: &Brace, context: &ExportContext) -> Result
     for name in spec.properties {
         match walk.properties.remove(name) {
             Some(element) => properties.children.push(element),
-            None if *name == "StandardAttributes" => {}
+            None if matches!(*name, "StandardAttributes" | "StandardTabularSections") => {}
             None => match xml_only_default(kind, name, context) {
                 Some(element) => properties.children.push(element),
                 None if !context.is_xml_2_21() && XML_2_21_ONLY.contains(name) => {}
@@ -915,10 +915,9 @@ fn decode_slot(
             }
         }
         Slot::StandardTabularSections(definitions) => {
-            put(
-                "StandardTabularSections",
-                standard_tabular_sections(value, definitions, owner, context)?,
-            );
+            if let Some(element) = standard_tabular_sections(value, definitions, owner, context)? {
+                put("StandardTabularSections", element);
+            }
         }
         Slot::Characteristics => put("Characteristics", characteristics(value, context)?),
         // Constants and nil slots carry nothing the XML writes; the
@@ -931,19 +930,21 @@ fn decode_slot(
     Ok(())
 }
 
-/// `{1,{0,<n>,<marker>,{3,<synonym>,"comment",<fill>,0,<attrs>,<tooltip>}...}}`.
+/// `{0}` omits the XML property; `{1,{0,<n>,<marker>,{3,<synonym>,"comment",<fill>,0,<attrs>,<tooltip>}...}}`
+/// writes the charts' predefined tabular sections.
 fn standard_tabular_sections(
     node: &Brace,
     definitions: super::parts::StandardSections,
     owner: Owner<'_>,
     context: &ExportContext,
-) -> Result<Element> {
+) -> Result<Option<Element>> {
     let mut element = el("StandardTabularSections");
     let fields = list(node)?;
-    if atom(item(fields, 0)?)? == "0" {
-        return Ok(element);
-    }
-    let body = list(item(fields, 1)?)?;
+    let body = match fields {
+        [flag] if atom(flag)? == "0" => return Ok(None),
+        [flag, body] if atom(flag)? == "1" => list(body)?,
+        _ => bail!("bad standard tabular sections {}", short(node)),
+    };
     let count = number(item(body, 1)?)? as usize;
     for index in 0..count {
         let marker = number(item(body, 2 + 2 * index)?)?;
@@ -974,7 +975,65 @@ fn standard_tabular_sections(
         xml.children.push(block);
         element.children.push(xml);
     }
-    Ok(element)
+    Ok(Some(element))
+}
+
+#[cfg(test)]
+mod standard_tabular_section_tests {
+    use super::*;
+    use crate::metadata_model::brace::parse_row;
+    use crate::metadata_model::export::{NameIndex, write_document};
+    use crate::metadata_model::objects::parts::Compat;
+
+    /// Both chart families distinguish the absent envelope from present data
+    /// and refuse malformed envelopes instead of silently dropping their tail.
+    #[test]
+    fn absent_present_and_invalid_envelopes_remain_distinct() {
+        let context = ExportContext {
+            names: NameIndex::default(),
+            version: "2.20".into(),
+            compat: Compat(8, 3, 27),
+        };
+        for (kind, definitions) in [
+            ("ChartOfAccounts", super::super::COA_TABULAR),
+            ("ChartOfCalculationTypes", super::super::CCALC_TABULAR),
+        ] {
+            let owner = Owner {
+                kind,
+                full_name: "Chart.Probe",
+            };
+            let decode = |text: &str| {
+                standard_tabular_sections(
+                    &parse_row(text.as_bytes()).unwrap(),
+                    definitions,
+                    owner,
+                    &context,
+                )
+            };
+            assert!(decode("{0}").unwrap().is_none(), "{kind}");
+            for text in ["{}", "{0,{0}}", "{1}", "{2,{0,0}}", "{1,{0,0},0}"] {
+                assert!(decode(text).is_err(), "{kind}: {text}");
+            }
+            let present = decode("{1,{0,0}}").unwrap().unwrap();
+            assert_eq!(
+                write_document(&present, "2.20"),
+                write_document(&el("StandardTabularSections"), "2.20")
+            );
+
+            let (name, marker, _) = definitions[0];
+            let section = r#"{3,{0},"section",1,0,{0},{0}}"#;
+            let text = format!("{{1,{{0,1,{marker},{section}}}}}");
+            let present = decode(&text).unwrap().unwrap();
+            let mut expected = crate::metadata_model::xml::parse_element_tree(
+                format!(r#"<Root xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"><StandardTabularSections><xr:StandardTabularSection name="{name}"><xr:Synonym/><xr:Comment>section</xr:Comment><xr:ToolTip/><xr:FillChecking>ShowError</xr:FillChecking><xr:StandardAttributes/></xr:StandardTabularSection></StandardTabularSections></Root>"#).as_bytes()
+            ).unwrap();
+            assert_eq!(
+                write_document(&present, "2.20"),
+                write_document(&expected.children.remove(0), "2.20"),
+                "{kind}"
+            );
+        }
+    }
 }
 
 /// `{0,{<n>,{"#",<characteristic>,{4,...}}...}}` -> `<Characteristics>`.
