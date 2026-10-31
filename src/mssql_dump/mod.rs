@@ -1096,6 +1096,22 @@ pub(crate) fn fetch_main_activation_rows(
     fetch::fetch_activation_rows(sql, database, table, selected_file_names)
 }
 
+/// The source of a main activation's inputs: the rows as stored ([`fetch_main_activation_rows`]).
+#[derive(Debug)]
+pub(crate) struct StoredActivationRows;
+
+impl crate::mssql_main_activation::MainActivationRowSource for StoredActivationRows {
+    fn fetch_rows(
+        &self,
+        sql: &crate::sql::SqlExec,
+        database: &str,
+        table: &str,
+        selected: &BTreeSet<String>,
+    ) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+        fetch_main_activation_rows(sql, database, table, selected)
+    }
+}
+
 pub(crate) fn fetch_extension_activation_rows(
     sql: &crate::sql::SqlExec,
     database: &str,

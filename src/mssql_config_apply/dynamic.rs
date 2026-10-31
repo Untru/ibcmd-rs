@@ -1492,7 +1492,11 @@ pub fn plan_dynamic(sql: &SqlExec, options: &ConfigApplyOptions) -> Result<Dynam
     }
 
     // The online engine's plan: the exact stage, the rows it replaces, the markers.
-    let inputs = crate::mssql::read_activation_inputs(sql, database)?;
+    let inputs = crate::mssql::read_activation_inputs(
+        &crate::mssql_dump::StoredActivationRows,
+        sql,
+        database,
+    )?;
     require_judged_image("ConfigSave", &staged, &inputs.staged)?;
     require_judged_image("Config", &replaced, &inputs.active)?;
     for (table, judged_marker, image_marker) in [
