@@ -1096,6 +1096,22 @@ pub(crate) fn fetch_main_activation_rows(
     fetch::fetch_activation_rows(sql, database, table, selected_file_names)
 }
 
+/// The source of a main activation's inputs: the rows as stored ([`fetch_main_activation_rows`]).
+#[derive(Debug)]
+pub(crate) struct StoredActivationRows;
+
+impl crate::mssql_main_activation::MainActivationRowSource for StoredActivationRows {
+    fn fetch_rows(
+        &self,
+        sql: &crate::sql::SqlExec,
+        database: &str,
+        table: &str,
+        selected: &BTreeSet<String>,
+    ) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+        fetch_main_activation_rows(sql, database, table, selected)
+    }
+}
+
 pub(crate) fn fetch_extension_activation_rows(
     sql: &crate::sql::SqlExec,
     database: &str,
@@ -2796,23 +2812,8 @@ pub(crate) fn dynamic_generation_aliases<'a>(
         .collect())
 }
 
-/// The stored row that holds the current content of the published `name`,
-/// among `stored_names`: the alias of the newest generation of `history` that
-/// carries it, else `name` itself.
-///
-/// One rule for every reader of the current content: the export's overlay, the
-/// stage that has read the whole table ([`dynamic_generation_aliases`]) and the
-/// stage that asks row by row (`mssql_effective_row`, which only adds the seek
-/// that finds the candidates).
-pub(crate) fn stored_row_name<'a>(
-    history: &[String],
-    name: &str,
-    stored_names: impl IntoIterator<Item = &'a str>,
-) -> String {
-    dynamic_generation::storage_generation_overlay(history, stored_names)
-        .stored_name(name)
-        .to_owned()
-}
+// The stored row of a published name, at its old path.
+pub(crate) use dynamic_generation::stored_row_name;
 
 /// The rows a state export starts from.
 pub(crate) enum StateBase<'a> {

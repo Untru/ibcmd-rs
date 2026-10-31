@@ -81,8 +81,13 @@ use crate::module_blob::{
 use crate::module_blob::{HtmlPageOwner, html_page_storage_bytes};
 use crate::mssql_main_activation::{
     MainActivationDryRunReport, MainActivationExecutor, MainActivationMode, MainActivationPlan,
-    MainActivationSnapshot as MainPublicationSnapshot, MainStorageRow, prepare_main_activation_for,
+    MainActivationSnapshot as MainPublicationSnapshot, prepare_main_activation_for,
     render_main_activation_sql_with,
+};
+// The inputs of a main activation, at their old paths (`mssql_apply` reads the marker rule).
+pub(crate) use crate::mssql_main_activation::{
+    ActivationInputs, allowed_activation_targets, exactly_one_optional_marker,
+    read_activation_inputs,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -1096,7 +1101,11 @@ fn activate_staged_main_verified_inner(
     if args.live_checkpoint {
         crate::mssql_live_continue::preflight_backend(&sql, &args.database)?;
     }
-    let inputs = read_activation_inputs(&sql, &args.database)?;
+    let inputs = read_activation_inputs(
+        &crate::mssql_dump::StoredActivationRows,
+        &sql,
+        &args.database,
+    )?;
     if inputs.staged.is_empty() {
         bail!("ConfigSave is empty; there is no staged main-configuration change");
     }
@@ -1417,59 +1426,6 @@ pub(crate) fn activate_staged_main_managed_verified(
     activate_staged_main_verified_inner(args, profile, Some(session), None)
 }
 
-/// What a main activation plans from, as stored: the exact `ConfigSave` image, the `Config` rows of the
-/// same names and the `DynamicallyUpdated` markers of `Config` and `Params`.
-pub(crate) struct ActivationInputs {
-    pub staged: Vec<MainStorageRow>,
-    pub active: Vec<MainStorageRow>,
-    pub config_marker: Option<MainStorageRow>,
-    pub params_marker: Option<MainStorageRow>,
-}
-
-/// Reads the [`ActivationInputs`] of `database` (`staged` is empty when nothing is staged).
-pub(crate) fn read_activation_inputs(sql: &SqlExec, database: &str) -> Result<ActivationInputs> {
-    let empty = BTreeSet::new();
-    let staged =
-        crate::mssql_dump::fetch_main_activation_rows(sql, database, "ConfigSave", &empty)?;
-    if staged.is_empty() {
-        return Ok(ActivationInputs {
-            staged,
-            active: Vec::new(),
-            config_marker: None,
-            params_marker: None,
-        });
-    }
-    let selected = staged
-        .iter()
-        .map(|row| row.file_name.clone())
-        .collect::<BTreeSet<_>>();
-    let active = crate::mssql_dump::fetch_main_activation_rows(sql, database, "Config", &selected)?;
-    let marker_name = BTreeSet::from(["DynamicallyUpdated".to_owned()]);
-    let config_marker = exactly_one_optional_marker(
-        "Config",
-        crate::mssql_dump::fetch_main_activation_rows(sql, database, "Config", &marker_name)?,
-    )?;
-    let params_marker = exactly_one_optional_marker(
-        "Params",
-        crate::mssql_dump::fetch_main_activation_rows(sql, database, "Params", &marker_name)?,
-    )?;
-    Ok(ActivationInputs {
-        staged,
-        active,
-        config_marker,
-        params_marker,
-    })
-}
-
-/// The staged names an activation may change: every row but the three service rows.
-pub(crate) fn allowed_activation_targets(staged: &[MainStorageRow]) -> Vec<String> {
-    staged
-        .iter()
-        .filter(|row| !matches!(row.file_name.as_str(), "root" | "version" | "versions"))
-        .map(|row| row.file_name.clone())
-        .collect()
-}
-
 /// The exclusive promotion of the staged ConfigSave, carried out by the own apply (#408 step 2, F-4 of #344).
 ///
 /// The transaction of [`render_main_activation_sql`] replaces the staged rows and deletes the two markers, which
@@ -1556,7 +1512,12 @@ fn config_apply_options(
     script: &Path,
     own_ras_processes: &[crate::mssql_platform_profile::OwnRasProcess],
 ) -> crate::mssql_config_apply::ConfigApplyOptions {
-    let mut options = crate::mssql_config_apply::ConfigApplyOptions::new(database, profile);
+    let mut options = crate::mssql_config_apply::ConfigApplyOptions::new(
+        database,
+        profile,
+        crate::restructure::extensions::read_adoptions,
+        &crate::mssql_dump::StoredActivationRows,
+    );
     options.dry_run = dry_run;
     options.exclusivity = crate::mssql_config_apply::Exclusivity::SqlSessions;
     options.script_output = Some(script.to_path_buf());
@@ -1610,17 +1571,6 @@ mod config_apply_options_tests {
         );
         assert!(dry.dry_run);
         assert!(dry.own_ras_processes.is_empty());
-    }
-}
-
-pub(crate) fn exactly_one_optional_marker(
-    table: &str,
-    mut rows: Vec<MainStorageRow>,
-) -> Result<Option<MainStorageRow>> {
-    match rows.len() {
-        0 => Ok(None),
-        1 => Ok(rows.pop()),
-        count => bail!("{table}.DynamicallyUpdated returned {count} rows"),
     }
 }
 

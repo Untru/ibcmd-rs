@@ -27,10 +27,11 @@ use uuid::Uuid;
 use crate::metadata_model::brace::parse_row;
 use crate::metadata_model::export::names::{owned_groups, remove_owned};
 use crate::restructure::extensions::{
-    Adoption, ChangedObject, ExtensionInputs, check as check_adoption, read_adoptions,
+    Adoption, ChangedObject, ExtensionInputs, check as check_adoption,
 };
 use crate::sql::{SqlClient, SqlExec, SqlValue};
 
+use super::AdoptionReader;
 use super::gate::GateBlocker;
 use super::model::{RowMeta, RowName, classify_name, hex_upper, quote_ident};
 use super::objects::describe;
@@ -662,6 +663,7 @@ pub fn extension_blockers(
     sql: &SqlExec,
     database: &str,
     removals: &Removals,
+    read_adoptions: AdoptionReader,
 ) -> Result<Vec<GateBlocker>> {
     let db = quote_ident(database)?;
     let registered = match client.query_scalar(

@@ -786,6 +786,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibcmd-dynamic-generation"
+version = "0.1.0"
+dependencies = [
+ "uuid",
+]
+
+[[package]]
 name = "ibcmd-edt"
 version = "0.1.0"
 dependencies = [
@@ -1035,6 +1042,7 @@ dependencies = [
  "ibcmd-compiler-readiness",
  "ibcmd-core",
  "ibcmd-dump-readers",
+ "ibcmd-dynamic-generation",
  "ibcmd-edt",
  "ibcmd-filedb",
  "ibcmd-form-body",

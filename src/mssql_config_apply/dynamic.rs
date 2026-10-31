@@ -960,7 +960,7 @@ fn effective_blob(
     history: &[String],
     judged: &[RowMeta],
 ) -> Result<Option<Vec<u8>>> {
-    let stored = crate::mssql_dump::stored_row_name(
+    let stored = ibcmd_dynamic_generation::stored_row_name(
         history,
         name,
         judged.iter().map(|row| row.name.as_str()),
@@ -1492,7 +1492,11 @@ pub fn plan_dynamic(sql: &SqlExec, options: &ConfigApplyOptions) -> Result<Dynam
     }
 
     // The online engine's plan: the exact stage, the rows it replaces, the markers.
-    let inputs = crate::mssql::read_activation_inputs(sql, database)?;
+    let inputs = crate::mssql_main_activation::read_activation_inputs(
+        options.activation_rows,
+        sql,
+        database,
+    )?;
     require_judged_image("ConfigSave", &staged, &inputs.staged)?;
     require_judged_image("Config", &replaced, &inputs.active)?;
     for (table, judged_marker, image_marker) in [
@@ -1511,7 +1515,7 @@ pub fn plan_dynamic(sql: &SqlExec, options: &ConfigApplyOptions) -> Result<Dynam
         .staged
         .into_iter()
         .partition(|row| row.file_name.eq_ignore_ascii_case("deleted"));
-    let allowed = crate::mssql::allowed_activation_targets(&published);
+    let allowed = crate::mssql_main_activation::allowed_activation_targets(&published);
     let activation = prepare_main_activation(
         MainActivationMode::Online,
         published,
@@ -1958,6 +1962,9 @@ fn owners_of(staged: &[RowMeta]) -> std::collections::BTreeMap<String, Vec<Strin
     }
     owners
 }
+
+#[cfg(test)]
+mod activation_tests;
 
 #[cfg(test)]
 mod tests {

@@ -13,6 +13,7 @@ use std::io::Read;
 use uuid::Uuid;
 
 use crate::mssql_platform_profile::{OwnRasProcess, exclusive_session_gate};
+use crate::sql::SqlExec;
 
 #[doc(hidden)]
 pub const MAX_ROW_BYTES: usize = 16 * 1024 * 1024;
@@ -422,6 +423,91 @@ impl MainActivationPlan {
                 .collect()
             },
         }
+    }
+}
+
+/// Where a main activation reads the stored rows it plans from (the root's exporter, which reads them as
+/// they are stored, never through a generation an export of the process resolved).
+#[doc(hidden)]
+pub trait MainActivationRowSource: std::fmt::Debug + Sync {
+    /// The rows of `table` of `database` whose names are in `selected` (every row when it is empty).
+    fn fetch_rows(
+        &self,
+        sql: &SqlExec,
+        database: &str,
+        table: &str,
+        selected: &BTreeSet<String>,
+    ) -> anyhow::Result<Vec<MainStorageRow>>;
+}
+
+/// What a main activation plans from, as stored: the exact `ConfigSave` image, the `Config` rows of the
+/// same names and the `DynamicallyUpdated` markers of `Config` and `Params`.
+#[doc(hidden)]
+pub struct ActivationInputs {
+    pub staged: Vec<MainStorageRow>,
+    pub active: Vec<MainStorageRow>,
+    pub config_marker: Option<MainStorageRow>,
+    pub params_marker: Option<MainStorageRow>,
+}
+
+/// Reads the [`ActivationInputs`] of `database` from `rows` (`staged` is empty when nothing is staged).
+#[doc(hidden)]
+pub fn read_activation_inputs(
+    rows: &dyn MainActivationRowSource,
+    sql: &SqlExec,
+    database: &str,
+) -> anyhow::Result<ActivationInputs> {
+    let empty = BTreeSet::new();
+    let staged = rows.fetch_rows(sql, database, "ConfigSave", &empty)?;
+    if staged.is_empty() {
+        return Ok(ActivationInputs {
+            staged,
+            active: Vec::new(),
+            config_marker: None,
+            params_marker: None,
+        });
+    }
+    let selected = staged
+        .iter()
+        .map(|row| row.file_name.clone())
+        .collect::<BTreeSet<_>>();
+    let active = rows.fetch_rows(sql, database, "Config", &selected)?;
+    let marker_name = BTreeSet::from(["DynamicallyUpdated".to_owned()]);
+    let config_marker = exactly_one_optional_marker(
+        "Config",
+        rows.fetch_rows(sql, database, "Config", &marker_name)?,
+    )?;
+    let params_marker = exactly_one_optional_marker(
+        "Params",
+        rows.fetch_rows(sql, database, "Params", &marker_name)?,
+    )?;
+    Ok(ActivationInputs {
+        staged,
+        active,
+        config_marker,
+        params_marker,
+    })
+}
+
+/// The staged names an activation may change: every row but the three service rows.
+#[doc(hidden)]
+pub fn allowed_activation_targets(staged: &[MainStorageRow]) -> Vec<String> {
+    staged
+        .iter()
+        .filter(|row| !matches!(row.file_name.as_str(), "root" | "version" | "versions"))
+        .map(|row| row.file_name.clone())
+        .collect()
+}
+
+#[doc(hidden)]
+pub fn exactly_one_optional_marker(
+    table: &str,
+    mut rows: Vec<MainStorageRow>,
+) -> anyhow::Result<Option<MainStorageRow>> {
+    match rows.len() {
+        0 => Ok(None),
+        1 => Ok(rows.pop()),
+        count => anyhow::bail!("{table}.DynamicallyUpdated returned {count} rows"),
     }
 }
 

@@ -69,7 +69,12 @@ impl State {
         };
         let profile =
             crate::dropin::apply::profile_of(session.configuration.platform()).map_err(failure)?;
-        let mut options = crate::mssql_config_apply::ConfigApplyOptions::new(database, profile);
+        let mut options = crate::mssql_config_apply::ConfigApplyOptions::new(
+            database,
+            profile,
+            crate::restructure::extensions::read_adoptions,
+            &crate::mssql_dump::StoredActivationRows,
+        );
         options.recovery_dir = Some(params.recovery_dir.join(uuid::Uuid::new_v4().to_string()));
         // Never prune operator artifacts from this editor operation.
         options.recovery_keep = 0;

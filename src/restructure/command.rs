@@ -387,6 +387,8 @@ fn run_through_apply(
     let mut options = ConfigApplyOptions::new(
         args.database.clone(),
         MssqlNativePlatformProfile::Platform8_3_27_2214,
+        crate::restructure::extensions::read_adoptions,
+        &crate::mssql_dump::StoredActivationRows,
     );
     options.dry_run = args.dry_run;
     options.rehearse = args.rehearse;
@@ -405,9 +407,14 @@ fn run_through_apply(
         (None, false) => BackupPolicy::None,
     };
     options.restructure_limit = limit_of(args)?;
-    let gate = S1Gate::new(&sql, options.conservative_gate(), plan_options(args))
-        .xml_version(Some("2.20"))
-        .size_limit(options.restructure_limit.clone());
+    let gate = S1Gate::new(
+        &sql,
+        options.conservative_gate(),
+        plan_options(args),
+        crate::restructure::extensions::read_adoptions,
+    )
+    .xml_version(Some("2.20"))
+    .size_limit(options.restructure_limit.clone());
     let mode = if args.dry_run {
         "through-apply, dry-run"
     } else if args.rehearse {

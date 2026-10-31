@@ -138,10 +138,21 @@ pub enum GateChoice {
     Conservative,
 }
 
+/// Reads the objects the extensions of a database adopt, from their images: the root's
+/// `restructure::extensions::read_adoptions`, which reads the extension registry and images through the
+/// exporter. The apply calls it only where a removal or an S1 restructuring has to know.
+pub(crate) type AdoptionReader =
+    fn(&SqlExec, &str) -> Result<Vec<crate::restructure::extensions::Adoption>>;
+
 #[derive(Debug, Clone)]
 pub struct ConfigApplyOptions {
     /// Source apply's original export dependency proof, never caller SQL.
     pub(crate) source_preimages: Option<dynamic::SourceOwnerPreimages>,
+    /// The objects the extensions adopt, read when a removal or the S1 gate needs them.
+    pub(crate) read_adoptions: AdoptionReader,
+    /// Where the dynamic apply reads the stored rows of its online activation: the root's
+    /// `mssql_dump::StoredActivationRows`, which reads them through the exporter.
+    pub(crate) activation_rows: &'static dyn crate::mssql_main_activation::MainActivationRowSource,
     pub database: String,
     pub platform_profile: MssqlNativePlatformProfile,
     /// Plan, check and render, but write nothing (not even the recovery
@@ -230,6 +241,7 @@ fn restructure_gate<'a>(
                     sql,
                     options.conservative_gate(),
                     crate::restructure::plan::PlanOptions::default(),
+                    options.read_adoptions,
                 )
                 .xml_version(xml_version_of(options.platform_profile))
                 .size_limit(options.restructure_limit.clone()),
@@ -245,9 +257,16 @@ impl ConfigApplyOptions {
         }
     }
 
-    pub fn new(database: impl Into<String>, platform_profile: MssqlNativePlatformProfile) -> Self {
+    pub fn new(
+        database: impl Into<String>,
+        platform_profile: MssqlNativePlatformProfile,
+        read_adoptions: AdoptionReader,
+        activation_rows: &'static dyn crate::mssql_main_activation::MainActivationRowSource,
+    ) -> Self {
         Self {
             source_preimages: None,
+            read_adoptions,
+            activation_rows,
             database: database.into(),
             platform_profile,
             dry_run: false,
@@ -1088,6 +1107,7 @@ pub fn plan_with_gate(
                 sql,
                 database,
                 &analysis.removals,
+                options.read_adoptions,
             )?);
         }
         let answer = answer_removals(
@@ -1969,7 +1989,12 @@ pub fn run_command(args: &crate::cli::MssqlConfigApplyArgs) -> Result<()> {
         password_env: &args.sql_pwd_env,
         trust_server_certificate: true,
     })?;
-    let mut options = ConfigApplyOptions::new(args.database.clone(), args.platform_profile);
+    let mut options = ConfigApplyOptions::new(
+        args.database.clone(),
+        args.platform_profile,
+        crate::restructure::extensions::read_adoptions,
+        &crate::mssql_dump::StoredActivationRows,
+    );
     options.dry_run = args.dry_run;
     options.rehearse = args.rehearse;
     options.exclusivity = match args.exclusivity {
@@ -2109,6 +2134,27 @@ fn write_artifact(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// The adoption reader of the unit tests: none of them reaches an extension.
+    fn no_adoptions(_: &SqlExec, _: &str) -> Result<Vec<crate::restructure::extensions::Adoption>> {
+        bail!("no extension is read in a unit test")
+    }
+
+    /// The activation rows of the unit tests: none of them reaches an activation.
+    #[derive(Debug)]
+    struct NoActivationRows;
+
+    impl crate::mssql_main_activation::MainActivationRowSource for NoActivationRows {
+        fn fetch_rows(
+            &self,
+            _: &SqlExec,
+            _: &str,
+            _: &str,
+            _: &std::collections::BTreeSet<String>,
+        ) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+            bail!("no activation row is read in a unit test")
+        }
+    }
+
     #[test]
     fn the_sessions_query_leaves_out_only_the_idle_sessions_of_the_own_ras_processes() {
         // no own process (the default of every caller but the old activation commands): every session but ours counts
@@ -2116,9 +2162,14 @@ mod tests {
         assert!(plain.contains("ISNULL(host_process_id, -1) <> @P2 ORDER BY session_id"));
         assert!(!plain.contains("1CV83 Server"));
         assert!(
-            ConfigApplyOptions::new("db", MssqlNativePlatformProfile::Platform8_3_27_2214)
-                .own_ras_processes
-                .is_empty()
+            ConfigApplyOptions::new(
+                "db",
+                MssqlNativePlatformProfile::Platform8_3_27_2214,
+                no_adoptions,
+                &NoActivationRows,
+            )
+            .own_ras_processes
+            .is_empty()
         );
         let own = [OwnRasProcess {
             host: "wks".to_owned(),
@@ -2135,7 +2186,12 @@ mod tests {
     fn the_8_5_profile_is_planned_like_any_other() {
         // it needs a server, and says so; it is not turned away by its version
         let sql = SqlExec::detached("no server in a unit test");
-        let options = ConfigApplyOptions::new("db", MssqlNativePlatformProfile::Platform8_5_1_1150);
+        let options = ConfigApplyOptions::new(
+            "db",
+            MssqlNativePlatformProfile::Platform8_5_1_1150,
+            no_adoptions,
+            &NoActivationRows,
+        );
         let error = plan(&sql, &options).err().expect("a detached handle fails");
         assert!(
             !error.to_string().contains("measured on 8.3.27 only"),
@@ -2147,8 +2203,12 @@ mod tests {
     #[test]
     fn a_platform_that_is_measured_still_needs_a_server() {
         let sql = SqlExec::detached("no server in a unit test");
-        let options =
-            ConfigApplyOptions::new("db", MssqlNativePlatformProfile::Platform8_3_27_2214);
+        let options = ConfigApplyOptions::new(
+            "db",
+            MssqlNativePlatformProfile::Platform8_3_27_2214,
+            no_adoptions,
+            &NoActivationRows,
+        );
         let error = plan(&sql, &options).err().expect("a detached handle fails");
         assert!(!error.to_string().contains("8.5"), "{error}");
     }
@@ -2519,8 +2579,12 @@ mod tests {
     #[test]
     fn the_s1_class_builds_the_s1_gate_of_the_restructure_track() {
         let sql = SqlExec::detached("no server in a unit test");
-        let mut options =
-            ConfigApplyOptions::new("db", MssqlNativePlatformProfile::Platform8_3_27_2214);
+        let mut options = ConfigApplyOptions::new(
+            "db",
+            MssqlNativePlatformProfile::Platform8_3_27_2214,
+            no_adoptions,
+            &NoActivationRows,
+        );
         options.allow_restructure = Some(AllowRestructure::S1);
         let gate = structural_gate(&sql, &options).expect("the S1 gate is built");
         assert_eq!(gate.name(), "s1");

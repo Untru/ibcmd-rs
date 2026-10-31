@@ -387,3 +387,22 @@ is the process-wide cancellation flag formerly `src/cancel.rs`, which was
 outside the slice; the root's `cancel` module re-exports it, so the flag
 keeps one owner. The file joins the slice with no occurrence. Every other
 record, the two stale ones included, is unchanged.
+
+The config-apply seams of #559 change the slice in two places:
+- `crates/ibcmd-mssql-live/src/mssql_main_activation.rs` takes the main
+  activation's inputs (`read_activation_inputs`, `allowed_activation_targets`
+  and the marker rule), formerly in `src/mssql.rs`, which was outside the
+  slice. The statement that names the three service rows
+  (`"root" | "version" | "versions"`) joins it with three
+  `name-special-case` records, count one each; the file's other records are
+  unchanged.
+- `crates/ibcmd-dynamic-generation/src/` also belongs to the slice. Its
+  `lib.rs` is the dynamic-generation overlay formerly
+  `src/mssql_dump/dynamic_generation.rs`, with its process-wide registry of
+  installed overlays and `stored_row_name`, formerly in
+  `src/mssql_dump/mod.rs`. The moved file held no occurrence: the crate's
+  `lib.rs` joins with an empty record, and the root's facade at the old path
+  keeps that path's empty record. The live lab test
+  (`src/mssql_dump/dynamic_generation/live.rs`) is a test-only module.
+No fingerprint changes. Every other record, the two stale ones included, is
+unchanged.
