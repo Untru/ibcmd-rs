@@ -893,7 +893,8 @@ mod tests {
 
     #[test]
     fn actual_native_si_versions_is_raw_bom_text_and_deflate_is_refused() {
-        let raw = include_bytes!("../../tests/fixtures/dynamic-overlay/siVersions.native.txt");
+        let raw =
+            include_bytes!("../../../../tests/fixtures/dynamic-overlay/siVersions.native.txt");
         assert!(raw.starts_with(b"\xef\xbb\xbf{0,16,"));
         assert_eq!(version_names(raw).unwrap().len(), 16);
         assert!(version_names(&versions::deflate_row(raw).unwrap()).is_err());

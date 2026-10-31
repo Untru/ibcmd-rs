@@ -624,8 +624,8 @@ fn an_index_switch_is_let_through_and_the_untraced_ones_are_not() {
 
 /// The extensions of the infobase (S1-I): the objects they adopt come with the plan's input.
 fn with_extensions(adopted: &[(&str, &str)]) -> crate::restructure::plan::Inputs {
-    use crate::mssql_dump::extension::AdoptedObject;
     use crate::restructure::extensions::{Adoption, ExtensionInputs};
+    use ibcmd_restructure::descriptor::AdoptedObject;
     let mut staged = inputs(OLD_ROW, NEW_ROW);
     staged.extensions = ExtensionInputs {
         registered: 2,

@@ -506,10 +506,12 @@ mod tests {
         header
     }
 
-    const OLD: &[u8] =
-        include_bytes!("../../docs/apply/evidence/params-marker/f4-descriptor-before.deflate");
-    const STAGED: &[u8] =
-        include_bytes!("../../docs/apply/evidence/params-marker/f4-descriptor-staged.deflate");
+    const OLD: &[u8] = include_bytes!(
+        "../../../../docs/apply/evidence/params-marker/f4-descriptor-before.deflate"
+    );
+    const STAGED: &[u8] = include_bytes!(
+        "../../../../docs/apply/evidence/params-marker/f4-descriptor-staged.deflate"
+    );
 
     #[test]
     fn actual_f4_recompressed_descriptor_is_not_a_metadata_change() {

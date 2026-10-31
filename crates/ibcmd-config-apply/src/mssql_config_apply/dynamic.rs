@@ -2342,7 +2342,11 @@ mod tests {
             .unwrap()
             .0;
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/dynamic-metadata-native");
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("dynamic-metadata-native");
         let mut rows = client.rows.lock().unwrap();
         rows.clear();
         rows.push(source_dependency_row(
@@ -2369,7 +2373,7 @@ mod tests {
     #[test]
     fn source_dependency_native_templates_capture_matching_aliases_and_refuse_conflicts() {
         let manifest: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/dynamic-metadata-native/manifest.json"
+            "../../../../tests/fixtures/dynamic-metadata-native/manifest.json"
         ))
         .unwrap();
         let cases: Vec<_> = manifest["cases"]
@@ -2871,9 +2875,9 @@ mod tests {
             }
         }
         let active =
-            include_bytes!("../../tests/fixtures/platform85-dynamic/root-active.native.bin");
+            include_bytes!("../../../../tests/fixtures/platform85-dynamic/root-active.native.bin");
         let staged =
-            include_bytes!("../../tests/fixtures/platform85-dynamic/root-staged.native.bin");
+            include_bytes!("../../../../tests/fixtures/platform85-dynamic/root-staged.native.bin");
         let active = versions::deflate_row(active).unwrap();
         let staged = versions::deflate_row(staged).unwrap();
         assert!(

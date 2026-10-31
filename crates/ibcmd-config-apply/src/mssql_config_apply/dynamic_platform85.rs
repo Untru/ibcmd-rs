@@ -92,9 +92,9 @@ mod tests {
 
     const PROFILE: MssqlNativePlatformProfile = MssqlNativePlatformProfile::Platform8_5_1_1150;
     const ACTIVE: &[u8] =
-        include_bytes!("../../tests/fixtures/platform85-dynamic/form-active.native.deflate");
+        include_bytes!("../../../../tests/fixtures/platform85-dynamic/form-active.native.deflate");
     const STAGED: &[u8] =
-        include_bytes!("../../tests/fixtures/platform85-dynamic/form-staged.native.deflate");
+        include_bytes!("../../../../tests/fixtures/platform85-dynamic/form-staged.native.deflate");
 
     fn deflate(bytes: &[u8]) -> Vec<u8> {
         let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());

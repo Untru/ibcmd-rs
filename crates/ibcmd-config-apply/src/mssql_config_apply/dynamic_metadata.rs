@@ -583,7 +583,11 @@ mod tests {
     fn raw(name: &str) -> Vec<u8> {
         std::fs::read(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/dynamic-metadata-native")
+                .join("..")
+                .join("..")
+                .join("tests")
+                .join("fixtures")
+                .join("dynamic-metadata-native")
                 .join(format!("{name}.bin")),
         )
         .unwrap()
@@ -599,7 +603,7 @@ mod tests {
     #[test]
     fn native_matrix_binds_exact_owners_and_decodes_all_measured_body_families() {
         let manifest: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/dynamic-metadata-native/manifest.json"
+            "../../../../tests/fixtures/dynamic-metadata-native/manifest.json"
         ))
         .unwrap();
         for case in manifest["cases"].as_array().unwrap() {
