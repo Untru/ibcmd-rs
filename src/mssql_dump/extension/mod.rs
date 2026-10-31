@@ -41,7 +41,7 @@ use super::{
     BinaryConfigRow, DirectStorageExportRecord, StorageImageSourceExportReport,
     config_row_from_binary, export_direct_storage_rows_to_source, inflate_raw_deflate,
 };
-use crate::cli::InfobaseConfigSourceVersion;
+use crate::legacy_version::InfobaseConfigSourceVersion;
 use crate::sql::SqlExec;
 
 mod form;

@@ -96,7 +96,8 @@ use crate::adapters::mssql_legacy::{
     MssqlConfigurationTableRole, MssqlExportInventoryPlan, MssqlExportInventoryScope,
     MssqlLegacyAdapter, decode_task_internal_uuid_slots,
 };
-use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
+use crate::cli::MssqlDumpConfigArgs;
+use crate::legacy_version::InfobaseConfigSourceVersion;
 use crate::metadata_owner_graph::{
     self as owner_graph, CATALOG_ATTRIBUTE_GROUP_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
     METADATA_TEMPLATE_COLLECTION_UUID,

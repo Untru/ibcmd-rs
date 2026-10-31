@@ -43,7 +43,7 @@ use std::collections::BTreeMap;
 
 use super::properties::{Meaning, meaning};
 use super::{ExtensionContext, STATE_EXTENDED};
-use crate::cli::InfobaseConfigSourceVersion;
+use crate::legacy_version::InfobaseConfigSourceVersion;
 use crate::mssql_dump::{
     format_full_metadata_source_xml, insert_configuration_internal_info_xml,
     insert_configuration_root_child_objects_xml, insert_metadata_properties_xml,
