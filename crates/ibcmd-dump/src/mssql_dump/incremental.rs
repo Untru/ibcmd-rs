@@ -54,11 +54,13 @@ use crate::legacy_version::InfobaseConfigSourceVersion;
 use ibcmd_metadata_model::metadata_model::index::{NESTED_COLLECTIONS, ROOT_COLLECTIONS};
 
 /// The file the export writes for the whole configuration.
-pub(crate) const CONFIG_DUMP_INFO: &str = ibcmd_xml::config_dump_info::FILE_NAME;
+#[doc(hidden)]
+pub const CONFIG_DUMP_INFO: &str = ibcmd_xml::config_dump_info::FILE_NAME;
 
 /// Native incremental export cannot safely represent removed or renamed objects.
 #[derive(Debug)]
-pub(crate) struct NativeFullExportRequired;
+#[doc(hidden)]
+pub struct NativeFullExportRequired;
 
 impl std::fmt::Display for NativeFullExportRequired {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -73,28 +75,30 @@ const HIERARCHICAL: &str = ibcmd_xml::config_dump_info::HIERARCHICAL;
 
 /// One top-level `<Metadata>` of a ConfigDumpInfo.xml: one stored row.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DumpInfoEntry {
-    pub(crate) name: String,
-    pub(crate) id: String,
-    pub(crate) config_version: String,
+#[doc(hidden)]
+pub struct DumpInfoEntry {
+    pub name: String,
+    pub id: String,
+    pub config_version: String,
 }
 
 /// A ConfigDumpInfo.xml as read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct DumpInfo {
+#[doc(hidden)]
+pub struct DumpInfo {
     /// `format` of the root element (`Hierarchical`).
     pub(crate) layout: Option<String>,
     /// `version` of the root element: the XML format (`2.20`, `2.21`).
     pub(crate) format_version: Option<String>,
     /// The rows: the top-level `<Metadata>` of `<ConfigVersions>`.
-    pub(crate) entries: Vec<DumpInfoEntry>,
+    pub entries: Vec<DumpInfoEntry>,
     /// The parts of the rows: the `<Metadata>` nested in them (attributes,
     /// tabular sections, commands, ...), id -> name. They have no version.
-    pub(crate) parts: BTreeMap<String, String>,
+    pub parts: BTreeMap<String, String>,
 }
 
 impl DumpInfo {
-    pub(crate) fn parse(xml: &[u8]) -> Result<Self> {
+    pub fn parse(xml: &[u8]) -> Result<Self> {
         let document = ibcmd_xml::config_dump_info::ConfigDumpInfo::parse(xml)?;
         let mut info = Self {
             layout: document.layout,
@@ -114,7 +118,7 @@ impl DumpInfo {
         Ok(info)
     }
 
-    pub(crate) fn read(path: &Path) -> Result<Self> {
+    pub fn read(path: &Path) -> Result<Self> {
         let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
         Self::parse(&bytes).with_context(|| format!("failed to read {}", path.display()))
     }
@@ -510,14 +514,15 @@ fn object_dir(segments: &[&str]) -> Option<String> {
 /// (`config_dump_top_name` names it by the stem of the file the row writes),
 /// so the two directions agree by construction.
 #[derive(Debug, Default)]
-pub(crate) struct Ownership<'a> {
+#[doc(hidden)]
+pub struct Ownership<'a> {
     files: HashMap<String, &'a str>,
     role_stems: HashMap<String, &'a str>,
     folders: HashMap<String, &'a str>,
 }
 
 impl<'a> Ownership<'a> {
-    pub(crate) fn new(entries: &'a [DumpInfoEntry]) -> Self {
+    pub fn new(entries: &'a [DumpInfoEntry]) -> Self {
         let mut ownership = Self::default();
         for entry in entries {
             let segments = entry.name.split('.').collect::<Vec<_>>();
@@ -554,7 +559,7 @@ impl<'a> Ownership<'a> {
 
     /// The entry whose own file `relative` (`/`-separated) is: the object's
     /// XML, or a file of a role.
-    pub(crate) fn exact(&self, relative: &str) -> Option<&'a str> {
+    pub fn exact(&self, relative: &str) -> Option<&'a str> {
         if let Some(id) = self.files.get(relative).copied() {
             return Some(id);
         }
@@ -573,7 +578,7 @@ impl<'a> Ownership<'a> {
     }
 
     /// The innermost object whose folder holds `relative`.
-    pub(crate) fn folder(&self, relative: &str) -> Option<&'a str> {
+    pub fn folder(&self, relative: &str) -> Option<&'a str> {
         ancestors(relative).find_map(|ancestor| self.folders.get(ancestor).copied())
     }
 }
@@ -711,7 +716,8 @@ fn written_key(relative: &str) -> String {
 /// The output directory of an export with `--base` or `--sync`: it may hold
 /// an earlier export (the point of both), so it is created when missing and
 /// otherwise left as it is.
-pub(crate) fn prepare_output_dir(path: &Path) -> Result<()> {
+#[doc(hidden)]
+pub fn prepare_output_dir(path: &Path) -> Result<()> {
     if path.exists() {
         if !path.is_dir() {
             bail!(

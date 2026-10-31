@@ -22,7 +22,7 @@ tests/fixtures/file-infobase/tiny-xml/** -text whitespace=cr-at-eol
 tests/fixtures/file-infobase/tiny-source/** -text whitespace=cr-at-eol
 tests/fixtures/file-infobase/empty-xml-8.3.27/** -text whitespace=cr-at-eol
 tests/fixtures/file-infobase/empty-xml-8.5.1/** -text whitespace=cr-at-eol
-src/mssql_dump/empty_configuration/** -text whitespace=cr-at-eol
+crates/ibcmd-dump/src/mssql_dump/empty_configuration/** -text whitespace=cr-at-eol
 tests/fixtures/file-infobase/default-button-xml/** -text whitespace=cr-at-eol
 tests/fixtures/file-infobase/default-button-source/** -text whitespace=cr-at-eol
 src/load/seeds/** -text

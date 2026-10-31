@@ -32,11 +32,12 @@ thread_local! {
 /// Reuse raw file-table reads within one editor operation, never across requests.
 /// Begin under the engine lock. Drop BEFORE final independent inventory validation.
 /// Nested scopes are refused so final validation cannot restore an older snapshot.
-pub(crate) struct FileDbReadScope {
+#[doc(hidden)]
+pub struct FileDbReadScope {
     _same_thread: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 impl FileDbReadScope {
-    pub(crate) fn begin(path: &Path) -> Result<Self> {
+    pub fn begin(path: &Path) -> Result<Self> {
         crate::cancel::check()?;
         if READ_SCOPE.with(|scope| scope.borrow().is_some()) {
             bail!("nested file database read scopes are not supported");
@@ -210,7 +211,8 @@ pub(super) fn publish(
 }
 
 /// The `CONFIG` table of a file infobase, the base an import stages over.
-pub(crate) struct FileInfobaseConfig {
+#[doc(hidden)]
+pub struct FileInfobaseConfig {
     /// The configuration it publishes (an online generation's aliases under
     /// their plain names): name -> stored bytes.
     pub published: BTreeMap<String, Vec<u8>>,
@@ -221,7 +223,8 @@ pub(crate) struct FileInfobaseConfig {
 /// The `CONFIG` rows of a file infobase as an import stages over them; a table
 /// holding the markers of an operation the platform did not finish is
 /// refused, as `config save` refuses it.
-pub(crate) fn file_infobase_config(rows: Vec<ConfigRow>) -> Result<FileInfobaseConfig> {
+#[doc(hidden)]
+pub fn file_infobase_config(rows: Vec<ConfigRow>) -> Result<FileInfobaseConfig> {
     let config = assemble(rows, "CONFIG")?;
     super::config_save::refuse_unfinished_operation(config.keys().map(String::as_str))?;
     let stored_names = config.keys().cloned().collect();
@@ -240,7 +243,8 @@ pub(crate) fn file_infobase_config(rows: Vec<ConfigRow>) -> Result<FileInfobaseC
 
 /// Effective import base read through one locked write session. Incomplete or
 /// unrecognised staging is refused, never silently discarded by a partial import.
-pub(crate) fn file_infobase_effective(
+#[doc(hidden)]
+pub fn file_infobase_effective(
     config: Vec<ConfigRow>,
     saved: Vec<ConfigRow>,
 ) -> Result<FileInfobaseConfig> {
@@ -292,7 +296,8 @@ pub(crate) fn file_infobase_effective(
 
 /// Resolve adopted references from the same locked descriptor as the
 /// extension registry/CAS. No second open may drop its POSIX record lock.
-pub(crate) fn file_extension_base_provider(
+#[doc(hidden)]
+pub fn file_extension_base_provider(
     db: &mut FileDb,
     version: crate::legacy_version::InfobaseConfigSourceVersion,
 ) -> Result<super::extension::BaseIndexProvider> {

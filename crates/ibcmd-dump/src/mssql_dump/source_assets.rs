@@ -2180,7 +2180,8 @@ pub(super) fn ws_reference_definition_members(
     })
 }
 
-pub(crate) fn write_source_xml_file(
+#[doc(hidden)]
+pub fn write_source_xml_file(
     path: &Path,
     xml: impl AsRef<[u8]>,
     source_version: InfobaseConfigSourceVersion,
@@ -3751,7 +3752,8 @@ const HTML_TEMPLATE_DOCUMENT_UUID: &str = "8eb4fad1-1fa6-403e-970f-2c12dbb43e23"
 ///
 /// The loader's `html_page_storage_bytes` is its inverse and checks every page
 /// it stores by running it back through here.
-pub(crate) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>) -> Vec<u8> {
+#[doc(hidden)]
+pub fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(content) else {
         return content.to_vec();
     };
@@ -3837,7 +3839,8 @@ pub(crate) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
 ///
 /// The loader asks the same question of a readable `<Reference>/Help` before it
 /// stores it back as a link.
-pub(crate) fn help_link_marker_is_anchor(text: &str, marker_start: usize) -> bool {
+#[doc(hidden)]
+pub fn help_link_marker_is_anchor(text: &str, marker_start: usize) -> bool {
     let Some(tag_start) = text[..marker_start].rfind('<') else {
         return false;
     };
@@ -3957,7 +3960,8 @@ fn help_standard_picture_by_negative_index(index: &str) -> Option<&'static str> 
 
 /// The negative index a help page stores `StdPicture.<Name>` by, when it
 /// stores it by one.
-pub(crate) fn help_standard_picture_negative_index(reference: &str) -> Option<&'static str> {
+#[doc(hidden)]
+pub fn help_standard_picture_negative_index(reference: &str) -> Option<&'static str> {
     HELP_STANDARD_PICTURE_INDEXES
         .iter()
         .find_map(|(index, name)| (*name == reference).then_some(*index))

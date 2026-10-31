@@ -20,6 +20,8 @@ $AllowedCategories = @('uuid-literal', 'name-special-case', 'xml-policy')
 # root_helpers/ module directory and only that directory is listed.  Modules
 # the compiler reads only for tests are not part of the slice: they are found
 # from their `#[cfg(test)] mod name;` declaration (see Get-TestOnlyModulePaths).
+# src/mssql_dump/ itself moved to crates/ibcmd-dump/src/mssql_dump/ (#559);
+# the root keeps its facade and a test-only module there, outside the slice.
 $GuardedCrateDirectories = @(
     'crates/ibcmd-1c-text/src',
     'crates/ibcmd-1c-vocab/src',
@@ -841,13 +843,6 @@ function Get-ScopedFiles {
         }
     }
 
-    $mssqlRoot = Join-Path $Root 'src/mssql_dump'
-    if (-not (Test-Path -LiteralPath $mssqlRoot -PathType Container)) {
-        throw 'Scoped source directory is missing.'
-    }
-    foreach ($file in Get-ChildItem -LiteralPath $mssqlRoot -Filter '*.rs' -File -Recurse) {
-        $files.Add($file)
-    }
     $testOnly = Get-TestOnlyModulePaths -Candidates $files.ToArray()
     $scoped = @($files | Where-Object { -not (Test-InsideTestOnlyModule -FullPath $_.FullName -TestOnly $testOnly) })
     return @($scoped | Sort-Object FullName)
@@ -1054,12 +1049,15 @@ function Assert-Rejected {
 
 function Invoke-ScopeSelfTest {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("ibcmd-physical-scope-" + [guid]::NewGuid())
-    $mssql = Join-Path $root 'src/mssql_dump'
+    # The exporter's module directory: test-only modules declared in its
+    # mod.rs and in a nested file.
+    $dump = 'crates/ibcmd-dump/src/mssql_dump'
+    $mssql = Join-Path $root $dump
     $utf8 = [System.Text.UTF8Encoding]::new($false)
     $uuid = 'const ID: &str = "11111111-1111-4111-8111-111111111111";'
     $files = [ordered]@{
         'src/module_blob.rs'                        = 'fn module_blob() {}'
-        'src/mssql_dump/mod.rs'                     = @'
+        "$dump/mod.rs"                              = @'
 #[cfg(test)]
 mod declared_tests;
 #[cfg(test)]
@@ -1074,16 +1072,16 @@ mod pathed;
 mod inline_tests { const INLINE: &str = "11111111-1111-4111-8111-111111111112"; }
 mod host;
 '@
-        'src/mssql_dump/declared_tests.rs'          = $uuid
-        'src/mssql_dump/declared_tests/deeper.rs'   = $uuid
-        'src/mssql_dump/nested_tests/mod.rs'        = $uuid
-        'src/mssql_dump/nested_tests/child.rs'      = $uuid
-        'src/mssql_dump/partly_tests.rs'            = $uuid
-        'src/mssql_dump/plain_tests.rs'             = $uuid
-        'src/mssql_dump/pathed.rs'                  = $uuid
-        'src/mssql_dump/host.rs'                    = "#[cfg(test)]`nmod host_tests;"
-        'src/mssql_dump/host/host_tests.rs'         = $uuid
-        'src/mssql_dump/host_tests.rs'              = $uuid
+        "$dump/declared_tests.rs"                   = $uuid
+        "$dump/declared_tests/deeper.rs"            = $uuid
+        "$dump/nested_tests/mod.rs"                 = $uuid
+        "$dump/nested_tests/child.rs"               = $uuid
+        "$dump/partly_tests.rs"                     = $uuid
+        "$dump/plain_tests.rs"                      = $uuid
+        "$dump/pathed.rs"                           = $uuid
+        "$dump/host.rs"                             = "#[cfg(test)]`nmod host_tests;"
+        "$dump/host/host_tests.rs"                  = $uuid
+        "$dump/host_tests.rs"                       = $uuid
     }
     # Each guarded crate directory: a production file, a nested one, and a
     # test-only module (with a file below its directory) that stays outside.
@@ -1101,9 +1099,8 @@ mod host;
         }
         [System.IO.Directory]::CreateDirectory((Join-Path $root 'tools')) | Out-Null
         $expected = @($GuardedCrateDirectories | ForEach-Object { "$_/lib.rs"; "$_/nested/deeper.rs" }) + @(
-            'src/module_blob.rs', 'src/mssql_dump/host.rs', 'src/mssql_dump/host_tests.rs',
-            'src/mssql_dump/mod.rs', 'src/mssql_dump/partly_tests.rs', 'src/mssql_dump/pathed.rs',
-            'src/mssql_dump/plain_tests.rs'
+            'src/module_blob.rs', "$dump/host.rs", "$dump/host_tests.rs", "$dump/mod.rs",
+            "$dump/partly_tests.rs", "$dump/pathed.rs", "$dump/plain_tests.rs"
         )
         $actual = @(Get-ScopedFiles $root | ForEach-Object { Get-LogicalPath -Root $root -Path $_.FullName } | Sort-Object)
         if (($actual -join '|') -ne (($expected | Sort-Object) -join '|')) {
@@ -1163,7 +1160,9 @@ mod host;
 
 function Invoke-SelfTest {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("ibcmd-physical-policy-" + [guid]::NewGuid())
-    [System.IO.Directory]::CreateDirectory((Join-Path $root 'src/mssql_dump')) | Out-Null
+    $dump = Join-Path $root 'crates/ibcmd-dump/src/mssql_dump'
+    [System.IO.Directory]::CreateDirectory((Join-Path $root 'src')) | Out-Null
+    [System.IO.Directory]::CreateDirectory($dump) | Out-Null
     [System.IO.Directory]::CreateDirectory((Join-Path $root 'tools')) | Out-Null
     foreach ($relative in $GuardedCrateDirectories) {
         $crateDirectory = Join-Path $root $relative
@@ -1172,7 +1171,7 @@ function Invoke-SelfTest {
     }
     try {
         $moduleBlob = Join-Path $root 'src/module_blob.rs'
-        $formBody = Join-Path $root 'src/mssql_dump/form_body.rs'
+        $formBody = Join-Path $dump 'form_body.rs'
         $moduleBlobText = "const ID: &str = `"11111111-1111-4111-8111-111111111111`";`n"
         $formBodyText = @'
 fn existing(kind: &str) { if kind == "Existing" { } }
@@ -1275,9 +1274,9 @@ fn multiline(xml: &mut String) {
         [System.IO.File]::WriteAllText($formBody, '', [System.Text.UTF8Encoding]::new($false))
         Assert-InventoryAllowed -Baseline (Read-Baseline $root) -Current (New-InventoryDocument $root)
 
-        [System.IO.File]::WriteAllText((Join-Path $root 'src/mssql_dump/fetch.rs'), 'fn fetch() {}', [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText((Join-Path $dump 'fetch.rs'), 'fn fetch() {}', [System.Text.UTF8Encoding]::new($false))
         Assert-Rejected { Assert-InventoryAllowed -Baseline (Read-Baseline $root) -Current (New-InventoryDocument $root) } 'unbaselined file_sha256='
-        Remove-Item -LiteralPath (Join-Path $root 'src/mssql_dump/fetch.rs') -Force
+        Remove-Item -LiteralPath (Join-Path $dump 'fetch.rs') -Force
 
         [System.IO.File]::WriteAllText($baselinePath, '{', [System.Text.UTF8Encoding]::new($false))
         Assert-Rejected { Read-Baseline $root } 'not valid JSON'

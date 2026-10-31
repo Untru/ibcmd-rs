@@ -15,10 +15,11 @@ use ibcmd_1c_vocab::{
     role_standard_tabular_section_attribute,
 };
 
-pub(super) struct RoleRights {
-    pub(super) set_for_new_objects: bool,
+#[doc(hidden)]
+pub struct RoleRights {
+    pub set_for_new_objects: bool,
     pub(super) set_for_attributes_by_default: bool,
-    pub(super) independent_rights_of_child_objects: bool,
+    pub independent_rights_of_child_objects: bool,
     pub(super) objects: Vec<RoleObjectRights>,
     pub(super) restriction_templates: Vec<RoleRestrictionTemplate>,
 }
@@ -95,7 +96,8 @@ pub(super) struct RoleRestrictionTemplate {
     pub(super) condition: String,
 }
 
-pub(super) fn parse_role_rights_blob(
+#[doc(hidden)]
+pub fn parse_role_rights_blob(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
@@ -259,7 +261,8 @@ pub(super) fn role_object_ref_name(
 /// `format_role_rights_xml`, for callers outside the exporter that need to
 /// read a row back the way the export does (the base-free writer's audit and
 /// its self-check).
-pub(crate) fn role_rights_xml_from_blob(
+#[doc(hidden)]
+pub fn role_rights_xml_from_blob(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,

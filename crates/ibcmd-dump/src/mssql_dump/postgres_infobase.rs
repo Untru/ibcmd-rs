@@ -48,7 +48,8 @@ impl PostgresExportSnapshot {
 
     /// Move the snapshot out of a resolved connection before export preflight.
     /// All connection clones then lose access, including when preflight fails.
-    pub(crate) fn transfer(&self) -> Result<Option<Self>> {
+    #[doc(hidden)]
+    pub fn transfer(&self) -> Result<Option<Self>> {
         Ok(self.take_rows()?.map(Self::new))
     }
 

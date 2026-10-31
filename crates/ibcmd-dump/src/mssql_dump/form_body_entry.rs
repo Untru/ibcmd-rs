@@ -18,7 +18,8 @@ pub(super) fn active_form_extension_export() -> Option<FormExtensionExport> {
 }
 
 #[allow(dead_code)]
-pub(crate) fn extract_form_body_xml(
+#[doc(hidden)]
+pub fn extract_form_body_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
@@ -59,7 +60,8 @@ pub(super) fn extract_form_body_xml_from_body(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn trace_form_body_with_context(
+#[doc(hidden)]
+pub fn trace_form_body_with_context(
     body: &ParsedFormBodyBlob,
     type_index: &BTreeMap<String, String>,
     dcs_type_index: &DcsTypeIndex,
@@ -86,7 +88,8 @@ pub(crate) fn trace_form_body_with_context(
     extract_form_body_xml_from_body_timed(body, &context, None).map(|_| ())
 }
 
-pub(crate) fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
+#[doc(hidden)]
+pub fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
     let body = ibcmd_compiler::compiler::bodies::form::decode_compatible_managed_form(blob).ok()?;
     form_body_module_text_bytes(body.parsed())
 }

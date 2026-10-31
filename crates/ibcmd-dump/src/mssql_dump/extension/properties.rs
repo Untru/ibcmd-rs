@@ -293,7 +293,8 @@ mod tests {
 }
 
 /// Inverse of the evidenced property mapping; shared by extension compilation.
-pub(crate) fn guid_for(element: &str, name: &str) -> Option<&'static str> {
+#[doc(hidden)]
+pub fn guid_for(element: &str, name: &str) -> Option<&'static str> {
     const IDS: &[&str] = &[
         "07ddee68-6fc0-4b88-9616-7792446d12b8",
         "09c412e0-0f30-11d6-a3c7-0050bae0a776",

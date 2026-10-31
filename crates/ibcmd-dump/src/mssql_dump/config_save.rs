@@ -389,7 +389,8 @@ fn read_rows(
 
 /// What [`write_rows_cf`] published.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RowsCf {
+#[doc(hidden)]
+pub struct RowsCf {
     pub elements: usize,
     pub packed_bytes: u64,
     pub storage_word: u32,
@@ -405,7 +406,8 @@ pub(crate) struct RowsCf {
 /// beside `output`, reopened and compared element by element, and only then
 /// takes the name. An existing `output` is refused unless `overwrite`, which
 /// replaces it only once the new file is complete.
-pub(crate) fn write_rows_cf(
+#[doc(hidden)]
+pub fn write_rows_cf(
     rows: BTreeMap<String, Vec<u8>>,
     output: &Path,
     overwrite: bool,

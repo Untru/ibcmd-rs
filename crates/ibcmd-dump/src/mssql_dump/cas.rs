@@ -223,7 +223,8 @@ pub fn resolve_cas_storage_image(
 }
 
 /// Shared graph validation; each container adapter supplies its own provenance.
-pub(crate) fn resolve_cas_storage_image_with_origin(
+#[doc(hidden)]
+pub fn resolve_cas_storage_image_with_origin(
     root_hash: CasHash,
     rows: impl IntoIterator<Item = CasStorageRow>,
     origin: StorageOrigin,

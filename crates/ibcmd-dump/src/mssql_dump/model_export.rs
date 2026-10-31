@@ -657,7 +657,8 @@ pub fn configuration_compatibility_8_5_or_later(args: &MssqlDumpConfigArgs) -> R
 }
 
 /// Return any PostgreSQL probe rows to the resolving operation, never a global cache.
-pub(crate) fn configuration_compatibility_with_snapshot(
+#[doc(hidden)]
+pub fn configuration_compatibility_with_snapshot(
     args: &MssqlDumpConfigArgs,
 ) -> Result<(bool, Option<PostgresExportSnapshot>)> {
     if args.rows_dir.is_none()
@@ -707,7 +708,8 @@ pub(crate) fn configuration_compatibility_with_snapshot(
     ))
 }
 
-pub(super) fn configuration_compatibility_from_storage(
+#[doc(hidden)]
+pub fn configuration_compatibility_from_storage(
     sql: &crate::sql::SqlExec,
     database: &str,
     main_configuration: bool,

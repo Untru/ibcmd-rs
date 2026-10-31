@@ -46,7 +46,8 @@ use crate::sql::SqlExec;
 
 mod form;
 mod project;
-pub(crate) mod properties;
+#[doc(hidden)]
+pub mod properties;
 pub(super) mod root;
 
 pub(crate) use project::project_object_xml;
@@ -384,11 +385,13 @@ fn split_top_level_fields(tail: &str) -> Result<Vec<&str>> {
 
 /// Reads the references of the configuration an extension extends, on the
 /// first request (see [`ExtensionContext::base_indexes`]).
-pub(crate) type BaseIndexProvider = Arc<dyn Fn() -> Option<ResolvedIndexes> + Send + Sync>;
+#[doc(hidden)]
+pub type BaseIndexProvider = Arc<dyn Fn() -> Option<ResolvedIndexes> + Send + Sync>;
 
 /// What an export of one extension knows about its adopted objects.
 #[derive(Default)]
-pub(crate) struct ExtensionContext {
+#[doc(hidden)]
+pub struct ExtensionContext {
     adopted: BTreeMap<String, AdoptedHeader>,
     /// SHA-1 of every storage row's packed bytes, by row name: the digests the
     /// extension's CAS manifest holds and `ConfigDumpInfo.xml` prints.
@@ -427,7 +430,8 @@ impl std::fmt::Debug for ExtensionContext {
 
 /// See [`ExtensionContext::note_indexes`].
 #[derive(Clone, Debug, Default)]
-pub(crate) struct ResolvedIndexes {
+#[doc(hidden)]
+pub struct ResolvedIndexes {
     pub type_index: BTreeMap<String, String>,
     pub object_refs: BTreeMap<String, String>,
     /// The compatibility mode of the configuration the indexes were read from
@@ -544,7 +548,8 @@ static ACTIVE: RwLock<Option<Arc<ExtensionContext>>> = RwLock::new(None);
 
 /// Keeps a context active for the process; the export is ordinary again once
 /// it is dropped.
-pub(crate) struct ExtensionGuard {
+#[doc(hidden)]
+pub struct ExtensionGuard {
     _private: (),
 }
 
@@ -556,7 +561,8 @@ impl Drop for ExtensionGuard {
     }
 }
 
-pub(crate) fn activate(context: ExtensionContext) -> Result<ExtensionGuard> {
+#[doc(hidden)]
+pub fn activate(context: ExtensionContext) -> Result<ExtensionGuard> {
     let mut active = ACTIVE
         .write()
         .map_err(|_| anyhow!("the extension export context is poisoned"))?;
@@ -568,7 +574,8 @@ pub(crate) fn activate(context: ExtensionContext) -> Result<ExtensionGuard> {
 }
 
 /// The context of the extension export running now, if any.
-pub(crate) fn active() -> Option<Arc<ExtensionContext>> {
+#[doc(hidden)]
+pub fn active() -> Option<Arc<ExtensionContext>> {
     ACTIVE.read().ok()?.clone()
 }
 
@@ -617,7 +624,8 @@ pub fn export_extension_image_to_source(
 /// File and database extensions share the same adoption normalization and XML
 /// projection. A CFE's manifest is checked against the exact packed payloads
 /// before it is accepted; it is a container index, not an XML source asset.
-pub(crate) fn export_extension_entries_to_source(
+#[doc(hidden)]
+pub fn export_extension_entries_to_source(
     source_profile: &str,
     entries: Vec<(String, Vec<u8>)>,
     output_dir: &Path,
@@ -905,7 +913,8 @@ pub(crate) fn fetch_base_indexes(
 /// The provider of [`fetch_base_indexes`] for an export to hand over: it reads
 /// the rows when the export first asks and answers nothing when they cannot be
 /// read (a reference to the extended configuration then stays an id).
-pub(crate) fn base_index_provider(
+#[doc(hidden)]
+pub fn base_index_provider(
     sql: &SqlExec,
     database: &str,
     source_version: InfobaseConfigSourceVersion,

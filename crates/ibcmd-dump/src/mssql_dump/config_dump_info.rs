@@ -1325,7 +1325,8 @@ pub fn read_config_dump_info(args: &MssqlDumpConfigArgs) -> Result<Vec<u8>> {
     read_config_dump_info_with_sql(args, None, None)
 }
 
-pub(crate) fn read_config_dump_info_with_sql(
+#[doc(hidden)]
+pub fn read_config_dump_info_with_sql(
     args: &MssqlDumpConfigArgs,
     sql: Option<crate::sql::SqlExec>,
     rows_snapshot: Option<Arc<BTreeMap<String, Arc<Vec<u8>>>>>,

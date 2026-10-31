@@ -13,6 +13,10 @@
 
 pub use ibcmd_mssql_extensions::mssql_extension_stage::*;
 
-pub(crate) use ibcmd_mssql_extensions::mssql_extension_stage::{
-    generate_container_configinfo_manifest, validate_container_configinfo_manifest,
-};
+pub(crate) use ibcmd_mssql_extensions::mssql_extension_stage::generate_container_configinfo_manifest;
+// Read only by the exporter, which names the crate; it still hides the item from the glob.
+#[expect(
+    unused_imports,
+    reason = "the re-export hides a widened item from the public glob"
+)]
+pub(crate) use ibcmd_mssql_extensions::mssql_extension_stage::validate_container_configinfo_manifest;

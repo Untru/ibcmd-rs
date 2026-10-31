@@ -28,7 +28,7 @@
 //!   2.21 ones, chosen by the registry's `xml_version()`.
 
 pub(super) use ibcmd_form_body::layout_8_5_1;
-pub(super) use ibcmd_form_writer::form::{load_8_5_1, xml_2_21_writer};
+pub(super) use ibcmd_form_writer::form::xml_2_21_writer;
 // Only a test of the exporter reads the 2.21 child order.
 #[cfg(test)]
 pub(super) use ibcmd_form_writer::form::xml_2_21_order;

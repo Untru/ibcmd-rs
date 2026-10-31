@@ -23,13 +23,20 @@ pub struct OfflineFormContextFactory;
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct OfflineFormContext {
-    pub(crate) type_index: BTreeMap<String, String>,
-    pub(crate) dcs_type_index: DcsTypeIndex,
-    pub(crate) object_refs: BTreeMap<String, String>,
-    pub(crate) field_type_refs: Arc<BTreeMap<String, String>>,
-    pub(crate) information_register_field_refs: InformationRegisterFieldReferenceIndex,
-    pub(crate) information_register_master_dimensions: Arc<InformationRegisterMasterDimensionIndex>,
-    pub(crate) form_owner_references: BTreeMap<String, String>,
+    #[doc(hidden)]
+    pub type_index: BTreeMap<String, String>,
+    #[doc(hidden)]
+    pub dcs_type_index: DcsTypeIndex,
+    #[doc(hidden)]
+    pub object_refs: BTreeMap<String, String>,
+    #[doc(hidden)]
+    pub field_type_refs: Arc<BTreeMap<String, String>>,
+    #[doc(hidden)]
+    pub information_register_field_refs: InformationRegisterFieldReferenceIndex,
+    #[doc(hidden)]
+    pub information_register_master_dimensions: Arc<InformationRegisterMasterDimensionIndex>,
+    #[doc(hidden)]
+    pub form_owner_references: BTreeMap<String, String>,
     pub summary: OfflineFormContextSummary,
 }
 

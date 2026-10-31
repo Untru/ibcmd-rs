@@ -1024,11 +1024,13 @@ mod characteristics {
     }
 }
 use ibcmd_dump_readers::additional_indexes;
-pub(crate) mod args;
+#[doc(hidden)]
+pub mod args;
 pub mod cas;
 mod command_interface;
 pub use config_dump_info::read_config_dump_info;
-pub(crate) use config_dump_info::read_config_dump_info_with_sql;
+#[doc(hidden)]
+pub use config_dump_info::read_config_dump_info_with_sql;
 mod config_dump_info;
 mod config_rows;
 pub mod config_save;
@@ -1039,12 +1041,14 @@ mod dcs;
 use ibcmd_compiler::compiler::bodies::dcs_2_21;
 mod dynamic_generation;
 mod empty_configuration;
-pub(crate) mod extension;
+#[doc(hidden)]
+pub mod extension;
 pub(crate) mod extension_types;
 mod fetch;
 mod file_infobase;
 mod postgres_infobase;
-pub(crate) use file_infobase::{
+#[doc(hidden)]
+pub use file_infobase::{
     FileInfobaseConfig, file_extension_base_provider, file_infobase_config, file_infobase_effective,
 };
 pub use postgres_infobase::PostgresExportSnapshot;
@@ -1056,11 +1060,8 @@ mod form_body_entry;
 mod form_extension;
 #[cfg(test)]
 mod revision_mix_tests;
-pub(crate) use form::load_8_5_1::{
-    down_convert_xml_2_21_form, is_xml_2_21_form, up_convert_chart_records_8_5_1,
-    up_convert_primitives_8_5_1_in_place,
-};
-pub(crate) use refs::constant_row_always_used;
+#[doc(hidden)]
+pub use refs::constant_row_always_used;
 pub(crate) use source_assets::declare_palette_namespace_beside_style;
 mod eds_export;
 mod forms;
@@ -1071,20 +1072,24 @@ mod metadata;
 #[cfg(test)]
 mod metadata_order_tests;
 pub mod model_export;
-mod moxel_entry;
+#[doc(hidden)]
+pub mod moxel_entry;
 pub mod offline_context;
 mod offline_rows;
 mod output_writer;
 mod refs;
-mod role_rights;
-pub(crate) use role_rights::role_rights_xml_from_blob;
+#[doc(hidden)]
+pub mod role_rights;
+#[doc(hidden)]
+pub use role_rights::role_rights_xml_from_blob;
 mod selected;
 mod source_asset_diagnostics;
 mod source_assets;
 mod timing;
 mod upgrade;
 
-pub(crate) fn fetch_main_activation_rows(
+#[doc(hidden)]
+pub fn fetch_main_activation_rows(
     sql: &crate::sql::SqlExec,
     database: &str,
     table: &str,
@@ -1099,7 +1104,8 @@ pub(crate) fn fetch_main_activation_rows(
 
 /// The source of a main activation's inputs: the rows as stored ([`fetch_main_activation_rows`]).
 #[derive(Debug)]
-pub(crate) struct StoredActivationRows;
+#[doc(hidden)]
+pub struct StoredActivationRows;
 
 impl ibcmd_mssql_live::mssql_main_activation::MainActivationRowSource for StoredActivationRows {
     fn fetch_rows(
@@ -1113,7 +1119,8 @@ impl ibcmd_mssql_live::mssql_main_activation::MainActivationRowSource for Stored
     }
 }
 
-pub(crate) fn fetch_extension_activation_rows(
+#[doc(hidden)]
+pub fn fetch_extension_activation_rows(
     sql: &crate::sql::SqlExec,
     database: &str,
     table: &str,
@@ -1139,7 +1146,8 @@ pub(crate) fn fetch_extension_activation_rows(
         .collect()
 }
 
-pub(crate) use fetch::fetch_config_part0_rows;
+#[doc(hidden)]
+pub use fetch::fetch_config_part0_rows;
 
 use command_interface::*;
 pub use config_dump_info::stored_config_versions;
@@ -1153,7 +1161,8 @@ use form_body_entry::extract_form_body_xml_from_body;
 use forms::*;
 use metadata::*;
 use moxel_entry::*;
-pub(crate) use output_writer::FileSink;
+#[doc(hidden)]
+pub use output_writer::FileSink;
 use output_writer::{MssqlDumpTimingReportOutputExt, OutputWriter};
 use refs::*;
 use role_rights::*;
@@ -1168,17 +1177,21 @@ pub use source_asset_diagnostics::{
 };
 /// The exporter's reading of a stored help page, which the loader's writer is
 /// the inverse of and checks every page against.
-pub(crate) use source_assets::{
+#[doc(hidden)]
+pub use source_assets::{
     help_link_marker_is_anchor, help_standard_picture_negative_index, rewrite_help_links,
 };
 
-pub(crate) use form_body::{FormItemSchemaTraceEvent, FormItemTraceEvent, FormItemTraceSink};
+pub(crate) use form_body::FormItemTraceSink;
 #[cfg(test)]
 pub(crate) use form_body_entry::render_form_body_xml_offline;
-pub(crate) use form_body_entry::trace_form_body_with_context;
-pub(crate) use form_body_entry::{extract_form_body_xml, unpack_form_body_module_text};
+#[doc(hidden)]
+pub use form_body_entry::trace_form_body_with_context;
+#[doc(hidden)]
+pub use form_body_entry::{extract_form_body_xml, unpack_form_body_module_text};
 
-pub(crate) fn extract_standalone_metadata_source_xml(
+#[doc(hidden)]
+pub fn extract_standalone_metadata_source_xml(
     blob: &[u8],
     uuid: &str,
     expected_path: &Path,
@@ -1219,17 +1232,18 @@ pub(crate) fn extract_standalone_metadata_source_xml(
     .map(|extracted| (extracted.relative_path, extracted.xml))
 }
 pub use moxel_entry::try_extract_moxel_spreadsheet_xml;
-pub(crate) use moxel_entry::{
-    MoxelLineTraceEvent, MoxelLineTraceSink,
-    extract_inflated_moxel_spreadsheet_xml_with_line_trace, extract_moxel_spreadsheet_xml,
-    extract_moxel_spreadsheet_xml_with_line_trace,
-    try_extract_moxel_spreadsheet_xml_with_generated_types,
-};
 #[cfg(all(test, feature = "mssql-live-tests"))]
 pub(crate) use moxel_entry::{
     debug_moxel_number_format_usage, debug_moxel_spreadsheet_summary_from_blob,
 };
-pub(crate) use source_assets::write_source_xml_file;
+#[doc(hidden)]
+pub use moxel_entry::{
+    extract_inflated_moxel_spreadsheet_xml_with_line_trace, extract_moxel_spreadsheet_xml,
+    extract_moxel_spreadsheet_xml_with_line_trace,
+    try_extract_moxel_spreadsheet_xml_with_generated_types,
+};
+#[doc(hidden)]
+pub use source_assets::write_source_xml_file;
 
 use timing::MssqlDumpTimingReportExt;
 pub use timing::{
@@ -1334,7 +1348,8 @@ pub struct MssqlDumpConfigReport {
 impl MssqlDumpConfigReport {
     /// Required before a selected file map can authorize publication or removals.
     /// Observational exports may retain their diagnostics without passing this gate.
-    pub(crate) fn ensure_selected_complete(&self) -> Result<()> {
+    #[doc(hidden)]
+    pub fn ensure_selected_complete(&self) -> Result<()> {
         anyhow::ensure!(
             !self.tables.is_empty(),
             "selected export has no completeness inventory"
@@ -2005,7 +2020,8 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
     dump_config_with(args, DumpHooks::default())
 }
 
-pub(crate) fn dump_config_with_sql(
+#[doc(hidden)]
+pub fn dump_config_with_sql(
     args: &MssqlDumpConfigArgs,
     sql_override: Option<crate::sql::SqlExec>,
 ) -> Result<MssqlDumpConfigReport> {
@@ -2026,38 +2042,40 @@ pub(crate) fn dump_config_with_sql(
 /// `crate::stored_objects`) hands the export besides its arguments. The
 /// default is the command line's export.
 #[derive(Default)]
-pub(crate) struct DumpHooks {
+#[doc(hidden)]
+pub struct DumpHooks {
     /// Capability-checked immutable Config rows, through the existing offline reader.
-    pub(crate) rows_snapshot: Option<Arc<BTreeMap<String, Arc<Vec<u8>>>>>,
+    pub rows_snapshot: Option<Arc<BTreeMap<String, Arc<Vec<u8>>>>>,
     /// The database handle to read with, whose connections the caller keeps
     /// between runs, instead of one built from the arguments' login. Not
     /// used with `--rows-dir`.
-    pub(crate) sql: Option<crate::sql::SqlExec>,
+    pub sql: Option<crate::sql::SqlExec>,
     /// Native objects supplies explicit recursion; None retains the custom
     /// --object contract (owned descendants, Configuration itself only).
-    pub(crate) object_recursion: Option<bool>,
+    pub object_recursion: Option<bool>,
     /// The rows of `--object`'s objects, which the caller selects (the root's
     /// `stored_objects`, from its inventory of the stored objects). Without
     /// one, an export given `--object` is refused before it begins.
-    pub(crate) select_objects: Option<ObjectSelector>,
+    pub select_objects: Option<ObjectSelector>,
     /// Native incremental export compares stored versions across XML headers.
-    pub(crate) native_versions: bool,
+    pub native_versions: bool,
     /// Where the files go instead of `output_dir`: nothing is written to the
     /// disk -- no folder prepared, no manifest, no raw rows -- and
     /// `output_dir` only names the files the sink receives.
-    pub(crate) sink: Option<Arc<dyn FileSink>>,
+    pub sink: Option<Arc<dyn FileSink>>,
 }
 
 /// Selects the rows of the named objects (`--object`) through the view the
 /// export has begun: the table, the full names and the hooks' recursion.
-pub(crate) type ObjectSelector =
-    fn(&ConfigTable<'_>, &[String], Option<bool>) -> Result<BTreeSet<String>>;
+#[doc(hidden)]
+pub type ObjectSelector = fn(&ConfigTable<'_>, &[String], Option<bool>) -> Result<BTreeSet<String>>;
 
 /// The Config table as a reader outside the export (`crate::stored_objects`,
 /// the tree of a configuration) reads it: through the export's own reads, so
 /// a `--rows-dir` folder answers as SQL Server does and an active dynamic
 /// generation's rows are read under their plain names.
-pub(crate) struct ConfigTable<'a> {
+#[doc(hidden)]
+pub struct ConfigTable<'a> {
     sql: &'a crate::sql::SqlExec,
     database: &'a str,
     main_configuration: bool,
@@ -2083,7 +2101,7 @@ impl<'a> ConfigTable<'a> {
 
     /// Every published row name. Installs the table's view for the reads
     /// that follow in the scope (see [`with_rows_dir_table`]).
-    pub(crate) fn names(&self) -> Result<BTreeSet<String>> {
+    pub fn names(&self) -> Result<BTreeSet<String>> {
         let table = MssqlConfigurationTableRole::Current.sql_name();
         let headers = fetch_row_headers(self.sql, self.database, table, &BTreeSet::new())?;
         let headers = install_storage_overlay(
@@ -2099,7 +2117,7 @@ impl<'a> ConfigTable<'a> {
 
     /// The named rows as stored (raw deflate for most), each assembled from
     /// its parts; a name the table lacks is left out.
-    pub(crate) fn rows(&self, names: &BTreeSet<String>) -> Result<BTreeMap<String, Vec<u8>>> {
+    pub fn rows(&self, names: &BTreeSet<String>) -> Result<BTreeMap<String, Vec<u8>>> {
         let mut rows = BTreeMap::<String, Vec<u8>>::new();
         if names.is_empty() {
             return Ok(rows);
@@ -2115,7 +2133,8 @@ impl<'a> ConfigTable<'a> {
 /// Runs `read` on the Config table of a folder of stored rows
 /// (`--rows-dir`): the folder answers every read while it runs, and the view
 /// it installs ends with it.
-pub(crate) fn with_rows_dir_table<T>(
+#[doc(hidden)]
+pub fn with_rows_dir_table<T>(
     dir: &Path,
     read: impl FnOnce(&ConfigTable<'_>) -> Result<T>,
 ) -> Result<T> {
@@ -2126,7 +2145,8 @@ pub(crate) fn with_rows_dir_table<T>(
 }
 
 /// Runs a bounded immutable snapshot through the same offline Config table reader.
-pub(crate) fn with_memory_rows_table<T>(
+#[doc(hidden)]
+pub fn with_memory_rows_table<T>(
     rows: &BTreeMap<String, Arc<Vec<u8>>>,
     read: impl FnOnce(&ConfigTable<'_>) -> Result<T>,
 ) -> Result<T> {
@@ -2139,7 +2159,8 @@ pub(crate) fn with_memory_rows_table<T>(
     read(&ConfigTable::active(&sql, ""))
 }
 
-pub(crate) use file_infobase::FileDbReadScope;
+#[doc(hidden)]
+pub use file_infobase::FileDbReadScope;
 
 #[cfg(test)]
 pub(crate) fn file_db_read_scope_active() -> bool {
@@ -2152,7 +2173,8 @@ pub(crate) fn file_db_fresh_load_count() -> usize {
 }
 
 /// Reads a real file infobase through the same effective CONFIG/CONFIGSAVE view as export.
-pub(crate) fn with_file_db_table<T>(
+#[doc(hidden)]
+pub fn with_file_db_table<T>(
     path: &Path,
     read: impl FnOnce(&ConfigTable<'_>) -> Result<T>,
 ) -> Result<T> {
@@ -2163,7 +2185,8 @@ pub(crate) fn with_file_db_table<T>(
 }
 
 /// Snapshot the same effective file database view as export, without reopening a path.
-pub(crate) fn file_db_rows_from_reader(
+#[doc(hidden)]
+pub fn file_db_rows_from_reader(
     db: &mut ibcmd_filedb::FileDb,
 ) -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
     effective_file_db_snapshot(file_infobase::load_from_reader(db)?)
@@ -2358,7 +2381,8 @@ mod descriptor_snapshot_tests {
 
 /// Runs `read` on the Config table of `database`; the view it installs ends
 /// with it.
-pub(crate) fn with_database_table<T>(
+#[doc(hidden)]
+pub fn with_database_table<T>(
     sql: &crate::sql::SqlExec,
     database: &str,
     read: impl FnOnce(&ConfigTable<'_>) -> Result<T>,
@@ -2368,7 +2392,8 @@ pub(crate) fn with_database_table<T>(
 }
 
 /// Main CONFIG + completed CONFIGSAVE table view through the existing read-only overlay.
-pub(crate) fn with_main_database_table<T>(
+#[doc(hidden)]
+pub fn with_main_database_table<T>(
     sql: &crate::sql::SqlExec,
     database: &str,
     read: impl FnOnce(&ConfigTable<'_>) -> Result<T>,
@@ -2379,7 +2404,8 @@ pub(crate) fn with_main_database_table<T>(
 
 /// [`dump_config`] with the caller's [`DumpHooks`]: the same export, the
 /// same arguments.
-pub(crate) fn dump_config_with(
+#[doc(hidden)]
+pub fn dump_config_with(
     args: &MssqlDumpConfigArgs,
     hooks: DumpHooks,
 ) -> Result<MssqlDumpConfigReport> {
@@ -2391,7 +2417,8 @@ pub(crate) fn dump_config_with(
 /// and completeness; their presence alone does not enable another writer.
 /// SQL main readers previously converted the whole overlay, so their original
 /// writer eligibility remains unfiltered even when conversion is now selected.
-pub(crate) fn dump_config_with_selected_validation(
+#[doc(hidden)]
+pub fn dump_config_with_selected_validation(
     args: &MssqlDumpConfigArgs,
     hooks: DumpHooks,
     originally_unfiltered: bool,
@@ -2401,7 +2428,8 @@ pub(crate) fn dump_config_with_selected_validation(
 
 /// Point reads validate only the descriptor actually returned, on the same raw
 /// row bytes as its writer. Asset/child completeness stays diagnostic here.
-pub(crate) fn dump_config_with_descriptor_validation(
+#[doc(hidden)]
+pub fn dump_config_with_descriptor_validation(
     args: &MssqlDumpConfigArgs,
     hooks: DumpHooks,
     path: &str,
@@ -2858,7 +2886,8 @@ fn dump_config_inner(
 /// payload of the `DynamicallyUpdated` row, `None` when the table has none.
 /// A stage bases the rows it patches on these, so the ids it keeps are the
 /// ones the storage now publishes.
-pub(crate) fn dynamic_generation_aliases<'a>(
+#[doc(hidden)]
+pub fn dynamic_generation_aliases<'a>(
     marker: Option<&[u8]>,
     file_names: impl IntoIterator<Item = &'a str>,
 ) -> Result<BTreeMap<String, String>> {
@@ -2875,11 +2904,9 @@ pub(crate) fn dynamic_generation_aliases<'a>(
         .collect())
 }
 
-// The stored row of a published name, at its old path.
-pub(crate) use dynamic_generation::stored_row_name;
-
 /// The rows a state export starts from.
-pub(crate) enum StateBase<'a> {
+#[doc(hidden)]
+pub enum StateBase<'a> {
     /// Nothing is stored: the staged rows are the whole configuration (a
     /// stage for an empty infobase, offline).
     Nothing,
@@ -2903,14 +2930,16 @@ pub(crate) enum StateBase<'a> {
 }
 
 /// A row a stage writes into ConfigSave: its file name and stored bytes.
-pub(crate) struct StagedRow<'a> {
+#[doc(hidden)]
+pub struct StagedRow<'a> {
     pub file_name: &'a str,
     pub bytes: &'a [u8],
 }
 
 /// What exporting a staged state did.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct StateExportReport {
+#[doc(hidden)]
+pub struct StateExportReport {
     /// Rows of the state: the stored ones as the storage publishes them, the
     /// staged ones in place of theirs.
     pub state_rows: usize,
@@ -2927,7 +2956,8 @@ pub(crate) struct StateExportReport {
 /// of the stored rows; `output_root` only names the files (the sink receives
 /// `output_root` joined with each relative path). `ConfigDumpInfo.xml` is not
 /// produced: it holds generation ids no stage keeps.
-pub(crate) fn export_staged_state(
+#[doc(hidden)]
+pub fn export_staged_state(
     base: StateBase<'_>,
     staged: &[StagedRow<'_>],
     removed: &[String],
@@ -3041,7 +3071,8 @@ fn fetch_all_config_rows(
 
 /// One row of the Config table whole (its parts assembled), or `None` when
 /// the table has no row of that name.
-pub(crate) fn fetch_config_row_whole(
+#[doc(hidden)]
+pub fn fetch_config_row_whole(
     sql: &crate::sql::SqlExec,
     database: &str,
     file_name: &str,
@@ -6786,7 +6817,8 @@ fn collect_root_family_kinds(text: &str, kinds: &mut BTreeMap<String, &'static s
 }
 
 /// The folder of a root family's kind (the plural the platform lays out).
-pub(crate) fn root_family_folder(kind: &str) -> Option<&'static str> {
+#[doc(hidden)]
+pub fn root_family_folder(kind: &str) -> Option<&'static str> {
     ibcmd_metadata_model::metadata_model::index::collection_of_kind(kind)
 }
 
@@ -36428,7 +36460,8 @@ const STYLE_BODY_FONT_STYLE_ITEM_KIND: &str = "2";
 /// stays the tiebreaker for an item the configuration's child index does not
 /// carry, so a style read without that index writes exactly what it wrote
 /// before.
-pub(crate) fn extract_style_body_xml(
+#[doc(hidden)]
+pub fn extract_style_body_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     configuration_root_child_order: &BTreeMap<String, usize>,
@@ -44951,10 +44984,8 @@ fn generation_history(
 /// error, as it is for the export.
 ///
 /// Reads the rows as stored, whatever view an export of this process installed.
-pub(crate) fn active_generation_history(
-    sql: &crate::sql::SqlExec,
-    database: &str,
-) -> Result<Vec<String>> {
+#[doc(hidden)]
+pub fn active_generation_history(sql: &crate::sql::SqlExec, database: &str) -> Result<Vec<String>> {
     let _stored = dynamic_generation::StorageViewScope::begin(database);
     let marker = BTreeSet::from([DYNAMIC_UPDATE_MARKER_ROW.to_owned()]);
     Ok(generation_history(
@@ -45242,9 +45273,6 @@ mod interface_root_tests;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod root_tests;
 
 #[cfg(test)]
 mod external_data_source_tests;

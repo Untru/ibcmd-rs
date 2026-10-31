@@ -18,7 +18,8 @@ use std::collections::BTreeSet;
 #[cfg(all(test, feature = "mssql-live-tests"))]
 use ibcmd_metadata_blob::{LocalizedString, SpreadsheetNumberFormatHint};
 
-pub(crate) fn extract_moxel_spreadsheet_xml(
+#[doc(hidden)]
+pub fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
@@ -42,7 +43,8 @@ pub fn try_extract_moxel_spreadsheet_xml(
 
 /// The same extraction with the configuration's generated-type index in hand,
 /// which is what a `{"#",<uuid>}` value type names.
-pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types(
+#[doc(hidden)]
+pub fn try_extract_moxel_spreadsheet_xml_with_generated_types(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
@@ -61,7 +63,8 @@ pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types(
     )
 }
 
-pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
+#[doc(hidden)]
+pub fn extract_moxel_spreadsheet_xml_with_line_trace(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
@@ -79,7 +82,8 @@ pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
 
 /// Trace an already-inflated native MXL body retained by an offline dump.
 /// Its MOXCEL framing is validated by the same codec routine as packed blobs.
-pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
+#[doc(hidden)]
+pub fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
@@ -98,7 +102,8 @@ pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
 /// [`ibcmd_moxel::parse_moxel_spreadsheet_text`] with the root's built-in
 /// type table.
 #[cfg(test)]
-pub(super) fn parse_moxel_spreadsheet_text(
+#[doc(hidden)]
+pub fn parse_moxel_spreadsheet_text(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MoxelSpreadsheet> {

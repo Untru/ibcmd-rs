@@ -592,7 +592,8 @@ pub(super) fn fetch_binary_rows_query(
 /// `IBCMD_RS_BASE_ROWS_DIR`'s `<name>__part0.bin` files hold). The built-in
 /// client reads it in slices of file names on several connections at once;
 /// the `--sqlcmd` path with one `bcp queryout`.
-pub(crate) fn fetch_config_part0_rows(
+#[doc(hidden)]
+pub fn fetch_config_part0_rows(
     sql: &SqlExec,
     database: &str,
 ) -> Result<std::collections::HashMap<String, Vec<u8>>> {
