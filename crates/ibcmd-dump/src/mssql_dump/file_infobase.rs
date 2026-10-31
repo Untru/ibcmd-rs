@@ -14,11 +14,11 @@ use ibcmd_filedb::{ConfigRow, FileDb};
 use super::offline_rows::OfflineRows;
 use super::{STAGE_COMMIT_ROW, STAGE_INVENTORY_ROW, STAGE_NEW_SUFFIX};
 
-#[cfg(test)]
+#[cfg(feature = "test-fixtures")]
 thread_local! {
     static FRESH_LOADS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
-#[cfg(test)]
+#[cfg(feature = "test-fixtures")]
 pub(super) fn fresh_load_count() -> usize {
     FRESH_LOADS.with(std::cell::Cell::get)
 }
@@ -80,7 +80,7 @@ pub(super) fn read_rows(path: &Path) -> Result<Arc<OfflineRows>> {
     Ok(rows)
 }
 
-#[cfg(test)]
+#[cfg(feature = "test-fixtures")]
 pub(super) fn read_scope_active() -> bool {
     READ_SCOPE.with(|scope| scope.borrow().is_some())
 }
@@ -109,7 +109,7 @@ fn open(db_path: &Path) -> Result<FileDb> {
 /// The configuration a file infobase publishes, as offline rows.
 pub(super) fn load(db_path: &Path) -> Result<OfflineRows> {
     crate::cancel::check()?;
-    #[cfg(test)]
+    #[cfg(feature = "test-fixtures")]
     FRESH_LOADS.with(|count| count.set(count.get() + 1));
     Ok(load_with_stored_names(db_path)?.0)
 }

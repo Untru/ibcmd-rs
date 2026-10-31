@@ -53,8 +53,9 @@ impl PostgresExportSnapshot {
         Ok(self.take_rows()?.map(Self::new))
     }
 
-    #[cfg(test)]
-    pub(crate) fn synthetic(label: &[u8]) -> Self {
+    #[cfg(any(test, feature = "test-fixtures"))]
+    #[doc(hidden)]
+    pub fn synthetic(label: &[u8]) -> Self {
         Self::new(Arc::new(OfflineRows::from_memory([(
             "root".to_owned(),
             Arc::new(label.to_vec()),

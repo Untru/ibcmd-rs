@@ -1183,7 +1183,7 @@ pub use source_assets::{
 };
 
 pub(crate) use form_body::FormItemTraceSink;
-#[cfg(test)]
+#[cfg(feature = "test-fixtures")]
 pub(crate) use form_body_entry::render_form_body_xml_offline;
 #[doc(hidden)]
 pub use form_body_entry::trace_form_body_with_context;
@@ -1232,10 +1232,6 @@ pub fn extract_standalone_metadata_source_xml(
     .map(|extracted| (extracted.relative_path, extracted.xml))
 }
 pub use moxel_entry::try_extract_moxel_spreadsheet_xml;
-#[cfg(all(test, feature = "mssql-live-tests"))]
-pub(crate) use moxel_entry::{
-    debug_moxel_number_format_usage, debug_moxel_spreadsheet_summary_from_blob,
-};
 #[doc(hidden)]
 pub use moxel_entry::{
     extract_inflated_moxel_spreadsheet_xml_with_line_trace, extract_moxel_spreadsheet_xml,
@@ -2162,12 +2158,12 @@ pub fn with_memory_rows_table<T>(
 #[doc(hidden)]
 pub use file_infobase::FileDbReadScope;
 
-#[cfg(test)]
+#[cfg(feature = "test-fixtures")]
 pub(crate) fn file_db_read_scope_active() -> bool {
     file_infobase::read_scope_active()
 }
 
-#[cfg(test)]
+#[cfg(feature = "test-fixtures")]
 pub(crate) fn file_db_fresh_load_count() -> usize {
     file_infobase::fresh_load_count()
 }

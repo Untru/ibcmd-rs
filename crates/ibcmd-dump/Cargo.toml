@@ -7,6 +7,9 @@ publish = false
 description = "The configuration exporter (mssql-dump-config and its library entry points): a configuration's stored rows read from SQL Server, PostgreSQL, a file infobase or saved rows and written as the native XML source tree, with its incremental state, ConfigDumpInfo, the extension export and the export's audits and reports"
 
 [features]
+# The exporter's probes the root's own unit tests read (`test_fixtures`,
+# `PostgresExportSnapshot::synthetic`, `parse_moxel_spreadsheet_text`).
+test-fixtures = []
 # The ignored live blob comparisons against a local SQL Server; forwards to
 # the database clients' live tests.
 mssql-live-tests = ["ibcmd-sql/mssql-live-tests"]

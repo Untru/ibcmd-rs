@@ -97,7 +97,7 @@ pub fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
 /// The Form.xml this exporter writes for a whole form body, read against the
 /// offline context of a saved dump -- the form writer's whole-form harness
 /// renders a compiled body and the stored one through it and compares.
-#[cfg(test)]
+#[cfg(feature = "test-fixtures")]
 pub(crate) fn render_form_body_xml_offline(
     body: &ParsedFormBodyBlob,
     context: &super::offline_context::OfflineFormContext,

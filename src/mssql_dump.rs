@@ -58,6 +58,12 @@ pub(crate) use ibcmd_dump::mssql_dump::ObjectSelector;
 // Read by the root's `module_blob` tests.
 #[cfg(test)]
 pub(crate) use ibcmd_dump::mssql_dump::extract_style_body_xml;
+// The exporter's probes, read by the root's tests of the stored objects and
+// the form writer.
+#[cfg(test)]
+pub(crate) use ibcmd_dump::test_fixtures::{
+    file_db_fresh_load_count, file_db_read_scope_active, render_form_body_xml_offline,
+};
 
 // The command-line argument structs, which `cli` re-exports, and the
 // extension export.
@@ -123,7 +129,10 @@ pub mod model_export {
 // What `root_tests` reads of the exporter; where it reads nothing they still
 // hide the widened modules from the glob.
 #[cfg_attr(
-    not(all(test, feature = "research-corpus-tests")),
+    not(all(
+        test,
+        any(feature = "research-corpus-tests", feature = "mssql-live-tests")
+    )),
     expect(
         unused_imports,
         reason = "the re-export hides a widened module from the public glob"
@@ -140,6 +149,14 @@ pub(crate) use ibcmd_dump::mssql_dump::moxel_entry;
 pub(crate) use ibcmd_dump::mssql_dump::role_rights;
 #[cfg(all(test, feature = "research-corpus-tests"))]
 use moxel_entry::parse_moxel_spreadsheet_text;
+
+// The spreadsheet probes of the root's live blob comparisons (`mssql`).
+#[cfg(all(test, feature = "mssql-live-tests"))]
+mod live_moxel_probes;
+#[cfg(all(test, feature = "mssql-live-tests"))]
+pub(crate) use live_moxel_probes::{
+    debug_moxel_number_format_usage, debug_moxel_spreadsheet_summary_from_blob,
+};
 
 #[cfg(test)]
 mod root_tests;
