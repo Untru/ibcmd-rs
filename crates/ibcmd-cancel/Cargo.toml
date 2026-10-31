@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
-description = "Cooperative cancellation of a long operation: the one process-wide flag a caller installs for an operation and the engine's loops check"
+description = "Cooperative cancellation of a long operation: the one process-wide flag a caller installs for an operation and the engine's loops check, and the process-wide lock under which one operation runs at a time"
 
 [dependencies]
 # `is_cancelled` looks through an anyhow error's causes.
