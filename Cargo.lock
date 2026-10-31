@@ -974,6 +974,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibcmd-mssql-extensions"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "ibcmd-1c-text",
+ "ibcmd-core",
+ "ibcmd-sql",
+ "sha1",
+ "uuid",
+]
+
+[[package]]
 name = "ibcmd-mssql-live"
 version = "0.1.0"
 dependencies = [
@@ -1096,6 +1108,7 @@ dependencies = [
  "ibcmd-metadata-source",
  "ibcmd-module-blob",
  "ibcmd-moxel",
+ "ibcmd-mssql-extensions",
  "ibcmd-mssql-live",
  "ibcmd-parallel",
  "ibcmd-platform",
