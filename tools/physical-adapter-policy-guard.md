@@ -438,6 +438,10 @@ are test-only modules. The root's facades (`src/mssql_config_apply.rs`,
 `src/restructure/s1.rs`) stay outside the slice. Each record equals the one
 a scan of the same file as it stood at its old path gives, except two: the
 clippy fix of the S1 gate's blocker filter changes the statement that holds
-its two `name-special-case` records (`"deleted"`, `"root"`), whose
-fingerprints change with it (category, count and literal unchanged). Every
-other record, the two stale ones included, is unchanged.
+its two `name-special-case` records, whose fingerprints change with it
+(category, count and literal unchanged):
+- `"deleted"`: `797728d2303e010ac925f5f8d2c8ca4d0cb3fc0e537cf952b95d27771a6abb42`
+  -> `33d61819e63890a2c8292d9506c27226dc1be273779940a5905940772c412a83`;
+- `"root"`: `0c8ac485677fde8beacc402785e5960dcc28442d8eb3846e67575e2d53f1b32e`
+  -> `6d47de36a6e7b6b493fc52ea5725d0fb774c94b196483bd62f9079f419200cd9`.
+Every other record, the two stale ones included, is unchanged.
