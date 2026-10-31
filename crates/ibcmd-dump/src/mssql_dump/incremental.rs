@@ -483,7 +483,7 @@ fn object_dir(segments: &[&str]) -> Option<String> {
     if let ["Configuration", _] = segments {
         return Some(String::new());
     }
-    if segments.is_empty() || segments.len() % 2 != 0 {
+    if segments.is_empty() || !segments.len().is_multiple_of(2) {
         return None;
     }
     let mut parts = Vec::with_capacity(segments.len());

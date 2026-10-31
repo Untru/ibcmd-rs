@@ -102,6 +102,10 @@ fn canonical(row: &Brace, context: &DescriptorContext, dialect: &str) -> anyhow:
     )
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 pub(super) fn physical(
     row: &Brace,
     context: &DescriptorContext,

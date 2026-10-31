@@ -372,6 +372,10 @@ fn check_file_base_metadata_budget(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::items_after_test_module,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 mod extension_base_budget_tests {
     use super::*;
     use std::io::Read;

@@ -36,6 +36,10 @@ fn compiled(kind: &str, xml: &str, version: &str) -> Brace {
     .unwrap()
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract(
     text: &str,
     uuid: &str,
@@ -45,6 +49,10 @@ fn extract(
     extract_with_current_refs(text, uuid, declared, version, &BTreeMap::new())
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_with_current_refs(
     text: &str,
     uuid: &str,

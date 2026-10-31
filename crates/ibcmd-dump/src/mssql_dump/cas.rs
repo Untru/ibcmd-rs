@@ -793,9 +793,7 @@ fn parse_quoted_string(value: &str) -> Option<String> {
     let mut chars = inner.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '"' {
-            if chars.next_if_eq(&'"').is_none() {
-                return None;
-            }
+            chars.next_if_eq(&'"')?;
         }
         output.push(ch);
     }

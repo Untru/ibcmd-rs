@@ -57,7 +57,7 @@ fn interface_preflight_uses_production_root_classification() {
     assert!(declare(&mut tree));
     let id = &context.index.configuration_uuid.unwrap();
     let root = metadata_text_row_from_text(id, serialize(&tree)).unwrap();
-    let missing = validate_interface_descriptors(&[root.clone()]).unwrap_err();
+    let missing = validate_interface_descriptors(std::slice::from_ref(&root)).unwrap_err();
     assert!(missing.to_string().contains("missing Interface descriptor"));
     let text = format!(
         r#"{{1,{{8,0,{{3,{{1,0,{ID}}},"OwnInterface",{{0}},"",0,0,00000000-0000-0000-0000-000000000000,0}},1}},0}}"#

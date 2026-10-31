@@ -360,10 +360,9 @@ fn form_metadata_fields_and_extended_presentation_in_block<'a>(
             Some(slot) => direct_form_application_purposes_are_valid(fields[slot]),
             None => true,
         })
+        && metadata_header_field_index(&fields, uuid).is_some()
     {
-        if metadata_header_field_index(&fields, uuid).is_some() {
-            return Some((fields, None));
-        }
+        return Some((fields, None));
     }
 
     for (index, field) in fields.iter().enumerate() {

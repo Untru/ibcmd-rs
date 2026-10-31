@@ -126,9 +126,7 @@ fn element_name(line: &str) -> Option<&str> {
     if text.starts_with('/') || text.starts_with('?') {
         return None;
     }
-    let end = text
-        .find(|character: char| character == ' ' || character == '>' || character == '/')
-        .unwrap_or(text.len());
+    let end = text.find([' ', '>', '/']).unwrap_or(text.len());
     Some(&text[..end])
 }
 

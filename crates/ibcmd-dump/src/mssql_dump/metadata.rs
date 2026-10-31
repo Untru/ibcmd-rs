@@ -436,7 +436,7 @@ pub(super) fn metadata_source_for_object_fields(
     uuid: &str,
     fields: &[&str],
 ) -> Option<(&'static str, &'static str)> {
-    let header_index = metadata_header_field_index(&fields, uuid);
+    let header_index = metadata_header_field_index(fields, uuid);
 
     // ExternalDataSource children share code 0 with IntegrationService and a
     // form descriptor, and code 11 is otherwise unused. Their measured body
@@ -574,7 +574,7 @@ pub(super) fn metadata_source_for_object_fields(
             Some(("ScheduledJob", "ScheduledJobs"))
         }
         4 if is_form_metadata_text(text, uuid) => Some(("CommonForm", "CommonForms")),
-        4 if is_common_template_metadata_fields(&fields, uuid) => {
+        4 if is_common_template_metadata_fields(fields, uuid) => {
             Some(("CommonTemplate", "CommonTemplates"))
         }
         4 if header_index == Some(1) => Some(("CommonPicture", "CommonPictures")),
@@ -606,7 +606,7 @@ pub(super) fn metadata_source_for_object_fields(
         // which the platform exports as `Subsystems/WebСервисУХ.xml` while we
         // previously misrouted it to `CalculationRegisters/WebСервисУХ.xml`.
         21 if header_index == Some(1) => Some(("Subsystem", "Subsystems")),
-        21 if is_code21_accounting_register_fields(&fields, uuid) => {
+        21 if is_code21_accounting_register_fields(fields, uuid) => {
             Some(("AccountingRegister", "AccountingRegisters"))
         }
         21 => Some(("CalculationRegister", "CalculationRegisters")),
@@ -692,6 +692,10 @@ mod overflow_tests {
     use super::*;
 
     #[test]
+    #[expect(
+        clippy::no_effect_replace,
+        reason = "moved verbatim in #559; cleanup later"
+    )]
     fn a_count_beyond_the_fields_leaves_the_text_as_it_is() {
         // Counts come from the file: arithmetic on them must not overflow.
         for text in [

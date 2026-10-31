@@ -1575,6 +1575,10 @@ pub(super) fn nested_headers_with_offsets_matching_uuids(
     headers
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 pub(super) fn standalone_child_reference(
     owner_kind: &str,
     owner_name: &str,
@@ -2621,6 +2625,10 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
         .collect()
 }
 
+#[expect(
+    clippy::type_complexity,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn information_register_field_reference_entries(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
@@ -2757,9 +2765,7 @@ pub(super) fn metadata_declared_leaves_exclude_string(
                 // extension names the types of the configuration it extends
                 // by id only, and the platform reads them as references there.
                 ConstantValueType::TypeId { .. } => {
-                    if super::extension::active().is_none() {
-                        return None;
-                    }
+                    super::extension::active()?;
                 }
                 ConstantValueType::ReferenceTypeSet { reference } => {
                     let leaves = type_set_leaves.get(reference)?;
@@ -2920,10 +2926,10 @@ pub(super) fn build_form_owner_resolution_diagnostics_from_texts(
     let mut owner_paths_by_ref = BTreeMap::<String, BTreeSet<PathBuf>>::new();
 
     for row in rows {
-        if is_form_metadata_text(&row.text, &row.file_name) {
-            if let Some(header) = row.header.as_ref() {
-                forms.push(header.clone());
-            }
+        if is_form_metadata_text(&row.text, &row.file_name)
+            && let Some(header) = row.header.as_ref()
+        {
+            forms.push(header.clone());
         }
     }
     let form_uuids = forms
@@ -3712,10 +3718,11 @@ pub(super) fn extract_configuration_source_xml(
         }
     }
     let root_layout = parse_configuration_root_layout(text, uuid);
-    let child_objects = root_layout
-        .is_none()
-        .then(|| parse_configuration_child_objects(text, uuid, &header_uuid))
-        .unwrap_or_default();
+    let child_objects = if root_layout.is_none() {
+        parse_configuration_child_objects(text, uuid, &header_uuid)
+    } else {
+        Default::default()
+    };
     let mut xml = format_configuration_source_xml(&header, &properties, source_version);
     if source_version == InfobaseConfigSourceVersion::V2_21 {
         match configuration_properties_8_5_1(text, object_refs) {
@@ -5033,18 +5040,12 @@ fn resolve_configuration_root_child_objects(
             if !seen_uuids.insert(uuid.as_str()) {
                 return None;
             }
-            let Some(reference) = object_refs.get(uuid) else {
-                return None;
-            };
-            let Some((kind, name)) = reference.split_once('.') else {
-                return None;
-            };
+            let reference = object_refs.get(uuid)?;
+            let (kind, name) = reference.split_once('.')?;
             if name.is_empty() || name.contains('.') {
                 return None;
             }
-            let Some((order, kind)) = configuration_root_child_kind(kind) else {
-                return None;
-            };
+            let (order, kind) = configuration_root_child_kind(kind)?;
             if family_kind.is_some_and(|(_, candidate)| candidate != kind) {
                 return None;
             }

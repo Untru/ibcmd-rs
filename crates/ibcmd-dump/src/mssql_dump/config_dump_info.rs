@@ -1093,6 +1093,10 @@ fn format_config_dump_info_xml(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::items_after_test_module,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 mod tests {
     use super::*;
 

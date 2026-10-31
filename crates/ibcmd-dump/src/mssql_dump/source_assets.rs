@@ -962,6 +962,10 @@ fn is_superseded_generation_owner(owner: &str) -> bool {
     !base.is_empty() && uuid::Uuid::parse_str(generation).is_ok()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 pub(super) fn source_asset_paths_with_indexes(
     rows: &[ConfigRow],
     metadata_texts: &[MetadataTextRow],
@@ -1071,7 +1075,7 @@ pub(super) fn source_asset_paths_with_indexes(
                     .get(interface_id.as_str())
                     .and_then(|row| row.binary_bytes().ok())
                     .is_some_and(|bytes| {
-                        parse_command_interface_blob(&bytes, &command_refs, &metadata_refs)
+                        parse_command_interface_blob(&bytes, command_refs, metadata_refs)
                             .is_some_and(|interface| !interface.is_empty())
                     });
             if is_command_interface {
@@ -1104,12 +1108,12 @@ pub(super) fn source_asset_paths_with_indexes(
                     row,
                     &file_names,
                     &rows_by_file_name,
-                    &command_refs,
-                    &metadata_refs,
+                    command_refs,
+                    metadata_refs,
                     &role_rights_object_refs,
-                    &field_refs,
-                    &type_index,
-                    &subsystem_refs,
+                    field_refs,
+                    type_index,
+                    subsystem_refs,
                 )
             })
             .collect::<Vec<_>>()
@@ -1122,12 +1126,12 @@ pub(super) fn source_asset_paths_with_indexes(
                     row,
                     &file_names,
                     &rows_by_file_name,
-                    &command_refs,
-                    &metadata_refs,
+                    command_refs,
+                    metadata_refs,
                     &role_rights_object_refs,
-                    &field_refs,
-                    &type_index,
-                    &subsystem_refs,
+                    field_refs,
+                    type_index,
+                    subsystem_refs,
                 )
             })
             .collect()
@@ -1137,13 +1141,13 @@ pub(super) fn source_asset_paths_with_indexes(
             paths.insert(body_id, asset);
         }
     }
-    paths.extend(form_help_asset_paths(rows, &rows_by_file_name, &form_refs));
+    paths.extend(form_help_asset_paths(rows, &rows_by_file_name, form_refs));
     paths.extend(form_body_asset_paths(
-        &form_refs,
+        form_refs,
         &file_names,
         &declared_form_types(metadata_texts),
     ));
-    paths.extend(template_body_asset_paths(&template_refs, &file_names));
+    paths.extend(template_body_asset_paths(template_refs, &file_names));
 
     paths
 }
@@ -1418,9 +1422,9 @@ pub(super) fn insert_parent_configuration_assets(
     file_names: &BTreeSet<&str>,
 ) {
     for (list_id, text) in list_texts {
-        if !paths
+        if paths
             .get(list_id)
-            .is_some_and(|asset| asset.primary_path == Path::new("Ext/ParentConfigurations.bin"))
+            .is_none_or(|asset| asset.primary_path != Path::new("Ext/ParentConfigurations.bin"))
         {
             continue;
         }
@@ -1501,6 +1505,10 @@ fn configuration_source_asset_kind(
 }
 
 #[allow(dead_code)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 pub(super) fn source_assets_from_metadata_blob(
     blob: &[u8],
     uuid: &str,
@@ -1532,6 +1540,10 @@ pub(super) fn source_assets_from_metadata_blob(
 }
 
 #[allow(dead_code)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 pub(super) fn source_assets_from_metadata_text(
     row: &MetadataTextRow,
     file_names: &BTreeSet<&str>,
@@ -1563,6 +1575,10 @@ pub(super) struct SourceAssetDiscovery {
     pub(super) misses: BTreeMap<String, String>,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 pub(super) fn source_assets_from_metadata_text_inner(
     row: &MetadataTextRow,
     file_names: &BTreeSet<&str>,
@@ -1985,10 +2001,9 @@ pub(super) fn normalize_ws_definition_own_namespace_prefixes(wsdl: &[u8]) -> Opt
             };
             let published_prefix = in_scope
                 .iter()
-                .filter(|(prefix, uri)| {
+                .rfind(|(prefix, uri)| {
                     *uri == target && !prefix.is_empty() && resolve(prefix) == Some(target)
                 })
-                .next_back()
                 .map(|(prefix, _)| *prefix);
             for (name, value, range) in &tag.attributes {
                 if !WS_DEFINITION_QNAME_ATTRIBUTES.contains(&name.rsplit(':').next()?) {
@@ -2029,6 +2044,7 @@ pub(super) fn normalize_ws_definition_own_namespace_prefixes(wsdl: &[u8]) -> Opt
 /// The length of the markup at `rest` that carries no start tag - a processing
 /// instruction, a comment, a CDATA section or a declaration - or `None` when
 /// `rest` opens an element.
+#[expect(clippy::manual_strip, reason = "moved verbatim in #559; cleanup later")]
 fn ws_definition_skipped_markup_end(rest: &str) -> Option<usize> {
     for (open, close) in [
         ("<!--", "-->"),
@@ -2278,27 +2294,26 @@ pub(super) fn write_source_asset(
         Err(error) => {
             // A classified refusal is reportable: the diagnostic export records
             // it and keeps traversing instead of losing every later row.
-            if context.collect_all_source_asset_diagnostics {
-                if let Some(refusal) = error
+            if context.collect_all_source_asset_diagnostics
+                && let Some(refusal) = error
                     .chain()
                     .find_map(|cause| cause.downcast_ref::<SourceAssetRefusal>())
                     .filter(|refusal| is_collectible_source_refusal(refusal.class()))
-                {
-                    // The report keeps the code; the detail goes to the
-                    // diagnostic run's own log.
-                    eprintln!(
-                        "source asset {} refused: {refusal}",
-                        asset.primary_path.display()
-                    );
-                    return Ok(WrittenSourceAsset::TypedRejectionNotEmitted {
-                        primary_path: asset.primary_path.clone(),
-                        family: source_asset_family_token(&asset.kind),
-                        code: refusal.code(),
-                        classification: refusal.class().as_str(),
-                        raw_length: bytes.len(),
-                        raw_sha256: raw_body_sha256(bytes),
-                    });
-                }
+            {
+                // The report keeps the code; the detail goes to the
+                // diagnostic run's own log.
+                eprintln!(
+                    "source asset {} refused: {refusal}",
+                    asset.primary_path.display()
+                );
+                return Ok(WrittenSourceAsset::TypedRejectionNotEmitted {
+                    primary_path: asset.primary_path.clone(),
+                    family: source_asset_family_token(&asset.kind),
+                    code: refusal.code(),
+                    classification: refusal.class().as_str(),
+                    raw_length: bytes.len(),
+                    raw_sha256: raw_body_sha256(bytes),
+                });
             }
             Err(error)
         }
@@ -3923,9 +3938,7 @@ fn resolve_help_picture_reference(token: &str, refs: &BTreeMap<String, String>) 
         return help_standard_picture_by_negative_index(index).map(str::to_string);
     }
     let uuid = token.strip_prefix("id")?.split('/').next()?;
-    if parse_non_zero_uuid(uuid).is_none() {
-        return None;
-    }
+    parse_non_zero_uuid(uuid)?;
     if let Some(reference) = refs.get(uuid)
         && reference.starts_with("CommonPicture.")
     {
@@ -4180,13 +4193,12 @@ pub(super) fn insert_predefined_item_references(
                 item.id,
             );
         }
-        if !ambiguous_item_ids.contains(&item.id) {
-            if let Some(previous) = index.insert(item.id.clone(), reference.clone())
-                && previous != reference
-            {
-                index.remove(&item.id);
-                ambiguous_item_ids.insert(item.id.clone());
-            }
+        if !ambiguous_item_ids.contains(&item.id)
+            && let Some(previous) = index.insert(item.id.clone(), reference.clone())
+            && previous != reference
+        {
+            index.remove(&item.id);
+            ambiguous_item_ids.insert(item.id.clone());
         }
         insert_predefined_item_references(
             index,
@@ -4362,7 +4374,7 @@ fn predefined_column_is_boolean(value: &str) -> bool {
         == Some("B")
 }
 
-fn parse_predefined_item_fields<'a>(value: &'a str) -> Option<(Vec<&'a str>, Option<&'a str>)> {
+fn parse_predefined_item_fields(value: &str) -> Option<(Vec<&str>, Option<&str>)> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != "2" {
         return None;
@@ -5104,6 +5116,10 @@ pub(super) fn format_predefined_data_xml(
     Ok(xml)
 }
 
+#[expect(
+    clippy::only_used_in_recursion,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 pub(super) fn push_predefined_item_xml(
     xml: &mut String,
     item: &PredefinedItem,
@@ -5905,7 +5921,7 @@ pub(super) fn parse_job_schedule_fields(
 
     let week_days_count = fields.get(index)?.trim().parse::<usize>().ok()?;
     index += 1;
-    let week_days = parse_schedule_number_list(&fields, &mut index, week_days_count)?;
+    let week_days = parse_schedule_number_list(fields, &mut index, week_days_count)?;
 
     let week_day_in_month = parse_schedule_number(fields.get(index)?)?;
     index += 1;
@@ -5914,7 +5930,7 @@ pub(super) fn parse_job_schedule_fields(
 
     let months_count = fields.get(index)?.trim().parse::<usize>().ok()?;
     index += 1;
-    let months = parse_schedule_number_list(&fields, &mut index, months_count)?;
+    let months = parse_schedule_number_list(fields, &mut index, months_count)?;
 
     let weeks_period = parse_schedule_number(fields.get(index)?)?;
     index += 1;

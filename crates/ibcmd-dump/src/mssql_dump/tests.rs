@@ -1822,6 +1822,10 @@ fn render_owner_graph_fixture_for_test(fields: &[String], collections: &[String]
     format!("{{1,{{{}}},5,{}}}", fields.join(","), collections.join(","))
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn audit_owner_graph_row_for_test(
     row: &MetadataTextRow,
 ) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
@@ -1842,6 +1846,10 @@ fn audit_owner_graph_row_for_test(
     )
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn audit_owner_graph_row_with_forms_for_test(
     row: &MetadataTextRow,
     form_refs: &BTreeMap<String, FormSourceReference>,
@@ -1863,6 +1871,10 @@ fn audit_owner_graph_row_with_forms_for_test(
     )
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn audit_owner_graph_row_with_object_refs_for_test(
     row: &MetadataTextRow,
     object_refs: &BTreeMap<String, String>,
@@ -2597,7 +2609,7 @@ fn parse_cct_child_templates_validates_paths_identity_and_names() {
     let mut wrong_kind = BTreeMap::from([(first.clone(), template("First"))]);
     wrong_kind.get_mut(&first).unwrap().kind = "Form";
     assert_eq!(
-        parse_cct_child_templates(owner, &[first.clone()], &wrong_kind),
+        parse_cct_child_templates(owner, std::slice::from_ref(&first), &wrong_kind),
         None
     );
 
@@ -2605,7 +2617,7 @@ fn parse_cct_child_templates_validates_paths_identity_and_names() {
     wrong_owner.get_mut(&first).unwrap().relative_path =
         PathBuf::from("ChartsOfCharacteristicTypes/Other/Templates/First.xml");
     assert_eq!(
-        parse_cct_child_templates(owner, &[first.clone()], &wrong_owner),
+        parse_cct_child_templates(owner, std::slice::from_ref(&first), &wrong_owner),
         None
     );
 
@@ -2613,7 +2625,7 @@ fn parse_cct_child_templates_validates_paths_identity_and_names() {
     wrong_path.get_mut(&first).unwrap().relative_path =
         PathBuf::from("ChartsOfCharacteristicTypes/Characteristics/Forms/First.xml");
     assert_eq!(
-        parse_cct_child_templates(owner, &[first.clone()], &wrong_path),
+        parse_cct_child_templates(owner, std::slice::from_ref(&first), &wrong_path),
         None
     );
 
@@ -3183,14 +3195,14 @@ fn cct_tabular_late_failure_rolls_back_all_staged_ids_and_corrected_item_commits
         first_uuid,
         "First",
         first_generated,
-        &[first_nested.clone()],
+        std::slice::from_ref(&first_nested),
         "{0}",
     );
     let second_invalid = cct_tabular_section_item_for_test(
         second_uuid,
         "Second",
         second_generated,
-        &[second_nested.clone()],
+        std::slice::from_ref(&second_nested),
         "late-tooltip-shape",
     );
     let second_corrected = cct_tabular_section_item_for_test(
@@ -3801,7 +3813,7 @@ fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
     let second = "22222222-2222-4222-8222-222222222222";
     let direct =
         document_attribute_wrapper_for_test(6, first, r#"{"Pattern",{"B"}}"#, r#"{"U"}"#, "0", "1");
-    let direct_items = vec![format!("{{{direct},0}}"), "{malformed}".to_owned()];
+    let direct_items = [format!("{{{direct},0}}"), "{malformed}".to_owned()];
     assert_eq!(
         parse_document_direct_attribute_collection_indexed(
             &direct_items.iter().map(String::as_str).collect::<Vec<_>>()
@@ -3854,7 +3866,7 @@ fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
         "{{11,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-8ccc-cccccccccccc,dddddddd-dddd-4ddd-8ddd-dddddddddddd,{{0,{{3,{{1,0,{first}}},\"Lines\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}},0,0,0}}"
     );
     let tabular = format!("{{{{1,{payload}}},1,{attributes}}}");
-    let tabular_items = vec![tabular, "{malformed}".to_owned()];
+    let tabular_items = [tabular, "{malformed}".to_owned()];
     let refs = BTreeMap::from([(
         first.to_owned(),
         "Document.Invoice.TabularSection.Lines".to_owned(),
@@ -15527,7 +15539,7 @@ fn live_pack_extract_repro_preserves_avansovy_report_template_shape() -> anyhow:
         spreadsheet.pictures.len(),
     );
     assert!(spreadsheet.lines.len() >= 2);
-    assert!(spreadsheet.pictures.len() >= 1);
+    assert!(!spreadsheet.pictures.is_empty());
     assert_eq!(
         original.matches("\t<format>\r\n").count() + original.matches("\t<format/>\r\n").count(),
         extracted.matches("\t<format>\r\n").count() + extracted.matches("\t<format/>\r\n").count(),
@@ -19723,21 +19735,21 @@ fn formats_moxel_stamp_offer_uses_field_selection_colors() {
         .formats
         .iter()
         .enumerate()
-        .filter_map(|(index, format)| {
-            (format.left_border == Some(1)
+        .filter(|(_, format)| {
+            format.left_border == Some(1)
                 && format.top_border == Some(1)
                 && format.height == Some(45)
                 && format.width == Some(72)
                 && format.fill_type == Some("Text")
-                && format.pic_index == Some(1))
-            .then(|| {
-                (
-                    index,
-                    format.border_color.clone(),
-                    format.text_color.clone(),
-                    format.back_color.clone(),
-                )
-            })
+                && format.pic_index == Some(1)
+        })
+        .map(|(index, format)| {
+            (
+                index,
+                format.border_color.clone(),
+                format.text_color.clone(),
+                format.back_color.clone(),
+            )
         })
         .collect::<Vec<_>>();
 
@@ -20440,7 +20452,7 @@ fn moxel_line_table_refuses_an_unknown_line_descriptor() {
 
     for refused in [
         format!("{{1,1,{{4,0,{{0}},99,2,0,{cell},0}},0}}"),
-        format!("{{1,1,{{4,0,{{0}},1,2,0,00000000-0000-0000-0000-000000000000,0}},0}}"),
+        "{1,1,{4,0,{0},1,2,0,00000000-0000-0000-0000-000000000000,0},0}".to_string(),
         format!("{{2,1,{{4,0,{{0}},1,2,0,{cell},0}},0}}"),
     ] {
         let fields = ["8", "1", "12", "{0}", "{0}", refused.as_str()];
@@ -29284,6 +29296,10 @@ fn configuration_localized_raw(values: &[(&str, &str)]) -> String {
     format!("{{{}}}", fields.join(","))
 }
 
+#[expect(
+    clippy::needless_range_loop,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn flat_configuration_properties_text(
     code: u32,
     field_count: usize,
@@ -30009,6 +30025,10 @@ fn configuration_default_roles_fail_closed() {
 }
 
 #[test]
+#[expect(
+    clippy::field_reassign_with_default,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extracts_atomic_configuration_localized_properties_for_proven_layouts() {
     let brief = configuration_localized_raw(&[("en", "Brief info")]);
     let detailed = configuration_localized_raw(&[("en", "Detailed & \"quoted\" info")]);
@@ -30251,6 +30271,10 @@ fn configuration_localized_properties_fail_closed_atomically() {
 }
 
 #[test]
+#[expect(
+    clippy::field_reassign_with_default,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extracts_configuration_used_mobile_application_functionalities_for_proven_layouts() {
     let raw37 = configuration_mobile_raw(
         37,
@@ -34235,6 +34259,10 @@ fn extract_filter_criterion_with_distinct_object_ref_indexes(
     )
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn audit_strict_filter_criterion(
     fixture: &StrictFilterCriterionFixture,
     raw: &str,
@@ -34317,9 +34345,7 @@ fn extracts_strict_v20_filter_criterion_in_native_order_from_base_indexes() {
     );
     assert!(xml.contains(r#"version="2.20""#));
     assert!(!xml.contains(r#"version="2.21""#));
-    assert!(xml.contains(&format!(
-        r#"<xr:GeneratedType name="FilterCriterionManager.DynamicCriterion" category="Manager">"#
-    )));
+    assert!(xml.contains(&r#"<xr:GeneratedType name="FilterCriterionManager.DynamicCriterion" category="Manager">"#.to_string()));
     assert!(xml.contains(&format!(
         "<xr:TypeId>{}</xr:TypeId>",
         fixture.generated_ids[0]
@@ -34328,9 +34354,12 @@ fn extracts_strict_v20_filter_criterion_in_native_order_from_base_indexes() {
         "<xr:ValueId>{}</xr:ValueId>",
         fixture.generated_ids[1]
     )));
-    assert!(xml.contains(&format!(
-        r#"<xr:GeneratedType name="FilterCriterionList.DynamicCriterion" category="List">"#
-    )));
+    assert!(
+        xml.contains(
+            &r#"<xr:GeneratedType name="FilterCriterionList.DynamicCriterion" category="List">"#
+                .to_string()
+        )
+    );
     assert!(xml.contains(&format!(
         "<xr:TypeId>{}</xr:TypeId>",
         fixture.generated_ids[2]
@@ -36359,7 +36388,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
         &mut index,
         &mut ambiguous,
         first_owner,
-        &[first_item.clone()],
+        std::slice::from_ref(&first_item),
     )
     .unwrap();
     assert_eq!(
@@ -44942,8 +44971,7 @@ fn catalog_attribute_layouts_and_nested_omissions_fail_closed() {
 
     let pattern8 = format!(
         "{{\"Pattern\",{}}}",
-        std::iter::repeat(r#"{"S"}"#)
-            .take(8)
+        std::iter::repeat_n(r#"{"S"}"#, 8)
             .collect::<Vec<_>>()
             .join(",")
     );
@@ -45866,6 +45894,10 @@ fn web_service_parameter_for_test(
     format!("{{{{0,{header},{value_type},{nillable},{direction}}},0}}")
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn web_service_operation_for_test(
     uuid: &str,
     name: &str,
@@ -46294,7 +46326,7 @@ fn rejects_web_service_trailing_data_at_nested_boundaries() {
 
     let operation_collection = web_service_collection_for_test(
         WEB_SERVICE_OPERATION_COLLECTION_UUID,
-        &[operation.clone()],
+        std::slice::from_ref(&operation),
     );
     assert!(
         parse_web_service_operations(&format!("{operation_collection}junk"), &mut BTreeSet::new(),)
@@ -46318,7 +46350,7 @@ fn rejects_web_service_trailing_data_at_nested_boundaries() {
 
     let parameter_collection = web_service_collection_for_test(
         WEB_SERVICE_PARAMETER_COLLECTION_UUID,
-        &[parameter.clone()],
+        std::slice::from_ref(&parameter),
     );
     assert!(
         parse_web_service_parameters(&format!("{parameter_collection}junk"), &mut BTreeSet::new(),)
@@ -49876,9 +49908,7 @@ fn calculation_generated_type_vector_emits_and_indexes_exact_seven_roles() {
     assert_eq!(entries.len(), expected.len());
     assert!(!xml.contains("CalculationRegisterObject"));
     let mut previous = xml.find("<InternalInfo>").unwrap();
-    for (entry, (type_index, value_index, name, category)) in
-        entries.iter().zip(expected.into_iter())
-    {
+    for (entry, (type_index, value_index, name, category)) in entries.iter().zip(expected) {
         let qualified_name = format!("{name}.Payroll");
         let opening =
             format!("<xr:GeneratedType name=\"{qualified_name}\" category=\"{category}\">");
@@ -51972,7 +52002,7 @@ fn configuration_allowed_incoming_share_request_types_ride_their_own_slot() {
     for malformed in [
         format!("{{2,{}}}", member("", "", "txt")),
         format!("{{1,{},{}}}", member("", "", "txt"), member("", "", "doc")),
-        format!("{{1,{{\"#\",00000000-0000-0000-0000-000000000000,{{0,\"\",\"\",\"txt\",0,0}}}}}}"),
+        "{1,{\"#\",00000000-0000-0000-0000-000000000000,{0,\"\",\"\",\"txt\",0,0}}}".to_string(),
         format!("{{1,{{\"#\",{type_uuid},{{1,\"\",\"\",\"txt\",0,0}}}}}}"),
         format!("{{1,{{\"#\",{type_uuid},{{0,\"\",\"\",\"txt\",0}}}}}}"),
         format!("{{1,{{\"#\",{type_uuid},{{0,\"\",\"\",\"txt\",x,0}}}}}}"),

@@ -562,7 +562,7 @@ pub(super) fn selected_owner_metadata_rows_for_uuids(
                 .collect::<BTreeSet<_>>();
         let matches = generated_type_matches
             .into_iter()
-            .chain(nested_command_matches.into_iter())
+            .chain(nested_command_matches)
             .collect::<BTreeSet<_>>();
         if matches.is_empty() {
             continue;

@@ -864,15 +864,14 @@ fn export_extension_records_to_source(
                 "no legacy family decoder recognized this storage entry: {reason}"
             ));
         }
-        if entry.disposition == StorageExportDisposition::Supported {
-            if let Err(error) = adjust_form_files(output_dir, entry, &context, &original_payloads)
+        if entry.disposition == StorageExportDisposition::Supported
+            && let Err(error) = adjust_form_files(output_dir, entry, &context, &original_payloads)
                 .and_then(|()| {
                     adjust_predefined_files(output_dir, entry, &context, &original_payloads)
                 })
-            {
-                fail_outputs(output_dir, entry, error);
-                continue;
-            }
+        {
+            fail_outputs(output_dir, entry, error);
+            continue;
         }
         if !adopted_rows.contains_key(&entry.logical_name)
             || entry.disposition != StorageExportDisposition::Supported
@@ -1178,7 +1177,7 @@ fn adjust_form_files(
             let packed = packed_rows
                 .get(&entry.logical_name)
                 .context("the adopted form's storage body is missing")?;
-            let body = ibcmd_metadata_blob::parse_form_body_blob(&packed)
+            let body = ibcmd_metadata_blob::parse_form_body_blob(packed)
                 .context("the adopted form's storage body is not readable")?;
             form::check_call_types(&adjusted, &body.layout)?;
         }

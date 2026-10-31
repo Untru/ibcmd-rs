@@ -117,8 +117,8 @@ impl OfflineInterfaceContext {
                 // A subsystem row is published only when it says something
                 // (`dynamic_source_asset`); the configuration's always is.
                 if kind == InterfaceAssetKind::ObjectCommandInterface
-                    && !parse_command_interface_blob(&blob, &self.command_refs, &self.metadata_refs)
-                        .is_some_and(|interface| !interface.is_empty())
+                    && parse_command_interface_blob(&blob, &self.command_refs, &self.metadata_refs)
+                        .is_none_or(|interface| interface.is_empty())
                 {
                     bail!("the exporter publishes no file for this subsystem row");
                 }

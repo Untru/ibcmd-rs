@@ -1398,29 +1398,21 @@ pub struct MssqlDumpedTableReport {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SourceAssetCompletenessStatus {
+    #[default]
     Unknown,
     Complete,
     Partial,
 }
 
-impl Default for SourceAssetCompletenessStatus {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SourceAssetCompletenessScope {
     Full,
+    #[default]
     Scoped,
-}
-
-impl Default for SourceAssetCompletenessScope {
-    fn default() -> Self {
-        Self::Scoped
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1646,15 +1638,11 @@ fn source_asset_audit_entry(
 /// it must not be used as evidence that every root object was emitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum RootMetadataInventoryScope {
     Full,
+    #[default]
     Scoped,
-}
-
-impl Default for RootMetadataInventoryScope {
-    fn default() -> Self {
-        Self::Scoped
-    }
 }
 
 /// One expected root source XML, keyed by its metadata row UUID rather than a
@@ -1862,7 +1850,7 @@ fn audit_root_metadata_inventory(
         .iter()
         .map(|uuid| {
             let row = rows_by_uuid.get(uuid.as_str()).copied();
-            let is_configuration = row.is_some_and(|row| is_configuration_metadata_row(row));
+            let is_configuration = row.is_some_and(is_configuration_metadata_row);
             let expected_path = if is_configuration {
                 "Configuration.xml".to_string()
             } else {
@@ -3472,6 +3460,10 @@ pub fn export_packed_entries_to_source(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn export_direct_storage_rows_to_source(
     rows: Vec<ConfigRow>,
     records: Vec<DirectStorageExportRecord>,
@@ -3686,6 +3678,10 @@ fn export_entry_note(notes: Option<&Vec<(String, String)>>, outputs: &[String]) 
 }
 
 #[allow(dead_code)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn dump_table_rows_eager(
     sql: &crate::sql::SqlExec,
     database: &str,
@@ -3880,6 +3876,10 @@ fn dump_table_rows_with_source_version(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn dump_table_rows_with_options(
     output_dir: &Path,
     table: &str,
@@ -4131,7 +4131,7 @@ fn dump_table_rows_with_options_mode(
         references: object_refs,
         resolutions: object_ref_resolutions,
     } = if extract_metadata_xml || needs_source_layout_refs {
-        let mut indexes = build_metadata_object_reference_indexes_from_texts(&metadata_texts);
+        let mut indexes = build_metadata_object_reference_indexes_from_texts(metadata_texts);
         if let Some(foreign) = foreign {
             for (uuid, reference) in &foreign.objects {
                 indexes.or_insert(uuid.clone(), reference.clone());
@@ -4141,7 +4141,7 @@ fn dump_table_rows_with_options_mode(
     } else if needs_standalone_refs {
         MetadataObjectReferenceIndexes::from_legacy(
             &build_standalone_object_reference_index_from_texts(
-                &metadata_texts,
+                metadata_texts,
                 &standalone_required_refs,
                 &form_refs,
                 &template_refs,
@@ -4320,7 +4320,7 @@ fn dump_table_rows_with_options_mode(
     })?;
     let information_register_field_refs = if extract_metadata_xml {
         build_information_register_field_reference_index_from_texts(
-            &metadata_texts,
+            metadata_texts,
             &type_index,
             &type_set_leaves,
         )
@@ -4329,7 +4329,7 @@ fn dump_table_rows_with_options_mode(
     };
     let source_assets = source_asset_paths_with_indexes(
         &rows,
-        &metadata_texts,
+        metadata_texts,
         &command_refs,
         &metadata_refs,
         &object_refs,
@@ -4340,13 +4340,13 @@ fn dump_table_rows_with_options_mode(
         &subsystem_refs,
     );
     let source_asset_diagnostics =
-        build_form_owner_resolution_diagnostics_from_texts(&metadata_texts);
+        build_form_owner_resolution_diagnostics_from_texts(metadata_texts);
     let rows_by_file_name = rows
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
     let source_asset_discovery_misses = source_asset_discovery_misses(
-        &metadata_texts,
+        metadata_texts,
         &file_names_owned.iter().map(String::as_str).collect(),
         &rows_by_file_name,
         &command_refs,
@@ -4365,7 +4365,7 @@ fn dump_table_rows_with_options_mode(
     {
         if extract_metadata_xml {
             build_standalone_content_references(
-                &metadata_texts,
+                metadata_texts,
                 &configuration_root_object_refs,
                 &form_refs,
                 &template_refs,
@@ -4373,10 +4373,10 @@ fn dump_table_rows_with_options_mode(
             )
         } else {
             build_standalone_content_references_for_uuids(
-                &metadata_texts,
+                metadata_texts,
                 &standalone_required_refs,
                 &build_configuration_root_object_reference_index_from_texts(
-                    &metadata_texts,
+                    metadata_texts,
                     &object_refs,
                 ),
                 &form_refs,
@@ -4400,9 +4400,9 @@ fn dump_table_rows_with_options_mode(
     } else {
         BTreeMap::new()
     };
-    let metadata_value_owner_file_names = eager_metadata_value_owner_file_names(&metadata_texts);
+    let metadata_value_owner_file_names = eager_metadata_value_owner_file_names(metadata_texts);
     let mut metadata_value_owner_ids = selected_metadata_predefined_owner_ids(
-        &metadata_texts,
+        metadata_texts,
         &metadata_value_owner_file_names,
         &type_index,
         &object_refs,
@@ -4410,7 +4410,7 @@ fn dump_table_rows_with_options_mode(
     );
     metadata_value_owner_ids.extend(business_process_flowchart_predefined_owner_ids(
         &rows,
-        &business_process_flowchart_file_names(&metadata_texts),
+        &business_process_flowchart_file_names(metadata_texts),
         &type_index,
         &object_refs,
         &body_owners,
@@ -4793,6 +4793,13 @@ fn dump_table_rows_with_options_mode(
     })
 }
 
+#[expect(
+    clippy::drop_non_drop,
+    clippy::if_same_then_else,
+    clippy::redundant_locals,
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn dump_table_rows_streamed(
     sql: &crate::sql::SqlExec,
     database: &str,
@@ -5018,10 +5025,10 @@ fn dump_table_rows_streamed(
     let selected_configuration_index_needs =
         selected_configuration_source_asset_index_needs_with_metadata(
             &file_names,
-            &selected_metadata_texts,
+            selected_metadata_texts,
         );
     let selected_metadata_index_needs = if selected_configuration_index_needs.is_none() {
-        selected_metadata_source_reference_index_needs(&selected_metadata_texts)
+        selected_metadata_source_reference_index_needs(selected_metadata_texts)
     } else {
         None
     };
@@ -5038,7 +5045,7 @@ fn dump_table_rows_streamed(
             && selected_export_needs_broad_metadata_indexes(
                 extract_module_text,
                 &file_names,
-                &selected_metadata_texts,
+                selected_metadata_texts,
             ));
     let broad_metadata_indexes_without_command_refs =
         selected_object_export || requested_descriptor.is_some() || natural_broad_metadata_indexes;
@@ -5883,7 +5890,7 @@ fn dump_table_rows_streamed(
     // (owner-qualified keys do not depend on which other owners are read).
     let items_covered = all_predefined_rows.is_some();
     let metadata_value_owner_file_names =
-        streamed_metadata_value_owner_file_names(&index_metadata_texts, &selected_file_names);
+        streamed_metadata_value_owner_file_names(&index_metadata_texts, selected_file_names);
     let mut owner_ids = if items_covered {
         BTreeSet::new()
     } else {
@@ -6712,6 +6719,10 @@ struct MetadataTextRowsAudit {
     misses: BTreeMap<String, MetadataExtractionMissReason>,
 }
 
+#[expect(
+    clippy::nonminimal_bool,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn build_metadata_text_rows_audited(rows: &[ConfigRow]) -> MetadataTextRowsAudit {
     let mut audit = MetadataTextRowsAudit::default();
     // `map` over this indexed iterator collects in source order, so only the
@@ -7203,6 +7214,10 @@ fn dump_table_binary_row(context: &DumpRowContext<'_>, row: &BinaryConfigRow) ->
     )
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn dump_table_row_bytes(
     context: &DumpRowContext<'_>,
     file_name: &str,
@@ -7242,7 +7257,7 @@ fn dump_table_row_bytes(
     let mut inflated_rows = 0;
     let inflated_relative = if context.inflate {
         let started = Instant::now();
-        match inflate_raw_deflate(&bytes) {
+        match inflate_raw_deflate(bytes) {
             Ok(inflated) => {
                 let relative = PathBuf::from(format!("{}_inflated", context.table))
                     .join(format!("{safe_name}.txt"));
@@ -7395,7 +7410,7 @@ fn dump_table_row_bytes(
             legacy_from_text(row)
         } else {
             extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
-                &bytes,
+                bytes,
                 file_name,
                 context.type_index,
                 context.type_index_collisions,
@@ -7465,7 +7480,7 @@ fn dump_table_row_bytes(
         let asset = match context.source_assets.get(file_name) {
             Some(asset) => Some(asset),
             None => {
-                dynamic_asset = dynamic_source_asset(context, file_name, &bytes);
+                dynamic_asset = dynamic_source_asset(context, file_name, bytes);
                 dynamic_asset.as_ref()
             }
         };
@@ -7479,7 +7494,7 @@ fn dump_table_row_bytes(
                     context,
                     file_name,
                     asset,
-                    &bytes,
+                    bytes,
                     parsed_form_body.as_ref(),
                     &mut timings,
                 )?;
@@ -7584,14 +7599,13 @@ fn dump_table_row_bytes(
     let mut module_text_rows = 0;
     let module_text_relative = if context.extract_module_text {
         let started = Instant::now();
-        let module_text = match unpack_module_blob_text(&bytes) {
+        let module_text = match unpack_module_blob_text(bytes) {
             Ok(text) => Some(text),
             Err(_) if let Some(body) = parsed_form_body.as_ref() => {
                 form_body_module_text_bytes(body)
             }
             Err(_) if context.module_text_paths.contains_key(file_name) => {
-                unpack_form_body_module_text(&bytes)
-                    .or_else(|| unpack_plain_text_module_body(&bytes))
+                unpack_form_body_module_text(bytes).or_else(|| unpack_plain_text_module_body(bytes))
             }
             Err(_) => None,
         };
@@ -13308,6 +13322,10 @@ fn extract_metadata_source_xml(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_metadata_source_xml_with_refs(
     blob: &[u8],
     uuid: &str,
@@ -13376,6 +13394,10 @@ fn extract_metadata_source_xml_with_type_collisions(
 }
 
 #[allow(dead_code)] // Compatibility wrapper for callers that only expose the legacy BTreeMap.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_metadata_source_xml_with_recalculation_refs(
     blob: &[u8],
     uuid: &str,
@@ -13416,6 +13438,10 @@ fn extract_metadata_source_xml_with_recalculation_refs(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
     blob: &[u8],
     uuid: &str,
@@ -13458,6 +13484,10 @@ fn extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutio
 }
 
 #[allow(dead_code)] // Compatibility wrapper for callers that only expose the legacy BTreeMap.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_metadata_source_xml_from_text_row(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
@@ -13496,6 +13526,10 @@ fn extract_metadata_source_xml_from_text_row(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_metadata_source_xml_from_text_row_with_object_ref_resolutions(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
@@ -13534,6 +13568,10 @@ fn extract_metadata_source_xml_from_text_row_with_object_ref_resolutions(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
@@ -13559,18 +13597,18 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     let text = row.text.as_str();
     // Only a successfully validated extension root owns this projection.
     // Mere process-wide context presence cannot waive ordinary refusal gates.
-    if extension::active().is_some() {
-        if let Some(xml) = extract_configuration_source_xml(
+    if extension::active().is_some()
+        && let Some(xml) = extract_configuration_source_xml(
             text,
             uuid,
             configuration_root_object_refs,
             source_version,
-        ) {
-            return Some(ExtractedMetadataSourceXml {
-                relative_path: PathBuf::from("Configuration.xml"),
-                xml: xml.into_bytes(),
-            });
-        }
+        )
+    {
+        return Some(ExtractedMetadataSourceXml {
+            relative_path: PathBuf::from("Configuration.xml"),
+            xml: xml.into_bytes(),
+        });
     }
     match refs::configuration_v76_interface_mode(text, uuid) {
         Err(signature) => {
@@ -13669,7 +13707,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let relative_path = PathBuf::from("CommonModules")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_common_module_source_xml(&header, &flags, source_version).into_bytes();
+        let xml = format_common_module_source_xml(header, &flags, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 16 && row.kind.as_deref() == Some("Constant") {
@@ -13679,7 +13717,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let relative_path = PathBuf::from("Constants")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let legacy_xml = format_constant_source_xml(&header, &constant, source_version);
+        let legacy_xml = format_constant_source_xml(header, &constant, source_version);
         let xml = route_constant_source_xml_through_canonical_ir(&legacy_xml, source_version)?;
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
@@ -13695,7 +13733,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
         let xml =
-            format_command_group_source_xml(&header, &command_group, source_version).into_bytes();
+            format_command_group_source_xml(header, &command_group, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if row
@@ -13709,7 +13747,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let relative_path = PathBuf::from("CommonCommands")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_common_command_source_xml_native(&header, &common_command, source_version)
+        let xml = format_common_command_source_xml_native(header, &common_command, source_version)
             .into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
@@ -13719,43 +13757,38 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let relative_path = PathBuf::from("StyleItems")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_style_item_source_xml(&header, &style_item).into_bytes();
+        let xml = format_style_item_source_xml(header, &style_item).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if row
         .kind
         .as_deref()
         .is_some_and(|kind| kind == "ScheduledJob")
-    {
-        if let Some(scheduled_job) =
+        && let Some(scheduled_job) =
             parse_scheduled_job_properties_from_text(text, uuid, object_refs)
-        {
-            let header = row.header.as_ref()?;
-            let relative_path = PathBuf::from("ScheduledJobs")
-                .join(sanitize_source_path_segment(&header.name))
-                .with_extension("xml");
-            let xml = format_scheduled_job_source_xml(&header, &scheduled_job, source_version)
-                .into_bytes();
-            return Some(ExtractedMetadataSourceXml { relative_path, xml });
-        }
+    {
+        let header = row.header.as_ref()?;
+        let relative_path = PathBuf::from("ScheduledJobs")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml =
+            format_scheduled_job_source_xml(header, &scheduled_job, source_version).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if row
         .kind
         .as_deref()
         .is_some_and(|kind| kind == "EventSubscription")
-    {
-        if let Some(event_subscription) =
+        && let Some(event_subscription) =
             parse_event_subscription_properties_from_text(text, uuid, type_index, object_refs)
-        {
-            let header = row.header.as_ref()?;
-            let relative_path = PathBuf::from("EventSubscriptions")
-                .join(sanitize_source_path_segment(&header.name))
-                .with_extension("xml");
-            let xml =
-                format_event_subscription_source_xml(&header, &event_subscription, source_version)
-                    .into_bytes();
-            return Some(ExtractedMetadataSourceXml { relative_path, xml });
-        }
+    {
+        let header = row.header.as_ref()?;
+        let relative_path = PathBuf::from("EventSubscriptions")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml = format_event_subscription_source_xml(header, &event_subscription, source_version)
+            .into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 0 && is_defined_type_metadata_text(text, uuid) {
         let header = row.header.as_ref()?;
@@ -13764,7 +13797,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
         let xml =
-            format_defined_type_source_xml(&header, &defined_type, source_version).into_bytes();
+            format_defined_type_source_xml(header, &defined_type, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if row
@@ -13807,7 +13840,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         // can name gets no declaration file at all, never an assumed
         // `<FormType>Managed</FormType>`.
         let form_type = parse_declared_form_type(text, uuid)?;
-        let xml = format_form_source_xml(kind, &header, &properties, form_type, source_version)
+        let xml = format_form_source_xml(kind, header, &properties, form_type, source_version)
             .into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
@@ -13828,7 +13861,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             .map(|template_ref| template_ref.template_type)
             .unwrap_or("BinaryData");
         let xml =
-            format_template_source_xml(kind, &header, template_type, source_version).into_bytes();
+            format_template_source_xml(kind, header, template_type, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     let kind = row.kind.as_deref()?;
@@ -13874,14 +13907,14 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     let mut strict_chart_root_formatted = false;
     let mut xml = if kind == "CommonPicture" {
         let picture = parse_common_picture_properties_from_text(text, uuid)?;
-        format_common_picture_source_xml(&header, &picture, source_version).into_bytes()
+        format_common_picture_source_xml(header, &picture, source_version).into_bytes()
     } else if kind == "PaletteColor" {
         let color = metadata_object_fields(text)
             .and_then(|fields| fields.get(2).map(|field| field.trim().to_string()))?;
         let color = form::layout_8_5_1::palette_color_8_5_1(&color)
             .map(ToOwned::to_owned)
             .or_else(|| form_body::parse_form_control_color(&color, object_refs))?;
-        format_palette_color_source_xml(&header, &color, source_version).into_bytes()
+        format_palette_color_source_xml(header, &color, source_version).into_bytes()
     } else if kind == "Bot" {
         // Must run here, after `is_form_metadata_text`/`is_template_metadata_text`
         // and the other structural (shape-based) checks above, not among the
@@ -13897,13 +13930,13 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         // of those before `kind` is ever consulted, so only the one true Bot
         // reaches `parse_bot_properties_from_text`.
         let bot = parse_bot_properties_from_text(text, uuid, object_refs)?;
-        format_bot_source_xml(&header, &bot, source_version).into_bytes()
+        format_bot_source_xml(header, &bot, source_version).into_bytes()
     } else if kind == "Role" {
-        format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
+        format_full_metadata_source_xml(kind, header, source_version).into_bytes()
     } else if kind == "Sequence" {
         let sequence =
-            parse_sequence_properties_from_text(text, uuid, &header, type_index, object_refs)?;
-        format_sequence_source_xml(&header, &sequence, source_version).into_bytes()
+            parse_sequence_properties_from_text(text, uuid, header, type_index, object_refs)?;
+        format_sequence_source_xml(header, &sequence, source_version).into_bytes()
     } else if kind == "Catalog" {
         let catalog = parse_strict_catalog_properties_from_text(
             text,
@@ -13916,7 +13949,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             template_refs,
             owner_graph_diagnostic,
         )?;
-        format_catalog_source_xml(&header, &catalog, source_version, type_set_leaves)?.into_bytes()
+        format_catalog_source_xml(header, &catalog, source_version, type_set_leaves)?.into_bytes()
     } else if kind == "Report" {
         let report = parse_report_properties_from_text(
             text,
@@ -13926,7 +13959,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             template_refs,
             object_refs,
         )?;
-        format_report_source_xml(&header, &report, source_version, type_set_leaves).into_bytes()
+        format_report_source_xml(header, &report, source_version, type_set_leaves).into_bytes()
     } else if kind == "DataProcessor" {
         let data_processor = parse_data_processor_properties_from_text(
             text,
@@ -13938,7 +13971,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             template_refs,
         )?;
-        format_data_processor_source_xml(&header, &data_processor, source_version, type_set_leaves)
+        format_data_processor_source_xml(header, &data_processor, source_version, type_set_leaves)
             .into_bytes()
     } else if kind == "Document" {
         let document = parse_document_properties_from_text(
@@ -13952,8 +13985,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             template_refs,
             owner_graph_diagnostic,
         )?;
-        format_document_source_xml(&header, &document, source_version, type_set_leaves)?
-            .into_bytes()
+        format_document_source_xml(header, &document, source_version, type_set_leaves)?.into_bytes()
     } else if kind == "ChartOfCharacteristicTypes" {
         let chart = parse_chart_of_characteristic_types_properties_from_text(
             text,
@@ -13998,7 +14030,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             owner_graph_diagnostic,
         )?;
         format_business_process_source_xml(
-            &header,
+            header,
             &business_process,
             source_version,
             type_set_leaves,
@@ -14014,17 +14046,17 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             owner_graph_diagnostic,
         )?;
-        format_task_source_xml(&header, &task, source_version, type_set_leaves)?.into_bytes()
+        format_task_source_xml(header, &task, source_version, type_set_leaves)?.into_bytes()
     } else if kind == "SettingsStorage" {
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid, form_refs)?;
-        format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
+        format_settings_storage_source_xml(header, &settings_storage, source_version).into_bytes()
     } else if kind == "Enum" {
         let enumeration = parse_enum_properties_from_text(text, uuid, form_refs, template_refs)?;
-        format_enum_source_xml(&header, &enumeration, source_version).into_bytes()
+        format_enum_source_xml(header, &enumeration, source_version).into_bytes()
     } else if kind == "FunctionalOptionsParameter" {
         let properties =
             parse_functional_options_parameter_properties_from_text(text, uuid, object_refs)?;
-        format_functional_options_parameter_source_xml(&header, &properties, source_version)
+        format_functional_options_parameter_source_xml(header, &properties, source_version)
             .into_bytes()
     } else if kind == "Subsystem" {
         let subsystem = parse_subsystem_properties_from_text(
@@ -14033,7 +14065,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             configuration_root_object_refs,
             subsystem_refs,
         )?;
-        format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
+        format_subsystem_source_xml(header, &subsystem, source_version).into_bytes()
     } else if kind == "ExchangePlan" {
         let exchange_plan = parse_exchange_plan_properties_from_text(
             text,
@@ -14042,7 +14074,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             object_refs,
             form_refs,
         )?;
-        format_exchange_plan_source_xml(&header, &exchange_plan, source_version, type_set_leaves)
+        format_exchange_plan_source_xml(header, &exchange_plan, source_version, type_set_leaves)
             .into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
         let register_object_refs = if kind == "InformationRegister" {
@@ -14066,14 +14098,14 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
                 root_recalculation_refs,
             )?;
         }
-        format_register_source_xml(kind, &header, &register, source_version, type_set_leaves)
+        format_register_source_xml(kind, header, &register, source_version, type_set_leaves)
             .into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
-        format_language_source_xml(&header, &language, source_version).into_bytes()
+        format_language_source_xml(header, &language, source_version).into_bytes()
     } else if kind == "DocumentNumerator" {
         let document_numerator = parse_document_numerator_properties_from_text(text, uuid)?;
-        format_document_numerator_source_xml(&header, &document_numerator, source_version)
+        format_document_numerator_source_xml(header, &document_numerator, source_version)
             .into_bytes()
     } else if kind == ibcmd_schema::interface::InterfaceLayout::KIND {
         let row = ibcmd_metadata_model::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
@@ -14098,23 +14130,23 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         .into_bytes()
     } else if kind == "WSReference" {
         let ws_reference = parse_ws_reference_properties_from_text(text, uuid)?;
-        format_ws_reference_source_xml(&header, &ws_reference, source_version).into_bytes()
+        format_ws_reference_source_xml(header, &ws_reference, source_version).into_bytes()
     } else if kind == "IntegrationService" {
         let service = parse_integration_service_properties_from_text(text, uuid)?;
-        format_integration_service_source_xml(&header, &service, source_version).into_bytes()
+        format_integration_service_source_xml(header, &service, source_version).into_bytes()
     } else if kind == "XDTOPackage" {
         let package = parse_xdto_package_properties_from_text(text, uuid)?;
-        format_xdto_package_source_xml(&header, &package, source_version).into_bytes()
+        format_xdto_package_source_xml(header, &package, source_version).into_bytes()
     } else if kind == "WebService" {
         let service = parse_web_service_properties_from_text(text, header, object_refs)?;
-        format_web_service_source_xml(&header, &service, source_version).into_bytes()
+        format_web_service_source_xml(header, &service, source_version).into_bytes()
     } else if kind == "HTTPService" {
         let service = parse_http_service_properties_from_text(text, uuid)?;
-        format_http_service_source_xml(&header, &service, source_version).into_bytes()
+        format_http_service_source_xml(header, &service, source_version).into_bytes()
     } else if kind == "CommonAttribute" {
         let common_attribute =
             parse_common_attribute_properties_from_text(text, header, type_index, object_refs)?;
-        format_common_attribute_source_xml(&header, &common_attribute, source_version).into_bytes()
+        format_common_attribute_source_xml(header, &common_attribute, source_version).into_bytes()
     } else if kind == "FilterCriterion" {
         let filter_criterion = match parse_filter_criterion_properties_from_text(
             text,
@@ -14140,7 +14172,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             // wrote every owned command twice.
             nested_commands = Vec::new();
         }
-        format_filter_criterion_source_xml(&header, &filter_criterion, source_version).into_bytes()
+        format_filter_criterion_source_xml(header, &filter_criterion, source_version).into_bytes()
     } else if kind == "ChartOfAccounts" {
         match parse_chart_of_accounts_properties_from_text(
             text,
@@ -14217,11 +14249,11 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     } else if metadata_kind_uses_default_list_form_properties(kind) {
         let properties =
             parse_default_list_form_metadata_properties_from_text(kind, text, uuid, form_refs)?;
-        format_default_list_form_metadata_source_xml(kind, &header, &properties, source_version)
+        format_default_list_form_metadata_source_xml(kind, header, &properties, source_version)
             .into_bytes()
     } else if is_typed_metadata_source(kind) {
         let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
-        format_typed_metadata_source_xml(kind, &header, &typed, source_version).into_bytes()
+        format_typed_metadata_source_xml(kind, header, &typed, source_version).into_bytes()
     } else {
         // A kind whose own reader (above, keyed by the record's version code)
         // did not take the record is stored in a version no reader knows --
@@ -14247,7 +14279,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         // header, a self-closed empty `Comment` and no trailing newline. The
         // families without a writer of their own used to reach a second copy
         // of this writer that disagreed on all four; that copy is gone.
-        format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
+        format_full_metadata_source_xml(kind, header, source_version).into_bytes()
     };
     let additional_tabular_section_child_objects = String::new();
     let owned_form_template_child_objects = if strict_chart_root_formatted
@@ -14301,6 +14333,11 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
 /// return typed errors, `legacy_option_none` intentionally does not pretend to
 /// identify an inner branch.
 #[allow(dead_code)] // Compatibility wrapper for callers that only expose the legacy BTreeMap.
+#[expect(
+    clippy::result_large_err,
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_metadata_source_xml_from_text_row_audited(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
@@ -14339,6 +14376,11 @@ fn extract_metadata_source_xml_from_text_row_audited(
     )
 }
 
+#[expect(
+    clippy::result_large_err,
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
@@ -14406,9 +14448,9 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
             "family_unrecognized",
         )
     } else if is_direct_code14_form_metadata_text(&row.text, &row.file_name)
-        && !form_refs
+        && form_refs
             .get(&row.file_name)
-            .is_some_and(|form_ref| form_ref.kind == OWNER_GRAPH_FORM_KIND)
+            .is_none_or(|form_ref| form_ref.kind != OWNER_GRAPH_FORM_KIND)
     {
         (
             MetadataSourceFailureClass::Unresolved,
@@ -14827,7 +14869,7 @@ fn exchange_plan_root_collection_is_valid(
     let Some(count) = parse_information_register_usize(fields[1]) else {
         return false;
     };
-    if fields.len() != count.checked_add(2).unwrap_or(usize::MAX) {
+    if fields.len() != count.saturating_add(2) {
         return false;
     }
     if direct_uuid_items {
@@ -15439,7 +15481,7 @@ fn parse_strict_tabular_sections(
     }
 
     let mut sections = Vec::with_capacity(values.len());
-    for (_section_index, value) in values.iter().enumerate() {
+    for value in values.iter() {
         let item = split_information_register_braced_fields(value)?;
         if item.len() != 3 || item.get(1)?.trim() != "1" {
             return None;
@@ -15528,8 +15570,8 @@ fn parse_strict_tabular_sections(
             .collect::<Option<Vec<_>>>()?;
         sections.push(section);
     }
-    let result = sections_by_uuid.is_empty().then_some(sections);
-    result
+
+    sections_by_uuid.is_empty().then_some(sections)
 }
 
 fn parse_strict_code11_tabular_section_header(fields: &[&str]) -> Option<MetadataHeader> {
@@ -15921,6 +15963,10 @@ fn parse_information_register_uuid(value: &str) -> Option<String> {
     Some(value.to_string())
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn decode_owner_graph<'a>(
     family: owner_graph::OwnerGraphFamily,
     text: &'a str,
@@ -16461,9 +16507,7 @@ fn validate_owner_graph_owned_templates(
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<()> {
-    let Some(owner_folder) = metadata_source_folder_for_kind(family.as_str()) else {
-        return None;
-    };
+    let owner_folder = metadata_source_folder_for_kind(family.as_str())?;
     let mut resolved_names = BTreeSet::new();
     for (item_index, uuid) in uuids.iter().enumerate() {
         let mut matches = template_refs
@@ -16519,6 +16563,10 @@ fn validate_owner_graph_owned_templates(
     Some(())
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn validate_owner_graph_form_slots(
     fields: &[&str],
     slots: &[usize],
@@ -16749,6 +16797,10 @@ fn parse_owner_graph_child_uuid_collection(
     Some(uuids)
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn decode_owner_graph_collection<'a>(
     family: owner_graph::OwnerGraphFamily,
     raw: &'a str,
@@ -16810,6 +16862,10 @@ fn decode_owner_graph_collection<'a>(
     ))
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn decode_owner_graph_uuid(
     raw: &str,
     family: owner_graph::OwnerGraphFamily,
@@ -17042,7 +17098,7 @@ fn information_register_root_collection_is_valid(value: &str) -> bool {
     if count == 0 {
         return fields.len() == 2;
     }
-    if fields.len() != count.checked_add(2).unwrap_or(usize::MAX) {
+    if fields.len() != count.saturating_add(2) {
         return false;
     }
     let items = &fields[2..];
@@ -19430,6 +19486,10 @@ fn parse_register_include_help_in_contents(
     .or(layout.absent_or_malformed_default)
 }
 
+#[expect(
+    clippy::type_complexity,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_register_presentations(
     kind: &str,
     fields: &[&str],
@@ -20166,6 +20226,10 @@ fn owner_collection_item_failure(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_attribute_tabular_section_child_objects(
     owner_kind: &str,
     owner_name: &str,
@@ -20192,6 +20256,10 @@ fn parse_attribute_tabular_section_child_objects(
     .expect("legacy child scanner has no declared-inventory failure path")
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_declared_owner_child_objects(
     owner_kind: &str,
     owner_name: &str,
@@ -20218,6 +20286,11 @@ fn parse_declared_owner_child_objects(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    clippy::unnecessary_unwrap,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_attribute_tabular_section_child_objects_with_declared_failure(
     owner_kind: &str,
     owner_name: &str,
@@ -20250,7 +20323,7 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
             continue;
         };
         if let Some(failure) = declared_inventory.and_then(|inventory| {
-            inventory.failure_for_observed(&tag, &header.uuid, parent_tabular_section.as_ref())
+            inventory.failure_for_observed(tag, &header.uuid, parent_tabular_section.as_ref())
         }) {
             return Err(failure);
         }
@@ -20363,7 +20436,7 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
         {
             return Err(declared_inventory
                 .expect("attribute property failure is declared-only")
-                .location_for(&tag, &header.uuid, parent_tabular_section.as_ref()));
+                .location_for(tag, &header.uuid, parent_tabular_section.as_ref()));
         }
         let (generated_types, tabular_section_properties) = if tag == "TabularSection" {
             match parse_exact_metadata_tabular_section(
@@ -20375,16 +20448,16 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
             ) {
                 Some(Some(exact)) => (exact.generated_types, Some(exact.properties)),
                 Some(None) | None => (
-                    (owner_kind == "DataProcessor")
-                        .then(|| {
-                            parse_data_processor_tabular_section_generated_types(
-                                text,
-                                marker_start,
-                                &header,
-                                owner_name,
-                            )
-                        })
-                        .unwrap_or_default(),
+                    if owner_kind == "DataProcessor" {
+                        parse_data_processor_tabular_section_generated_types(
+                            text,
+                            marker_start,
+                            &header,
+                            owner_name,
+                        )
+                    } else {
+                        Default::default()
+                    },
                     parse_metadata_tabular_section_properties(
                         owner_kind,
                         text,
@@ -20402,7 +20475,7 @@ fn parse_attribute_tabular_section_child_objects_with_declared_failure(
         {
             return Err(declared_inventory
                 .expect("tabular-section property failure is declared-only")
-                .location_for(&tag, &header.uuid, parent_tabular_section.as_ref()));
+                .location_for(tag, &header.uuid, parent_tabular_section.as_ref()));
         }
         let child = MetadataChildObject {
             tag,
@@ -21428,6 +21501,10 @@ struct AccumulationCalculationRegisterChildPayload {
 /// tail.  Their common code-27 payload is nevertheless complete and native
 /// `ibcmd` writes its attribute defaults from it.  Keeping the outer wrapper
 /// exact prevents applying those defaults to arbitrary code-27 children.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_accumulation_register_attribute_payload(
     owner_kind: &str,
     tag: &str,
@@ -21559,6 +21636,10 @@ fn parse_accumulation_calculation_register_child_tag_from_fields(
     register_common_child_header_matches(&common_fields, child_header).then_some(tag)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_accumulation_calculation_register_child_payload(
     owner_kind: &str,
     text: &str,
@@ -21597,6 +21678,10 @@ fn parse_accumulation_calculation_register_child_payload(
     Some(value)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_accumulation_calculation_register_child_payload_from_fields(
     owner_kind: &str,
     fields: &[&str],
@@ -21835,6 +21920,10 @@ fn register_common_child_header_matches(
         && parsed_header.comment == child_header.comment
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_information_register_child_payload(
     text: &str,
     marker_start: usize,
@@ -21898,6 +21987,10 @@ fn information_register_child_fields_current<'a>(fields: &[&'a str]) -> Option<V
     Some(current)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_information_register_child_payload_from_fields(
     fields: &[&str],
     child_header: &MetadataHeader,
@@ -22582,11 +22675,7 @@ fn dangling_value_design_time_ref(
     {
         return None;
     }
-    if information_register_design_time_owner_reference(owner_uuid, type_index, object_refs)
-        .is_none()
-    {
-        return None;
-    }
+    information_register_design_time_owner_reference(owner_uuid, type_index, object_refs)?;
     if object_refs.contains_key(value_uuid)
         || type_index.contains_key(value_uuid)
         || object_refs.keys().any(|key| {
@@ -23064,6 +23153,10 @@ fn parse_metadata_choice_parameter_typed_value(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_catalog_child_properties(
     owner_name: &str,
     text: &str,
@@ -23425,6 +23518,10 @@ fn build_document_data_path_owner_proof(
     DocumentDataPathOwnerProof { entries, ambiguous }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_document_child_properties(
     owner_name: &str,
     text: &str,
@@ -24308,6 +24405,10 @@ fn catalog_direct_attribute_wrapper_code(root_code: &str) -> Option<u32> {
 /// unknown code now refuses the body instead of being silently flattened to the
 /// literal. `FillFromFillingValue`/`FillValue` stay unwritten: native emits
 /// neither for this family.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_accounting_register_common_child_properties(
     owner_kind: &str,
     text: &str,
@@ -24430,7 +24531,7 @@ fn parse_metadata_child_properties_from_fields(
         return Some(properties);
     }
 
-    let header_index = metadata_header_field_index(&fields, child_uuid)?;
+    let header_index = metadata_header_field_index(fields, child_uuid)?;
     if fields.len() <= header_index + 13 {
         return None;
     }
@@ -26509,6 +26610,10 @@ fn parse_chart_standard_tabular_sections(
         .collect()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_chart_of_characteristic_types_properties_from_text(
     text: &str,
     header: &MetadataHeader,
@@ -26741,7 +26846,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         object_refs,
         owner_graph_diagnostic,
     )?;
-    if !cct_characteristics_preconditions(&fields) {
+    if !cct_characteristics_preconditions(fields) {
         return None;
     }
     let input_modes = split_information_register_braced_fields(fields.get(54)?)?;
@@ -27291,6 +27396,10 @@ fn parse_cct_direct_attributes_indexed(
     Ok(result)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_cct_attribute(
     value: &str,
     nested: bool,
@@ -27359,6 +27468,10 @@ fn cct_attribute_wrapper_is_exact(wrapper: &[&str], nested: bool) -> bool {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_cct_attribute_properties(
     payload: &[&str],
     wrapper: &[&str],
@@ -27500,6 +27613,10 @@ fn parse_cct_attribute_properties(
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_business_process_child_properties(
     text: &str,
     marker_start: usize,
@@ -27543,6 +27660,10 @@ fn parse_business_process_child_properties(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_cct_tabular_sections_indexed(
     items: &[&str],
     owner_kind: &str,
@@ -27852,6 +27973,10 @@ pub(super) fn catalog_string_code_length(text: &str, uuid: &str) -> Option<usize
     .ok()
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_strict_catalog_properties_from_text(
     text: &str,
     uuid: &str,
@@ -28791,6 +28916,10 @@ fn parse_catalog_child_templates(
         .collect()
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_catalog_field_references(
     fields: &[&str],
     field_index: usize,
@@ -29300,6 +29429,10 @@ fn parse_chart_of_calculation_types_child_objects(
     Some(child_objects)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_document_properties_from_text(
     text: &str,
     uuid: &str,
@@ -30167,6 +30300,10 @@ fn validate_document_owner_graph_child_objects(
     Ok(())
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_document_field_references(
     fields: &[&str],
     field_index: usize,
@@ -30186,6 +30323,10 @@ fn parse_document_field_references(
     )
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_owner_graph_field_references(
     fields: &[&str],
     field_index: usize,
@@ -30480,6 +30621,10 @@ fn parse_document_standard_attributes(
     Some(Some(attributes))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_business_process_properties_from_text(
     text: &str,
     uuid: &str,
@@ -31070,6 +31215,10 @@ fn parse_business_process_based_on(
         .collect()
 }
 
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_business_process_field_references(
     fields: &[&str],
     field_index: usize,
@@ -31659,6 +31808,10 @@ fn malformed_task_internal_uuid_slot_diagnostic(
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::result_large_err,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_task_internal_uuid_slots(
     fields: &[&str],
 ) -> std::result::Result<TaskInternalUuidSlots, MetadataSourceExtractionDiagnostic> {
@@ -32993,6 +33146,10 @@ fn parse_settings_storage_default_form_ref(
     Some(Some(reference))
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
 fn parse_data_processor_properties_from_text(
     text: &str,
     uuid: &str,
@@ -35821,7 +35978,7 @@ fn parse_integration_service_channels(
         channel_items
             .into_iter()
             .take(count)
-            .filter_map(|field| parse_integration_service_channel(field))
+            .filter_map(parse_integration_service_channel)
             .collect::<Vec<_>>(),
     )
 }
@@ -38935,10 +39092,10 @@ fn format_chart_of_characteristic_types_source_xml(
     properties.push_str(
         &render_cct_characteristics_xml(
             &chart.characteristics,
-            &chart.predefined_data_update,
-            &chart.edit_type,
+            chart.predefined_data_update,
+            chart.edit_type,
             xml_bool(chart.quick_choice),
-            &chart.choice_mode,
+            chart.choice_mode,
         )
         .ok()?,
     );
@@ -43727,14 +43884,13 @@ fn parse_filter_criterion_uuid(
     item_index: Option<usize>,
     non_zero: bool,
 ) -> std::result::Result<String, FilterCriterionDecodeError> {
-    let uuid =
-        parse_information_register_uuid(value).ok_or_else(|| FilterCriterionDecodeError {
-            stage,
-            reason: FilterCriterionDecodeReason::UuidSyntax,
-            role,
-            item_index,
-            reference_uuid: None,
-        })?;
+    let uuid = parse_information_register_uuid(value).ok_or(FilterCriterionDecodeError {
+        stage,
+        reason: FilterCriterionDecodeReason::UuidSyntax,
+        role,
+        item_index,
+        reference_uuid: None,
+    })?;
     let uuid = uuid.to_ascii_lowercase();
     if non_zero && information_register_uuid_is_zero(&uuid) {
         return Err(FilterCriterionDecodeError {
