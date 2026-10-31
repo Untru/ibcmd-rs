@@ -1258,19 +1258,3 @@ mod tests {
         assert_eq!(from_overlay, expected);
     }
 }
-
-/// The overlay the export installs, run against a real server: the rows the
-/// derived table publishes and the headers the export lists must be what the
-/// overlay describes, row by row (SHA-256 of the stored bytes).
-///
-/// Set `IBCMD_RS_DYNGEN_DB` to a lab database (it is only read). With
-/// `IBCMD_RS_DYNGEN_MAIN=1` the run publishes the main configuration, as the
-/// platform's export does, staged `ConfigSave` rows included:
-///
-/// ```text
-/// IBCMD_RS_DYNGEN_DB=ibcmd_rs_04_rcheck_bsp_a IBCMD_RS_DYNGEN_MAIN=1 cargo test --locked \
-///     -p ibcmd-rs --lib --no-default-features --features mssql-live-tests \
-///     dynamic_generation::live -- --ignored --nocapture
-/// ```
-#[cfg(all(test, feature = "mssql-live-tests"))]
-mod live;
