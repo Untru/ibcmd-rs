@@ -24,12 +24,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
 use crate::metadata_model::brace::parse_row;
 use crate::metadata_model::export::names::{
     may_own_objects, own_header, owned_objects, root_kinds,
 };
 use crate::sql::{SqlClient, SqlParam};
+use ibcmd_compiler_families::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
 
 use super::model::{RowMeta, RowName, classify_name, quote_ident};
 use super::sqlgen::ParamsRewrite;

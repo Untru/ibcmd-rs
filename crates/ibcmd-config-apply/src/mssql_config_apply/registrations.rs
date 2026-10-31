@@ -12,7 +12,7 @@
 //! What this module decides at plan time, from the staged names and the register:
 //!
 //! - **the nodes**: every node of an exchange plan that registers changes, except the plan's own node
-//!   ([`super::objects::registration_nodes`], read from the plans' node tables and not only from the
+//!   (`super::objects::registration_nodes`, read from the plans' node tables and not only from the
 //!   register);
 //! - **the changed objects**: the objects whose uuid a staged (or dropped) name starts with, and those whose
 //!   file list names a staged row, when the register knows them at some node;

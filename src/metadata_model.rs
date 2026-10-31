@@ -31,6 +31,11 @@ pub mod standard_pictures {
 pub mod objects {
     pub use ibcmd_metadata_model::metadata_model::objects::*;
 
+    // Read only by the own apply (`ibcmd-config-apply`); it still hides the item from the glob.
+    #[expect(
+        unused_imports,
+        reason = "the re-export hides a widened item from the public glob"
+    )]
     pub(crate) use ibcmd_metadata_model::metadata_model::objects::owned_body_classes;
     pub(crate) use ibcmd_restructure::descriptor::{layout, standard_markers};
 
@@ -110,6 +115,11 @@ pub mod export {
     pub mod names {
         pub use ibcmd_metadata_model::metadata_model::export::names::*;
 
+        // Read only by the own apply (`ibcmd-config-apply`); it still hides the item from the glob.
+        #[expect(
+            unused_imports,
+            reason = "the re-export hides a widened item from the public glob"
+        )]
         pub(crate) use ibcmd_metadata_model::metadata_model::export::names::root_class_kinds;
     }
 

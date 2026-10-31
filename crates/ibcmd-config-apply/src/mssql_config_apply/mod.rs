@@ -147,7 +147,8 @@ pub(crate) type AdoptionReader =
 #[derive(Debug, Clone)]
 pub struct ConfigApplyOptions {
     /// Source apply's original export dependency proof, never caller SQL.
-    pub(crate) source_preimages: Option<dynamic::SourceOwnerPreimages>,
+    #[doc(hidden)]
+    pub source_preimages: Option<dynamic::SourceOwnerPreimages>,
     /// The objects the extensions adopt, read when a removal or the S1 gate needs them.
     pub(crate) read_adoptions: AdoptionReader,
     /// Where the dynamic apply reads the stored rows of its online activation: the root's
@@ -1423,9 +1424,9 @@ pub fn plan_with_gate(
     report.gate = Some(verdict);
     // A `deleted` list of removals is consumed only when a phase accounts for it.
     if judged_deleted
-        && !structure
+        && structure
             .as_ref()
-            .is_some_and(|phase| phase.consumed_staged_rows > 0)
+            .is_none_or(|phase| phase.consumed_staged_rows == 0)
     {
         return Err(NeedsNativeApply::apply(
             "the stage's `deleted` list asks for removals that no structure phase accounts for; run the native `ibcmd infobase config apply`",
@@ -1964,102 +1965,10 @@ pub fn write_needs_acknowledgement(database: &str, dry_run: bool) -> bool {
     !dry_run && !is_lab_database(database)
 }
 
-/// `ibcmd-rs mssql-config-apply`: build the SQL handle, run, print the report.
-pub fn run_command(args: &crate::cli::MssqlConfigApplyArgs) -> Result<()> {
-    use crate::cli::{MssqlConfigApplyExclusivityArg, MssqlConfigApplyRecoveryArg};
-    use crate::sql::SqlOptions;
-
-    if write_needs_acknowledgement(&args.database, args.dry_run) && !args.allow_non_lab {
-        bail!(
-            "--allow-non-lab acknowledgement is required for a database write outside the lab (a database named ibcmd_rs_04_* or ibcmd_rs_05_*) or use --dry-run"
-        );
-    }
-    let password = args.sql_user.as_deref().and_then(|_| {
-        args.sql_pwd
-            .clone()
-            .filter(|value| !value.is_empty())
-            .or_else(|| std::env::var(&args.sql_pwd_env).ok())
-    });
-    let sql = SqlExec::from_options(SqlOptions {
-        sqlcmd: None,
-        bcp: None,
-        server: &args.server,
-        user: args.sql_user.as_deref(),
-        password: password.as_deref(),
-        password_env: &args.sql_pwd_env,
-        trust_server_certificate: true,
-    })?;
-    let mut options = ConfigApplyOptions::new(
-        args.database.clone(),
-        args.platform_profile,
-        crate::restructure::extensions::read_adoptions,
-        &crate::mssql_dump::StoredActivationRows,
-    );
-    options.dry_run = args.dry_run;
-    options.rehearse = args.rehearse;
-    options.exclusivity = match args.exclusivity {
-        MssqlConfigApplyExclusivityArg::Sql => Exclusivity::SqlSessions,
-        MssqlConfigApplyExclusivityArg::Assumed => Exclusivity::Assumed,
-    };
-    options.recovery_dir = args.recovery_dir.clone();
-    options.recovery_keep = args.recovery_keep;
-    options.recovery_blobs = match args.recovery_blobs {
-        MssqlConfigApplyRecoveryArg::Changed => RecoveryBlobs::Changed,
-        MssqlConfigApplyRecoveryArg::None => RecoveryBlobs::None,
-    };
-    options.script_output = args.script_output.clone();
-    options.allow_restructure = args
-        .allow_restructure
-        .map(|crate::cli::MssqlConfigApplyRestructureArg::S1| AllowRestructure::S1);
-    options.backup = match (&args.recovery_backup, args.i_have_a_backup) {
-        (Some(file), _) => BackupPolicy::File(file.clone()),
-        (None, true) => BackupPolicy::Acknowledged,
-        (None, false) => BackupPolicy::None,
-    };
-    options.gate = match args.gate {
-        crate::cli::MssqlConfigApplyGateArg::ApplyCheck => GateChoice::ApplyCheck,
-        crate::cli::MssqlConfigApplyGateArg::Conservative => GateChoice::Conservative,
-    };
-    if args.admit_unverified_roles
-        && (options.gate != GateChoice::Conservative || options.allow_restructure.is_some())
-    {
-        bail!(
-            "--admit-unverified-roles is a switch of the conservative gate: add --gate conservative"
-        );
-    }
-    options.admit_unverified_roles = args.admit_unverified_roles;
-    options.restructure_limit = crate::restructure::size_guard::resolve_limit(
-        &crate::settings::Settings::load(None)?,
-        args.restructure_limit_rows,
-        args.restructure_limit_bytes.as_deref(),
-    )?;
-    match apply_staged_configuration(&sql, &options) {
-        Ok(report) => {
-            let json = serde_json::to_string_pretty(&report)?;
-            if let Some(path) = &args.report {
-                std::fs::write(path, &json)
-                    .with_context(|| format!("failed to write {}", path.display()))?;
-            }
-            println!("{json}");
-            Ok(())
-        }
-        Err(error) => {
-            if let Some(refusal) = refusal_report(&error, &args.database) {
-                let json = serde_json::to_string_pretty(&refusal)?;
-                if let Some(path) = &args.report {
-                    std::fs::write(path, &json)
-                        .with_context(|| format!("failed to write {}", path.display()))?;
-                }
-                println!("{json}");
-            }
-            Err(error)
-        }
-    }
-}
-
 /// What the command prints when the apply refuses by type: the same fields
 /// whatever the refusal, `refused` naming the kind.
-fn refusal_report(error: &anyhow::Error, database: &str) -> Option<serde_json::Value> {
+#[doc(hidden)]
+pub fn refusal_report(error: &anyhow::Error, database: &str) -> Option<serde_json::Value> {
     if let Some(refusal) = error.downcast_ref::<StructuralRefusal>() {
         return Some(serde_json::json!({
             "refused": "needs_native_apply",
@@ -2462,22 +2371,6 @@ mod tests {
             // a dry run writes nothing
             assert!(!write_needs_acknowledgement(other, true), "{other}");
         }
-    }
-
-    #[test]
-    fn the_dropin_entry_never_asks_for_a_lab_acknowledgement() {
-        // The drop-in reaches the apply through apply_staged_configuration, which knows nothing about the lab;
-        // only the developer command (run_command) checks the name. The drop-in source must not mention the flag.
-        let dropin = include_str!("../dropin/apply.rs");
-        assert!(
-            !dropin.contains(concat!("allow_", "non_lab")),
-            "the drop-in apply asks for an acknowledgement"
-        );
-        assert!(
-            !dropin.contains(concat!("allow-", "non-lab")),
-            "the drop-in apply asks for an acknowledgement"
-        );
-        assert!(!dropin.contains("write_needs_acknowledgement"));
     }
 
     #[test]

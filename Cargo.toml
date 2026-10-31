@@ -42,6 +42,7 @@ members = [
     "crates/ibcmd-apply-check",
     "crates/ibcmd-cancel",
     "crates/ibcmd-dynamic-generation",
+    "crates/ibcmd-config-apply",
 ]
 resolver = "3"
 exclude = ["crates/ibcmd-edt/vendor/morph1c"]
@@ -95,6 +96,7 @@ ibcmd-mssql-live = { path = "crates/ibcmd-mssql-live" }
 ibcmd-apply-check = { path = "crates/ibcmd-apply-check" }
 ibcmd-cancel = { path = "crates/ibcmd-cancel" }
 ibcmd-dynamic-generation = { path = "crates/ibcmd-dynamic-generation" }
+ibcmd-config-apply = { path = "crates/ibcmd-config-apply" }
 # The process allocator, installed in main.rs.
 mimalloc = "0.1.52"
 quick-xml = "0.38"

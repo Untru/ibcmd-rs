@@ -5,11 +5,11 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow, ensure};
 
-use crate::compiler::bodies::template::{TemplateKind, decode_compatible_template};
-use crate::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
-use crate::compiler::families::native::{NativeValue, parse_optional_bom};
 use crate::metadata_model::brace::Brace;
 use crate::metadata_model::export::names::own_header;
+use ibcmd_compiler::compiler::bodies::template::{TemplateKind, decode_compatible_template};
+use ibcmd_compiler_families::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
+use ibcmd_compiler_families::compiler::families::native::{NativeValue, parse_optional_bom};
 
 /// Independent decoding bounds: a small compressed row must not inflate without limit.
 pub(super) const MAX_PLAIN_ROW: usize = 8 * 1024 * 1024;
@@ -284,33 +284,33 @@ pub(super) fn root_owners(row: &Brace) -> Result<Owners> {
         let Some(items) = row.as_list() else {
             return Ok(());
         };
-        if let Some(class) = items.first().and_then(Brace::as_atom) {
-            if let Some(kind) = classes.get(class) {
-                ensure!(groups.insert(class.to_owned()), "duplicate root collection");
-                let count = items
-                    .get(1)
-                    .and_then(Brace::as_atom)
-                    .and_then(|n| n.parse::<usize>().ok())
-                    .ok_or_else(|| anyhow!("invalid root collection count"))?;
+        if let Some(class) = items.first().and_then(Brace::as_atom)
+            && let Some(kind) = classes.get(class)
+        {
+            ensure!(groups.insert(class.to_owned()), "duplicate root collection");
+            let count = items
+                .get(1)
+                .and_then(Brace::as_atom)
+                .and_then(|n| n.parse::<usize>().ok())
+                .ok_or_else(|| anyhow!("invalid root collection count"))?;
+            ensure!(
+                count.checked_add(2) == Some(items.len()),
+                "inconsistent root collection count"
+            );
+            for item in &items[2..] {
+                let id = item
+                    .as_atom()
+                    .ok_or_else(|| anyhow!("root owner UUID is not an atom"))?;
                 ensure!(
-                    count.checked_add(2) == Some(items.len()),
-                    "inconsistent root collection count"
+                    uuid::Uuid::parse_str(id)?.hyphenated().to_string() == id,
+                    "noncanonical root owner UUID"
                 );
-                for item in &items[2..] {
-                    let id = item
-                        .as_atom()
-                        .ok_or_else(|| anyhow!("root owner UUID is not an atom"))?;
-                    ensure!(
-                        uuid::Uuid::parse_str(id)?.hyphenated().to_string() == id,
-                        "noncanonical root owner UUID"
-                    );
-                    ensure!(
-                        kinds.insert(id.to_owned(), kind).is_none(),
-                        "duplicate or ambiguous root owner UUID"
-                    );
-                }
-                return Ok(());
+                ensure!(
+                    kinds.insert(id.to_owned(), kind).is_none(),
+                    "duplicate or ambiguous root owner UUID"
+                );
             }
+            return Ok(());
         }
         for item in items {
             visit(item, classes, groups, kinds)?;
@@ -341,35 +341,35 @@ fn collect_children(
     let Some(items) = row.as_list() else {
         return Ok(());
     };
-    if let Some(class) = items.first().and_then(Brace::as_atom) {
-        if known.contains_key(class) {
-            let kind = *expected
-                .get(class)
-                .ok_or_else(|| anyhow!("foreign owned-body collection"))?;
-            ensure!(
-                groups.insert(class.to_owned()),
-                "duplicate owned-body collection"
-            );
-            let count = items
-                .get(1)
-                .and_then(Brace::as_atom)
-                .and_then(|n| n.parse::<usize>().ok())
-                .ok_or_else(|| anyhow!("invalid owned-body collection count"))?;
-            ensure!(
-                count <= MAX_GRAPH_ROWS && count.checked_add(2) == Some(items.len()),
-                "inconsistent owned-body collection count"
-            );
-            for child in &items[2..] {
-                children.push((
-                    kind,
-                    child
-                        .as_atom()
-                        .ok_or_else(|| anyhow!("owned UUID is not an atom"))?
-                        .to_owned(),
-                ));
-            }
-            return Ok(());
+    if let Some(class) = items.first().and_then(Brace::as_atom)
+        && known.contains_key(class)
+    {
+        let kind = *expected
+            .get(class)
+            .ok_or_else(|| anyhow!("foreign owned-body collection"))?;
+        ensure!(
+            groups.insert(class.to_owned()),
+            "duplicate owned-body collection"
+        );
+        let count = items
+            .get(1)
+            .and_then(Brace::as_atom)
+            .and_then(|n| n.parse::<usize>().ok())
+            .ok_or_else(|| anyhow!("invalid owned-body collection count"))?;
+        ensure!(
+            count <= MAX_GRAPH_ROWS && count.checked_add(2) == Some(items.len()),
+            "inconsistent owned-body collection count"
+        );
+        for child in &items[2..] {
+            children.push((
+                kind,
+                child
+                    .as_atom()
+                    .ok_or_else(|| anyhow!("owned UUID is not an atom"))?
+                    .to_owned(),
+            ));
         }
+        return Ok(());
     }
     for item in items {
         collect_children(item, expected, known, groups, children)?;
@@ -481,7 +481,8 @@ pub(super) fn validate_body(role: BodyRole, blob: &[u8]) -> Result<()> {
         }
         BodyRole::Form => {
             ensure!(plain.starts_with(b"\xef\xbb\xbf"), "form body has no BOM");
-            let body = crate::compiler::bodies::form::decode_compatible_managed_form(blob)?;
+            let body =
+                ibcmd_compiler::compiler::bodies::form::decode_compatible_managed_form(blob)?;
             let parsed = body.parsed();
             ensure!(
                 parsed
@@ -491,7 +492,7 @@ pub(super) fn validate_body(role: BodyRole, blob: &[u8]) -> Result<()> {
                     .and_then(|s| s.split(',').next())
                     .map(str::trim)
                     == Some("50")
-                    && parsed.revision == crate::module_blob::FormBodyRevision::V4
+                    && parsed.revision == ibcmd_form_body::FormBodyRevision::V4
                     && parsed.trailing_fields == 7
                     && parsed.trailing.len() == 7,
                 "unmeasured managed form body layout"
@@ -582,7 +583,11 @@ mod tests {
     fn raw(name: &str) -> Vec<u8> {
         std::fs::read(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/dynamic-metadata-native")
+                .join("..")
+                .join("..")
+                .join("tests")
+                .join("fixtures")
+                .join("dynamic-metadata-native")
                 .join(format!("{name}.bin")),
         )
         .unwrap()
@@ -598,7 +603,7 @@ mod tests {
     #[test]
     fn native_matrix_binds_exact_owners_and_decodes_all_measured_body_families() {
         let manifest: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/dynamic-metadata-native/manifest.json"
+            "../../../../tests/fixtures/dynamic-metadata-native/manifest.json"
         ))
         .unwrap();
         for case in manifest["cases"].as_array().unwrap() {
@@ -674,7 +679,7 @@ mod tests {
     }
     fn collection(class: &str, count: &str, ids: &[&str]) -> Brace {
         let mut items = vec![Brace::atom(class), Brace::atom(count)];
-        items.extend(ids.iter().map(|id| Brace::atom(id)));
+        items.extend(ids.iter().map(Brace::atom));
         Brace::List(items)
     }
     const PARENT: &str = "00000001-0002-0003-0004-000000000005";

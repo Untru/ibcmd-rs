@@ -4,9 +4,8 @@ use crate::settings::Settings;
 use anyhow::{Context, Result, bail};
 pub use ibcmd_restructure_engine::restructure::size_guard::*;
 
-// The guard of the S1 gate's structure phase reads the config apply's gate types and goes with it.
-mod phase;
-pub use phase::guard_phase;
+// The guard of the S1 gate's structure phase reads the config apply's gate types; it is `ibcmd-config-apply`'s.
+pub use ibcmd_config_apply::restructure::size_guard::guard_phase;
 
 /// The limit a command runs with: the flag, else the settings chain (variable, settings file), else the
 /// default; rows and bytes each on their own. A limit of 0 is refused: it would refuse every rebuild.

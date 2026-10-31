@@ -183,7 +183,8 @@ Nothing of this needs exclusive access, and none of it is asked for.
 
 ## 3. How it is built
 
-`src/mssql_config_apply/dynamic.rs` plans and runs; it writes no row itself.
+`crates/ibcmd-config-apply/src/mssql_config_apply/dynamic.rs` (formerly `src/mssql_config_apply/dynamic.rs`) plans and runs;
+it writes no row itself.
 
 * **The transition** is the online engine's (`mssql_main_activation`, mode `online`, unchanged): an application lock, the
   exact-stage and exact-active assertions, the alias rows and markers, `root` and `version` replaced in place, the

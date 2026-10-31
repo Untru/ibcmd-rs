@@ -1608,8 +1608,10 @@ SELECT 1;"
             assert!(!parity.contains(forbidden), "{forbidden}");
         }
         // what the inputs do not carry is not rendered
-        let mut bare = ScriptInputs::default();
-        bare.reset_change_registrations = false;
+        let bare = ScriptInputs {
+            reset_change_registrations: false,
+            ..Default::default()
+        };
         let text = render_parity_writes(&bare);
         assert!(!text.contains("_ConfigChngR") && !text.contains("dbo.Files"));
     }

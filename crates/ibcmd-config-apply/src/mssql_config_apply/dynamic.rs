@@ -67,7 +67,8 @@ pub const WARN_GENERATIONS: usize = 50;
 /// Private fields prevent callers from supplying SQL or manufacturing a newer
 /// post-stage snapshot. The raw originals remain owned through publication.
 #[derive(Debug, Clone)]
-pub(crate) struct SourceOwnerPreimages {
+#[doc(hidden)]
+pub struct SourceOwnerPreimages {
     database: String,
     groups: Vec<SourcePreimageGroup>,
 }
@@ -95,7 +96,8 @@ impl SourceOwnerPreimages {
         let client = tests::source_dependency_fixture();
         Self::capture_client(&client, database, &tests::source_dependency_names()).unwrap()
     }
-    pub(crate) fn capture(sql: &SqlExec, database: &str, selected: &[String]) -> Result<Self> {
+    #[doc(hidden)]
+    pub fn capture(sql: &SqlExec, database: &str, selected: &[String]) -> Result<Self> {
         Self::capture_client(require_client(sql)?, database, selected)
     }
 
@@ -195,7 +197,8 @@ impl SourceOwnerPreimages {
         Ok(proof)
     }
 
-    pub(crate) fn require_current(&self, sql: &SqlExec, database: &str) -> Result<()> {
+    #[doc(hidden)]
+    pub fn require_current(&self, sql: &SqlExec, database: &str) -> Result<()> {
         self.require_current_client(require_client(sql)?, database)
     }
 
@@ -214,7 +217,8 @@ impl SourceOwnerPreimages {
         Ok(())
     }
 
-    pub(crate) fn precondition_sql(&self, database: &str) -> Result<String> {
+    #[doc(hidden)]
+    pub fn precondition_sql(&self, database: &str) -> Result<String> {
         if self.database != database {
             bail!("source dependency proof belongs to a different database");
         }
@@ -2338,7 +2342,11 @@ mod tests {
             .unwrap()
             .0;
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/dynamic-metadata-native");
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("dynamic-metadata-native");
         let mut rows = client.rows.lock().unwrap();
         rows.clear();
         rows.push(source_dependency_row(
@@ -2365,7 +2373,7 @@ mod tests {
     #[test]
     fn source_dependency_native_templates_capture_matching_aliases_and_refuse_conflicts() {
         let manifest: serde_json::Value = serde_json::from_str(include_str!(
-            "../../tests/fixtures/dynamic-metadata-native/manifest.json"
+            "../../../../tests/fixtures/dynamic-metadata-native/manifest.json"
         ))
         .unwrap();
         let cases: Vec<_> = manifest["cases"]
@@ -2867,9 +2875,9 @@ mod tests {
             }
         }
         let active =
-            include_bytes!("../../tests/fixtures/platform85-dynamic/root-active.native.bin");
+            include_bytes!("../../../../tests/fixtures/platform85-dynamic/root-active.native.bin");
         let staged =
-            include_bytes!("../../tests/fixtures/platform85-dynamic/root-staged.native.bin");
+            include_bytes!("../../../../tests/fixtures/platform85-dynamic/root-staged.native.bin");
         let active = versions::deflate_row(active).unwrap();
         let staged = versions::deflate_row(staged).unwrap();
         assert!(
@@ -3793,7 +3801,12 @@ mod tests {
             sha256: hex_lower(&row.sha256()),
             ..meta("deleted", "")
         };
-        require_judged_image("ConfigSave", &[judged.clone()], std::slice::from_ref(&row)).unwrap();
+        require_judged_image(
+            "ConfigSave",
+            std::slice::from_ref(&judged),
+            std::slice::from_ref(&row),
+        )
+        .unwrap();
         let changed = MainStorageRow {
             binary_data: br#"1,"DynamicallyUpdated",0"#.to_vec(),
             ..row.clone()

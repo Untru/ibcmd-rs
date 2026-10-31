@@ -3,9 +3,9 @@
 //! genuine Comment/Synonym changes still collect it. The remaining #418 matrix
 //! is open; no row-count boundary or wider service-information parity is claimed.
 
-use crate::compiler::families::native::descriptor_own_uuid;
 use crate::sql::SqlClient;
 use anyhow::{Result, ensure};
+use ibcmd_compiler_families::compiler::families::native::descriptor_own_uuid;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -506,10 +506,12 @@ mod tests {
         header
     }
 
-    const OLD: &[u8] =
-        include_bytes!("../../docs/apply/evidence/params-marker/f4-descriptor-before.deflate");
-    const STAGED: &[u8] =
-        include_bytes!("../../docs/apply/evidence/params-marker/f4-descriptor-staged.deflate");
+    const OLD: &[u8] = include_bytes!(
+        "../../../../docs/apply/evidence/params-marker/f4-descriptor-before.deflate"
+    );
+    const STAGED: &[u8] = include_bytes!(
+        "../../../../docs/apply/evidence/params-marker/f4-descriptor-staged.deflate"
+    );
 
     #[test]
     fn actual_f4_recompressed_descriptor_is_not_a_metadata_change() {
@@ -570,10 +572,7 @@ mod tests {
             effective_descriptor(Some(&ordinary), id, &aliases, &[g1, g2]).unwrap(),
             Some(&aliases[0])
         );
-        assert_eq!(
-            effective_descriptor(Some(&ordinary), id, &aliases, &[g1]).is_err(),
-            true
-        );
+        assert!(effective_descriptor(Some(&ordinary), id, &aliases, &[g1]).is_err());
         assert_eq!(
             effective_descriptor(Some(&ordinary), id, &[], &[]).unwrap(),
             Some(&ordinary)
