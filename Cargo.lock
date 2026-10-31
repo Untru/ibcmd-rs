@@ -1017,6 +1017,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibcmd-platform-spec"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ibcmd-core",
+ "ibcmd-metadata-model",
+ "ibcmd-mssql-live",
+ "ibcmd-platform",
+ "serde",
+]
+
+[[package]]
 name = "ibcmd-postgres"
 version = "0.1.0"
 dependencies = [
@@ -1085,6 +1098,7 @@ dependencies = [
  "ibcmd-mssql-live",
  "ibcmd-parallel",
  "ibcmd-platform",
+ "ibcmd-platform-spec",
  "ibcmd-postgres",
  "ibcmd-restructure",
  "ibcmd-restructure-engine",

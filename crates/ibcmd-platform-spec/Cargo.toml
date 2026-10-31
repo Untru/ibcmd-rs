@@ -1,0 +1,29 @@
+[package]
+name = "ibcmd-platform-spec"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The platform an infobase command runs for: the --platform spec over the portable registry with the XML selector and the MSSQL capabilities, the process-wide export platform, the historical XML selector with its version axes, and the legacy MSSQL store's provider descriptor"
+
+[dependencies]
+# Registry errors, as in the root.
+anyhow = "1.0"
+# `InfobaseConfigSourceVersion` is a clap `ValueEnum`, and the registry
+# lists `MssqlNativePlatformProfile`'s values, as in the root.
+clap = { version = "4.5", features = ["derive"] }
+# The version axes and the provider's capability declarations.
+ibcmd-core = { path = "../ibcmd-core" }
+# The native platform profiles and their `mssql.main.write` capability.
+ibcmd-mssql-live = { path = "../ibcmd-mssql-live" }
+# The portable registry a `PlatformSpec` wraps.
+ibcmd-platform = { path = "../ibcmd-platform" }
+# A spec serializes as its version, as in the root.
+serde = "1.0"
+
+[dev-dependencies]
+# The metadata contexts whose platform a spec is made from (`platform::tests`).
+ibcmd-metadata-model = { path = "../ibcmd-metadata-model" }
+
+[lints.rust]
+unsafe_code = "forbid"
