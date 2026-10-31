@@ -595,7 +595,7 @@ fn run() -> Result<()> {
         }
         Commands::MssqlDumpConfig(mut args) => {
             ibcmd_rs::settings::commands::prepare_dump_config(&mut args, subcommand)?;
-            let report = ibcmd_rs::stored_objects::dump_config(&args)?;
+            let report = ibcmd_rs::mssql_dump::dump_config(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Commands::MssqlSaveConfig(args) => {

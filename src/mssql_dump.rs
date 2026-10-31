@@ -160,3 +160,46 @@ pub(crate) use live_moxel_probes::{
 
 #[cfg(test)]
 mod root_tests;
+
+#[cfg(test)]
+mod dump_config_tests {
+    use clap::Parser;
+
+    use super::args::MssqlDumpConfigArgs;
+
+    #[derive(Parser)]
+    struct Command {
+        #[command(flatten)]
+        args: MssqlDumpConfigArgs,
+    }
+
+    /// `crate::mssql_dump::dump_config` is the stored objects' entry, which
+    /// fills the `--object` selector: an object export goes on to read its
+    /// rows (and fails on the missing folder), where the crate's own
+    /// `dump_config`, which has no selector, refuses it first.
+    #[test]
+    fn the_root_dump_config_selects_objects_where_the_crate_refuses_them() {
+        let scratch = crate::test_scratch::TestScratch::new("root-dump-config");
+        let rows = scratch.join("rows");
+        let mut argv = vec!["mssql-dump-config".into(), "--rows-dir".into()];
+        argv.push(rows.clone().into_os_string());
+        argv.extend(["--object".into(), "Catalog.Банки".into()]);
+        argv.extend([
+            "--runtime-journal".into(),
+            scratch.join("journal.json").into_os_string(),
+        ]);
+        argv.extend(["-o".into(), scratch.join("out").into_os_string()]);
+        let args = Command::try_parse_from(argv).unwrap().args;
+
+        let refused = ibcmd_dump::mssql_dump::dump_config(&args).unwrap_err();
+        assert_eq!(
+            refused.to_string(),
+            "--object is selected by the caller's reader of the stored objects, and this export \
+             was given none"
+        );
+
+        let error = format!("{:#}", super::dump_config(&args).unwrap_err());
+        assert!(!error.contains("--object is selected by"), "{error}");
+        assert!(error.contains(&rows.display().to_string()), "{error}");
+    }
+}
