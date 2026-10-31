@@ -55,8 +55,15 @@ pub(crate) use ibcmd_moxel::{MoxelLineTraceEvent, MoxelLineTraceSink};
     reason = "the re-export hides a widened item from the public glob"
 )]
 pub(crate) use ibcmd_dump::mssql_dump::ObjectSelector;
-// Read by the root's `module_blob` tests.
-#[cfg(test)]
+// Read by the root's `module_blob` tests; outside tests it still hides the
+// widened item from the glob.
+#[cfg_attr(
+    not(test),
+    expect(
+        unused_imports,
+        reason = "the re-export hides a widened item from the public glob"
+    )
+)]
 pub(crate) use ibcmd_dump::mssql_dump::extract_style_body_xml;
 // The exporter's probes, read by the root's tests of the stored objects and
 // the form writer.
@@ -121,7 +128,15 @@ pub mod cas {
 pub mod model_export {
     pub use ibcmd_dump::mssql_dump::model_export::*;
 
-    #[cfg(test)]
+    // Read by `root_tests`; outside tests it still hides the widened item
+    // from the glob.
+    #[cfg_attr(
+        not(test),
+        expect(
+            unused_imports,
+            reason = "the re-export hides a widened item from the public glob"
+        )
+    )]
     pub(crate) use ibcmd_dump::mssql_dump::model_export::configuration_compatibility_from_storage;
     pub(crate) use ibcmd_dump::mssql_dump::model_export::configuration_compatibility_with_snapshot;
 }
