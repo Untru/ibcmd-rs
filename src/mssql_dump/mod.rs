@@ -96,7 +96,6 @@ use crate::adapters::mssql_legacy::{
     MssqlConfigurationTableRole, MssqlExportInventoryPlan, MssqlExportInventoryScope,
     MssqlLegacyAdapter, decode_task_internal_uuid_slots,
 };
-use crate::cli::MssqlDumpConfigArgs;
 use crate::legacy_version::InfobaseConfigSourceVersion;
 use crate::metadata_owner_graph::{
     self as owner_graph, CATALOG_ATTRIBUTE_GROUP_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
@@ -107,6 +106,7 @@ use crate::module_blob::{
     unpack_plain_text_module_body,
 };
 use crate::parallel;
+use args::MssqlDumpConfigArgs;
 
 mod legacy_child;
 mod characteristics {
@@ -1025,6 +1025,7 @@ mod characteristics {
     }
 }
 use ibcmd_dump_readers::additional_indexes;
+pub(crate) mod args;
 pub mod cas;
 mod command_interface;
 pub use config_dump_info::read_config_dump_info;

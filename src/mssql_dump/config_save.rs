@@ -66,8 +66,8 @@ use ibcmd_core::storage::{
 use ibcmd_v8::format::Revision;
 use serde::Serialize;
 
+use super::args::MssqlSaveConfigArgs;
 use crate::adapters::mssql_legacy::MssqlConfigurationTableRole;
-use crate::cli::MssqlSaveConfigArgs;
 
 use super::{
     DYNAMIC_UPDATE_MARKER_ROW, STAGE_NEW_SUFFIX, build_dump_file_name_batches, dynamic_generation,
