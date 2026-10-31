@@ -1964,6 +1964,9 @@ fn owners_of(staged: &[RowMeta]) -> std::collections::BTreeMap<String, Vec<Strin
 }
 
 #[cfg(test)]
+mod activation_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
