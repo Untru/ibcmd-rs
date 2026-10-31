@@ -120,6 +120,8 @@ yaml_serde = "0.10"
 ibcmd-compiler-families = { path = "crates/ibcmd-compiler-families", features = ["test-fixtures"] }
 # The managed-form codec's profile fixture, for its root tests.
 ibcmd-compiler = { path = "crates/ibcmd-compiler", features = ["test-fixtures"] }
+# The export platform's per-thread override, for the exporter's form tests.
+ibcmd-platform-spec = { path = "crates/ibcmd-platform-spec", features = ["test-fixtures"] }
 # Substring search in tests/platform_oracle_boundary.rs; already in the
 # runtime graph (tiberius, futures-util).
 memchr = "2.8"

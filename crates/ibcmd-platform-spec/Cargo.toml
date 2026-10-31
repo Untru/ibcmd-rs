@@ -6,6 +6,11 @@ license = "MIT"
 publish = false
 description = "The platform an infobase command runs for: the --platform spec over the portable registry with the XML selector and the MSSQL capabilities, the process-wide export platform, the historical XML selector with its version axes, and the legacy MSSQL store's provider descriptor"
 
+[features]
+# `platform::with_export_default_button_importance` and the thread's
+# override it sets, for the root's tests.
+test-fixtures = []
+
 [dependencies]
 # Registry errors, as in the root.
 anyhow = "1.0"
