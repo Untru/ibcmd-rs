@@ -809,6 +809,7 @@ dependencies = [
  "ibcmd-1c-text",
  "ibcmd-metadata-blob",
  "ibcmd-schema",
+ "ibcmd-xml",
 ]
 
 [[package]]
@@ -973,6 +974,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibcmd-mssql-extensions"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "ibcmd-1c-text",
+ "ibcmd-core",
+ "ibcmd-sql",
+ "sha1",
+ "uuid",
+]
+
+[[package]]
 name = "ibcmd-mssql-live"
 version = "0.1.0"
 dependencies = [
@@ -1013,6 +1026,20 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "ibcmd-platform-spec"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ibcmd-core",
+ "ibcmd-metadata-model",
+ "ibcmd-mssql-live",
+ "ibcmd-platform",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1081,9 +1108,11 @@ dependencies = [
  "ibcmd-metadata-source",
  "ibcmd-module-blob",
  "ibcmd-moxel",
+ "ibcmd-mssql-extensions",
  "ibcmd-mssql-live",
  "ibcmd-parallel",
  "ibcmd-platform",
+ "ibcmd-platform-spec",
  "ibcmd-postgres",
  "ibcmd-restructure",
  "ibcmd-restructure-engine",
@@ -1128,6 +1157,7 @@ dependencies = [
  "futures-util",
  "ibcmd-postgres",
  "serde_json",
+ "sha2",
  "tiberius",
  "tokio",
  "tokio-util",

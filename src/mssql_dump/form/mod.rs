@@ -17,7 +17,7 @@
 //! here; what reads the platform registry stays here.
 //!
 //! Which layout and which XML format a build uses is the platform registry's
-//! answer (`src/platform/`), not something to infer from a version number.
+//! answer (`crates/ibcmd-platform-spec`), not something to infer from a version number.
 //! When a new build arrives (say 8.5.4):
 //!
 //! - nothing changed in its forms: one registry entry, no code here;

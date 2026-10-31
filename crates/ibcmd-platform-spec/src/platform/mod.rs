@@ -314,14 +314,15 @@ pub fn note_export_platform(platform: PlatformSpec) {
 }
 
 /// Restore the oldest registered build's spelling when only a dialect is known.
-pub(crate) fn clear_export_platform() {
+#[doc(hidden)]
+pub fn clear_export_platform() {
     EXPORT_DEFAULT_BUTTON_IMPORTANCE.store(false, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// See [`PlatformSpec::writes_default_button_importance`], for the platform
 /// [`note_export_platform`] recorded.
 pub fn export_writes_default_button_importance() -> bool {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-fixtures"))]
     if let Some(value) = TEST_DEFAULT_BUTTON_IMPORTANCE.with(std::cell::Cell::get) {
         return value;
     }
@@ -330,7 +331,7 @@ pub fn export_writes_default_button_importance() -> bool {
 
 // Unit tests share the process: a test that depends on the export platform
 // fixes it for its own thread instead of reading what a parallel test noted.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-fixtures"))]
 thread_local! {
     static TEST_DEFAULT_BUTTON_IMPORTANCE: std::cell::Cell<Option<bool>> =
         const { std::cell::Cell::new(None) };
@@ -338,8 +339,9 @@ thread_local! {
 
 /// Runs `body` with the export platform's default-button spelling fixed on
 /// this thread (tests only).
-#[cfg(test)]
-pub(crate) fn with_export_default_button_importance<T>(value: bool, body: impl FnOnce() -> T) -> T {
+#[cfg(any(test, feature = "test-fixtures"))]
+#[doc(hidden)]
+pub fn with_export_default_button_importance<T>(value: bool, body: impl FnOnce() -> T) -> T {
     let previous = TEST_DEFAULT_BUTTON_IMPORTANCE.with(|cell| cell.replace(Some(value)));
     let result = body();
     TEST_DEFAULT_BUTTON_IMPORTANCE.with(|cell| cell.set(previous));
@@ -367,7 +369,8 @@ pub fn for_xml_version(xml: InfobaseConfigSourceVersion) -> Result<PlatformSpec>
 ///
 /// Only when the bundled registry lacks the 8.3.27 or the 8.5.1 release,
 /// which its tests rule out.
-pub(crate) fn of_xml_dialect(dialect: &str) -> PlatformSpec {
+#[doc(hidden)]
+pub fn of_xml_dialect(dialect: &str) -> PlatformSpec {
     ibcmd_platform::of_xml_dialect(dialect).into()
 }
 

@@ -42,6 +42,8 @@ $GuardedCrateDirectories = @(
     'crates/ibcmd-cancel/src',
     'crates/ibcmd-dynamic-generation/src',
     'crates/ibcmd-config-apply/src',
+    'crates/ibcmd-platform-spec/src',
+    'crates/ibcmd-mssql-extensions/src',
     'crates/ibcmd-module-blob/src',
     'crates/ibcmd-moxel/src/root_helpers'
 )

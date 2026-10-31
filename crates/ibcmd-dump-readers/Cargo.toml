@@ -10,6 +10,8 @@ description = "Independent readers of stored configuration records for source ex
 anyhow = "1.0"
 ibcmd-1c-text = { path = "../ibcmd-1c-text" }
 ibcmd-schema = { path = "../ibcmd-schema" }
+# The metadata order sections `metadata_owner_graph` orders produced types by.
+ibcmd-xml = { path = "../ibcmd-xml" }
 
 [dev-dependencies]
 flate2 = "1.1"

@@ -10,8 +10,9 @@
 //! extension extends.
 
 pub mod adopted;
-pub mod adoption;
-pub mod predefined;
+// The readers of an object's adoption and of its predefined items' extension
+// state, moved to the dump readers' crate; their paths stay.
+pub use ibcmd_dump_readers::extension::{adoption, predefined};
 pub mod root;
 
 pub(crate) mod build;
