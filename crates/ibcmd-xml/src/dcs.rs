@@ -4722,6 +4722,169 @@ fn invalid_evidence(
     }
 }
 
+/// Reads direct ordinary dynamic-list field declarations from a normalized
+/// Form ServerState sibling fragment. Duplicate bindings are retained so the
+/// caller can refuse ambiguous spelling overrides. Nested and calculated fields
+/// contribute nothing; malformed recognized fields refuse the whole fragment.
+///
+/// Namespace defaults match the Form writer's inherited context. Byte, depth
+/// and source-derived scan progress bounds precede retaining an XML tree.
+pub fn form_dynamic_list_direct_field_bindings(fragment: &str) -> Option<Vec<(String, String)>> {
+    const MAX_DEPTH: usize = 64;
+    // Only root -> direct Field -> simple value ancestry is admitted. Never
+    // search the sibling tree to resolve a prefix for each individual field.
+    fn direct_namespace<'a>(ancestors: &[&'a XmlElement], prefix: Option<&str>) -> Option<&'a str> {
+        for element in ancestors.iter().rev() {
+            for attribute in element.attributes() {
+                if let AttributeKind::Namespace(declared) = attribute.kind()
+                    && declared.as_deref() == prefix
+                {
+                    // An empty declaration shadows an inherited binding too.
+                    return Some(attribute.value());
+                }
+            }
+        }
+        None
+    }
+    fn direct_xsi_type(
+        element: &XmlElement,
+        root: &XmlElement,
+        xsi_namespace: &str,
+    ) -> Option<String> {
+        let ancestors = [root, element];
+        let mut value = None;
+        for attribute in element.attributes() {
+            let AttributeKind::Ordinary(name) = attribute.kind() else {
+                continue;
+            };
+            // The default namespace never applies to an unprefixed XML
+            // attribute, even when it does apply to the QName value.
+            if value.is_some()
+                || name.local() != "type"
+                || name.prefix().is_none()
+                || direct_namespace(&ancestors, name.prefix()) != Some(xsi_namespace)
+            {
+                return None;
+            }
+            value = Some(attribute.value());
+        }
+        let name = crate::node::QName::new(value?).ok()?;
+        let namespace = direct_namespace(&ancestors, name.prefix())?;
+        if namespace.is_empty() {
+            return None;
+        }
+        Some(format!("{{{namespace}}}{}", name.local()))
+    }
+    if fragment.len() > MAX_DCS_RETAINED_BYTES {
+        return None;
+    }
+    let policy = ibcmd_schema::bundled_dcs_inner_schema_policy().ok()?;
+    let core = bundled_dcs_filter_policy().ok()?;
+    let wrapped = format!(
+        "<Form xmlns=\"{FORM_LOG_NAMESPACE}\" xmlns:dcssch=\"{}\" xmlns:xsi=\"{}\" xmlns:dcscor=\"{}\" xmlns:v8=\"{}\" xmlns:xs=\"{}\" xmlns:dcsset=\"{}\">{fragment}</Form>",
+        policy.schema_namespace_uri(),
+        policy.xsi_namespace_uri(),
+        core.core_namespace_uri(),
+        policy.data_core_namespace_uri(),
+        policy.xml_schema_namespace_uri(),
+        policy.settings_namespace_uri(),
+    );
+    if wrapped.len() > MAX_DCS_RETAINED_BYTES {
+        return None;
+    }
+    let mut reader = QuickXmlReader::from_str(&wrapped);
+    reader.config_mut().check_end_names = true;
+    let mut buffer = Vec::new();
+    let mut depth = 0usize;
+    // Match the existing DCS reader's progress bound: one byte per event,
+    // plus the terminating EOF event, rather than a corpus-size ceiling.
+    let mut events = 0usize;
+    let event_bound = wrapped.len().checked_add(1)?;
+    loop {
+        events = events.checked_add(1)?;
+        if events > event_bound {
+            return None;
+        }
+        match reader.read_event_into(&mut buffer).ok()? {
+            QuickXmlEvent::Start(_) => {
+                depth = depth.checked_add(1)?;
+                if depth > MAX_DEPTH {
+                    return None;
+                }
+            }
+            QuickXmlEvent::Empty(_) if depth.checked_add(1)? > MAX_DEPTH => {
+                return None;
+            }
+            QuickXmlEvent::End(_) => depth = depth.checked_sub(1)?,
+            QuickXmlEvent::DocType(_) => return None,
+            QuickXmlEvent::Eof => {
+                if depth != 0 {
+                    return None;
+                }
+                break;
+            }
+            _ => {}
+        }
+        buffer.clear();
+    }
+    let document = XmlReader::from_slice(wrapped.as_bytes()).ok()?;
+    let root = document.root();
+    let mut bindings = Vec::new();
+    for node in root.children() {
+        let element = match node {
+            XmlNode::Element(element) => element,
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Comment(_) => continue,
+            _ => return None,
+        };
+        if element.name().local() != "Field"
+            || direct_namespace(&[root, element], element.name().prefix())
+                != Some(FORM_LOG_NAMESPACE)
+        {
+            continue;
+        }
+        if direct_xsi_type(element, root, policy.xsi_namespace_uri())?
+            != policy.data_set_field_type_qname()
+        {
+            continue;
+        }
+        let mut data_path = None;
+        let mut field = None;
+        for node in element.children() {
+            let child = match node {
+                XmlNode::Element(child) => child,
+                XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+                XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+                XmlNode::Comment(_) => continue,
+                _ => return None,
+            };
+            let destination = match child.name().local() {
+                "dataPath" => &mut data_path,
+                "field" => &mut field,
+                _ => continue,
+            };
+            if destination.is_some()
+                || direct_namespace(&[root, element, child], child.name().prefix())
+                    != Some(policy.schema_namespace_uri())
+                || child
+                    .attributes()
+                    .iter()
+                    .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+            {
+                return None;
+            }
+            let value = simple_element_text(child)?;
+            if value.trim().is_empty() {
+                return None;
+            }
+            *destination = Some(value);
+        }
+        bindings.push((data_path?, field?));
+    }
+    Some(bindings)
+}
+
 #[cfg(test)]
 mod tests {
     use ibcmd_core::asset::MediaKind;
@@ -6572,5 +6735,175 @@ mod form_data_parameters_reconciliation_tests {
                 .as_deref(),
             Some(valued.as_str())
         );
+    }
+
+    fn direct_binding_fragment(data_path: &str, field: &str) -> String {
+        format!(
+            "<Field xsi:type=\"dcssch:DataSetFieldField\"><dcssch:dataPath>{data_path}</dcssch:dataPath><dcssch:field>{field}</dcssch:field></Field>"
+        )
+    }
+
+    #[test]
+    fn direct_form_field_bindings_preserve_ordinary_values_and_duplicate_records() {
+        let fragment = direct_binding_fragment("Selected", "Stored");
+        assert_eq!(
+            super::form_dynamic_list_direct_field_bindings(&format!("{fragment}{fragment}")),
+            Some(vec![("Selected".into(), "Stored".into()); 2])
+        );
+        assert_eq!(
+            super::form_dynamic_list_direct_field_bindings(""),
+            Some(vec![])
+        );
+        let with_metadata = fragment.replace(
+            "</Field>",
+            "<dcssch:valueType><v8:Type>xs:string</v8:Type></dcssch:valueType></Field>",
+        );
+        assert_eq!(
+            super::form_dynamic_list_direct_field_bindings(&with_metadata),
+            Some(vec![("Selected".into(), "Stored".into())])
+        );
+    }
+
+    #[test]
+    fn direct_form_field_bindings_decode_entities_without_trimming_values() {
+        assert_eq!(
+            super::form_dynamic_list_direct_field_bindings(&direct_binding_fragment(
+                " A&amp;B ",
+                "C&#x26;D"
+            )),
+            Some(vec![(" A&B ".into(), "C&D".into())])
+        );
+        assert!(
+            super::form_dynamic_list_direct_field_bindings(&direct_binding_fragment(
+                "A&unresolved;",
+                "B"
+            ))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_form_field_bindings_exclude_nested_calculated_and_foreign_fields() {
+        let ordinary = direct_binding_fragment("A", "B");
+        let calculated = ordinary.replace("DataSetFieldField", "DataSetFieldExpression");
+        let foreign = ordinary.replace("<Field ", "<Field xmlns=\"urn:foreign\" ");
+        assert_eq!(
+            super::form_dynamic_list_direct_field_bindings(&format!(
+                "<Container>{ordinary}</Container>{calculated}{foreign}"
+            )),
+            Some(vec![])
+        );
+    }
+
+    #[test]
+    fn direct_form_field_bindings_resolve_qnames_and_refuse_namespace_rebinding() {
+        let policy = ibcmd_schema::bundled_dcs_inner_schema_policy().unwrap();
+        let ordinary = direct_binding_fragment("A", "B");
+        let alias = ordinary.replace(
+            "<Field ",
+            &format!("<Field xmlns:alias=\"{}\" ", policy.schema_namespace_uri()),
+        );
+        let alias = alias.replace("dcssch:", "alias:");
+        assert_eq!(
+            super::form_dynamic_list_direct_field_bindings(&alias),
+            Some(vec![("A".into(), "B".into())])
+        );
+        assert_eq!(
+            super::form_dynamic_list_direct_field_bindings(
+                &ordinary.replace("<Field ", "<Field xmlns:dcssch=\"urn:foreign\" ")
+            ),
+            Some(vec![])
+        );
+        for changed in [
+            ordinary.replace(
+                "<dcssch:dataPath>",
+                "<dcssch:dataPath xmlns:dcssch=\"urn:foreign\">",
+            ),
+            ordinary.replace("<Field ", "<Field xmlns:xsi=\"urn:foreign\" "),
+            ordinary.replace("dcssch:DataSetFieldField", "unbound:DataSetFieldField"),
+        ] {
+            assert!(super::form_dynamic_list_direct_field_bindings(&changed).is_none());
+        }
+    }
+
+    #[test]
+    fn direct_form_field_bindings_refuse_missing_duplicate_empty_or_nested_values() {
+        let ordinary = direct_binding_fragment("A", "B");
+        for changed in [
+            ordinary.replace("<dcssch:field>B</dcssch:field>", ""),
+            ordinary.replace(
+                "<dcssch:field>B</dcssch:field>",
+                "<dcssch:field>B</dcssch:field><dcssch:field>C</dcssch:field>",
+            ),
+            ordinary.replace(
+                "<dcssch:dataPath>A</dcssch:dataPath>",
+                "<dcssch:dataPath>A</dcssch:dataPath><dcssch:dataPath>C</dcssch:dataPath>",
+            ),
+            direct_binding_fragment("", "B"),
+            direct_binding_fragment("A", " "),
+            direct_binding_fragment("A", "<Nested>B</Nested>"),
+        ] {
+            assert!(super::form_dynamic_list_direct_field_bindings(&changed).is_none());
+        }
+    }
+
+    #[test]
+    fn direct_form_field_bindings_refuse_malformed_depth_and_byte_limits() {
+        assert!(super::form_dynamic_list_direct_field_bindings("<Field>").is_none());
+        assert!(super::form_dynamic_list_direct_field_bindings("<!DOCTYPE Field>").is_none());
+        let deep = format!("{}{}", "<Nested>".repeat(64), "</Nested>".repeat(64));
+        assert!(super::form_dynamic_list_direct_field_bindings(&deep).is_none());
+        assert!(
+            super::form_dynamic_list_direct_field_bindings(
+                &" ".repeat(ibcmd_core::dcs::MAX_DCS_RETAINED_BYTES + 1)
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_form_field_bindings_keep_large_sibling_records_and_local_prefix_scopes() {
+        let mut fragment = String::new();
+        for index in 0..4_096 {
+            fragment.push_str(&direct_binding_fragment(
+                &format!("Selected{index}"),
+                &format!("Stored{index}"),
+            ));
+        }
+        let bindings = super::form_dynamic_list_direct_field_bindings(&fragment).unwrap();
+        assert_eq!(bindings.len(), 4_096);
+        for (index, (path, field)) in bindings.iter().enumerate() {
+            assert_eq!(path, &format!("Selected{index}"));
+            assert_eq!(field, &format!("Stored{index}"));
+        }
+        let policy = ibcmd_schema::bundled_dcs_inner_schema_policy().unwrap();
+        let restored = format!(
+            "<Field xmlns:dcssch=\"urn:shadow\" xmlns:local=\"{0}\" xsi:type=\"local:DataSetFieldField\"><dcssch:dataPath xmlns:dcssch=\"{0}\">Selected</dcssch:dataPath><dcssch:field xmlns:dcssch=\"{0}\">Stored</dcssch:field></Field>",
+            policy.schema_namespace_uri(),
+        );
+        let foreign = direct_binding_fragment("Ignored", "Ignored")
+            .replace("<Field ", "<Field xmlns:dcssch=\"urn:foreign\" ");
+        let ordinary = direct_binding_fragment("Next", "Next");
+        assert_eq!(
+            super::form_dynamic_list_direct_field_bindings(&format!(
+                "{foreign}{restored}{ordinary}"
+            )),
+            Some(vec![
+                ("Selected".into(), "Stored".into()),
+                ("Next".into(), "Next".into()),
+            ])
+        );
+    }
+
+    #[test]
+    fn direct_form_field_bindings_refuse_empty_prefix_shadows_and_unprefixed_type() {
+        let ordinary = direct_binding_fragment("Selected", "Stored");
+        for changed in [
+            ordinary.replace("<Field ", "<Field xmlns:dcssch=\"\" "),
+            ordinary.replace("<dcssch:field>", "<dcssch:field xmlns:dcssch=\"\">"),
+            ordinary.replace("xsi:type=", "type="),
+        ] {
+            assert!(super::form_dynamic_list_direct_field_bindings(&changed).is_none());
+        }
     }
 }

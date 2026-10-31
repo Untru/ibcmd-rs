@@ -1,7 +1,7 @@
 //! `cf load` of edits a module overlay cannot carry -- `Form.xml`, metadata
 //! XML, templates, added and removed objects: the edited objects are compiled
 //! from the tree against the base's own rows (the staging compiler, offline).
-//! The loaded file must export back to exactly the edited tree.
+//! The loaded file exports the edited tree with native BSL source-file framing.
 
 use crate::common;
 
@@ -443,7 +443,14 @@ fn closed_module_replacement_is_fresh_on_both_load_routes() {
         let tag = format!("closed-replacement-{compiled}");
         let (base, tree) = exported("closed_module", "input.cfe", &tag);
         let module = tree.join("CommonModules/ТестРасширение_Модуль/Ext/Module.bin");
-        fs::remove_file(&module).unwrap();
+        if std::env::var_os("IBCMD_TEST_KEEP_FIXTURES").as_deref()
+            == Some(std::ffi::OsStr::new("1"))
+        {
+            let retained = common::temp_dir(&format!("{tag}-closed-input")).with_extension("bin");
+            fs::rename(&module, retained).unwrap();
+        } else {
+            fs::remove_file(&module).unwrap();
+        }
         let text = b"Procedure Reopened()\r\nEndProcedure\r\n";
         fs::write(module.with_extension("bsl"), text).unwrap();
         if compiled {
@@ -484,7 +491,7 @@ fn closed_module_replacement_is_fresh_on_both_load_routes() {
         assert!(common::export(&out, &back).status.success());
         assert_eq!(
             fs::read(back.join("CommonModules/ТестРасширение_Модуль/Ext/Module.bsl")).unwrap(),
-            text
+            b"\xef\xbb\xbfProcedure Reopened()\r\nEndProcedure\r\n"
         );
     }
 }

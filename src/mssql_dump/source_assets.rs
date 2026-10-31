@@ -3,9 +3,10 @@ use super::{
     BTreeMap, BTreeSet, BusinessProcessFlowchart, ConfigRow, ConstantValueType, DeclaredFormType,
     DetailedFormBodyExtraction, DumpRowContext, FamilyId, FormParseContext,
     FormSourceAssetDiagnostic, FormSourceReference, InfobaseConfigSourceVersion, Instant,
-    MetadataCommandReference, MetadataSourceFailureClass, MetadataTextRow, MssqlDumpTimingReport,
-    MssqlLegacyAdapter, OutputWriter, ParsedFormBodyBlob, Path, PathBuf, ProfileId, Result,
-    SubsystemSourceReference, TemplateSourceReference, anyhow, bail, build_metadata_text_rows,
+    MetadataCommandReference, MetadataSourceFailureClass, MetadataTextRow,
+    MoxelChartSeriesAutomaticName, MssqlDumpTimingReport, MssqlLegacyAdapter, OutputWriter,
+    ParsedFormBodyBlob, Path, PathBuf, ProfileId, Result, SubsystemSourceReference,
+    TemplateSourceReference, anyhow, bail, build_metadata_text_rows,
     build_role_rights_object_reference_index, decode_base64_mime, dedup_form_item_assets,
     elapsed_ms, escape_xml_element_text, escape_xml_text, ext_picture_file_name,
     extract_base64_payload, extract_form_body_xml_from_body_detailed_timed,
@@ -25,7 +26,7 @@ use super::{
     parse_exchange_plan_content_extension, parse_form_body_blob, parse_home_page_work_area_blob,
     parse_metadata_type_pattern, parse_non_zero_uuid, parse_role_rights_blob, parse_uuid_field,
     sanitize_source_path_segment, scan_1c_braced_value, skip_ascii_ws_at, split_1c_braced_fields,
-    standard_picture_name, try_extract_moxel_spreadsheet_xml_with_generated_types,
+    standard_picture_name, try_extract_moxel_spreadsheet_xml_with_generated_types_and_policy,
     unpack_module_blob_text, xml_bool,
 };
 #[cfg(test)]
@@ -3288,6 +3289,7 @@ fn write_source_asset_inner(
                 bytes,
                 context.object_refs,
                 context.moxel_generated_types,
+                context.chart_series_names,
                 &asset.primary_path,
             )?;
             let xml = if context.source_version == InfobaseConfigSourceVersion::V2_20 {
@@ -3360,15 +3362,21 @@ fn extract_moxel_source_asset_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
+    chart_series_names: MoxelChartSeriesAutomaticName,
     source_path: &Path,
 ) -> Result<String> {
-    try_extract_moxel_spreadsheet_xml_with_generated_types(bytes, object_refs, generated_types)
-        .with_context(|| {
-            format!(
-                "failed to extract spreadsheet template from source asset {}",
-                source_path.display()
-            )
-        })
+    try_extract_moxel_spreadsheet_xml_with_generated_types_and_policy(
+        bytes,
+        object_refs,
+        generated_types,
+        chart_series_names,
+    )
+    .with_context(|| {
+        format!(
+            "failed to extract spreadsheet template from source asset {}",
+            source_path.display()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -3381,6 +3389,7 @@ mod mxl_source_asset_tests {
             &[0],
             &BTreeMap::new(),
             &BTreeMap::new(),
+            MoxelChartSeriesAutomaticName::Stored,
             Path::new("Templates/Example/Ext/Template.xml"),
         )
         .unwrap_err();

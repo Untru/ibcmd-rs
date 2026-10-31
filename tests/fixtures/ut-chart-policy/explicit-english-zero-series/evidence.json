@@ -1,0 +1,74 @@
+{
+  "status": "APPLIED_FOCUSED_RUST_RED_GREEN_CONFIRMED",
+  "source_cf_sha256": "b2fa2d388face5e7281711d3714815cc304e12bd220f7495be15abfa0a613b8b",
+  "source_cf_bytes": 7505,
+  "native_binary_sha256": "38f37715535cea530e58d5ba2e7e072c184b61b12f3e903ac290b299cf39fd38",
+  "native_build": "8.3.27.2342",
+  "native_receipt_sha256": "f65179de7a49cdb7acad0225a1a3853bb0215b70a3404221e6db26f1e7b3c493",
+  "native_observation": {
+    "source_script_variant": "English",
+    "item_language": "ru",
+    "stored_source_name": "Сводная",
+    "native_name": "Pivot",
+    "real_series_count": 0,
+    "str_is_changed": false,
+    "xml_points_scale_present": false,
+    "xml_values_scale_present": false
+  },
+  "native_accounting_status": "FINAL_AUDIT_INCOMPLETE",
+  "native_full_acceptance": false,
+  "selector": null,
+  "native_internal_scale_flag": null,
+  "native_opaque_language_flags": null,
+  "tests_rust_executed": true,
+  "production_renderer_edited": true,
+  "candidate_versions": {
+    "base": "6599857a29c19d115f04dda319728aa97ac480192c95c61aadf381ad277ecc5c",
+    "mechanical": "77270c79c79e5bd92e4db74698defe5fc0522497aef98a6d8a57cda798f1e571",
+    "with_tests": "7591ae959f0a2c79aeb487a81a2b2e1c271e686321dcf1c3d38c565fc14fdcdf",
+    "corrected": "8133ea9735d803fd7d947895ef3684e5a1bfb68a33b5488bb76cd146a4b455f2"
+  },
+  "source_provenance": {
+    "kind": "candidate_compiled_public_source_owned_cf_not_native_expected_output",
+    "wrapper_manifest_sha256": "aff4c4f4f7d84cb08866bdb0e9190b5bac8a4b26c6d0d477c4f2a676ac7c27c4",
+    "wrapper_configuration_sha256": "c0f1d5b9ee5d107e4516dba1cad795f2fe37d2f40e12197ef0377e5a01adc4bb",
+    "wrapper_template_sha256": "4cbcca2ca9bd3813440a1ef1920e8df79c590d30de1bfe7df8ca20fc0285d6b4",
+    "compiler_source_head": "9e05b83d037386407f7af0bfc4e6c78291f2c886",
+    "compiler_binary_sha256": "ac667b3e7c5b08724e06e2e91cd22e06904539efc7ab475c4dd98fc5b5689d67",
+    "original_erp_cf_or_database_rows_used": false,
+    "fixture_cf_input": "reviewed hand-authored wrapper plus already-public structural spreadsheet/chart sources; synthetic object IDs, metadata/cell names and title"
+  },
+  "source_moxel_sha256_before_patches": "6599857a29c19d115f04dda319728aa97ac480192c95c61aadf381ad277ecc5c",
+  "source_moxel_sha256_tested_green": "8133ea9735d803fd7d947895ef3684e5a1bfb68a33b5488bb76cd146a4b455f2",
+  "head_before_patches": "fdd57a20",
+  "default_current_ut_parity_fixed": false,
+  "frozen_external_proposal_status": "HISTORICAL_UNAPPLIED_UNRUN_UNCHANGED",
+  "focused_rust_verification": {
+    "command": "CARGO_BUILD_JOBS=1 IBCMD_TEST_KEEP_FIXTURES=1 cargo test --locked -p ibcmd-rs --lib explicit_english_projection_ --no-default-features",
+    "red": {
+      "source_sha256": "7591ae959f0a2c79aeb487a81a2b2e1c271e686321dcf1c3d38c565fc14fdcdf",
+      "passed": 3,
+      "failed": 1,
+      "failing_test": "explicit_english_projection_republishes_zero_series_extra_name",
+      "only_difference_is_cached_to_english_name": true,
+      "log_sha256": "da6ca7f355561c62606bf99e043d177915d03ba566e5fac867c8c959873b8104",
+      "sanitized_summary_sha256": "5be9f1b8c4eb521d4261f809ca2e6bcab553e8b08109aa8f0b903d82ae0129ce"
+    },
+    "green": {
+      "source_sha256": "8133ea9735d803fd7d947895ef3684e5a1bfb68a33b5488bb76cd146a4b455f2",
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "exit_code": 0,
+      "test_execution_seconds": 0.02,
+      "log_sha256": "1c29f29b6a497a2374a60ad671ef63aef5b639a67b33277aed616e3e95d2d748"
+    },
+    "private_inputs_used": false,
+    "native_vm_sql_executed_for_unit_verification": false,
+    "raw_logs": "retained externally; not bundled",
+    "broader_gates_claimed": false
+  },
+  "source_moxel_sha256_after_rustfmt": "15e0646e3440383622360b008aadaf5afaf2fc71a6d318f96cb6431f6949d46d",
+  "formatted_projection_tests_sha256": "7c3a50791255b874d17a418800c831f738fe267615534dce8924ae71bfdce34e",
+  "post_test_change": "rustfmt only; tested green source remains pinned separately"
+}

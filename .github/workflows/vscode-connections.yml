@@ -1,9 +1,33 @@
 name: VSCode connections
 on:
   pull_request:
-    paths: ['editors/vscode/**', 'src/**', 'crates/**', 'Cargo.toml', 'Cargo.lock', 'tests/**', '.github/workflows/vscode-connections.yml', '.github/workflows/release.yml']
+    paths:
+      [
+        "examples/form_field_map_observer.rs",
+        "tools/write-form-observer-provenance.py",
+        "editors/vscode/**",
+        "src/**",
+        "crates/**",
+        "Cargo.toml",
+        "Cargo.lock",
+        "tests/**",
+        ".github/workflows/vscode-connections.yml",
+        ".github/workflows/release.yml",
+      ]
   push:
-    paths: ['editors/vscode/**', 'src/**', 'crates/**', 'Cargo.toml', 'Cargo.lock', 'tests/**', '.github/workflows/vscode-connections.yml', '.github/workflows/release.yml']
+    paths:
+      [
+        "examples/form_field_map_observer.rs",
+        "tools/write-form-observer-provenance.py",
+        "editors/vscode/**",
+        "src/**",
+        "crates/**",
+        "Cargo.toml",
+        "Cargo.lock",
+        "tests/**",
+        ".github/workflows/vscode-connections.yml",
+        ".github/workflows/release.yml",
+      ]
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,17 +46,77 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: '1.95.0'
+          toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
       - run: cargo test --locked --test editor_server --test editor_export_plan --no-default-features
+      - name: Test bounded Form field-map observer
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: "2"
+          IBCMD_TEST_KEEP_FIXTURES: "1"
+        run: |
+          cargo test --locked --lib field_map_observer --no-default-features
+          cargo test --locked --lib query_identity_observer --no-default-features
+          cargo test --locked -p ibcmd-form-schema --lib form_observer_shared_schema_tests
+      - name: Test explicit chart series-name policy
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: "2"
+          IBCMD_TEST_KEEP_FIXTURES: "1"
+        run: |
+          cargo test --locked -p ibcmd-moxel chart_policy_
+          cargo test --locked -p ibcmd-moxel explicit_english_projection_
+          cargo test --locked --lib chart_policy_ --no-default-features
+          cargo test --locked --lib explicit_english_projection_ --no-default-features
+          cargo test --locked --lib chart_series_names_ --no-default-features
+          cargo test --locked --lib changed_chart_names_ --no-default-features
+          cargo test --locked --lib nonstored_chart_labels_ --no-default-features
+
+      - name: Build read-only Windows Form observer
+        if: runner.os == 'Windows'
+        env:
+          CARGO_BUILD_JOBS: "2"
+        run: cargo build --locked --no-default-features --example form_field_map_observer
+      - name: Verify Windows observer CLI non-disclosure and bounds
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python tests/scripts/form_field_map_observer_cli_test.py target/debug/examples/form_field_map_observer.exe "$env:RUNNER_TEMP/observer-fixtures"
+      - name: Verify frozen context CLI custody and non-disclosure
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          IBCMD_TEST_KEEP_FIXTURES: "1"
+        run: python tests/scripts/form_field_map_context_cli_test.py target/debug/examples/form_field_map_observer.exe "$env:RUNNER_TEMP/observer-context-fixtures"
+      - name: Verify observer staging preserves prior artifacts
+        env:
+          IBCMD_TEST_KEEP_FIXTURES: "1"
+        run: python tests/scripts/form_observer_provenance_test.py "${{ runner.temp }}/observer-provenance-fixtures"
+      - name: Bind Windows observer artifact provenance
+        id: observer_artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          DIAGNOSTIC_REQUESTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $observerArtifactDirectory = Join-Path $env:RUNNER_TEMP ("form-observer-artifact-{0}-{1}" -f $env:GITHUB_RUN_ID, $env:GITHUB_RUN_ATTEMPT)
+          python tools/write-form-observer-provenance.py target/debug/examples/form_field_map_observer.exe "$observerArtifactDirectory"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "directory=$observerArtifactDirectory" >> $env:GITHUB_OUTPUT
+      - name: Retain reviewed observer for serialized lab diagnostics
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: form-field-map-observer-windows-x64
+          path: ${{ steps.observer_artifact.outputs.directory }}/
+          if-no-files-found: error
       - run: npm ci
         working-directory: editors/vscode
       - run: npm run bundle

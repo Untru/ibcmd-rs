@@ -358,6 +358,13 @@ fn export_config_policy(
     args: &InfobaseConfigExportArgs,
     native_versions: bool,
 ) -> Result<InfobaseConfigExportReport> {
+    if args.chart_series_names != crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored
+        && (args.base.is_some() || args.sync || args.extension.is_some())
+    {
+        bail!(
+            "--chart-series-names=russian|english requires a full configuration export without --base, --sync or --extension"
+        );
+    }
     let config = resolve_connection(args.connection())?;
     if config.postgres()?.is_some() {
         if args.extension.is_some() {
@@ -389,6 +396,7 @@ fn export_config_policy(
         args.base.as_deref(),
         args.sync,
         native_versions,
+        args.chart_series_names,
     )
 }
 
@@ -418,6 +426,7 @@ pub(crate) fn export_config_report(
         base,
         sync,
         false,
+        crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
     )
 }
 
@@ -433,6 +442,7 @@ fn export_config_report_policy(
     base: Option<&Path>,
     sync: bool,
     native_versions: bool,
+    chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName,
 ) -> Result<InfobaseConfigExportReport> {
     let postgres_snapshot = config
         .postgres_snapshot
@@ -460,6 +470,7 @@ fn export_config_report_policy(
     );
     dump_args.base = base.map(Path::to_path_buf);
     dump_args.sync = sync;
+    dump_args.chart_series_names = chart_series_names;
     let dump = crate::mssql_dump::dump_config_with(
         &dump_args,
         crate::mssql_dump::DumpHooks {
@@ -623,6 +634,7 @@ fn dump_args(
     source_version: InfobaseConfigSourceVersion,
 ) -> MssqlDumpConfigArgs {
     MssqlDumpConfigArgs {
+        chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
         rows_dir: None,
         file_infobase: config.file_infobase.clone(),
         // Checked when the connection is resolved (`resolve_connection_with`).
@@ -1713,8 +1725,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn changed_chart_names_refuse_unsupported_scope_before_connection_or_output() {
+        for mode in 0..3 {
+            let mut args = export_args("unused");
+            args.chart_series_names = crate::mssql_dump::MoxelChartSeriesAutomaticName::Russian;
+            args.dbms = Some("unreachable-invalid-dbms".into());
+            match mode {
+                0 => args.base = Some("previous.xml".into()),
+                1 => args.sync = true,
+                _ => args.extension = Some("Example".into()),
+            }
+            let error = export_config(&args).unwrap_err().to_string();
+            assert!(error.contains("--chart-series-names"), "{error}");
+        }
+    }
+
     fn export_args(db_name: &str) -> InfobaseConfigExportArgs {
         InfobaseConfigExportArgs {
+            chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
             db_path: None,
             settings: None,
             native_config: None,

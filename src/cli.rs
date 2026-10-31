@@ -783,6 +783,8 @@ pub struct InfobaseConfigExportArgs {
     /// `--sync`: the output directory is brought in line with the
     /// configuration, what a fresh export would not hold is removed.
     pub sync: bool,
+    /// Generated chart series labels only; stored preserves their cached spelling.
+    pub chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName,
 }
 
 /// `infobase config import`: what the drop-in command line (`crate::dropin`)
@@ -1844,6 +1846,9 @@ pub struct MssqlDumpConfigArgs {
     /// Try to reconstruct minimal source XML for recognized metadata blobs.
     #[arg(long)]
     pub extract_metadata_xml: bool,
+    /// Generated chart series labels; user-edited labels are preserved.
+    #[arg(long, value_enum, default_value = "stored")]
+    pub chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName,
     /// Fail a full Config export when any expected root metadata XML is absent.
     #[arg(
         long,
@@ -4558,6 +4563,47 @@ pub struct MssqlStageCommonTemplateObjectArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chart_series_names_parse_typed_values_default_and_refuse_unknown() {
+        use crate::mssql_dump::MoxelChartSeriesAutomaticName as Policy;
+        for (value, expected) in [
+            (None, Policy::Stored),
+            (Some("stored"), Policy::Stored),
+            (Some("russian"), Policy::Russian),
+            (Some("english"), Policy::RepublishedInEnglish),
+        ] {
+            let mut command = vec![
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "lab",
+                "--output-dir",
+                "out",
+            ];
+            if let Some(value) = value {
+                command.extend(["--chart-series-names", value]);
+            }
+            let Commands::MssqlDumpConfig(args) = Cli::try_parse_from(command).unwrap().command
+            else {
+                panic!("wrong command");
+            };
+            assert_eq!(args.chart_series_names, expected);
+        }
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "lab",
+                "--output-dir",
+                "out",
+                "--chart-series-names",
+                "automatic"
+            ])
+            .is_err()
+        );
+    }
 
     #[test]
     fn parses_exchange_plan_stage_command() {

@@ -84,6 +84,7 @@ pub enum Opt {
     Sqlcmd,
     Settings,
     SourceVersion,
+    ChartSeriesNames,
     DbPwdEnv,
     BaseFree,
     Exclusivity,
@@ -180,6 +181,7 @@ const CONFIG_OPTIONS: &[OptSpec] = &[
 ];
 
 const EXPORT_OPTIONS: &[OptSpec] = &[
+    valued(Opt::ChartSeriesNames, &["chart-series-names"], None),
     valued(Opt::Base, &["base"], Some('b')),
     valued(Opt::File, &["file"], Some('f')),
     valued(Opt::Extension, &["extension"], Some('e')),
@@ -529,6 +531,7 @@ pub struct Common {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportRequest {
+    pub chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName,
     pub common: Common,
     pub threads: Option<usize>,
     /// The extension to export (`--extension`, `-e`); the configuration
@@ -849,6 +852,7 @@ fn parse_export_query(scan: &Scan) -> Result<Invocation, Refusal> {
         Opt::Force,
         Opt::IgnoreUnresolvedRefs,
         Opt::Extension,
+        Opt::ChartSeriesNames,
     ] {
         if let Some(spelled) = scan.spelled(opt) {
             return Err(Refusal::UnsupportedOption {
@@ -904,6 +908,7 @@ fn parse_export_query(scan: &Scan) -> Result<Invocation, Refusal> {
         .transpose()?;
     Ok(Invocation::ExportQuery(ExportQueryRequest {
         export: ExportRequest {
+            chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
             common: common(scan)?,
             threads,
             extension: scan.value(Opt::Extension).map(str::to_owned),
@@ -996,6 +1001,25 @@ pub fn parse_infobase(args: &[OsString]) -> Result<Invocation, Refusal> {
             "Опции base и sync не могут быть использованы одновременно.".into(),
         ));
     }
+    let chart_series_names = match scan.value(Opt::ChartSeriesNames) {
+        None => crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
+        Some(value) => {
+            <crate::mssql_dump::MoxelChartSeriesAutomaticName as clap::ValueEnum>::from_str(
+                value, false,
+            )
+            .map_err(|_| Refusal::InvalidValue {
+                option: "--chart-series-names".into(),
+                value: value.into(),
+            })?
+        }
+    };
+    if chart_series_names != crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored
+        && (scan.has(Opt::Base) || scan.has(Opt::Sync) || scan.has(Opt::Extension))
+    {
+        return Err(Refusal::NativeMalformed(
+            "--chart-series-names=russian|english requires a full configuration export without --base, --sync or --extension".into(),
+        ));
+    }
     let common = common(&scan)?;
     let path = match scan.arguments.as_slice() {
         [] => {
@@ -1024,6 +1048,7 @@ pub fn parse_infobase(args: &[OsString]) -> Result<Invocation, Refusal> {
     }
     Ok(match node.kind {
         NodeKind::Export => Invocation::Export(ExportRequest {
+            chart_series_names,
             common,
             extension: match scan.value(Opt::Extension) {
                 None => None,
@@ -1455,6 +1480,71 @@ pub fn node_at(path: &[&str]) -> Option<&'static Node> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chart_series_names_default_values_forward_and_refuse_unknown() {
+        use crate::mssql_dump::MoxelChartSeriesAutomaticName as Policy;
+        assert_eq!(
+            export(&["config", "export", "--db-name=lab", "out"]).chart_series_names,
+            Policy::Stored
+        );
+        for (value, expected) in [
+            ("stored", Policy::Stored),
+            ("russian", Policy::Russian),
+            ("english", Policy::RepublishedInEnglish),
+        ] {
+            let option = format!("--chart-series-names={value}");
+            let request = export(&["config", "export", "--db-name=lab", &option, "out"]);
+            assert_eq!(request.chart_series_names, expected);
+            assert_eq!(
+                crate::dropin::export_args(&request).chart_series_names,
+                expected
+            );
+        }
+        assert!(
+            matches!(parse(&["config", "export", "--db-name=lab", "--chart-series-names=automatic", "out"]),
+            Err(Refusal::InvalidValue { option, .. }) if option == "--chart-series-names")
+        );
+    }
+
+    #[test]
+    fn changed_chart_names_refuse_incremental_extension_and_query_commands() {
+        for option in ["--base=previous.xml", "--sync", "--extension=Example"] {
+            assert!(
+                parse(&[
+                    "config",
+                    "export",
+                    "--db-name=lab",
+                    "--chart-series-names=russian",
+                    option,
+                    "out"
+                ])
+                .is_err()
+            );
+        }
+        assert!(
+            parse(&[
+                "config",
+                "export",
+                "info",
+                "--db-name=lab",
+                "--chart-series-names=english"
+            ])
+            .is_err()
+        );
+        let stored = export(&[
+            "config",
+            "export",
+            "--db-name=lab",
+            "--chart-series-names=stored",
+            "--base=previous.xml",
+            "out",
+        ]);
+        assert_eq!(
+            stored.chart_series_names,
+            crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored
+        );
+    }
 
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()

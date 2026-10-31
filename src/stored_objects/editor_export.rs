@@ -201,7 +201,7 @@ impl StoredConfiguration {
             for (name, bytes) in &exported.files {
                 let target = stage.join(name);
                 fs::create_dir_all(target.parent().context("missing stage parent")?)?;
-                fs::write(target, bytes)?;
+                fs::write(target, filesystem_expected_bytes(name, bytes).as_ref())?;
                 files.insert(name.clone());
             }
         }

@@ -12,6 +12,36 @@ use std::collections::BTreeMap;
 
 pub(crate) use ibcmd_moxel::*;
 
+/// Explicit generated chart labels selected by the export surface.
+/// Conversion into the decoder policy is exhaustive and independent of host state.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, clap::ValueEnum)]
+pub enum MoxelChartSeriesAutomaticName {
+    #[value(name = "english")]
+    RepublishedInEnglish,
+    #[value(name = "russian")]
+    Russian,
+    #[default]
+    #[value(name = "stored")]
+    Stored,
+}
+
+impl From<MoxelChartSeriesAutomaticName> for ibcmd_moxel::MoxelChartSeriesAutomaticName {
+    fn from(policy: MoxelChartSeriesAutomaticName) -> Self {
+        match policy {
+            MoxelChartSeriesAutomaticName::Stored => Self::Stored,
+            MoxelChartSeriesAutomaticName::Russian => Self::Russian,
+            MoxelChartSeriesAutomaticName::RepublishedInEnglish => Self::RepublishedInEnglish,
+        }
+    }
+}
+
+impl MoxelChartSeriesAutomaticName {
+    #[cfg(test)]
+    const fn host() -> Self {
+        Self::Stored
+    }
+}
+
 #[cfg(all(test, feature = "mssql-live-tests"))]
 use std::collections::BTreeSet;
 
@@ -47,17 +77,33 @@ pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
 ) -> Result<String, MxlDiagnostic> {
+    try_extract_moxel_spreadsheet_xml_with_generated_types_and_policy(
+        bytes,
+        object_refs,
+        generated_types,
+        MoxelChartSeriesAutomaticName::Stored,
+    )
+}
+
+/// Packed export entry point retaining the root codec and built-in type table.
+pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types_and_policy(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+    policy: MoxelChartSeriesAutomaticName,
+) -> Result<String, MxlDiagnostic> {
     let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes)
         .map_err(|error| binary_container_diagnostic(error.to_string()))?;
     // An 8.5 spreadsheet spells its colour and font tuples one revision later.
     let text =
         super::form::layout_8_5_1::rewrite_primitives_8_5_1_in_place(body.native_body_text());
-    extract_moxel_body_xml(
+    extract_moxel_body_xml_with_policy(
         &text,
         object_refs,
         generated_types,
         super::builtin_type_reference,
         None,
+        policy.into(),
     )
 }
 
@@ -496,4 +542,13 @@ mod moxel_exact_parity_tests {
                 }]
         );
     }
+}
+
+#[cfg(test)]
+mod series_projection_tests {
+    use super::*;
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ut-chart-policy/explicit-english-zero-series/projection_tests.rs"
+    ));
 }
