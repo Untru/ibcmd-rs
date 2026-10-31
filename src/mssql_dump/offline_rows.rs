@@ -377,7 +377,7 @@ impl OfflineRows {
 
     /// Reads and assembles the selected rows in parallel, keeping their order.
     fn read(selected: Vec<(&str, &Parts)>) -> Result<Vec<BinaryConfigRow>> {
-        crate::parallel::install(|| {
+        ibcmd_parallel::install(|| {
             selected
                 .par_iter()
                 .map(|(file_name, parts)| {
@@ -457,7 +457,7 @@ impl OfflineRows {
             .iter()
             .filter_map(|(file_name, parts)| Some((file_name, parts.first()?)))
             .collect::<Vec<_>>();
-        let read = crate::parallel::install(|| {
+        let read = ibcmd_parallel::install(|| {
             parts
                 .par_iter()
                 .map(|(file_name, part)| Ok(((*file_name).clone(), part.read()?)))

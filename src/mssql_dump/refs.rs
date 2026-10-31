@@ -103,8 +103,8 @@ pub(super) fn build_metadata_command_reference_index_from_texts(
 /// hides the constant's `Open` command prints the sentinel and this export
 /// printed the name.
 fn model_use_standard_commands(kind: &str, text: &str) -> Option<bool> {
-    let row = crate::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
-    crate::metadata_model::simple::export::use_standard_commands(kind, &row)
+    let row = ibcmd_metadata_model::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
+    ibcmd_metadata_model::metadata_model::simple::export::use_standard_commands(kind, &row)
 }
 
 /// The target's own `<UseStandardCommands>`, read through the same decoder and
@@ -3438,8 +3438,8 @@ fn configuration_properties_8_5_1(
 /// The configuration row `text` is an extension's root: its header, the one
 /// under `header_uuid`, records an adoption.
 fn extension_root_row(text: &str, header_uuid: &str) -> bool {
-    crate::extension::adoption::header_of(text, header_uuid)
-        .and_then(crate::extension::adoption::parse)
+    ibcmd_dump_readers::extension::adoption::header_of(text, header_uuid)
+        .and_then(ibcmd_dump_readers::extension::adoption::parse)
         .is_some_and(|adoption| adoption.adopted)
 }
 
@@ -3816,7 +3816,7 @@ pub(super) fn parse_configuration_properties_from_text(
     let extension_root = fields
         .get(1)
         .and_then(|field| field.find("{3,").map(|at| &field[at..]))
-        .and_then(crate::extension::adoption::parse)
+        .and_then(ibcmd_dump_readers::extension::adoption::parse)
         .is_some_and(|adoption| adoption.adopted);
     let configuration_extension_compatibility_mode = if extension_root {
         fields
@@ -4217,9 +4217,9 @@ pub(super) fn parse_configuration_use_purposes(
         let layout = parse_configuration_root_layout(text, uuid)?;
         return (raw_fields.len() == 1
             && layout.contained_objects.first().is_some_and(|owner| {
-                owner
-                    .class_id
-                    .eq_ignore_ascii_case(crate::metadata_model::root::MODULE_GROUP_CLASS_ID)
+                owner.class_id.eq_ignore_ascii_case(
+                    ibcmd_metadata_model::metadata_model::root::MODULE_GROUP_CLASS_ID,
+                )
             }))
         .then(Vec::new);
     }
@@ -4566,7 +4566,7 @@ pub(super) fn configuration_v76_interface_mode(
     if !layout.contained_objects.first().is_some_and(|owner| {
         owner
             .class_id
-            .eq_ignore_ascii_case(crate::metadata_model::root::MODULE_GROUP_CLASS_ID)
+            .eq_ignore_ascii_case(ibcmd_metadata_model::metadata_model::root::MODULE_GROUP_CLASS_ID)
     }) {
         return Ok(None);
     }

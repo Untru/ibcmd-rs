@@ -14,16 +14,16 @@
 //! over one by one.
 
 use super::*;
-use crate::metadata_model::brace::parse_row;
-use crate::metadata_model::export::names::{
+use ibcmd_metadata_model::metadata_model::brace::parse_row;
+use ibcmd_metadata_model::metadata_model::export::names::{
     IndexComparison, compare, has_decoder, has_names, has_owned_names, may_own_objects,
     owned_objects, predefined_items, predefined_suffix, root_kinds,
 };
-use crate::metadata_model::export::{
+use ibcmd_metadata_model::metadata_model::export::{
     ExportContext, NameIndex, decode_object, object_names, owned_object_names, write_document,
 };
-use crate::metadata_model::index::ConfigIndex;
-use crate::metadata_model::objects::parts::Compat;
+use ibcmd_metadata_model::metadata_model::index::ConfigIndex;
+use ibcmd_metadata_model::metadata_model::objects::parts::Compat;
 
 /// Whether the export keeps its research summaries (the model plan, the
 /// name index) off stderr: the drop-in `infobase config export` prints only
@@ -88,7 +88,8 @@ fn kind_folder(kind: &str) -> Option<String> {
     } else {
         format!("{kind}s")
     };
-    (crate::metadata_model::index::kind_of_collection(&folder) == Some(kind)).then_some(folder)
+    (ibcmd_metadata_model::metadata_model::index::kind_of_collection(&folder) == Some(kind))
+        .then_some(folder)
 }
 
 /// The root row among the text rows: the configuration's own row.
@@ -138,7 +139,8 @@ impl ModelPlan {
             .and_then(Compat::parse)
             .unwrap_or_else(|| {
                 let [major, minor, patch] =
-                    crate::platform::of_xml_dialect(source_version.as_str()).release();
+                    ibcmd_platform_spec::platform::of_xml_dialect(source_version.as_str())
+                        .release();
                 Compat(major, minor, patch)
             });
         let kinds = root
@@ -559,7 +561,7 @@ impl ModelExport {
         })();
         if let Err(error) = result
             && (kind == ibcmd_schema::interface::InterfaceLayout::KIND
-                || error.is::<crate::metadata_model::export::values::UnsupportedDescriptorValue>())
+                || error.is::<ibcmd_metadata_model::metadata_model::export::values::UnsupportedDescriptorValue>())
         {
             return Err(error).context("stored descriptor has an unsupported value");
         }
@@ -663,7 +665,7 @@ pub(crate) fn configuration_compatibility_with_snapshot(
         && let Some(target) = &args.postgres
     {
         let (rows, snapshot) = super::postgres_infobase::load_for_probe(target)?;
-        let read = |name: &str| -> Result<crate::metadata_model::brace::Brace> {
+        let read = |name: &str| -> Result<ibcmd_metadata_model::metadata_model::brace::Brace> {
             let names = BTreeSet::from([name.to_owned()]);
             let row = rows
                 .rows_named(
@@ -711,7 +713,7 @@ fn configuration_compatibility_from_storage(
     main_configuration: bool,
 ) -> Result<bool> {
     let _views = dynamic_generation::StorageViewScope::begin(database);
-    let read = |name: &str| -> Result<crate::metadata_model::brace::Brace> {
+    let read = |name: &str| -> Result<ibcmd_metadata_model::metadata_model::brace::Brace> {
         let names = BTreeSet::from([name.to_string()]);
         let rows = fetch_binary_rows(
             sql,
@@ -742,11 +744,13 @@ fn configuration_compatibility_from_storage(
 }
 
 fn configuration_compatibility_from_read(
-    read: impl Fn(&str) -> Result<crate::metadata_model::brace::Brace>,
+    read: impl Fn(&str) -> Result<ibcmd_metadata_model::metadata_model::brace::Brace>,
 ) -> Result<bool> {
-    let uuid = crate::metadata_model::root::export::root_configuration_uuid(&read("root")?)?;
-    let shape = crate::metadata_model::root::export::stored_shape(&read(&uuid)?)?;
-    Ok(shape == crate::metadata_model::root::ConfigurationShape::V76)
+    let uuid = ibcmd_metadata_model::metadata_model::root::export::root_configuration_uuid(&read(
+        "root",
+    )?)?;
+    let shape = ibcmd_metadata_model::metadata_model::root::export::stored_shape(&read(&uuid)?)?;
+    Ok(shape == ibcmd_metadata_model::metadata_model::root::ConfigurationShape::V76)
 }
 
 // ---------------------------------------------------------------------------

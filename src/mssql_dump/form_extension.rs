@@ -61,7 +61,7 @@ impl FormBaseFormExt for FormBaseForm {
 /// The base form body an adopted form carries, when it is one.
 pub(super) fn adopted_base_form(body: &ParsedFormBodyBlob) -> Option<ParsedFormBodyBlob> {
     let base = body.trailing.get(adopted_base_record_slot(body)?)?.trim();
-    crate::module_blob::parse_form_body_plain(base).ok()
+    ibcmd_form_body::parse_form_body_plain(base).ok()
 }
 
 /// The adoption facts of the form `body`; `None` for a form without a base

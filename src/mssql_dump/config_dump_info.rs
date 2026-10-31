@@ -583,7 +583,7 @@ fn parse_extension_config_info(text: &str) -> Result<Vec<ConfigVersionEntry>> {
     for pair in fields[1..].chunks_exact(2) {
         let name = parse_1c_quoted_string(pair[0].trim())
             .ok_or_else(|| anyhow!("configinfo holds an invalid entry name"))?;
-        let hash = crate::module_blob::decode_base64_mime(pair[1].trim())
+        let hash = ibcmd_1c_text::decode_base64_mime_lenient(pair[1].trim())
             .filter(|hash| hash.len() == 20)
             .ok_or_else(|| anyhow!("configinfo entry {name:?} has no SHA-1"))?;
         let version = hash
@@ -803,10 +803,11 @@ fn add_configuration_root_command_interface_references(
             continue;
         };
         for suffix in ["9", "a"] {
-            let Some(role) = crate::compiler::families::assets::SourceAssetRegistry
-                .route_by_suffix("Configuration", suffix)
-                .and_then(|route| Path::new(route.relative_path()).file_stem())
-                .and_then(|role| role.to_str())
+            let Some(role) =
+                ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+                    .route_by_suffix("Configuration", suffix)
+                    .and_then(|route| Path::new(route.relative_path()).file_stem())
+                    .and_then(|role| role.to_str())
             else {
                 continue;
             };
@@ -895,7 +896,7 @@ fn config_dump_top_name(
         .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has no row suffix"))?;
     let family = metadata_reference_family(base)
         .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} owner {base} names no family"))?;
-    if let Some(role) = crate::compiler::families::assets::SourceAssetRegistry
+    if let Some(role) = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
         .route_by_suffix(family, suffix)
         .and_then(|route| Path::new(route.relative_path()).file_stem())
         .and_then(|role| role.to_str())

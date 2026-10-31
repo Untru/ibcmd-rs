@@ -2023,7 +2023,7 @@ fn activation_binary_filter(headers: &[ActivationHeader]) -> String {
         "(FileName=N'{}' AND PartNo={} AND Attributes={} AND CONVERT(varchar(27),Creation,121)='{}' AND CONVERT(varchar(27),Modified,121)='{}' AND CONVERT(bigint,DataSize)={} AND DATALENGTH(BinaryData)={} AND HASHBYTES('SHA2_256',BinaryData)=0x{})",
         quote_string(&row.name), row.part, row.attributes, quote_string(&row.creation),
         quote_string(&row.modified), row.size, row.size,
-        crate::mssql_config_apply::model::hex_upper(&row.digest)))
+        ibcmd_config_apply::mssql_config_apply::model::hex_upper(&row.digest)))
         .collect::<Vec<_>>().join(" OR ");
     format!("WHERE {predicates}\n")
 }
@@ -2141,7 +2141,7 @@ pub(super) fn fetch_activation_rows(
     database: &str,
     table: &str,
     selected: &BTreeSet<String>,
-) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+) -> Result<Vec<ibcmd_mssql_live::mssql_main_activation::MainStorageRow>> {
     let filter = if selected.is_empty() {
         String::new()
     } else {
@@ -2160,14 +2160,14 @@ pub(super) fn fetch_activation_rows(
         table,
         &filter,
         ActivationCaptureBudget {
-            rows: crate::mssql_main_activation::MAX_ROWS,
-            row_bytes: crate::mssql_main_activation::MAX_ROW_BYTES as u64,
-            total_bytes: crate::mssql_main_activation::MAX_PLAN_BYTES as u64,
+            rows: ibcmd_mssql_live::mssql_main_activation::MAX_ROWS,
+            row_bytes: ibcmd_mssql_live::mssql_main_activation::MAX_ROW_BYTES as u64,
+            total_bytes: ibcmd_mssql_live::mssql_main_activation::MAX_PLAN_BYTES as u64,
         },
     )?
     .into_iter()
     .map(|row| {
-        Ok(crate::mssql_main_activation::MainStorageRow {
+        Ok(ibcmd_mssql_live::mssql_main_activation::MainStorageRow {
             file_name: row.file_name,
             part_no: row.part_no,
             creation: row.creation,

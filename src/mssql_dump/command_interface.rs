@@ -176,7 +176,7 @@ pub(super) fn parse_command_interface_blob_with_subsystem_refs(
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<CommandInterface> {
-    let inflated = crate::compiler::families::native::inflate(bytes).ok()?;
+    let inflated = ibcmd_compiler_families::compiler::families::native::inflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let fields = split_1c_braced_fields_bounded(
         text.trim_start_matches('\u{feff}'),

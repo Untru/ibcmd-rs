@@ -39,6 +39,10 @@ pub mod form {
     };
     // The transitional reader of historic fixtures, for the export and apply
     // adapters.
+    #[expect(
+        unused_imports,
+        reason = "the root keeps the path; its one reader, the exporter, names the crate"
+    )]
     pub(crate) use ibcmd_compiler::compiler::bodies::form::decode_compatible_managed_form;
 }
 pub mod form_chart {
@@ -71,6 +75,10 @@ pub mod mxl {
         MxlBody, MxlCodecError, MxlCodecProfile, compile_mxl, decode_mxl,
     };
     // The transitional readers the MOXCEL exporter decodes through.
+    #[expect(
+        unused_imports,
+        reason = "the root keeps the path; its one reader, the exporter, names the crate"
+    )]
     pub(crate) use ibcmd_compiler::compiler::bodies::mxl::{
         decode_compatible_mxl, decode_inflated_compatible_mxl,
     };
@@ -110,6 +118,10 @@ pub mod rights {
     };
     // The transitional reader of the export adapter, which passes it the
     // extension-export state.
+    #[expect(
+        unused_imports,
+        reason = "the root keeps the path; its one reader, the exporter, names the crate"
+    )]
     pub(crate) use ibcmd_compiler::compiler::bodies::rights::decode_compatible_role_rights;
     use ibcmd_compiler::compiler::bodies::rights::decode_role_rights_with;
 

@@ -637,7 +637,7 @@ pub(crate) fn export_extension_entries_to_source(
         .context("CFE configinfo is missing")?;
     let configinfo_bytes = configinfo.len();
     let manifest = crate::mssql_extension_stage::validate_container_configinfo_manifest(
-        &crate::module_blob::inflate_raw(configinfo)?,
+        &ibcmd_module_blob::inflate_raw(configinfo)?,
     )
     .context("CFE configinfo manifest")?;
     let root_name = manifest.identity.configuration_id.hyphenated().to_string();
@@ -1003,7 +1003,7 @@ fn normalize_row(packed: &[u8]) -> Result<Option<NormalizedRow>> {
         return Ok(None);
     }
     let is_root = normalized.text.trim_start().starts_with("{2,");
-    let packed = crate::module_blob::deflate_raw(format!("{bom}{}", normalized.text).as_bytes())?;
+    let packed = ibcmd_module_blob::deflate_raw(format!("{bom}{}", normalized.text).as_bytes())?;
     Ok(Some(NormalizedRow {
         packed,
         adopted: normalized.adopted,
@@ -1112,7 +1112,7 @@ fn adjust_predefined_files(
         .context("the adopted predefined items row is missing")?;
     let plain = inflate_raw_deflate(packed)?;
     let text = String::from_utf8(plain).context("predefined items row is not UTF-8")?;
-    let states = crate::extension::predefined::states(&text)?;
+    let states = ibcmd_dump_readers::extension::predefined::states(&text)?;
     for output in &entry.outputs {
         if !output.replace('\\', "/").ends_with("/Ext/Predefined.xml") {
             continue;
@@ -1120,7 +1120,7 @@ fn adjust_predefined_files(
         let path = output_dir.join(output);
         let xml =
             std::fs::read_to_string(&path).with_context(|| format!("failed to read {output}"))?;
-        let projected = crate::extension::predefined::rewrite(&xml, &states)?;
+        let projected = ibcmd_dump_readers::extension::predefined::rewrite(&xml, &states)?;
         std::fs::write(&path, projected.as_bytes())
             .with_context(|| format!("failed to write {output}"))?;
     }
@@ -1163,7 +1163,7 @@ fn adjust_form_files(
             let packed = packed_rows
                 .get(&entry.logical_name)
                 .context("the adopted form's storage body is missing")?;
-            let body = crate::module_blob::parse_form_body_blob(&packed)
+            let body = ibcmd_metadata_blob::parse_form_body_blob(&packed)
                 .context("the adopted form's storage body is not readable")?;
             form::check_call_types(&adjusted, &body.layout)?;
         }

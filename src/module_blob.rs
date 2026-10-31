@@ -47,11 +47,23 @@ pub use ibcmd_metadata_blob::{
 };
 
 // The rest of the root reaches these by their `module_blob` paths.
+#[cfg_attr(
+    not(test),
+    expect(
+        unused_imports,
+        reason = "the root's tests read it; outside them its one reader, the exporter, names the crate"
+    )
+)]
 pub(crate) use ibcmd_1c_text::decode_base64_mime_lenient as decode_base64_mime;
 pub(crate) use ibcmd_1c_text::encode_base64;
 // The module blob codec, the raw deflate helpers and digests, the
 // raw-deflated packer and the versions-blob patcher are the
 // `ibcmd-module-blob` crate's; the root reaches them by these paths.
+#[expect(
+    unused_imports,
+    reason = "the root keeps the path; its one reader, the exporter, names the crate"
+)]
+pub(crate) use ibcmd_module_blob::unpack_plain_text_module_body;
 pub use ibcmd_module_blob::{
     PackedModuleBlob, PackedRawDeflatedBlob, PatchedVersionsBlob, VersionReplacement, hex_sha256,
     module_blob_text_sha256, pack_module_blob_bytes, pack_module_blob_bytes_base_free,
@@ -59,7 +71,7 @@ pub use ibcmd_module_blob::{
     patch_versions_blob_bytes_allowing_additions, raw_deflated_first_base64_payload_sha256,
     raw_deflated_plain_sha256, unpack_module_blob_text, versions_base_free_blockers,
 };
-pub(crate) use ibcmd_module_blob::{deflate_raw, inflate_raw, unpack_plain_text_module_body};
+pub(crate) use ibcmd_module_blob::{deflate_raw, inflate_raw};
 
 // A form body record and its container revision are the `ibcmd-form-body`
 // crate's (the form reader there reads them); this module unpacks them and

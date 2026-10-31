@@ -172,10 +172,10 @@ pub struct MssqlDumpConfigArgs {
     #[arg(
         long,
         value_name = "VERSION",
-        value_parser = crate::platform::parse_flag,
+        value_parser = ibcmd_platform_spec::platform::parse_flag,
         conflicts_with = "source_version"
     )]
-    pub platform: Option<crate::platform::PlatformSpec>,
+    pub platform: Option<ibcmd_platform_spec::platform::PlatformSpec>,
     /// Source XML version for reconstructed source files.
     #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20, hide = true)]
     pub source_version: InfobaseConfigSourceVersion,

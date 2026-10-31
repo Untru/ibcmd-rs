@@ -15,6 +15,11 @@ pub mod mssql_legacy {
 
     pub use ibcmd_platform_spec::adapters::mssql_legacy::*;
 
+    // Read only by the exporter, which names the crate; it still hides the item from the glob.
+    #[expect(
+        unused_imports,
+        reason = "the re-export hides a widened item from the public glob"
+    )]
     pub(crate) use ibcmd_platform_spec::adapters::mssql_legacy::{
         MssqlConfigurationTableRole, MssqlExportInventoryPlan, MssqlExportInventoryScope,
         decode_task_internal_uuid_slots,

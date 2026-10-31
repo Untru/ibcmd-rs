@@ -47,7 +47,7 @@ pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
 ) -> Result<String, MxlDiagnostic> {
-    let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes)
+    let body = ibcmd_compiler::compiler::bodies::mxl::decode_compatible_mxl(bytes)
         .map_err(|error| binary_container_diagnostic(error.to_string()))?;
     // An 8.5 spreadsheet spells its colour and font tuples one revision later.
     let text =
@@ -66,7 +66,7 @@ pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
     object_refs: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
-    let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
+    let body = ibcmd_compiler::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
     extract_moxel_body_xml(
         body.native_body_text(),
         object_refs,
@@ -84,7 +84,7 @@ pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
     object_refs: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
-    let body = crate::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes).ok()?;
+    let body = ibcmd_compiler::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes).ok()?;
     extract_moxel_body_xml(
         body.native_body_text(),
         object_refs,

@@ -100,7 +100,7 @@ pub(super) fn parse_role_rights_blob(
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
 ) -> Option<RoleRights> {
-    let inflated = crate::compiler::bodies::rights::decode_compatible_role_rights(
+    let inflated = ibcmd_compiler::compiler::bodies::rights::decode_compatible_role_rights(
         bytes,
         super::extension::active().is_some(),
     )

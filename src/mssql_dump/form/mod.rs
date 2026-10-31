@@ -48,7 +48,7 @@ pub(super) fn apply_form_facts_8_5_1_for_export(
         facts,
         object_refs,
         adoption,
-        crate::platform::export_writes_default_button_importance(),
+        ibcmd_platform_spec::platform::export_writes_default_button_importance(),
     )
 }
 
