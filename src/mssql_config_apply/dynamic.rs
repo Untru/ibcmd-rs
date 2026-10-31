@@ -960,7 +960,7 @@ fn effective_blob(
     history: &[String],
     judged: &[RowMeta],
 ) -> Result<Option<Vec<u8>>> {
-    let stored = crate::mssql_dump::stored_row_name(
+    let stored = ibcmd_dynamic_generation::stored_row_name(
         history,
         name,
         judged.iter().map(|row| row.name.as_str()),

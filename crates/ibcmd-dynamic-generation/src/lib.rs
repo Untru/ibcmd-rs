@@ -290,6 +290,24 @@ pub fn storage_generation_overlay<'a>(
     overlay
 }
 
+/// The stored row that holds the current content of the published `name`,
+/// among `stored_names`: the alias of the newest generation of `history` that
+/// carries it, else `name` itself.
+///
+/// One rule for every reader of the current content: the export's overlay, the
+/// stage that has read the whole table (`mssql_dump::dynamic_generation_aliases`
+/// in the root) and the stage that asks row by row (`mssql_effective_row`, which
+/// only adds the seek that finds the candidates).
+pub fn stored_row_name<'a>(
+    history: &[String],
+    name: &str,
+    stored_names: impl IntoIterator<Item = &'a str>,
+) -> String {
+    storage_generation_overlay(history, stored_names)
+        .stored_name(name)
+        .to_owned()
+}
+
 /// The table of a database an overlay describes: (database, table).
 type StorageKey = (String, String);
 
