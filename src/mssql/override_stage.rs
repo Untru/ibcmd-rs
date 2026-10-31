@@ -38,8 +38,6 @@ use super::empty_stage::{
     prepare_empty_object, read_descriptor_xmls,
 };
 use super::patch_refusal::ObjectFailure;
-// The `deleted` row lives below both the stage and the export, which compares
-// a file infobase's stored one with it.
 use super::stage_guard::{in_scope, normalize_prefix};
 use super::{PreparedMetadataBodyStage, PreparedMetadataObjectStage, query_json, quote_ident};
 use crate::apply_check::{ObjectOp, check_tree_against_db};
@@ -51,6 +49,9 @@ use crate::module_blob::{
 };
 use crate::source_listing;
 use crate::sql::SqlExec;
+
+// The `deleted` row lives below both the stage and the export, which compares
+// a file infobase's stored one with it.
 pub(crate) use ibcmd_module_blob::deleted_row;
 
 /// The row that lists what an import removes (`docs/import/patch-mode.md`,
