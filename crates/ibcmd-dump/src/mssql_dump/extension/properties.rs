@@ -372,7 +372,7 @@ mod inverse_mapping_tests {
         // Includes generic property constants and every element-specific match arm.
         let source = include_str!("properties.rs");
         let forward = source.split("#[cfg(test)]").next().unwrap();
-        let inverse = source.split("pub(crate) fn guid_for").nth(1).unwrap();
+        let inverse = source.split("pub fn guid_for").nth(1).unwrap();
         let ids = inverse.split("IDS.iter()").next().unwrap();
         let ids = ids.split('"').collect::<Vec<_>>();
         for literal in forward.split('"') {
