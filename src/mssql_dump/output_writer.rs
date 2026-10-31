@@ -33,7 +33,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
 
-use crate::cli::InfobaseConfigSourceVersion;
+use crate::legacy_version::InfobaseConfigSourceVersion;
 
 /// Writer threads when `IBCMD_RS_OUTPUT_WRITERS` does not say.
 const DEFAULT_WRITERS: usize = 8;

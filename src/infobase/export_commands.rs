@@ -238,6 +238,7 @@ pub fn objects(args: &InfobaseConfigExportArgs, names: &[String], recursive: boo
             sql: None,
             sink: Some(sink.clone()),
             object_recursion: Some(recursive),
+            select_objects: Some(crate::stored_objects::stored_rows_selected),
             native_versions: false,
         },
     )?;

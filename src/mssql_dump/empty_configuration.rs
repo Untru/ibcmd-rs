@@ -17,7 +17,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::output_writer::OutputWriter;
-use crate::cli::InfobaseConfigSourceVersion;
+use crate::legacy_version::InfobaseConfigSourceVersion;
 
 struct Templates {
     configuration: &'static str,

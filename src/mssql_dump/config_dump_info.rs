@@ -1352,6 +1352,7 @@ pub(crate) fn read_config_dump_info_with_sql(
             rows_snapshot,
             sink: Some(sink.clone()),
             object_recursion: None,
+            select_objects: None,
             native_versions: false,
         },
     )?;

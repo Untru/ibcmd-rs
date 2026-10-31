@@ -257,7 +257,7 @@ pub(crate) fn file_infobase_effective(
     }
     if staged
         .get("deleted")
-        .is_some_and(|bytes| crate::mssql::stage_deleted_row(&[]).ok().as_ref() != Some(bytes))
+        .is_some_and(|bytes| ibcmd_module_blob::deleted_row(&[]).ok().as_ref() != Some(bytes))
     {
         bail!(
             "partial import over staged deletions is not supported; apply the existing stage first"
