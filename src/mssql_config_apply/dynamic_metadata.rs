@@ -5,11 +5,11 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow, ensure};
 
-use crate::compiler::bodies::template::{TemplateKind, decode_compatible_template};
-use crate::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
-use crate::compiler::families::native::{NativeValue, parse_optional_bom};
 use crate::metadata_model::brace::Brace;
 use crate::metadata_model::export::names::own_header;
+use ibcmd_compiler::compiler::bodies::template::{TemplateKind, decode_compatible_template};
+use ibcmd_compiler_families::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
+use ibcmd_compiler_families::compiler::families::native::{NativeValue, parse_optional_bom};
 
 /// Independent decoding bounds: a small compressed row must not inflate without limit.
 pub(super) const MAX_PLAIN_ROW: usize = 8 * 1024 * 1024;
@@ -481,7 +481,8 @@ pub(super) fn validate_body(role: BodyRole, blob: &[u8]) -> Result<()> {
         }
         BodyRole::Form => {
             ensure!(plain.starts_with(b"\xef\xbb\xbf"), "form body has no BOM");
-            let body = crate::compiler::bodies::form::decode_compatible_managed_form(blob)?;
+            let body =
+                ibcmd_compiler::compiler::bodies::form::decode_compatible_managed_form(blob)?;
             let parsed = body.parsed();
             ensure!(
                 parsed
@@ -491,7 +492,7 @@ pub(super) fn validate_body(role: BodyRole, blob: &[u8]) -> Result<()> {
                     .and_then(|s| s.split(',').next())
                     .map(str::trim)
                     == Some("50")
-                    && parsed.revision == crate::module_blob::FormBodyRevision::V4
+                    && parsed.revision == ibcmd_form_body::FormBodyRevision::V4
                     && parsed.trailing_fields == 7
                     && parsed.trailing.len() == 7,
                 "unmeasured managed form body layout"

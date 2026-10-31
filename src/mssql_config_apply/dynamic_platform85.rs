@@ -7,10 +7,9 @@
 use anyhow::{Context, Result, bail};
 use flate2::{Decompress, FlushDecompress, Status};
 
-use crate::module_blob::{
-    FormBodyRevision, pack_form_body_blob_from_module_text, parse_form_body_plain,
-};
 use crate::mssql_platform_profile::MssqlNativePlatformProfile;
+use ibcmd_form_body::{FormBodyRevision, parse_form_body_plain};
+use ibcmd_metadata_blob::pack_form_body_blob_from_module_text;
 
 const MAX_PLAIN: usize = 8 * 1024 * 1024;
 
@@ -43,7 +42,7 @@ fn inflate_complete(blob: &[u8]) -> Result<Vec<u8>> {
     }
 }
 
-fn parse_measured_form(plain: &[u8]) -> Result<crate::module_blob::ParsedFormBodyBlob> {
+fn parse_measured_form(plain: &[u8]) -> Result<ibcmd_form_body::ParsedFormBodyBlob> {
     // Native tuples have a BOM, container revision 4, CR/LF and layout 59.
     // No outer padding, alternative frame revision or layout is inferred.
     if !plain.starts_with(b"\xef\xbb\xbf{4,\r\n{59,") || !plain.ends_with(b"}") {

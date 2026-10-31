@@ -3,9 +3,9 @@
 //! genuine Comment/Synonym changes still collect it. The remaining #418 matrix
 //! is open; no row-count boundary or wider service-information parity is claimed.
 
-use crate::compiler::families::native::descriptor_own_uuid;
 use crate::sql::SqlClient;
 use anyhow::{Result, ensure};
+use ibcmd_compiler_families::compiler::families::native::descriptor_own_uuid;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
