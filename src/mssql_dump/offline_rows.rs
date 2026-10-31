@@ -474,6 +474,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::{OfflineRows, parse_part_file_name, read_parts};
+    use crate::mssql_dump::args::MssqlDumpConfigArgs;
 
     const GENERATION: &str = "06cb0442-0c47-4fad-986a-f08f28287c1b";
 
@@ -918,7 +919,7 @@ mod tests {
                 .as_nanos()
         ));
         let _scratch = crate::test_scratch::TestScratch::adopt(&out);
-        let result = crate::mssql_dump::dump_config(&crate::cli::MssqlDumpConfigArgs {
+        let result = crate::mssql_dump::dump_config(&MssqlDumpConfigArgs {
             sqlcmd: None,
             bcp_executable: None,
             runtime_journal: None,

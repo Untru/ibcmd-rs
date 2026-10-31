@@ -2473,6 +2473,14 @@ mod export_tls_tests {
     use super::*;
     use clap::Parser;
 
+    /// `mssql-dump-config`'s arguments, parsed as the command line parses
+    /// them (the subcommand's name is the program name here).
+    #[derive(Parser)]
+    struct Command {
+        #[command(flatten)]
+        args: MssqlDumpConfigArgs,
+    }
+
     #[test]
     fn export_sql_constructor_validates_certificates_for_built_in_and_external_backends() {
         for external in [false, true] {
@@ -2493,11 +2501,7 @@ mod export_tls_tests {
             if external {
                 argv.extend(["--sqlcmd", "sqlcmd"]);
             }
-            let crate::cli::Commands::MssqlDumpConfig(args) =
-                crate::cli::Cli::try_parse_from(argv).unwrap().command
-            else {
-                panic!("export args expected");
-            };
+            let args = Command::try_parse_from(&argv[1..]).unwrap().args;
             let sql = sql_for_export(&args, args.sql_pwd.as_deref()).unwrap();
             assert!(
                 !sql.trust_server_certificate(),
