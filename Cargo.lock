@@ -1129,6 +1129,7 @@ dependencies = [
  "futures-util",
  "ibcmd-postgres",
  "serde_json",
+ "sha2",
  "tiberius",
  "tokio",
  "tokio-util",

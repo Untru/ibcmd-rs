@@ -69,7 +69,9 @@ pub mod probe;
 pub mod profile;
 pub mod profile_registry;
 pub mod restructure;
-pub(crate) mod runtime_evidence_schema;
+// The journal schema of the database calls, moved to `ibcmd-sql`; callers
+// keep `crate::runtime_evidence_schema::…`.
+pub(crate) use ibcmd_sql::runtime_evidence_schema;
 pub mod server;
 pub mod settings;
 pub mod source;
