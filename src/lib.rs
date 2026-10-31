@@ -81,9 +81,13 @@ pub mod profile_registry;
 pub mod restructure;
 // The journal schema of the database calls, moved to `ibcmd-sql`; callers
 // keep `crate::runtime_evidence_schema::…`.
-#[expect(
-    unused_imports,
-    reason = "the root keeps the path; its one reader, the exporter, names the crate"
+// `dump_sources` (`platform-oracle`) reads it too.
+#[cfg_attr(
+    not(feature = "platform-oracle"),
+    expect(
+        unused_imports,
+        reason = "the root keeps the path; its one reader, the exporter, names the crate"
+    )
 )]
 pub(crate) use ibcmd_sql::runtime_evidence_schema;
 pub mod server;
