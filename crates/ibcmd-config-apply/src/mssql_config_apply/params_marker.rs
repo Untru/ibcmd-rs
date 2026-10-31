@@ -572,10 +572,7 @@ mod tests {
             effective_descriptor(Some(&ordinary), id, &aliases, &[g1, g2]).unwrap(),
             Some(&aliases[0])
         );
-        assert_eq!(
-            effective_descriptor(Some(&ordinary), id, &aliases, &[g1]).is_err(),
-            true
-        );
+        assert!(effective_descriptor(Some(&ordinary), id, &aliases, &[g1]).is_err());
         assert_eq!(
             effective_descriptor(Some(&ordinary), id, &[], &[]).unwrap(),
             Some(&ordinary)

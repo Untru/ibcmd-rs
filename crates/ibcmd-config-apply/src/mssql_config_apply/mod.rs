@@ -1424,9 +1424,9 @@ pub fn plan_with_gate(
     report.gate = Some(verdict);
     // A `deleted` list of removals is consumed only when a phase accounts for it.
     if judged_deleted
-        && !structure
+        && structure
             .as_ref()
-            .is_some_and(|phase| phase.consumed_staged_rows > 0)
+            .is_none_or(|phase| phase.consumed_staged_rows == 0)
     {
         return Err(NeedsNativeApply::apply(
             "the stage's `deleted` list asks for removals that no structure phase accounts for; run the native `ibcmd infobase config apply`",

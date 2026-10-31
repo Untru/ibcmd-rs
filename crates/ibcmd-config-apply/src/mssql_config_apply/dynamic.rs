@@ -3801,7 +3801,12 @@ mod tests {
             sha256: hex_lower(&row.sha256()),
             ..meta("deleted", "")
         };
-        require_judged_image("ConfigSave", &[judged.clone()], std::slice::from_ref(&row)).unwrap();
+        require_judged_image(
+            "ConfigSave",
+            std::slice::from_ref(&judged),
+            std::slice::from_ref(&row),
+        )
+        .unwrap();
         let changed = MainStorageRow {
             binary_data: br#"1,"DynamicallyUpdated",0"#.to_vec(),
             ..row.clone()

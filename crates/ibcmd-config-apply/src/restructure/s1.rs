@@ -375,7 +375,7 @@ pub fn decide(
         .collect();
     conservative.retain(|blocker| {
         let row = blocker.row.to_ascii_lowercase();
-        !(blocker.reason == DESCRIPTOR_DIFFERS && !refused_by_the_check.contains(&row))
+        (blocker.reason != DESCRIPTOR_DIFFERS || refused_by_the_check.contains(&row))
             && !planned.contains_key(&row)
             && !created_files.contains(&row)
             && !(has_deleted && row == "deleted")

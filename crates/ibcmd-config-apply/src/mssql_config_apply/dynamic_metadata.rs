@@ -284,33 +284,33 @@ pub(super) fn root_owners(row: &Brace) -> Result<Owners> {
         let Some(items) = row.as_list() else {
             return Ok(());
         };
-        if let Some(class) = items.first().and_then(Brace::as_atom) {
-            if let Some(kind) = classes.get(class) {
-                ensure!(groups.insert(class.to_owned()), "duplicate root collection");
-                let count = items
-                    .get(1)
-                    .and_then(Brace::as_atom)
-                    .and_then(|n| n.parse::<usize>().ok())
-                    .ok_or_else(|| anyhow!("invalid root collection count"))?;
+        if let Some(class) = items.first().and_then(Brace::as_atom)
+            && let Some(kind) = classes.get(class)
+        {
+            ensure!(groups.insert(class.to_owned()), "duplicate root collection");
+            let count = items
+                .get(1)
+                .and_then(Brace::as_atom)
+                .and_then(|n| n.parse::<usize>().ok())
+                .ok_or_else(|| anyhow!("invalid root collection count"))?;
+            ensure!(
+                count.checked_add(2) == Some(items.len()),
+                "inconsistent root collection count"
+            );
+            for item in &items[2..] {
+                let id = item
+                    .as_atom()
+                    .ok_or_else(|| anyhow!("root owner UUID is not an atom"))?;
                 ensure!(
-                    count.checked_add(2) == Some(items.len()),
-                    "inconsistent root collection count"
+                    uuid::Uuid::parse_str(id)?.hyphenated().to_string() == id,
+                    "noncanonical root owner UUID"
                 );
-                for item in &items[2..] {
-                    let id = item
-                        .as_atom()
-                        .ok_or_else(|| anyhow!("root owner UUID is not an atom"))?;
-                    ensure!(
-                        uuid::Uuid::parse_str(id)?.hyphenated().to_string() == id,
-                        "noncanonical root owner UUID"
-                    );
-                    ensure!(
-                        kinds.insert(id.to_owned(), kind).is_none(),
-                        "duplicate or ambiguous root owner UUID"
-                    );
-                }
-                return Ok(());
+                ensure!(
+                    kinds.insert(id.to_owned(), kind).is_none(),
+                    "duplicate or ambiguous root owner UUID"
+                );
             }
+            return Ok(());
         }
         for item in items {
             visit(item, classes, groups, kinds)?;
@@ -341,35 +341,35 @@ fn collect_children(
     let Some(items) = row.as_list() else {
         return Ok(());
     };
-    if let Some(class) = items.first().and_then(Brace::as_atom) {
-        if known.contains_key(class) {
-            let kind = *expected
-                .get(class)
-                .ok_or_else(|| anyhow!("foreign owned-body collection"))?;
-            ensure!(
-                groups.insert(class.to_owned()),
-                "duplicate owned-body collection"
-            );
-            let count = items
-                .get(1)
-                .and_then(Brace::as_atom)
-                .and_then(|n| n.parse::<usize>().ok())
-                .ok_or_else(|| anyhow!("invalid owned-body collection count"))?;
-            ensure!(
-                count <= MAX_GRAPH_ROWS && count.checked_add(2) == Some(items.len()),
-                "inconsistent owned-body collection count"
-            );
-            for child in &items[2..] {
-                children.push((
-                    kind,
-                    child
-                        .as_atom()
-                        .ok_or_else(|| anyhow!("owned UUID is not an atom"))?
-                        .to_owned(),
-                ));
-            }
-            return Ok(());
+    if let Some(class) = items.first().and_then(Brace::as_atom)
+        && known.contains_key(class)
+    {
+        let kind = *expected
+            .get(class)
+            .ok_or_else(|| anyhow!("foreign owned-body collection"))?;
+        ensure!(
+            groups.insert(class.to_owned()),
+            "duplicate owned-body collection"
+        );
+        let count = items
+            .get(1)
+            .and_then(Brace::as_atom)
+            .and_then(|n| n.parse::<usize>().ok())
+            .ok_or_else(|| anyhow!("invalid owned-body collection count"))?;
+        ensure!(
+            count <= MAX_GRAPH_ROWS && count.checked_add(2) == Some(items.len()),
+            "inconsistent owned-body collection count"
+        );
+        for child in &items[2..] {
+            children.push((
+                kind,
+                child
+                    .as_atom()
+                    .ok_or_else(|| anyhow!("owned UUID is not an atom"))?
+                    .to_owned(),
+            ));
         }
+        return Ok(());
     }
     for item in items {
         collect_children(item, expected, known, groups, children)?;
@@ -679,7 +679,7 @@ mod tests {
     }
     fn collection(class: &str, count: &str, ids: &[&str]) -> Brace {
         let mut items = vec![Brace::atom(class), Brace::atom(count)];
-        items.extend(ids.iter().map(|id| Brace::atom(id)));
+        items.extend(ids.iter().map(Brace::atom));
         Brace::List(items)
     }
     const PARENT: &str = "00000001-0002-0003-0004-000000000005";
