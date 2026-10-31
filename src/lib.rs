@@ -37,6 +37,7 @@ pub mod mssql;
 pub mod mssql_apply;
 pub(crate) use ibcmd_mssql_live::mssql_artifact;
 pub mod mssql_config_apply;
+mod mssql_config_apply_command;
 pub mod mssql_dump;
 pub mod mssql_effective_row;
 pub mod mssql_extension_activation;
