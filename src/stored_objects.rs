@@ -54,8 +54,8 @@ use crate::metadata_model::export::names::{own_header, owned_groups, root_member
 use crate::metadata_model::index::{NESTED_COLLECTIONS, ROOT_COLLECTIONS};
 use crate::module_blob::inflate_raw;
 use crate::mssql_dump::{
-    ConfigTable, DumpHooks, FileSink, dump_config_with, stored_config_versions,
-    with_database_table, with_rows_dir_table,
+    ConfigTable, DumpHooks, FileSink, MssqlDumpConfigReport, dump_config_with,
+    stored_config_versions, with_database_table, with_rows_dir_table,
 };
 use crate::platform::PlatformSpec;
 use crate::sql::SqlExec;
@@ -774,6 +774,20 @@ pub(crate) fn stored_rows_selected(
     Ok(rows)
 }
 
+/// `mssql-dump-config`: the command line's export, the exporter's
+/// `dump_config` with its `--object` rows selected by
+/// [`stored_rows_selected`]. The export takes the selector as a hook, since
+/// this module names the export and the export cannot name it back.
+pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> {
+    dump_config_with(
+        args,
+        DumpHooks {
+            select_objects: Some(stored_rows_selected),
+            ..Default::default()
+        },
+    )
+}
+
 // ---------------------------------------------------------------------------
 // The files of an export, in memory.
 
@@ -1256,6 +1270,7 @@ impl StoredConfiguration {
             rows_snapshot: self.rows_snapshot.clone(),
             sql,
             object_recursion: selected.map(|_| false),
+            select_objects: Some(stored_rows_selected),
             native_versions: false,
             sink: Some(sink.clone()),
         };
