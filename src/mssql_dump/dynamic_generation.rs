@@ -91,7 +91,7 @@ struct StagedRows {
 
 /// How an active dynamic generation renames what a storage table publishes.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(super) struct StorageGenerationOverlay {
+pub struct StorageGenerationOverlay {
     /// The generations of the table's history, oldest first.
     history: Vec<String>,
     /// Whether some alias of a listed generation exists, so the rows have to be
@@ -111,12 +111,12 @@ pub(super) struct StorageGenerationOverlay {
 }
 
 impl StorageGenerationOverlay {
-    pub(super) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         !self.aliased && self.dropped.is_empty() && self.staged.is_none()
     }
 
     /// The names of the staged rows this overlay publishes.
-    pub(super) fn staged_names(&self) -> Option<&BTreeSet<String>> {
+    pub fn staged_names(&self) -> Option<&BTreeSet<String>> {
         self.staged.as_ref().map(|staged| &staged.names)
     }
 
@@ -127,7 +127,7 @@ impl StorageGenerationOverlay {
     /// all of it and the table holds the rows of the objects that changed. The
     /// platform's export publishes that configuration, so a name the staged
     /// rows hold is read from them and every other name from the table.
-    pub(super) fn staging(mut self, table: String, names: BTreeSet<String>) -> Self {
+    pub fn staging(mut self, table: String, names: BTreeSet<String>) -> Self {
         self.renames
             .retain(|_, published| !names.contains(published));
         self.hidden.extend(names.iter().cloned());
@@ -136,18 +136,18 @@ impl StorageGenerationOverlay {
     }
 
     /// The name `file_name` is published under, when this overlay moves it.
-    pub(super) fn published_name<'a>(&'a self, file_name: &'a str) -> Option<&'a str> {
+    pub fn published_name<'a>(&'a self, file_name: &'a str) -> Option<&'a str> {
         self.renames.get(file_name).map(String::as_str)
     }
 
     /// Whether the plain row `file_name` is not published: an alias replaces
     /// it, or its name is dropped.
-    pub(super) fn hides(&self, file_name: &str) -> bool {
+    pub fn hides(&self, file_name: &str) -> bool {
         self.hidden.contains(file_name)
     }
 
     /// The names this overlay publishes out of the stored ones `file_names`.
-    pub(super) fn published_names<'a>(
+    pub fn published_names<'a>(
         &'a self,
         file_names: impl IntoIterator<Item = &'a str> + 'a,
     ) -> impl Iterator<Item = &'a str> + 'a {
@@ -161,7 +161,7 @@ impl StorageGenerationOverlay {
 
     /// The stored row the published `name` is read from: its newest alias, or
     /// the plain row when no alias carries it.
-    pub(super) fn stored_name<'a>(&'a self, name: &'a str) -> &'a str {
+    pub fn stored_name<'a>(&'a self, name: &'a str) -> &'a str {
         self.renames
             .iter()
             .find(|(_, published)| published.as_str() == name)
@@ -174,7 +174,7 @@ impl StorageGenerationOverlay {
     /// An online update that removes an object does not remove its rows; the
     /// `versions` row of the generation stops listing it and the platform stops
     /// reading it. The names such a row does not list are what this drops.
-    pub(super) fn dropping(mut self, dropped: BTreeSet<String>) -> Self {
+    pub fn dropping(mut self, dropped: BTreeSet<String>) -> Self {
         self.renames
             .retain(|_, published| !dropped.contains(published));
         self.hidden.extend(dropped.iter().cloned());
@@ -182,13 +182,13 @@ impl StorageGenerationOverlay {
         self
     }
 
-    pub(super) fn renames(&self) -> &BTreeMap<String, String> {
+    pub fn renames(&self) -> &BTreeMap<String, String> {
         &self.renames
     }
 }
 
 /// Whether a file name carries any generation's alias infix.
-pub(super) fn is_dynamic_generation_alias(file_name: &str) -> bool {
+pub fn is_dynamic_generation_alias(file_name: &str) -> bool {
     file_name.contains(DYNAMIC_UPDATE_INFIX)
 }
 
@@ -200,7 +200,7 @@ pub(super) fn is_dynamic_generation_alias(file_name: &str) -> bool {
 /// plans a transition. A payload this reader cannot read is a refusal, not an
 /// empty history: reading it as "no active generation" would publish the
 /// previous configuration silently, which is the defect this exists to close.
-pub(super) fn dynamic_generation_history(payload: &[u8]) -> Option<Vec<String>> {
+pub fn dynamic_generation_history(payload: &[u8]) -> Option<Vec<String>> {
     let text = std::str::from_utf8(payload.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(payload))
         .ok()?
         .trim();
@@ -251,7 +251,7 @@ fn alias_generation(
 /// carry is published from the newest one; the aliases of the older ones are
 /// left out of the table altogether, exactly as a superseded generation's rows
 /// already are.
-pub(super) fn storage_generation_overlay<'a>(
+pub fn storage_generation_overlay<'a>(
     history: &[String],
     file_names: impl IntoIterator<Item = &'a str>,
 ) -> StorageGenerationOverlay {
@@ -301,7 +301,7 @@ const SELECTION_MAX: usize = 64;
 /// What a query on the table expression is going to keep, so that the scan under
 /// the aggregate can be limited to the stored rows that can publish it.
 #[derive(Debug, Clone, Copy)]
-pub(super) enum Selection<'a> {
+pub enum Selection<'a> {
     /// Every row: the scan reads the whole table.
     All,
     /// Rows with these published names (`FileName IN (...)`).
@@ -392,7 +392,7 @@ fn storage_key(database: &str, table: &str) -> StorageKey {
 /// Makes every query this run builds on `table` of `database` read the
 /// configuration the overlay describes, until the enclosing
 /// [`StorageViewScope`] ends. An empty overlay installs nothing.
-pub(super) fn install_storage_generation_overlay(
+pub fn install_storage_generation_overlay(
     database: &str,
     table: &str,
     overlay: Arc<StorageGenerationOverlay>,
@@ -407,7 +407,7 @@ pub(super) fn install_storage_generation_overlay(
 }
 
 /// The overlay installed for `table` of `database`, if there is one.
-pub(super) fn storage_generation_overlay_for(
+pub fn storage_generation_overlay_for(
     database: &str,
     table: &str,
 ) -> Option<Arc<StorageGenerationOverlay>> {
@@ -427,13 +427,13 @@ pub(super) fn storage_generation_overlay_for(
 /// database, so the overlay it resolves is gone when it returns; the reads of
 /// the activation begin one to be sure they see the stored rows.
 #[must_use = "the scope ends when it is dropped"]
-pub(super) struct StorageViewScope {
+pub struct StorageViewScope {
     database: String,
     suspended: Vec<(String, Arc<StorageGenerationOverlay>)>,
 }
 
 impl StorageViewScope {
-    pub(super) fn begin(database: &str) -> Self {
+    pub fn begin(database: &str) -> Self {
         let mut overlays = STORAGE_GENERATION_OVERLAYS
             .write()
             .unwrap_or_else(PoisonError::into_inner);
@@ -540,7 +540,7 @@ fn columns_of(alias: &str) -> String {
 /// the reading it implements. It has the columns of the storage table:
 /// `FileName`, `PartNo`, `DataSize`, `BinaryData`, `Attributes`, `Creation`,
 /// `Modified`.
-pub(super) fn storage_table_expression(
+pub fn storage_table_expression(
     qualified_table: &str,
     overlay: Option<&StorageGenerationOverlay>,
 ) -> String {
@@ -550,7 +550,7 @@ pub(super) fn storage_table_expression(
 /// [`storage_table_expression`] for a query that keeps only `selection`: the same
 /// rows, and the scan under the aggregate limited to the stored rows that can
 /// publish them.
-pub(super) fn storage_table_expression_for(
+pub fn storage_table_expression_for(
     qualified_table: &str,
     overlay: Option<&StorageGenerationOverlay>,
     selection: Selection<'_>,
@@ -1273,180 +1273,4 @@ mod tests {
 ///     dynamic_generation::live -- --ignored --nocapture
 /// ```
 #[cfg(all(test, feature = "mssql-live-tests"))]
-mod live {
-    use super::*;
-    use crate::mssql_dump::fetch::fetch_row_headers;
-    use crate::sql::{SqlBackend, SqlClient, SqlExec, SqlOptions};
-
-    type Rows = BTreeMap<(String, i64), (i64, Vec<u8>)>;
-
-    fn stored_rows(client: &dyn SqlClient, table: &str) -> anyhow::Result<Rows> {
-        let mut rows = Rows::new();
-        for row in client.query_rows(
-            &format!(
-                "SELECT FileName, PartNo, DataSize, HASHBYTES('SHA2_256', BinaryData) FROM {table}"
-            ),
-            &[],
-        )? {
-            let key = (row.text(0)?.to_owned(), row.i64(1)?);
-            assert!(
-                rows.insert(key.clone(), (row.i64(2)?, row.binary(3)?.to_vec()))
-                    .is_none(),
-                "{key:?} is stored twice"
-            );
-        }
-        Ok(rows)
-    }
-
-    #[test]
-    #[ignore = "reads a lab database: set IBCMD_RS_DYNGEN_DB"]
-    fn the_expression_publishes_the_rows_the_overlay_describes() -> anyhow::Result<()> {
-        let Some(database) = std::env::var_os("IBCMD_RS_DYNGEN_DB") else {
-            return Ok(());
-        };
-        let database = database.to_string_lossy().into_owned();
-        let main = std::env::var_os("IBCMD_RS_DYNGEN_MAIN").is_some();
-        let sql = SqlExec::from_options(SqlOptions::integrated("localhost", None))?;
-        let SqlBackend::Client(client) = sql.backend() else {
-            anyhow::bail!("the built-in client is expected");
-        };
-        let config = format!("[{}].dbo.[Config]", database.replace(']', "]]"));
-        let saved = format!("[{}].dbo.[ConfigSave]", database.replace(']', "]]"));
-
-        let stored = stored_rows(client, &config)?;
-        let staged = stored_rows(client, &saved)?;
-
-        // What the export installs, exactly as `dump_table_rows_streamed` asks for it.
-        let _view = StorageViewScope::begin(&database);
-        let headers = fetch_row_headers(&sql, &database, "Config", &BTreeSet::new())?;
-        let listed = crate::mssql_dump::install_storage_overlay(
-            &sql,
-            &database,
-            "Config",
-            &BTreeSet::new(),
-            headers,
-            main,
-        )?;
-        let overlay =
-            storage_generation_overlay_for(&database, "Config").expect("an overlay is installed");
-
-        // What the overlay says is published.
-        let mut expected = Rows::new();
-        for ((name, part), value) in &stored {
-            if let Some(published) = overlay.published_name(name) {
-                expected.insert((published.to_owned(), *part), value.clone());
-            } else if !is_dynamic_generation_alias(name) && !overlay.hides(name) {
-                expected.insert((name.clone(), *part), value.clone());
-            }
-        }
-        if let Some(names) = overlay.staged_names() {
-            for ((name, part), value) in &staged {
-                assert!(names.contains(name), "{name} is staged but not listed");
-                expected.insert((name.clone(), *part), value.clone());
-            }
-        }
-
-        // What the server publishes.
-        let expression = crate::mssql_dump::qualified_storage_table(&database, "Config");
-        let published = stored_rows(client, &expression)?;
-        eprintln!(
-            "{database}: {} stored rows, {} staged rows, {} aliases published, {} published rows, {} listed, expression of {} characters",
-            stored.len(),
-            staged.len(),
-            overlay.renames().len(),
-            published.len(),
-            listed.len(),
-            expression.len()
-        );
-        assert_eq!(published.len(), expected.len());
-        assert!(published == expected, "the server and the overlay disagree");
-
-        // The same rows through a selection (#409 F-15): a few aliased names, plain
-        // names, and a name that does not exist.
-        if !main {
-            let mut picked = BTreeSet::new();
-            for published in overlay.renames().values().take(6) {
-                picked.insert(published.clone());
-            }
-            for (name, _) in stored
-                .keys()
-                .filter(|(name, _)| !is_dynamic_generation_alias(name))
-                .take(6)
-            {
-                picked.insert(name.clone());
-            }
-            picked.insert("00000000-0000-0000-0000-000000000000.0".to_owned());
-            let read = |selection: Selection<'_>, filter: &str| -> anyhow::Result<Rows> {
-                let expression =
-                    crate::mssql_dump::qualified_storage_table_for(&database, "Config", selection);
-                stored_rows(
-                    client,
-                    &format!("(SELECT * FROM {expression} WHERE {filter}) sel"),
-                )
-            };
-            let values = picked
-                .iter()
-                .map(|name| quote(name))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let filter = format!("FileName IN ({values})");
-            let by_names = read(Selection::Names(&picked), &filter)?;
-            let unbounded = read(Selection::All, &filter)?;
-            assert!(
-                by_names == unbounded,
-                "a selection changed the rows it keeps"
-            );
-            assert!(!by_names.is_empty());
-            let owners = picked
-                .iter()
-                .filter(|name| !name.contains('.'))
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            if !owners.is_empty() {
-                let filter = owners
-                    .iter()
-                    .map(|owner| {
-                        format!(
-                            "FileName = {} OR FileName LIKE N'{}.%'",
-                            quote(owner),
-                            owner.replace('\'', "''")
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" OR ");
-                let by_owners = read(Selection::Owners(&owners), &filter)?;
-                let all = read(Selection::All, &filter)?;
-                assert!(
-                    by_owners == all,
-                    "an owner selection changed the rows it keeps"
-                );
-            }
-            eprintln!(
-                "{database}: {} rows through a selection of {} names and {} owners",
-                by_names.len(),
-                picked.len(),
-                owners.len()
-            );
-        }
-
-        // What the export lists: the same names, parts and sizes.
-        let listed = listed
-            .iter()
-            .map(|header| {
-                (
-                    (header.file_name.clone(), i64::from(header.part_no)),
-                    header.data_size,
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        let sizes = expected
-            .iter()
-            .map(|(key, (size, _))| (key.clone(), *size))
-            .collect::<BTreeMap<_, _>>();
-        assert!(
-            listed == sizes,
-            "the headers and the published rows disagree"
-        );
-        Ok(())
-    }
-}
+mod live;
