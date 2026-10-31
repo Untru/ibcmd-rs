@@ -30,12 +30,12 @@ use sha2::{Digest, Sha256};
 
 use crate::apply_check::s1::{S1Operation, classify};
 use crate::apply_check::{RuleId, Verdict, check_staged};
+use crate::mssql_config_apply::AdoptionReader;
 use crate::mssql_config_apply::gate::{
     ConservativeGate, CreatedObject, DESCRIPTOR_DIFFERS, GateInput, GateVerdict, StructuralGate,
     StructurePhase,
 };
 use crate::mssql_config_apply::sqlgen::ParamsRewrite;
-use crate::restructure::extensions::read_adoptions;
 use crate::restructure::plan::{Inputs, Plan, PlanOptions, plan};
 use crate::restructure::reader::{ClientSource, read_inputs};
 use crate::restructure::size_guard::{LimitSetting, guard_phase};
@@ -424,6 +424,8 @@ pub struct S1Gate<'a> {
     sql: &'a SqlExec,
     conservative: ConservativeGate,
     options: PlanOptions,
+    /// The objects the extensions adopt (S1-I), read only when extensions are registered.
+    read_adoptions: AdoptionReader,
     /// The XML dialect the check decodes descriptors with (`2.20` for 8.3); `None` lets it infer it.
     xml_version: Option<&'static str>,
     /// The limit on the rows and bytes the stage may rebuild (S1-J, `size_guard`).
@@ -432,11 +434,17 @@ pub struct S1Gate<'a> {
 }
 
 impl<'a> S1Gate<'a> {
-    pub fn new(sql: &'a SqlExec, conservative: ConservativeGate, options: PlanOptions) -> Self {
+    pub fn new(
+        sql: &'a SqlExec,
+        conservative: ConservativeGate,
+        options: PlanOptions,
+        read_adoptions: AdoptionReader,
+    ) -> Self {
         Self {
             sql,
             conservative,
             options,
+            read_adoptions,
             xml_version: None,
             limit: LimitSetting::default(),
             prepared: RefCell::new(None),
@@ -489,7 +497,7 @@ impl StructuralGate for S1Gate<'_> {
         // The objects the extensions adopt (S1-I): the plan refuses to change one. What cannot be read
         // is a refusal, not an error: the stage is then not one this gate can vouch for.
         if inputs.extensions.registered > 0 {
-            match read_adoptions(self.sql, input.database) {
+            match (self.read_adoptions)(self.sql, input.database) {
                 Ok(adoptions) => {
                     inputs.extensions.adoptions = adoptions;
                     inputs.extensions.adoptions_read = true;

@@ -1556,7 +1556,11 @@ fn config_apply_options(
     script: &Path,
     own_ras_processes: &[crate::mssql_platform_profile::OwnRasProcess],
 ) -> crate::mssql_config_apply::ConfigApplyOptions {
-    let mut options = crate::mssql_config_apply::ConfigApplyOptions::new(database, profile);
+    let mut options = crate::mssql_config_apply::ConfigApplyOptions::new(
+        database,
+        profile,
+        crate::restructure::extensions::read_adoptions,
+    );
     options.dry_run = dry_run;
     options.exclusivity = crate::mssql_config_apply::Exclusivity::SqlSessions;
     options.script_output = Some(script.to_path_buf());
