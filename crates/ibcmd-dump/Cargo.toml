@@ -1,0 +1,98 @@
+[package]
+name = "ibcmd-dump"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The configuration exporter (mssql-dump-config and its library entry points): a configuration's stored rows read from SQL Server, PostgreSQL, a file infobase or saved rows and written as the native XML source tree, with its incremental state, ConfigDumpInfo, the extension export and the export's audits and reports"
+
+[features]
+# The ignored live blob comparisons against a local SQL Server; forwards to
+# the database clients' live tests.
+mssql-live-tests = ["ibcmd-sql/mssql-live-tests"]
+# The ignored MOXEL comparisons with an external lab corpus.
+research-corpus-tests = []
+
+[dependencies]
+anyhow = "1.0"
+# The exporter's two command-line argument structs (`mssql_dump::args`).
+clap = { version = "4.5", features = ["derive"] }
+flate2 = "1.1"
+# The 1C braced-text primitives and scalar fields.
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+# The platform-type, attribute, style, command and role-right vocabularies.
+ibcmd-1c-vocab = { path = "../ibcmd-1c-vocab" }
+# The process-wide cancellation flag and the engine's lock.
+ibcmd-cancel = { path = "../ibcmd-cancel" }
+# The `.cf` archive and its storage export plan and report.
+ibcmd-cf = { path = "../ibcmd-cf" }
+# The coordinator and the body codecs (forms, templates, rights, DCS).
+ibcmd-compiler = { path = "../ibcmd-compiler" }
+# The family compilers, the source asset registry and the profile registry.
+ibcmd-compiler-families = { path = "../ibcmd-compiler-families" }
+# The own apply's hex spelling and its unfinished-apply row names.
+ibcmd-config-apply = { path = "../ibcmd-config-apply" }
+ibcmd-core = { path = "../ibcmd-core" }
+# The additional-index and owner readers, and the extension's adoption.
+ibcmd-dump-readers = { path = "../ibcmd-dump-readers" }
+# The storage generation overlay's stored row names.
+ibcmd-dynamic-generation = { path = "../ibcmd-dynamic-generation" }
+# File infobases (1CD).
+ibcmd-filedb = { path = "../ibcmd-filedb" }
+# The form body record, its reader and indexes.
+ibcmd-form-body = { path = "../ibcmd-form-body" }
+# Native colour, font and border spellings.
+ibcmd-form-native = { path = "../ibcmd-form-native" }
+# The form schema of the form body reader's trace.
+ibcmd-form-schema = { path = "../ibcmd-form-schema" }
+# The native form writer's 8.5 layout converters.
+ibcmd-form-writer = { path = "../ibcmd-form-writer" }
+# The stored bodies' packers and the form body blob reader.
+ibcmd-metadata-blob = { path = "../ibcmd-metadata-blob" }
+# The metadata descriptor model and its export.
+ibcmd-metadata-model = { path = "../ibcmd-metadata-model" }
+# The module blob codec, raw deflate and the `v8` container.
+ibcmd-module-blob = { path = "../ibcmd-module-blob" }
+# The MOXCEL spreadsheet decoder.
+ibcmd-moxel = { path = "../ibcmd-moxel" }
+# The main activation's stored rows and their bounds.
+ibcmd-mssql-live = { path = "../ibcmd-mssql-live" }
+# An extension's staging into ConfigCASSave.
+ibcmd-mssql-extensions = { path = "../ibcmd-mssql-extensions" }
+# The process-wide worker pools.
+ibcmd-parallel = { path = "../ibcmd-parallel" }
+# The export platform, the historical XML selector and the legacy adapter.
+ibcmd-platform-spec = { path = "../ibcmd-platform-spec" }
+# The brace tree.
+ibcmd-restructure = { path = "../ibcmd-restructure" }
+ibcmd-schema = { path = "../ibcmd-schema" }
+# The database clients and the journal schema of their calls.
+ibcmd-sql = { path = "../ibcmd-sql" }
+# The format-15 container reader.
+ibcmd-v8 = { path = "../ibcmd-v8" }
+ibcmd-xml = { path = "../ibcmd-xml" }
+quick-xml = "0.38"
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha1 = "0.10"
+sha2 = "0.10"
+uuid = { version = "1.19", features = ["v4"] }
+walkdir = "2.5"
+
+[dev-dependencies]
+# The body-profile fixtures of the codec tests, as the root has them.
+ibcmd-compiler = { path = "../ibcmd-compiler", features = ["test-fixtures"] }
+ibcmd-compiler-families = { path = "../ibcmd-compiler-families", features = ["test-fixtures"] }
+# The export platform's per-thread override, for the form tests.
+ibcmd-platform-spec = { path = "../ibcmd-platform-spec", features = ["test-fixtures"] }
+
+[target.'cfg(windows)'.dependencies]
+# The atomic file replace, the UI language and the process CPU time, as in
+# the root.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+
+[lints.rust]
+# Three Windows FFI calls of the exporter allow it on its module (`lib.rs`);
+# nothing else may.
+unsafe_code = "deny"
