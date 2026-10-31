@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 publish = false
-description = "The stored-body codec of a 1C configuration: raw deflate, the format-15 V8 container with anyhow errors, the module blob, the versions blob patcher and the digests reported for them"
+description = "The stored-body codec of a 1C configuration: raw deflate, the format-15 V8 container with anyhow errors, the module blob, the versions blob patcher, the deleted row of an import and the digests reported for them"
 
 [dependencies]
 # Errors as in the root, whose callers add their own context.

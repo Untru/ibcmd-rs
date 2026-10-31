@@ -2,11 +2,13 @@
 //! uppercase hex SHA-256 the reports print, and a raw-deflated body packed or
 //! digested (`raw.rs`); the format-15 V8 container read and written through
 //! `ibcmd-v8` with `anyhow` errors ([`v8_container`]); the module blob
-//! (`module.rs`); and the versions blob's generation UUIDs patched
-//! (`versions.rs`).
+//! (`module.rs`); the versions blob's generation UUIDs patched
+//! (`versions.rs`); and the `deleted` row of the platform's import
+//! (`deleted.rs`).
 //!
-//! Everything here moved from the root crate (`module_blob.rs` and
-//! `v8_container.rs`), and `inflate_raw` from `ibcmd-1c-vocab`, which now
+//! Everything here moved from the root crate (`module_blob.rs`,
+//! `v8_container.rs` and, for `deleted_row`, `mssql/override_stage.rs`), and
+//! `inflate_raw` from `ibcmd-1c-vocab`, which now
 //! imports it from here. The root still reaches every item by its old path
 //! through re-exports (`module_blob::…`, `crate::v8_container::…`). The bodies
 //! are unchanged but for visibility (what the root reads is `pub`) and one
@@ -25,6 +27,7 @@
 //! and their literals stay in the guard's baseline. A file added here is in
 //! the slice at once and fails the guard until its record is reviewed.
 
+mod deleted;
 mod module;
 mod raw;
 /// The format-15 V8 container through `ibcmd-v8`'s reader and writer, its
@@ -32,6 +35,7 @@ mod raw;
 pub mod v8_container;
 mod versions;
 
+pub use deleted::deleted_row;
 pub use module::{
     PackedModuleBlob, module_blob_text_sha256, pack_module_blob_bytes,
     pack_module_blob_bytes_base_free, pack_module_blob_container_bytes, unpack_module_blob_text,

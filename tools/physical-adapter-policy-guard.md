@@ -475,3 +475,15 @@ The root's facades (`src/platform.rs`, `src/adapters/mod.rs`,
 `src/mssql_extension_stage.rs`, `src/external/mod.rs`,
 `src/extension/mod.rs`) stay outside the slice. No baseline fingerprint
 changes. Every other record, the two stale ones included, is unchanged.
+
+The seams the exporter needs before it moves (#559) add two files to the
+slice, both from outside it and neither with a guarded literal, so each
+joins with an empty record: `src/mssql_dump/args.rs`, the exporter's two
+command-line argument structs, formerly in `src/cli.rs`; and
+`crates/ibcmd-module-blob/src/deleted.rs` (the crate is already listed), the
+`deleted` row of an import, formerly in `src/mssql/override_stage.rs`. The
+engine's lock, formerly in `src/stored_objects.rs`, joins
+`crates/ibcmd-cancel/src/lib.rs` (already listed) and adds no record. The
+root's re-exports (`src/cli.rs`, `src/mssql/override_stage.rs`,
+`src/stored_objects.rs`) stay outside the slice. No baseline fingerprint
+changes. Every other record, the two stale ones included, is unchanged.

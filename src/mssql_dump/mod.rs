@@ -96,7 +96,7 @@ use crate::adapters::mssql_legacy::{
     MssqlConfigurationTableRole, MssqlExportInventoryPlan, MssqlExportInventoryScope,
     MssqlLegacyAdapter, decode_task_internal_uuid_slots,
 };
-use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
+use crate::legacy_version::InfobaseConfigSourceVersion;
 use crate::metadata_owner_graph::{
     self as owner_graph, CATALOG_ATTRIBUTE_GROUP_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
     METADATA_TEMPLATE_COLLECTION_UUID,
@@ -106,6 +106,7 @@ use crate::module_blob::{
     unpack_plain_text_module_body,
 };
 use crate::parallel;
+use args::MssqlDumpConfigArgs;
 
 mod legacy_child;
 mod characteristics {
@@ -1024,6 +1025,7 @@ mod characteristics {
     }
 }
 use ibcmd_dump_readers::additional_indexes;
+pub(crate) mod args;
 pub mod cas;
 mod command_interface;
 pub use config_dump_info::read_config_dump_info;
@@ -1997,6 +1999,9 @@ struct MssqlDumpRowManifest {
     source_asset_path: Option<String>,
 }
 
+/// The export with no hooks. It has no reader of the stored objects, so it
+/// refuses `--object`; the command line runs `crate::stored_objects`'
+/// `dump_config`, which gives the export that reader.
 pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> {
     dump_config_with(args, DumpHooks::default())
 }
@@ -2011,6 +2016,7 @@ pub(crate) fn dump_config_with_sql(
             rows_snapshot: None,
             sql: sql_override,
             object_recursion: None,
+            select_objects: None,
             native_versions: false,
             sink: None,
         },
@@ -2031,6 +2037,10 @@ pub(crate) struct DumpHooks {
     /// Native objects supplies explicit recursion; None retains the custom
     /// --object contract (owned descendants, Configuration itself only).
     pub(crate) object_recursion: Option<bool>,
+    /// The rows of `--object`'s objects, which the caller selects (the root's
+    /// `stored_objects`, from its inventory of the stored objects). Without
+    /// one, an export given `--object` is refused before it begins.
+    pub(crate) select_objects: Option<ObjectSelector>,
     /// Native incremental export compares stored versions across XML headers.
     pub(crate) native_versions: bool,
     /// Where the files go instead of `output_dir`: nothing is written to the
@@ -2038,6 +2048,11 @@ pub(crate) struct DumpHooks {
     /// `output_dir` only names the files the sink receives.
     pub(crate) sink: Option<Arc<dyn FileSink>>,
 }
+
+/// Selects the rows of the named objects (`--object`) through the view the
+/// export has begun: the table, the full names and the hooks' recursion.
+pub(crate) type ObjectSelector =
+    fn(&ConfigTable<'_>, &[String], Option<bool>) -> Result<BTreeSet<String>>;
 
 /// The Config table as a reader outside the export (`crate::stored_objects`,
 /// the tree of a configuration) reads it: through the export's own reads, so
@@ -2158,7 +2173,7 @@ pub(crate) fn file_db_rows_from_reader(
 fn effective_file_db_snapshot(
     rows: offline_rows::OfflineRows,
 ) -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
-    crate::stored_objects::exclusive(|| {
+    ibcmd_cancel::exclusive(|| {
         let _active = offline_rows::activate_rows(rows)?;
         let _views = dynamic_generation::StorageViewScope::begin("");
         let sql = crate::sql::SqlExec::detached("a descriptor snapshot answers every read itself");
@@ -2217,7 +2232,7 @@ mod descriptor_snapshot_tests {
             assert!(db.config_headers("CONFIGSAVE").unwrap().is_empty());
             let descriptor = file_db_rows_from_reader(&mut db).unwrap();
             drop(db);
-            crate::stored_objects::exclusive(|| -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
+            ibcmd_cancel::exclusive(|| -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
                 let read = || -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
                     with_file_db_table(&scratch.0, |table| {
                         let names = table.names()?;
@@ -2402,6 +2417,12 @@ fn dump_config_with_options(
     editor_writer_scope: Option<bool>,
     requested_descriptor: Option<&str>,
 ) -> Result<MssqlDumpConfigReport> {
+    if !args.objects.is_empty() && hooks.select_objects.is_none() {
+        bail!(
+            "--object is selected by the caller's reader of the stored objects, and this export \
+             was given none"
+        );
+    }
     let password_marker = if args.sql_user.is_none() {
         password_source_marker(PASSWORD_SOURCE_NONE)
     } else if args.sql_pwd.as_ref().is_some_and(|value| !value.is_empty()) {
@@ -2486,6 +2507,42 @@ mod export_tls_tests {
             assert_eq!(sql.tools().is_some(), external);
             assert_eq!(sql.user(), Some("fixture-user"));
         }
+    }
+}
+
+#[cfg(test)]
+mod object_selector_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct Command {
+        #[command(flatten)]
+        args: MssqlDumpConfigArgs,
+    }
+
+    /// Without a selector, an export given `--object` is refused before it
+    /// writes anything: no journal, no output folder.
+    #[test]
+    fn an_object_export_without_a_selector_is_refused_before_it_writes() {
+        let scratch = crate::test_scratch::TestScratch::new("object-selector");
+        let out = scratch.join("out");
+        let journal = scratch.join("journal.json");
+        let mut argv = vec!["mssql-dump-config".into(), "--rows-dir".into()];
+        argv.push(scratch.join("rows").into_os_string());
+        argv.extend(["--object".into(), "Catalog.Банки".into()]);
+        argv.extend(["--runtime-journal".into(), journal.clone().into_os_string()]);
+        argv.extend(["-o".into(), out.clone().into_os_string()]);
+        let args = Command::try_parse_from(argv).unwrap().args;
+
+        let error = dump_config(&args).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "--object is selected by the caller's reader of the stored objects, and this export \
+             was given none"
+        );
+        assert!(!out.exists() && !journal.exists());
     }
 }
 
@@ -2649,7 +2706,10 @@ fn dump_config_inner(
         } else {
             ConfigTable::active(&sql, &args.database)
         };
-        selected_file_names.extend(crate::stored_objects::stored_rows_selected(
+        let select_objects = hooks
+            .select_objects
+            .expect("an export given --object without a selector is refused first");
+        selected_file_names.extend(select_objects(
             &table,
             &args.objects,
             hooks.object_recursion,

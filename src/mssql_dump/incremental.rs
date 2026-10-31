@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::InfobaseConfigSourceVersion;
+use crate::legacy_version::InfobaseConfigSourceVersion;
 use crate::metadata_model::index::{NESTED_COLLECTIONS, ROOT_COLLECTIONS};
 
 /// The file the export writes for the whole configuration.
