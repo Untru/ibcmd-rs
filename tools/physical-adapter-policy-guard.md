@@ -406,3 +406,38 @@ The config-apply seams of #559 change the slice in two places:
   (`src/mssql_dump/dynamic_generation/live.rs`) is a test-only module.
 No fingerprint changes. Every other record, the two stale ones included, is
 unchanged.
+
+`crates/ibcmd-config-apply/src/` also belongs to the slice (#559). It holds
+the own configuration apply, formerly `src/mssql_config_apply/` (without
+the developer command, which stays in the root as
+`src/mssql_config_apply_command.rs`), the S1 structural gate, formerly
+`src/restructure/s1.rs`, and the guard of its structure phase, formerly
+`src/restructure/size_guard/phase.rs`; all were outside the slice. Its
+production files join with 212 records (214 occurrences):
+- `mssql_config_apply/dynamic_overlay.rs`: 25 records;
+- `mssql_config_apply/dynamic_metadata.rs`: 23;
+- `mssql_config_apply/dynamic.rs`: 14;
+- `mssql_config_apply/mod.rs`: 11;
+- `mssql_config_apply/gate.rs`: 7;
+- `mssql_config_apply/objects.rs`: 5;
+- `mssql_config_apply/params_marker.rs`: 4;
+- `mssql_config_apply/{dynamic_platform85,model,recovery,removals}.rs`: 3
+  each;
+- `restructure/s1.rs`: 2 `name-special-case`;
+- `mssql_config_apply/registrations.rs`: 1;
+- `mssql_config_apply/{gate_parts,objects_analysis,removals,synonyms}_tests.rs`
+  (10, 27, 54 with 56 occurrences, and 17 records): unit tests, but their
+  modules are declared with `#[path = "..."]`, which the guard does not
+  resolve, so they stay in the slice;
+- `lib.rs`, `restructure/mod.rs`, `restructure/size_guard/phase.rs` and
+  `mssql_config_apply/{check_gate,errors,si,sqlgen,synonyms,versions}.rs`:
+  none.
+`mssql_config_apply/dynamic/activation_tests.rs`,
+`restructure/{tests_s1,tests_plan,tests_sections}.rs` and `test_scratch.rs`
+are test-only modules. The root's facades (`src/mssql_config_apply.rs`,
+`src/restructure/s1.rs`) stay outside the slice. Each record equals the one
+a scan of the same file as it stood at its old path gives, except two: the
+clippy fix of the S1 gate's blocker filter changes the statement that holds
+its two `name-special-case` records (`"deleted"`, `"root"`), whose
+fingerprints change with it (category, count and literal unchanged). Every
+other record, the two stale ones included, is unchanged.
