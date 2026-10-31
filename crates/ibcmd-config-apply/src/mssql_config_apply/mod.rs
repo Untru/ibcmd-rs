@@ -1965,9 +1965,6 @@ pub fn write_needs_acknowledgement(database: &str, dry_run: bool) -> bool {
     !dry_run && !is_lab_database(database)
 }
 
-// The developer command's CLI glue is the root's.
-pub use crate::mssql_config_apply_command::run_command;
-
 /// What the command prints when the apply refuses by type: the same fields
 /// whatever the refusal, `refused` naming the kind.
 #[doc(hidden)]

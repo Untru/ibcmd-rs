@@ -12,9 +12,15 @@
 
 pub use ibcmd_mssql_live::mssql_platform_profile::*;
 
+pub(crate) use ibcmd_mssql_live::mssql_platform_profile::refuse_unbound_live_sessions;
+// Read only by the own apply, which is `ibcmd-config-apply`'s; they still hide the items from the glob.
+#[expect(
+    unused_imports,
+    reason = "each re-export hides a widened item from the public glob"
+)]
 pub(crate) use ibcmd_mssql_live::mssql_platform_profile::{
-    SESSION_VISIBILITY_ERROR, SESSION_VISIBILITY_PREDICATE, refuse_unbound_live_sessions,
-    session_exemption, session_visibility_gate,
+    SESSION_VISIBILITY_ERROR, SESSION_VISIBILITY_PREDICATE, session_exemption,
+    session_visibility_gate,
 };
 
 // The crate's test module is not built into the root's tests; the root's
