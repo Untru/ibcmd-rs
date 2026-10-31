@@ -6,21 +6,21 @@ use sha2::{Digest, Sha256};
 /// Typed runtime-evidence argument categories used to keep secrets out of
 /// durable subprocess journals.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SanitizedRuntimeArgumentKind {
+pub enum SanitizedRuntimeArgumentKind {
     PasswordSourceMarker,
     QueryDigestMarker,
     Ordinary,
 }
 
 /// Exact serialization and filesystem policy for durable subprocess journals.
-pub(crate) struct SubprocessJournalSchema;
+pub struct SubprocessJournalSchema;
 
 impl SubprocessJournalSchema {
-    pub(crate) const fn redacted_password_source_marker() -> &'static str {
+    pub const fn redacted_password_source_marker() -> &'static str {
         "<password-source:redacted>"
     }
 
-    pub(crate) fn argument_kind(argument: &str) -> SanitizedRuntimeArgumentKind {
+    pub fn argument_kind(argument: &str) -> SanitizedRuntimeArgumentKind {
         if matches!(
             argument,
             "<password-source:none>"
@@ -46,20 +46,20 @@ impl SubprocessJournalSchema {
         }
     }
 
-    pub(crate) fn query_digest_marker(query: &str) -> String {
+    pub fn query_digest_marker(query: &str) -> String {
         format!("<query-sha256:{:x}>", Sha256::digest(query.as_bytes()))
     }
 
-    pub(crate) fn journal_parent(path: &Path) -> Option<&Path> {
+    pub fn journal_parent(path: &Path) -> Option<&Path> {
         path.parent()
             .filter(|parent| !parent.as_os_str().is_empty())
     }
 
-    pub(crate) fn missing_parent_error(path: &Path) -> String {
+    pub fn missing_parent_error(path: &Path) -> String {
         format!("journal path must have a parent: {}", path.display())
     }
 
-    pub(crate) fn temporary_file_name(path: &Path, nonce: impl Display) -> String {
+    pub fn temporary_file_name(path: &Path, nonce: impl Display) -> String {
         let file_name = path
             .file_name()
             .and_then(|name| name.to_str())
