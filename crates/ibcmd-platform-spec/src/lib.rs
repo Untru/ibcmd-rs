@@ -15,3 +15,21 @@
 //!
 //! The moved code keeps its `crate::…` paths; the root re-exports each module
 //! at its old path.
+
+pub mod legacy_version;
+pub mod platform;
+
+/// Bridges around legacy providers.
+pub mod adapters {
+    pub mod mssql_legacy;
+}
+
+// The crate behind the root facade the moved code names by its root path
+// (`crate::mssql_platform_profile::…`); the root's facade re-exports it, so
+// the path names the same items here as it did in the root.
+use ibcmd_mssql_live::mssql_platform_profile;
+
+// The same for the metadata model, which `platform`'s tests read
+// (`crate::metadata_model::…`).
+#[cfg(test)]
+use ibcmd_metadata_model::metadata_model;

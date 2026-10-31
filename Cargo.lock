@@ -1027,6 +1027,7 @@ dependencies = [
  "ibcmd-mssql-live",
  "ibcmd-platform",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

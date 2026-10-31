@@ -26,7 +26,9 @@ pub(crate) use ibcmd_form_schema as form_schema;
 pub mod infobase;
 #[cfg(feature = "platform-oracle")]
 pub mod infobase_oracle;
-pub mod legacy_version;
+// The historical XML selector and its version axes, moved to
+// `ibcmd-platform-spec`; callers keep `crate::legacy_version::…`.
+pub use ibcmd_platform_spec::legacy_version;
 pub mod load;
 pub mod metadata_model;
 // `brace_list!`, which `metadata_model::brace` exported at the crate root.
