@@ -43,7 +43,7 @@ impl OfflineHelpContext {
         plain: &[u8],
         source_version: InfobaseConfigSourceVersion,
     ) -> Result<RenderedHelp> {
-        let blob = crate::compiler::families::native::deflate_bytes(plain)
+        let blob = ibcmd_compiler_families::compiler::families::native::deflate_bytes(plain)
             .map_err(|error| anyhow!("failed to deflate the row: {error}"))?;
         let help = parse_help_blob(&blob).context("the exporter cannot read the help row")?;
         let adapter = MssqlLegacyAdapter::from_legacy_selector(source_version);

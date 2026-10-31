@@ -377,7 +377,7 @@ impl OfflineRows {
 
     /// Reads and assembles the selected rows in parallel, keeping their order.
     fn read(selected: Vec<(&str, &Parts)>) -> Result<Vec<BinaryConfigRow>> {
-        crate::parallel::install(|| {
+        ibcmd_parallel::install(|| {
             selected
                 .par_iter()
                 .map(|(file_name, parts)| {
@@ -457,7 +457,7 @@ impl OfflineRows {
             .iter()
             .filter_map(|(file_name, parts)| Some((file_name, parts.first()?)))
             .collect::<Vec<_>>();
-        let read = crate::parallel::install(|| {
+        let read = ibcmd_parallel::install(|| {
             parts
                 .par_iter()
                 .map(|(file_name, part)| Ok(((*file_name).clone(), part.read()?)))
@@ -474,6 +474,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::{OfflineRows, parse_part_file_name, read_parts};
+    use crate::mssql_dump::args::MssqlDumpConfigArgs;
 
     const GENERATION: &str = "06cb0442-0c47-4fad-986a-f08f28287c1b";
 
@@ -619,7 +620,7 @@ mod tests {
         let a = uuid::Uuid::new_v4().hyphenated().to_string();
         let b = uuid::Uuid::new_v4().hyphenated().to_string();
         let versions = format!("\u{feff}{{1,3,\"\",{generation},\"a\",{a},\"a.0\",{b}}}");
-        let versions = crate::module_blob::deflate_raw(versions.as_bytes()).unwrap();
+        let versions = ibcmd_module_blob::deflate_raw(versions.as_bytes()).unwrap();
         let rows = OfflineRows::from_memory([
             ("a".to_string(), row(b"a")),
             ("a.0".to_string(), row(b"a.0")),
@@ -918,7 +919,7 @@ mod tests {
                 .as_nanos()
         ));
         let _scratch = crate::test_scratch::TestScratch::adopt(&out);
-        let result = crate::mssql_dump::dump_config(&crate::cli::MssqlDumpConfigArgs {
+        let result = crate::mssql_dump::dump_config(&MssqlDumpConfigArgs {
             sqlcmd: None,
             bcp_executable: None,
             runtime_journal: None,

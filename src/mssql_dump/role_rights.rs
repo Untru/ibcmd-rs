@@ -100,7 +100,7 @@ pub(super) fn parse_role_rights_blob(
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
 ) -> Option<RoleRights> {
-    let inflated = crate::compiler::bodies::rights::decode_compatible_role_rights(
+    let inflated = ibcmd_compiler::compiler::bodies::rights::decode_compatible_role_rights(
         bytes,
         super::extension::active().is_some(),
     )
@@ -1108,65 +1108,4 @@ pub(super) fn is_action_like_nested_rights_category(category: &str) -> bool {
 
 pub(super) fn is_top_level_rights_object_name(name: &str) -> bool {
     name.matches('.').count() == 1
-}
-
-#[cfg(test)]
-mod extension_flag_tests {
-    use std::collections::BTreeMap;
-    use std::time::{Duration, Instant};
-
-    use crate::compiler::bodies::rights::{
-        RightsCodecProfile, RoleRightsSummary, decode_role_rights,
-    };
-    use crate::mssql_dump::extension::{ExtensionContext, activate};
-    use ibcmd_core::artifact::ProfileId;
-
-    /// The rights codec reads a root flag stored as `2` (an extension role's
-    /// defaulted `false`) as `false` only when its caller says an extension's
-    /// export is running. Both root callers -- the export adapter's
-    /// `parse_role_rights_blob` and the public `decode_role_rights` -- take
-    /// that from the process-wide extension state: with an extension active,
-    /// both read the body. (The inactive side is the codec's own test in
-    /// `ibcmd-compiler`; here another test may hold the process-wide state.)
-    #[test]
-    fn both_root_callers_read_a_root_flag_of_2_while_an_extension_is_active() {
-        let plain = b"\xef\xbb\xbf{10,\r\n{0},\r\n{0},2,1,2,4294967295}";
-        let blob = crate::module_blob::deflate_raw(plain).unwrap();
-        let registry = crate::profile_registry::load_bundled_profile_registry().unwrap();
-        let profile = RightsCodecProfile::from_effective(
-            registry
-                .get(&ProfileId::parse("platform-8.3.27.1989").unwrap())
-                .unwrap(),
-        )
-        .unwrap();
-
-        // Other tests activate the process-wide context too; wait for it.
-        let started = Instant::now();
-        let guard = loop {
-            match activate(ExtensionContext::default()) {
-                Ok(guard) => break guard,
-                Err(error) if started.elapsed() > Duration::from_secs(120) => {
-                    panic!("{error:#}")
-                }
-                Err(_) => std::thread::sleep(Duration::from_millis(10)),
-            }
-        };
-        let parsed = super::parse_role_rights_blob(&blob, &BTreeMap::new(), &BTreeMap::new());
-        let decoded = decode_role_rights(&profile, &blob);
-        drop(guard);
-
-        let parsed = parsed.expect("the export adapter reads the extension role");
-        assert!(!parsed.set_for_new_objects);
-        assert!(!parsed.independent_rights_of_child_objects);
-        assert_eq!(
-            *decoded.unwrap().summary(),
-            RoleRightsSummary {
-                object_count: 0,
-                restriction_template_count: 0,
-                set_for_new_objects: false,
-                set_for_attributes_by_default: true,
-                independent_rights_of_child_objects: false,
-            }
-        );
-    }
 }

@@ -22,4 +22,8 @@ pub(crate) use ibcmd_platform_spec::platform::{clear_export_platform, of_xml_dia
 // The tests' per-thread override of the export platform (the crate's
 // `test-fixtures` feature).
 #[cfg(test)]
+#[expect(
+    unused_imports,
+    reason = "the root keeps the path; its one reader, the exporter, names the crate"
+)]
 pub(crate) use ibcmd_platform_spec::platform::with_export_default_button_importance;

@@ -30,10 +30,10 @@ use super::{
 };
 #[cfg(test)]
 use super::{MxlDiagnostic, MxlDiagnosticStage};
-use crate::compiler::families::assets::{
+use anyhow::Context;
+use ibcmd_compiler_families::compiler::families::assets::{
     ConfigRowId, SourceAssetRelationError, SourceAssetRole, SourceAssetRoute,
 };
-use anyhow::Context;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 #[derive(Debug, Clone)]
@@ -225,8 +225,10 @@ pub(super) fn dynamic_source_asset(
         let mut form_dir = form_ref.relative_path.clone();
         form_dir.set_extension("");
         return Some(SourceAsset {
-            primary_path: form_dir
-                .join(crate::compiler::families::assets::SourceAssetRegistry.help_relative_path()),
+            primary_path: form_dir.join(
+                ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+                    .help_relative_path(),
+            ),
             kind: SourceAssetKind::Help,
         });
     }
@@ -238,13 +240,13 @@ pub(super) fn dynamic_source_asset(
         && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
             .is_some_and(|interface| !interface.is_empty())
     {
-        let route = crate::compiler::families::assets::SourceAssetRegistry
+        let route = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
             .route_by_suffix("Configuration", suffix)
             .filter(|route| {
                 matches!(
                     route.role(),
-                    crate::compiler::families::assets::SourceAssetRole::MainSectionCommandInterface
-                        | crate::compiler::families::assets::SourceAssetRole::CommandInterface
+                    ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::MainSectionCommandInterface
+                        | ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::CommandInterface
                 )
             })?;
         return Some(SourceAsset {
@@ -264,10 +266,10 @@ pub(super) fn dynamic_source_asset(
     ) {
         return Some(asset);
     }
-    if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
+    if let Some(route) = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
         .route_by_suffix(&owner.kind, suffix)
         .filter(|route| {
-            route.role() == crate::compiler::families::assets::SourceAssetRole::CommandInterface
+            route.role() == ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::CommandInterface
         })
         && matches!(suffix, "0" | "1")
         && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
@@ -286,9 +288,10 @@ pub(super) fn dynamic_source_asset(
             return None;
         }
         return Some(SourceAsset {
-            primary_path: owner
-                .object_path
-                .join(crate::compiler::families::assets::SourceAssetRegistry.help_relative_path()),
+            primary_path: owner.object_path.join(
+                ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+                    .help_relative_path(),
+            ),
             kind: SourceAssetKind::Help,
         });
     }
@@ -329,7 +332,7 @@ pub(super) fn dynamic_owner_bound_source_asset(
     field_refs: &BTreeMap<String, String>,
 ) -> Option<SourceAsset> {
     let owner_family = FamilyId::parse(&owner.kind).ok()?;
-    let route = crate::compiler::families::assets::SourceAssetRegistry
+    let route = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
         .owner_bound_relation(&owner_family, row_id.suffix())
         .ok()?;
     owner_bound_source_asset(
@@ -371,7 +374,7 @@ pub(super) fn owner_bound_source_asset(
     object_refs: &BTreeMap<String, String>,
     field_refs: &BTreeMap<String, String>,
 ) -> std::result::Result<SourceAsset, OwnerBoundSourceAssetFailure> {
-    let registry = crate::compiler::families::assets::SourceAssetRegistry;
+    let registry = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry;
     match route.role() {
         SourceAssetRole::Rights => {
             parse_role_rights_blob(bytes, object_refs, field_refs)
@@ -420,7 +423,7 @@ pub(super) fn is_binary_module_container(bytes: &[u8]) -> bool {
     let Some(names) = v8_container_element_names(&inflated) else {
         return false;
     };
-    crate::compiler::families::assets::BinaryModuleMemberLayout::from_member_names(&names)
+    ibcmd_compiler_families::compiler::families::assets::BinaryModuleMemberLayout::from_member_names(&names)
         .is_some_and(|layout| {
             !layout.text_member_present || unpack_module_blob_text(bytes).is_err()
         })
@@ -1000,7 +1003,9 @@ pub(super) fn source_asset_paths_with_indexes(
             continue;
         }
         let is_configuration_group = is_configuration_module_group(metadata_id, &suffixes);
-        for route in crate::compiler::families::assets::SourceAssetRegistry.configuration_routes() {
+        for route in ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+            .configuration_routes()
+        {
             let Some(kind) = configuration_source_asset_kind(route.role()) else {
                 continue;
             };
@@ -1024,10 +1029,10 @@ pub(super) fn source_asset_paths_with_indexes(
         }
         let standalone_id = format!("{metadata_id}.f");
         if is_configuration_group && file_names.contains(standalone_id.as_str()) {
-            let route = crate::compiler::families::assets::SourceAssetRegistry
+            let route = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
                 .route(
                     "Configuration",
-                    crate::compiler::families::assets::SourceAssetRole::StandaloneContent,
+                    ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::StandaloneContent,
                 )
                 .expect("configuration standalone route is registered");
             paths.insert(
@@ -1039,10 +1044,10 @@ pub(super) fn source_asset_paths_with_indexes(
             );
         }
         for role in [
-            crate::compiler::families::assets::SourceAssetRole::MainSectionCommandInterface,
-            crate::compiler::families::assets::SourceAssetRole::CommandInterface,
+            ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::MainSectionCommandInterface,
+            ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::CommandInterface,
         ] {
-            let route = crate::compiler::families::assets::SourceAssetRegistry
+            let route = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
                 .route("Configuration", role)
                 .expect("configuration command-interface route is registered");
             let suffix = route.suffix().trim_start_matches('.');
@@ -1476,9 +1481,9 @@ pub(super) fn inflated_row_text(bytes: &[u8]) -> Option<String> {
 }
 
 fn configuration_source_asset_kind(
-    role: crate::compiler::families::assets::SourceAssetRole,
+    role: ibcmd_compiler_families::compiler::families::assets::SourceAssetRole,
 ) -> Option<SourceAssetKind> {
-    use crate::compiler::families::assets::SourceAssetRole;
+    use ibcmd_compiler_families::compiler::families::assets::SourceAssetRole;
     match role {
         SourceAssetRole::Splash | SourceAssetRole::Logo | SourceAssetRole::MainSectionPicture => {
             Some(SourceAssetKind::ExtPicture)
@@ -1574,7 +1579,7 @@ pub(super) fn source_assets_from_metadata_text_inner(
     let folder = row.folder?;
     let header = row.header.as_ref()?;
     let owner_family = FamilyId::parse(kind).ok()?;
-    let registry = crate::compiler::families::assets::SourceAssetRegistry;
+    let registry = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry;
     let object_path = if kind == "Subsystem" {
         subsystem_refs
             .get(uuid)
@@ -1672,10 +1677,10 @@ pub(super) fn source_assets_from_metadata_text_inner(
     let body_id = format!("{uuid}.0");
     if file_names.contains(body_id.as_str()) {
         let asset = match kind {
-            "CommonPicture" => crate::compiler::families::assets::SourceAssetRegistry
+            "CommonPicture" => ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
                 .route(
                     "CommonPicture",
-                    crate::compiler::families::assets::SourceAssetRole::Picture,
+                    ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::Picture,
                 )
                 .map(|route| SourceAsset {
                     primary_path: object_path.join(route.relative_path()),
@@ -1685,10 +1690,10 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 primary_path: object_path.join("Ext").join("Schedule.xml"),
                 kind: SourceAssetKind::Schedule,
             }),
-            "XDTOPackage" => crate::compiler::families::assets::SourceAssetRegistry
+            "XDTOPackage" => ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
                 .route(
                     "XDTOPackage",
-                    crate::compiler::families::assets::SourceAssetRole::Package,
+                    ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::Package,
                 )
                 .map(|route| SourceAsset {
                     primary_path: object_path.join(route.relative_path()),
@@ -1719,10 +1724,10 @@ pub(super) fn source_assets_from_metadata_text_inner(
         if command_mapped_ids.contains(&body_id) {
             continue;
         }
-        let is_command_relation = crate::compiler::families::assets::SourceAssetRegistry
+        let is_command_relation = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
             .route_by_suffix(kind, suffix)
             .is_some_and(|route| {
-                route.role() == crate::compiler::families::assets::SourceAssetRole::CommandInterface
+                route.role() == ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::CommandInterface
             });
         if !is_command_relation || !file_names.contains(body_id.as_str()) {
             continue;
@@ -1741,8 +1746,9 @@ pub(super) fn source_assets_from_metadata_text_inner(
             // `.0`/`.1` command interface to zero sections and stay absent
             // from the native export tree.
             Some(interface) if !interface.is_empty() => {
-                let route = crate::compiler::families::assets::SourceAssetRegistry
-                    .route_by_suffix(kind, suffix)?;
+                let route =
+                    ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+                        .route_by_suffix(kind, suffix)?;
                 assets.push((
                     body_id,
                     SourceAsset {
@@ -1803,7 +1809,8 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 (*body_id).to_string(),
                 SourceAsset {
                     primary_path: object_path.join(
-                        crate::compiler::families::assets::SourceAssetRegistry.help_relative_path(),
+                        ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+                            .help_relative_path(),
                     ),
                     kind: SourceAssetKind::Help,
                 },
@@ -1856,11 +1863,12 @@ pub(super) fn source_assets_from_metadata_text_inner(
 }
 
 pub(super) fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
-    crate::compiler::families::assets::SourceAssetRegistry.additional_indexes_suffix(kind)
+    ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+        .additional_indexes_suffix(kind)
 }
 
 pub(super) fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
-    let suffix = crate::compiler::families::assets::SourceAssetRegistry
+    let suffix = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
         .help_suffix(kind)
         .expect("source-asset registry defines the help suffix policy")
         .trim_start_matches('.');
@@ -2692,8 +2700,8 @@ fn write_source_asset_inner(
             )?;
         }
         SourceAssetKind::DataCompositionSchema => {
-            let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-                crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+                ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
                 bytes,
             )
             .with_context(|| {
@@ -2707,7 +2715,7 @@ fn write_source_asset_inner(
                 ProfileId::parse(&format!("xml-{}", context.source_version.as_str()))
                     .expect("legacy source-version profiles are valid");
             let content = match body.layout() {
-                crate::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument => {
+                ibcmd_compiler::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument => {
                     let documents = body.documents();
                     match crate::mssql_dump::dcs::normalize_data_composition_schema_template_documents_with_profiles(
                         &documents,
@@ -2735,7 +2743,9 @@ fn write_source_asset_inner(
                         }
                     }
                 }
-                crate::compiler::bodies::dcs::DcsBodyLayout::DirectXml => body.plaintext().to_vec(),
+                ibcmd_compiler::compiler::bodies::dcs::DcsBodyLayout::DirectXml => {
+                    body.plaintext().to_vec()
+                }
             };
             // A schema stored by 8.5 declares the palette namespace on its
             // settings roots; 8.3.27 writes no such declaration (15 templates
@@ -4004,10 +4014,10 @@ pub(super) fn predefined_data_source_model(kind: &str) -> Option<PredefinedDataS
 
 fn predefined_data_route(
     kind: &str,
-) -> Option<&'static crate::compiler::families::assets::SourceAssetRoute> {
-    crate::compiler::families::assets::SourceAssetRegistry.route(
+) -> Option<&'static ibcmd_compiler_families::compiler::families::assets::SourceAssetRoute> {
+    ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry.route(
         kind,
-        crate::compiler::families::assets::SourceAssetRole::Predefined,
+        ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::Predefined,
     )
 }
 

@@ -16,7 +16,7 @@ pub(crate) use ibcmd_moxel::*;
 use std::collections::BTreeSet;
 
 #[cfg(all(test, feature = "mssql-live-tests"))]
-use crate::module_blob::{LocalizedString, SpreadsheetNumberFormatHint};
+use ibcmd_metadata_blob::{LocalizedString, SpreadsheetNumberFormatHint};
 
 pub(crate) fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
@@ -47,7 +47,7 @@ pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
 ) -> Result<String, MxlDiagnostic> {
-    let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes)
+    let body = ibcmd_compiler::compiler::bodies::mxl::decode_compatible_mxl(bytes)
         .map_err(|error| binary_container_diagnostic(error.to_string()))?;
     // An 8.5 spreadsheet spells its colour and font tuples one revision later.
     let text =
@@ -66,7 +66,7 @@ pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
     object_refs: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
-    let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
+    let body = ibcmd_compiler::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
     extract_moxel_body_xml(
         body.native_body_text(),
         object_refs,
@@ -84,7 +84,7 @@ pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
     object_refs: &BTreeMap<String, String>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
-    let body = crate::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes).ok()?;
+    let body = ibcmd_compiler::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes).ok()?;
     extract_moxel_body_xml(
         body.native_body_text(),
         object_refs,
@@ -446,16 +446,20 @@ mod moxel_exact_parity_tests {
 	<rowsItem><index>0</index><row><c><c><f>1</f></c></c></row></rowsItem>
 	<format><valueType><v8:TypeSet xmlns:d4p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d4p1:CatalogRef</v8:TypeSet></valueType></format>
 </document>"#;
-        let body =
-            crate::compiler::bodies::mxl_native::write_native_moxel_body(source.as_bytes(), None)
-                .unwrap();
+        let body = ibcmd_compiler::compiler::bodies::mxl_native::write_native_moxel_body(
+            source.as_bytes(),
+            None,
+        )
+        .unwrap();
         assert!(
             body.replace("\r\n", "")
                 .contains("{\"Pattern\",{\"#\",e61ef7b8-f3e1-4f4b-8ac7-676e90524997}}"),
             "{body}"
         );
         let plain = format!("MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{body}");
-        let blob = crate::compiler::families::native::deflate_bytes(plain.as_bytes()).unwrap();
+        let blob =
+            ibcmd_compiler_families::compiler::families::native::deflate_bytes(plain.as_bytes())
+                .unwrap();
         let object_refs = BTreeMap::new();
 
         let exported = try_extract_moxel_spreadsheet_xml(&blob, &object_refs).unwrap();

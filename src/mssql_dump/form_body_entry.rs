@@ -22,7 +22,8 @@ pub(crate) fn extract_form_body_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let body = crate::compiler::bodies::form::decode_compatible_managed_form(bytes).ok()?;
+    let body =
+        ibcmd_compiler::compiler::bodies::form::decode_compatible_managed_form(bytes).ok()?;
     // A platform 8.5 body is read through its 8.3.27 down-conversion, the way
     // the source export reads one (`source_assets`). What the members 8.5
     // appends say is only spelled by the 2.21 writer, which this 2.20 reading
@@ -86,7 +87,7 @@ pub(crate) fn trace_form_body_with_context(
 }
 
 pub(crate) fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
-    let body = crate::compiler::bodies::form::decode_compatible_managed_form(blob).ok()?;
+    let body = ibcmd_compiler::compiler::bodies::form::decode_compatible_managed_form(blob).ok()?;
     form_body_module_text_bytes(body.parsed())
 }
 

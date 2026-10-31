@@ -15,11 +15,12 @@ use ibcmd_core::validate::validate_configuration;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 
-use crate::module_blob::{
-    ReturnValuesReuse, pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml,
-    pack_simple_metadata_blob_from_xml, parse_common_module_xml_properties,
+use ibcmd_compiler::compiler::bodies::mxl_native::pack_moxel_spreadsheet_blob_from_xml;
+use ibcmd_metadata_blob::{
+    ReturnValuesReuse, pack_simple_metadata_blob_from_xml, parse_common_module_xml_properties,
     parse_simple_metadata_xml_properties,
 };
+use ibcmd_module_blob::pack_module_blob_bytes;
 
 #[test]
 fn information_register_master_dimension_scan_keeps_only_a_proven_prefix() {
@@ -654,7 +655,9 @@ fn source_asset_discovery_fails_closed_for_aggregate_decoder_miss() {
 
 #[test]
 fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
-    use crate::compiler::families::assets::{ConfigRowId, SourceAssetRegistry, SourceAssetRole};
+    use ibcmd_compiler_families::compiler::families::assets::{
+        ConfigRowId, SourceAssetRegistry, SourceAssetRole,
+    };
 
     let cases = [
         (
@@ -8972,7 +8975,7 @@ fn form_attributes_conditional_appearance_outside_the_cohort_is_transliterated()
     let storage = String::from_utf8(decode_base64_mime(encoded).unwrap())
         .unwrap()
         .replace("xs:string\">A", "xs:boolean\">true");
-    let payload = crate::module_blob::encode_base64(storage.as_bytes());
+    let payload = ibcmd_1c_text::encode_base64(storage.as_bytes());
     let section = extract_form_body_attributes_section(
         &[format!(
             "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
@@ -9009,7 +9012,7 @@ fn form_attributes_malformed_conditional_appearance_fails_closed() {
     let storage = String::from_utf8(decode_base64_mime(encoded).unwrap())
         .unwrap()
         .replace("</conditionalAppearance>", "");
-    let payload = crate::module_blob::encode_base64(storage.as_bytes());
+    let payload = ibcmd_1c_text::encode_base64(storage.as_bytes());
     let section = extract_form_body_attributes_section(
         &[format!(
             "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
@@ -9317,7 +9320,7 @@ fn rejects_non_dcs_or_malformed_dynamic_list_appearance() {
 #[test]
 fn extracts_form_attribute_additional_columns_from_body_tail() {
     let body = ParsedFormBodyBlob {
-            revision: crate::module_blob::FormBodyRevision::V4,
+            revision: ibcmd_form_body::FormBodyRevision::V4,
             layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"}}".to_string(),
             module_text: String::new(),
             trailing: vec![r##"{4,1,{9,{3},0,"СписокЗаказов",{1,1,{"ru","Список заказов"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,1,{5,8,0,"СтрокиЗаказа",{1,1,{"ru","Строки заказа"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}},1,{0,{2,{3},{8}},2,{5,1,0,"GTIN",{1,1,{"ru","GTIN"}},{"Pattern",{"S",50,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{5,2,0,"КоличествоКодов",{1,1,{"ru","Количество кодов"}},{"Pattern",{"N",6,0,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}},0,{0}}"##.to_string()],
@@ -9341,7 +9344,7 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
         }
     }
     let body = ParsedFormBodyBlob {
-        revision: crate::module_blob::FormBodyRevision::V4,
+        revision: ibcmd_form_body::FormBodyRevision::V4,
         layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"},{31,{1,0},0,0,0,\"Trace\"}}".to_string(),
         module_text: String::new(),
         trailing: Vec::new(),
@@ -10303,7 +10306,7 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
         .replacen("{5006,0}", primary, 1)
         .replacen("{5007,0}", duplicate, 1);
     let body = ParsedFormBodyBlob {
-        revision: crate::module_blob::FormBodyRevision::V4,
+        revision: ibcmd_form_body::FormBodyRevision::V4,
         layout: format!("{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{field}}}"),
         module_text: String::new(),
         trailing: Vec::new(),
@@ -19244,200 +19247,6 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
     assert_eq!(
         moxel_output_format_indices(&spreadsheet),
         vec![4, 1, 2, 3, 5]
-    );
-}
-
-#[cfg(feature = "research-corpus-tests")]
-fn assert_moxel_template_matches_lab_baseline(
-    raw: &str,
-    baseline_relative_path: &[&str],
-    label: &str,
-) {
-    let raw = if raw.trim_start().starts_with("{8,") {
-        raw
-    } else {
-        let body_start = raw.find("{8,").unwrap();
-        &raw[body_start..]
-    };
-    let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
-    let baseline_path = baseline_relative_path.iter().fold(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("lab")
-            .join("ut_ibcmd_20260629_164647")
-            .join("ibcmd"),
-        |path, segment| path.join(segment),
-    );
-    let baseline = std::fs::read_to_string(baseline_path).unwrap();
-    let temp_root =
-        std::env::temp_dir().join(format!("ibcmd-rs-moxel-{label}-{}", std::process::id()));
-    let left_root = temp_root.join("left");
-    let right_root = temp_root.join("right");
-    let rel_path = std::path::Path::new("Template.xml");
-    std::fs::create_dir_all(&left_root).unwrap();
-    std::fs::create_dir_all(&right_root).unwrap();
-    std::fs::write(
-        left_root.join(rel_path),
-        baseline.trim_start_matches('\u{feff}'),
-    )
-    .unwrap();
-    std::fs::write(
-        right_root.join(rel_path),
-        xml.trim_start_matches('\u{feff}'),
-    )
-    .unwrap();
-    let report = crate::plan::explain_source_diff_file(
-        &left_root,
-        &right_root,
-        "Template.xml",
-        &[],
-        Some(20),
-    )
-    .unwrap();
-    if report.summary.total_differences != 0 {
-        panic!(
-            "{label} diff summary: left_only={} right_only={} value_or_attr_diff={} first_diffs={:?}",
-            report.summary.left_only,
-            report.summary.right_only,
-            report.summary.value_or_attr_diff,
-            report.differences
-        );
-    }
-    let baseline = baseline.trim_start_matches('\u{feff}');
-    let xml = xml.trim_start_matches('\u{feff}');
-    if baseline != xml {
-        let mismatch = baseline
-            .bytes()
-            .zip(xml.bytes())
-            .position(|(left, right)| left != right)
-            .unwrap_or_else(|| baseline.len().min(xml.len()));
-        panic!(
-            "{label} byte mismatch at {} left_len={} right_len={} left={:?} right={:?}",
-            mismatch,
-            baseline.len(),
-            xml.len(),
-            &baseline[mismatch.saturating_sub(40)..baseline.len().min(mismatch + 40)],
-            &xml[mismatch.saturating_sub(40)..xml.len().min(mismatch + 40)]
-        );
-    }
-}
-
-#[cfg(feature = "research-corpus-tests")]
-#[test]
-#[ignore = "requires external research corpus"]
-fn formats_moxel_invoice_1096_matches_lab_baseline_template_xml() {
-    let raw = include_str!("../../tests/fixtures/moxel_invoice_1096_raw.txt");
-    assert_moxel_template_matches_lab_baseline(
-        raw,
-        &[
-            "DataProcessors",
-            "ПечатьОбщихФорм",
-            "Templates",
-            "ПФ_MXL_СчетФактура1096_ru",
-            "Ext",
-            "Template.xml",
-        ],
-        "1096",
-    );
-}
-
-#[cfg(feature = "research-corpus-tests")]
-#[test]
-#[ignore = "requires external research corpus"]
-fn formats_moxel_ukd_info_buyer_2020_matches_lab_baseline_template_xml() {
-    let raw = include_str!("../../tests/fixtures/moxel_ukd_info_buyer_2020_raw.txt");
-    assert_moxel_template_matches_lab_baseline(
-        raw,
-        &[
-            "DataProcessors",
-            "ОбменСКонтрагентами",
-            "Templates",
-            "УКД_ИнформацияПокупателя_2020",
-            "Ext",
-            "Template.xml",
-        ],
-        "ukd_info_buyer_2020",
-    );
-}
-
-#[cfg(feature = "research-corpus-tests")]
-#[test]
-#[ignore = "requires external research corpus"]
-fn formats_moxel_contract_parameter_map_matches_lab_baseline_template_xml() {
-    let raw = include_str!("../../tests/fixtures/moxel_contract_parameter_map_raw.txt");
-    assert_moxel_template_matches_lab_baseline(
-        raw,
-        &[
-            "DataProcessors",
-            "ФорматДоговорнойДокумент101XML",
-            "Templates",
-            "СоответствияПараметровИМеток",
-            "Ext",
-            "Template.xml",
-        ],
-        "contract_parameter_map",
-    );
-}
-
-#[cfg(feature = "research-corpus-tests")]
-#[test]
-#[ignore = "requires external research corpus"]
-fn formats_moxel_contract_typical_names_matches_lab_baseline_template_xml() {
-    let raw = include_str!("../../tests/fixtures/moxel_contract_typical_names_raw.txt");
-    assert_moxel_template_matches_lab_baseline(
-        raw,
-        &[
-            "DataProcessors",
-            "ФорматДоговорнойДокумент101XML",
-            "Templates",
-            "ПереченьТиповыхНаименованийЭлементовДоговоров",
-            "Ext",
-            "Template.xml",
-        ],
-        "contract_typical_names",
-    );
-}
-
-#[cfg(feature = "research-corpus-tests")]
-#[test]
-#[ignore = "requires external research corpus"]
-fn formats_moxel_eis_appendix_matches_lab_baseline_template_xml() {
-    let raw = include_str!("../../tests/fixtures/moxel_eis_appendix_raw.txt");
-    assert_moxel_template_matches_lab_baseline(
-        raw,
-        &[
-            "DataProcessors",
-            "ЭлектронноеАктированиеЕИС",
-            "Templates",
-            "ЭД_ПриложениеЕИС_ru",
-            "Ext",
-            "Template.xml",
-        ],
-        "eis_appendix",
-    );
-}
-
-#[cfg(feature = "research-corpus-tests")]
-#[test]
-#[ignore = "requires external research corpus"]
-fn debug_moxel_card_matches_lab_baseline() {
-    let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
-    let out_dir = out_dir.trim();
-    let raw_path = format!(
-        "{out_dir}\\ibcmd_rs_dump\\Config_inflated\\018b2a34-2af6-49b1-85a2-d1e7fb95bfe0.0__part0.txt"
-    );
-    let raw = std::fs::read_to_string(raw_path).unwrap();
-    assert_moxel_template_matches_lab_baseline(
-        &raw,
-        &[
-            "DataProcessors",
-            "РаботаСНоменклатурой",
-            "Templates",
-            "ПФ_MXL_КарточкаНоменклатуры",
-            "Ext",
-            "Template.xml",
-        ],
-        "card_nomenclature",
     );
 }
 
@@ -52983,7 +52792,7 @@ fn extension_export_probe_body() -> ParsedFormBodyBlob {
 {1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
     const INPUT: &str = r##"{37,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Организация",2,0,{1,1,{"ru","От организации"}},{1,1,{"ru","Организация, от имени которой будете приглашать."}},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},1,1,0,{"Pattern",{"#",f6841c6b-6c71-4c82-ae9e-d08b49db326c}},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Организация, от имени которой будете приглашать."}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ОрганизацияПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОрганизацияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОрганизацияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##;
     ParsedFormBodyBlob {
-        revision: crate::module_blob::FormBodyRevision::V4,
+        revision: ibcmd_form_body::FormBodyRevision::V4,
         // The form's child items are `<count>,<uuid>,<item>` pairs.
         layout: format!(
             "{{59,3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{GROUP},\

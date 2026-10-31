@@ -4,6 +4,13 @@
 //! (`tests/common/eds_generated.rs`), which reads the root's compiler and
 //! profile registry.
 
+#[cfg_attr(
+    not(test),
+    expect(
+        unused_imports,
+        reason = "the root's tests read it; outside them its one reader, the exporter, names the crate"
+    )
+)]
 pub(crate) use ibcmd_metadata_model::metadata_model::external_data_source::{
     decode, export_source, names, source_family,
 };

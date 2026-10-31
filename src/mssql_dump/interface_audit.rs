@@ -109,7 +109,7 @@ impl OfflineInterfaceContext {
         plain: &[u8],
         source_version: InfobaseConfigSourceVersion,
     ) -> Result<Vec<u8>> {
-        let blob = crate::compiler::families::native::deflate_bytes(plain)
+        let blob = ibcmd_compiler_families::compiler::families::native::deflate_bytes(plain)
             .map_err(|error| anyhow!("failed to deflate the row: {error}"))?;
         let xml = match kind {
             InterfaceAssetKind::ObjectCommandInterface

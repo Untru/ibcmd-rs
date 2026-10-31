@@ -8,11 +8,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::metadata_model::brace::parse_row;
-use crate::metadata_model::export::{ExportContext, NameIndex, write_document};
-use crate::metadata_model::external_data_source;
-use crate::metadata_model::external_data_source_children;
-use crate::metadata_model::objects::parts::Compat;
+use ibcmd_metadata_model::metadata_model::brace::parse_row;
+use ibcmd_metadata_model::metadata_model::export::{ExportContext, NameIndex, write_document};
+use ibcmd_metadata_model::metadata_model::external_data_source;
+use ibcmd_metadata_model::metadata_model::external_data_source_children;
+use ibcmd_metadata_model::metadata_model::objects::parts::Compat;
 
 use super::{ExtractedMetadataSourceXml, MetadataTextRow};
 

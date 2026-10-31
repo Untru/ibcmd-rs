@@ -3,7 +3,7 @@ use super::*;
 /// Interface has no permissive legacy decoder. Validate its records before
 /// the full source writer starts, including class-identified future layouts.
 pub(super) fn validate_interface_descriptors(rows: &[MetadataTextRow]) -> Result<()> {
-    use crate::metadata_model::{
+    use ibcmd_metadata_model::metadata_model::{
         brace::parse_row, export::configuration_objects, interface::Interface,
     };
     use ibcmd_schema::interface::InterfaceLayout as Layout;
@@ -444,11 +444,13 @@ pub(super) fn metadata_source_for_object_fields(
     // that fails to parse is refused instead of being rewritten as a service.
     if code == 0 || code == 11 {
         if let Some(family) =
-            crate::metadata_model::external_data_source_children::family(text, uuid)
+            ibcmd_metadata_model::metadata_model::external_data_source_children::family(text, uuid)
         {
             return Some(family);
         }
-        if crate::metadata_model::external_data_source_children::looks_like_eds_child(text) {
+        if ibcmd_metadata_model::metadata_model::external_data_source_children::looks_like_eds_child(
+            text,
+        ) {
             return None;
         }
     }
@@ -460,7 +462,9 @@ pub(super) fn metadata_source_for_object_fields(
         && fields.len() == ibcmd_schema::external_data_source::BODY_ARITY
         && field_starts_with(fields.get(1), "{0,")
     {
-        return crate::metadata_model::external_data_source::source_family(text, uuid);
+        return ibcmd_metadata_model::metadata_model::external_data_source::source_family(
+            text, uuid,
+        );
     }
 
     match code {

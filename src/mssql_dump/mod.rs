@@ -92,21 +92,20 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-use crate::adapters::mssql_legacy::{
-    MssqlConfigurationTableRole, MssqlExportInventoryPlan, MssqlExportInventoryScope,
-    MssqlLegacyAdapter, decode_task_internal_uuid_slots,
-};
 use crate::legacy_version::InfobaseConfigSourceVersion;
 use crate::metadata_owner_graph::{
     self as owner_graph, CATALOG_ATTRIBUTE_GROUP_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
     METADATA_TEMPLATE_COLLECTION_UUID,
 };
-use crate::module_blob::{
-    ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text,
-    unpack_plain_text_module_body,
-};
-use crate::parallel;
 use args::MssqlDumpConfigArgs;
+use ibcmd_form_body::ParsedFormBodyBlob;
+use ibcmd_metadata_blob::parse_form_body_blob;
+use ibcmd_module_blob::{unpack_module_blob_text, unpack_plain_text_module_body};
+use ibcmd_parallel as parallel;
+use ibcmd_platform_spec::adapters::mssql_legacy::{
+    MssqlConfigurationTableRole, MssqlExportInventoryPlan, MssqlExportInventoryScope,
+    MssqlLegacyAdapter, decode_task_internal_uuid_slots,
+};
 
 mod legacy_child;
 mod characteristics {
@@ -1090,7 +1089,7 @@ pub(crate) fn fetch_main_activation_rows(
     database: &str,
     table: &str,
     selected_file_names: &BTreeSet<String>,
-) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+) -> Result<Vec<ibcmd_mssql_live::mssql_main_activation::MainStorageRow>> {
     // The activation compares these rows with the table inside its transaction
     // (`dbo.Config`, no view), so they are the rows as stored: never the
     // generation an export of this process resolved (#409 F-2).
@@ -1102,14 +1101,14 @@ pub(crate) fn fetch_main_activation_rows(
 #[derive(Debug)]
 pub(crate) struct StoredActivationRows;
 
-impl crate::mssql_main_activation::MainActivationRowSource for StoredActivationRows {
+impl ibcmd_mssql_live::mssql_main_activation::MainActivationRowSource for StoredActivationRows {
     fn fetch_rows(
         &self,
         sql: &crate::sql::SqlExec,
         database: &str,
         table: &str,
         selected: &BTreeSet<String>,
-    ) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+    ) -> Result<Vec<ibcmd_mssql_live::mssql_main_activation::MainStorageRow>> {
         fetch_main_activation_rows(sql, database, table, selected)
     }
 }
@@ -1121,13 +1120,13 @@ pub(crate) fn fetch_extension_activation_rows(
     prefix: &str,
     max_rows: usize,
     max_total_bytes: u64,
-) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+) -> Result<Vec<ibcmd_mssql_live::mssql_main_activation::MainStorageRow>> {
     fetch::fetch_exact_prefix_rows(sql, database, table, prefix, max_rows, max_total_bytes)?
         .into_iter()
         .map(|row| {
             let data_size = u64::try_from(row.data_size)
                 .with_context(|| format!("negative DataSize for {table}.{}", row.file_name))?;
-            Ok(crate::mssql_main_activation::MainStorageRow {
+            Ok(ibcmd_mssql_live::mssql_main_activation::MainStorageRow {
                 file_name: row.file_name,
                 part_no: row.part_no,
                 creation: row.creation,
@@ -2474,6 +2473,14 @@ mod export_tls_tests {
     use super::*;
     use clap::Parser;
 
+    /// `mssql-dump-config`'s arguments, parsed as the command line parses
+    /// them (the subcommand's name is the program name here).
+    #[derive(Parser)]
+    struct Command {
+        #[command(flatten)]
+        args: MssqlDumpConfigArgs,
+    }
+
     #[test]
     fn export_sql_constructor_validates_certificates_for_built_in_and_external_backends() {
         for external in [false, true] {
@@ -2494,11 +2501,7 @@ mod export_tls_tests {
             if external {
                 argv.extend(["--sqlcmd", "sqlcmd"]);
             }
-            let crate::cli::Commands::MssqlDumpConfig(args) =
-                crate::cli::Cli::try_parse_from(argv).unwrap().command
-            else {
-                panic!("export args expected");
-            };
+            let args = Command::try_parse_from(&argv[1..]).unwrap().args;
             let sql = sql_for_export(&args, args.sql_pwd.as_deref()).unwrap();
             assert!(
                 !sql.trust_server_certificate(),
@@ -6763,7 +6766,8 @@ fn collect_root_family_kinds(text: &str, kinds: &mut BTreeMap<String, &'static s
         return;
     };
     if fields.len() >= 2
-        && let Some(kind) = crate::compiler::root::configuration_family_kind(fields[0].trim())
+        && let Some(kind) =
+            ibcmd_compiler::compiler::root::configuration_family_kind(fields[0].trim())
         && fields[1].trim().parse::<usize>().ok() == Some(fields.len() - 2)
     {
         for child in &fields[2..] {
@@ -6783,7 +6787,7 @@ fn collect_root_family_kinds(text: &str, kinds: &mut BTreeMap<String, &'static s
 
 /// The folder of a root family's kind (the plural the platform lays out).
 pub(crate) fn root_family_folder(kind: &str) -> Option<&'static str> {
-    crate::metadata_model::index::collection_of_kind(kind)
+    ibcmd_metadata_model::metadata_model::index::collection_of_kind(kind)
 }
 
 fn normalize_direct_form_metadata(metadata: &mut MetadataTextRow) -> bool {
@@ -7237,7 +7241,7 @@ fn dump_table_row_bytes(
         // database's, so a `source-diff` against the native tree measures
         // exactly whether a compiled body exports back to its `Form.xml`.
         let parsed = match form_body_override(file_name) {
-            Some(plain) => crate::module_blob::parse_form_body_plain(&plain).ok(),
+            Some(plain) => ibcmd_form_body::parse_form_body_plain(&plain).ok(),
             None => parse_form_body_blob(bytes).ok(),
         };
         timings.form_body_parse_cpu_ms += elapsed_ms(started);
@@ -7287,7 +7291,7 @@ fn dump_table_row_bytes(
             });
         if context.selected_metadata_validator.is_some()
             && let Some(Err(error)) = &modelled
-            && error.is::<crate::metadata_model::export::values::UnsupportedDescriptorValue>()
+            && error.is::<ibcmd_metadata_model::metadata_model::export::values::UnsupportedDescriptorValue>()
         {
             return Err(anyhow!(
                 "selected metadata conversion is incomplete: {error}"
@@ -8505,7 +8509,7 @@ fn parse_flowchart_picture(text: &str) -> Option<FlowchartPicture> {
                 return None;
             }
             let encoded = inner.first()?.trim().strip_prefix("#base64:")?;
-            let data = crate::module_blob::decode_base64_mime(encoded)?;
+            let data = ibcmd_1c_text::decode_base64_mime_lenient(encoded)?;
             Some(FlowchartPicture::Embedded {
                 file_name: format!("Picture.{}", flowchart_picture_extension(&data)?),
                 data,
@@ -9757,8 +9761,8 @@ fn configuration_module_body_paths_of(
     file_names: &BTreeSet<&str>,
 ) -> BTreeMap<String, PathBuf> {
     let mut paths = BTreeMap::new();
-    for route in
-        crate::compiler::families::assets::SourceAssetRegistry.module_routes("Configuration")
+    for route in ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+        .module_routes("Configuration")
     {
         let suffix = route.suffix().trim_start_matches('.');
         let body_id = format!("{header_uuid}.{suffix}");
@@ -9781,10 +9785,10 @@ fn form_module_body_paths(
         }
         let mut form_dir = form_ref.relative_path.clone();
         form_dir.set_extension("");
-        let route = crate::compiler::families::assets::SourceAssetRegistry
+        let route = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
             .route(
                 "Form",
-                crate::compiler::families::assets::SourceAssetRole::FormModule,
+                ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::FormModule,
             )
             .expect("form-module route is registered");
         paths.insert(body_id, form_dir.join(route.relative_path()));
@@ -9793,7 +9797,7 @@ fn form_module_body_paths(
 }
 
 fn is_configuration_module_group(owner: &str, suffixes: &BTreeSet<&str>) -> bool {
-    let registry = crate::compiler::families::assets::SourceAssetRegistry;
+    let registry = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry;
     if let Some(extension) = extension::active() {
         // An extension keeps only the blocks of its root object that it
         // overrides (the managed application module, say), not the whole set.
@@ -9813,7 +9817,8 @@ fn is_configuration_module_group(owner: &str, suffixes: &BTreeSet<&str>) -> bool
         && registry
             .configuration_routes()
             .filter(|route| {
-                route.codec() != crate::compiler::families::assets::SourceAssetCodec::Module
+                route.codec()
+                    != ibcmd_compiler_families::compiler::families::assets::SourceAssetCodec::Module
             })
             .any(|route| suffixes.contains(route.suffix().trim_start_matches('.')))
 }
@@ -9876,10 +9881,10 @@ fn nested_command_module_source_paths(
         if !file_names.contains(body_id.as_str()) {
             continue;
         }
-        let route = crate::compiler::families::assets::SourceAssetRegistry
+        let route = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
             .route(
                 "Command",
-                crate::compiler::families::assets::SourceAssetRole::CommandModule,
+                ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::CommandModule,
             )
             .expect("nested-command module route is registered");
         let path = PathBuf::from(folder)
@@ -10519,11 +10524,12 @@ fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) 
 fn module_owner_route(
     kind: &str,
     suffix: &str,
-) -> Option<&'static crate::compiler::families::assets::SourceAssetRoute> {
-    crate::compiler::families::assets::SourceAssetRegistry
+) -> Option<&'static ibcmd_compiler_families::compiler::families::assets::SourceAssetRoute> {
+    ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
         .route_by_suffix(kind, suffix)
         .filter(|route| {
-            route.codec() == crate::compiler::families::assets::SourceAssetCodec::Module
+            route.codec()
+                == ibcmd_compiler_families::compiler::families::assets::SourceAssetCodec::Module
         })
 }
 
@@ -13575,7 +13581,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     {
         // The canonical family owns all fields/children. No later generic scan
         // or header-only fallback is allowed to modify or replace this result.
-        match crate::metadata_model::external_data_source::export_source(
+        match ibcmd_metadata_model::metadata_model::external_data_source::export_source(
             text,
             uuid,
             source_version.as_str(),
@@ -14032,18 +14038,22 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         format_document_numerator_source_xml(&header, &document_numerator, source_version)
             .into_bytes()
     } else if kind == ibcmd_schema::interface::InterfaceLayout::KIND {
-        let row = crate::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
-        let interface = crate::metadata_model::interface::Interface::from_brace(&row).ok()?;
-        crate::metadata_model::export::write_document(
+        let row = ibcmd_metadata_model::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
+        let interface =
+            ibcmd_metadata_model::metadata_model::interface::Interface::from_brace(&row).ok()?;
+        ibcmd_metadata_model::metadata_model::export::write_document(
             &interface.to_xml().ok()?,
             source_version.as_str(),
         )
         .into_bytes()
     } else if kind == ibcmd_schema::websocket_client::WebSocketClientLayout::KIND {
-        let row = crate::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
+        let row = ibcmd_metadata_model::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
         let client =
-            crate::metadata_model::websocket_client::WebSocketClient::from_brace(&row).ok()?;
-        crate::metadata_model::export::write_document(
+            ibcmd_metadata_model::metadata_model::websocket_client::WebSocketClient::from_brace(
+                &row,
+            )
+            .ok()?;
+        ibcmd_metadata_model::metadata_model::export::write_document(
             &client.to_xml().ok()?,
             source_version.as_str(),
         )
@@ -36134,12 +36144,12 @@ fn parse_command_group_picture_value(
 
 /// The platform's standard pictures, named and stored through the one table
 /// of the crate (`metadata_model::standard_pictures`).
-pub(crate) use crate::metadata_model::standard_pictures::standard_picture_name;
+pub(crate) use ibcmd_metadata_model::metadata_model::standard_pictures::standard_picture_name;
 #[expect(
     unused_imports,
     reason = "Retain the original crate-internal standard-picture compatibility path"
 )]
-pub(crate) use crate::metadata_model::standard_pictures::standard_picture_uuid;
+pub(crate) use ibcmd_metadata_model::metadata_model::standard_pictures::standard_picture_uuid;
 
 fn parse_common_command_group_value(
     value: &str,
@@ -36244,19 +36254,19 @@ fn command_group_representation_xml(value: u8) -> &'static str {
 }
 
 fn common_command_representation_xml(value: u8) -> Option<&'static str> {
-    crate::metadata_model::common::REPRESENTATIONS
+    ibcmd_metadata_model::metadata_model::common::REPRESENTATIONS
         .iter()
         .find_map(|(name, code)| (*code == i64::from(value)).then_some(*name))
 }
 
 fn common_command_parameter_use_mode_xml(value: u8) -> Option<&'static str> {
-    crate::metadata_model::common::PARAMETER_USE_MODES
+    ibcmd_metadata_model::metadata_model::common::PARAMETER_USE_MODES
         .iter()
         .find_map(|(name, code)| (*code == i64::from(value)).then_some(*name))
 }
 
 fn common_command_on_main_server_unavailable_behavior_xml(value: u8) -> Option<&'static str> {
-    crate::metadata_model::common::MAIN_SERVER_UNAVAILABLE_BEHAVIORS
+    ibcmd_metadata_model::metadata_model::common::MAIN_SERVER_UNAVAILABLE_BEHAVIORS
         .iter()
         .find_map(|(name, code)| (*code == i64::from(value)).then_some(*name))
 }
@@ -45234,6 +45244,9 @@ mod interface_root_tests;
 mod tests;
 
 #[cfg(test)]
+mod root_tests;
+
+#[cfg(test)]
 mod external_data_source_tests;
 
 #[cfg(test)]
@@ -45245,7 +45258,7 @@ fn extension_activation_web_colors_share_the_native_dictionary() {
             Some(format!("web:{name}").as_str())
         );
         assert!(
-            crate::compiler::bodies::form_native::WEB_COLOR_CODES
+            ibcmd_form_native::WEB_COLOR_CODES
                 .iter()
                 .any(|(n, c)| *n == name && c.parse::<i32>().ok() == Some(code))
         );

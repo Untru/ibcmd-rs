@@ -67,7 +67,7 @@ use ibcmd_v8::format::Revision;
 use serde::Serialize;
 
 use super::args::MssqlSaveConfigArgs;
-use crate::adapters::mssql_legacy::MssqlConfigurationTableRole;
+use ibcmd_platform_spec::adapters::mssql_legacy::MssqlConfigurationTableRole;
 
 use super::{
     DYNAMIC_UPDATE_MARKER_ROW, STAGE_NEW_SUFFIX, build_dump_file_name_batches, dynamic_generation,
@@ -259,8 +259,10 @@ fn refuse_source_output(source: &Path, output: &Path) -> Result<()> {
     let source_path = ibcmd_filedb::data_file(source);
     let source_file = std::fs::File::open(&source_path)
         .with_context(|| format!("open source infobase {}", source_path.display()))?;
-    if crate::file_identity::file_identity(&source_file).context("identify source infobase")?
-        == crate::file_identity::file_identity(&output_file).context("identify save output")?
+    if ibcmd_compiler::file_identity::file_identity(&source_file)
+        .context("identify source infobase")?
+        == ibcmd_compiler::file_identity::file_identity(&output_file)
+            .context("identify save output")?
     {
         bail!(
             "save output identifies the source infobase data file: {}",
@@ -334,7 +336,7 @@ pub(super) fn refuse_unfinished_operation<'a>(
     let unfinished = stored
         .into_iter()
         .filter(|name| {
-            crate::mssql_config_apply::sqlgen::UNFINISHED_NAMES.contains(name)
+            ibcmd_config_apply::mssql_config_apply::sqlgen::UNFINISHED_NAMES.contains(name)
                 || name.ends_with(STAGE_NEW_SUFFIX)
         })
         .collect::<BTreeSet<_>>();

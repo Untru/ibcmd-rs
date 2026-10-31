@@ -372,7 +372,7 @@ mod extension_base_budget_tests {
     use std::io::Read;
 
     fn row(name: &str, bytes: &[u8]) -> super::super::ConfigRow {
-        let packed = crate::module_blob::deflate_raw(bytes).unwrap();
+        let packed = ibcmd_module_blob::deflate_raw(bytes).unwrap();
         super::super::ConfigRow {
             file_name: name.into(),
             part_no: 0,

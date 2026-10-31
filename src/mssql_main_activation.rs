@@ -13,9 +13,20 @@
 pub use ibcmd_mssql_live::mssql_main_activation::*;
 
 pub(crate) use ibcmd_mssql_live::mssql_main_activation::{
-    ActivationInputs, MainActivationRowSource, allowed_activation_targets,
-    exactly_one_optional_marker, read_activation_inputs,
+    ActivationInputs, allowed_activation_targets, exactly_one_optional_marker,
+    read_activation_inputs,
 };
+// Read only by the exporter, which names the crate; it still hides the item from the glob.
+#[expect(
+    unused_imports,
+    reason = "the re-export hides a widened item from the public glob"
+)]
+pub(crate) use ibcmd_mssql_live::mssql_main_activation::MainActivationRowSource;
+// Read only by the exporter, which names the crate; it still hides the item from the glob.
+#[expect(
+    unused_imports,
+    reason = "the re-export hides a widened item from the public glob"
+)]
 pub(crate) use ibcmd_mssql_live::mssql_main_activation::{MAX_PLAN_BYTES, MAX_ROW_BYTES, MAX_ROWS};
 // Read only by a root test; outside tests it still hides the item from the glob.
 #[cfg_attr(not(test), allow(unused_imports))]

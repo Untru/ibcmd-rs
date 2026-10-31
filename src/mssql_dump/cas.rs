@@ -78,7 +78,7 @@ impl CasHash {
     }
 
     fn from_base64(value: &str) -> std::result::Result<Self, CasGraphError> {
-        let decoded = crate::module_blob::decode_base64_mime(value).ok_or_else(|| {
+        let decoded = ibcmd_1c_text::decode_base64_mime_lenient(value).ok_or_else(|| {
             CasGraphError::InvalidManifest("invalid CAS digest base64".to_owned())
         })?;
         let bytes: [u8; CAS_HASH_BYTES] = decoded.try_into().map_err(|decoded: Vec<u8>| {
@@ -861,7 +861,7 @@ mod tests {
     }
 
     fn base64(hash: CasHash) -> String {
-        crate::module_blob::encode_base64(hash.as_bytes())
+        ibcmd_1c_text::encode_base64(hash.as_bytes())
     }
 
     fn row(plain: &[u8]) -> CasStorageRow {

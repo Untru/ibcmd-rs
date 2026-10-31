@@ -1,6 +1,6 @@
 //! Own production-compiled Configuration controls; no copied native fixture.
 use super::*;
-use crate::metadata_model::{
+use ibcmd_metadata_model::metadata_model::{
     DescriptorContext,
     brace::{Brace, parse_row, serialize, serialize_row},
     compile_descriptor,
@@ -568,7 +568,7 @@ fn configuration_native_class_authority_does_not_claim_partial_sql_tuple() {
     // The same malformed coordinate under its REAL class is still an error,
     // rather than a per-field fallback. No native 0/6 enum is added.
     partial.as_list_mut().unwrap()[3].as_list_mut().unwrap()[0] =
-        Brace::uuid(crate::metadata_model::root::MODULE_GROUP_CLASS_ID);
+        Brace::uuid(ibcmd_metadata_model::metadata_model::root::MODULE_GROUP_CLASS_ID);
     for version in [
         InfobaseConfigSourceVersion::V2_20,
         InfobaseConfigSourceVersion::V2_21,

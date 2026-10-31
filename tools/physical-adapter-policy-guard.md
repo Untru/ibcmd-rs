@@ -487,3 +487,20 @@ engine's lock, formerly in `src/stored_objects.rs`, joins
 root's re-exports (`src/cli.rs`, `src/mssql/override_stage.rs`,
 `src/stored_objects.rs`) stay outside the slice. No baseline fingerprint
 changes. Every other record, the two stale ones included, is unchanged.
+
+The exporter's root-only preparation for its move into a crate (#559)
+names the crates behind the root's composite facades in
+`src/mssql_dump/`. Two `name-special-case` fingerprints of
+`src/mssql_dump/source_assets.rs` change around unchanged literals, count
+one each, because their statements now name
+`ibcmd_compiler_families::compiler::families::assets::{SourceAssetRegistry,
+SourceAssetRole}` instead of the root's `crate::compiler::families::assets`
+path: `"CommonPicture"`
+`48fe7234b66ec2400abe453b4f2a22a38006b065fb96abc1cb02267cec7f9817` to
+`6d545f63e45cfe84d27f1e6fd27333bb71e62190e4f3141d5788c2104215796f`, and
+`"XDTOPackage"`
+`9c39df022e204d74129422ad98ac80f42533f7b5973d0268de41ad8d3ba2bcd5` to
+`c43a0be548e99c0b625d852691ddf5ca677a9267c81afaa1bf43c4160d182f88`. The
+exporter's tests that call root-only code moved into
+`src/mssql_dump/root_tests.rs`, a test-only module. Every other record,
+the two stale ones included, is unchanged.
