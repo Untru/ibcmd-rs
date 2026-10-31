@@ -3,20 +3,23 @@
 //! (`note_export_platform`, `export_writes_default_button_importance`)
 //! keeps its one owner there.
 //!
-//! The crate made three of its crate-visible functions `#[doc(hidden)] pub`
-//! for the root (one only under its `test-fixtures` feature); the names
-//! below re-export each of them crate-visibly, which shadows the glob, so
-//! none of them joins the root's public API.
+//! The public names are listed, not globbed: the crate made three of its
+//! crate-visible functions `#[doc(hidden)] pub` for the root, one of them
+//! only under its `test-fixtures` feature, which the root's dev-dependency
+//! turns on for every test build (the integration tests' too). A glob would
+//! re-export that one publicly in those builds, where a crate-visible
+//! `#[cfg(test)]` re-export, active only in the root's unit tests, cannot
+//! shadow it. The three are re-exported crate-visibly instead.
 
-#![allow(
-    hidden_glob_reexports,
-    reason = "each crate-visible re-export hides a widened item from the public glob on purpose"
-)]
-
-pub use ibcmd_platform_spec::platform::*;
+pub use ibcmd_platform_spec::platform::{
+    CONSTANT_DEFAULT_BUTTON_IMPORTANCE, CONSTANT_FEATURE_PREFIX, CONSTANT_FORM_LAYOUT,
+    CONSTANT_XML_FORMAT, FEATURE_PALETTE_COLORS, FormLayout, PLATFORM_FLAG_HELP, Platform,
+    PlatformFeature, PlatformSpec, XmlFormat, export_writes_default_button_importance,
+    feature_uuid, for_xml_version, known, note_export_platform, parse, parse_flag,
+};
 
 pub(crate) use ibcmd_platform_spec::platform::{clear_export_platform, of_xml_dialect};
 // The tests' per-thread override of the export platform (the crate's
-// `test-fixtures` feature, which the root's dev-dependency turns on).
+// `test-fixtures` feature).
 #[cfg(test)]
 pub(crate) use ibcmd_platform_spec::platform::with_export_default_button_importance;
