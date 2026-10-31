@@ -81,7 +81,7 @@ use crate::module_blob::{
 use crate::module_blob::{HtmlPageOwner, html_page_storage_bytes};
 use crate::mssql_main_activation::{
     MainActivationDryRunReport, MainActivationExecutor, MainActivationMode, MainActivationPlan,
-    MainActivationSnapshot as MainPublicationSnapshot, MainStorageRow, prepare_main_activation_for,
+    MainActivationSnapshot as MainPublicationSnapshot, prepare_main_activation_for,
     render_main_activation_sql_with,
 };
 // The inputs of a main activation, at their old paths (`mssql_apply` reads the marker rule).
