@@ -445,3 +445,33 @@ its two `name-special-case` records, whose fingerprints change with it
 - `"root"`: `0c8ac485677fde8beacc402785e5960dcc28442d8eb3846e67575e2d53f1b32e`
   -> `6d47de36a6e7b6b493fc52ea5725d0fb774c94b196483bd62f9079f419200cd9`.
 Every other record, the two stale ones included, is unchanged.
+
+The exporter's prerequisite leaf modules of #559 join the slice in four
+crates; all of them were outside it:
+- `crates/ibcmd-dump-readers/src/` (already listed) takes
+  `metadata_owner_graph.rs`, formerly `src/metadata_owner_graph.rs`, with
+  41 records (45 occurrences: 19 `uuid-literal`, 22 `name-special-case`);
+  `external/brace.rs`, formerly `src/external/brace.rs`, with none; and
+  `extension/adoption.rs` (4 `name-special-case`, 1 `uuid-literal`) and
+  `extension/predefined.rs` (10 records, 12 occurrences: 5
+  `name-special-case`, 5 `xml-policy`), formerly under `src/extension/`.
+- `crates/ibcmd-sql/src/` (already listed) takes `runtime_evidence_schema.rs`,
+  formerly `src/runtime_evidence_schema.rs`, with 13 records (5
+  `name-special-case`, 8 `xml-policy`).
+- `crates/ibcmd-platform-spec/src/` (new) holds `legacy_version.rs`,
+  `platform/mod.rs` and `adapters/mssql_legacy.rs`, formerly at the same
+  paths under `src/`: `mssql_legacy.rs` with 1 `uuid-literal` (the nil
+  uuid), the others and `lib.rs` with none. `platform/tests.rs` is a
+  test-only module.
+- `crates/ibcmd-mssql-extensions/src/` (new) holds
+  `mssql_extension_stage.rs`, formerly `src/mssql_extension_stage.rs`, with
+  9 `name-special-case` records; `lib.rs` has none.
+Each record equals the one a scan of the same file at its old path in the
+commit before its move gives. The 19 `uuid-literal` records of
+`metadata_owner_graph.rs` differ from a scan of the file before #559's
+preparation of it, because the statements that hold them changed from
+`pub(crate) const` to `pub const`; they were not in the baseline before.
+The root's facades (`src/platform.rs`, `src/adapters/mod.rs`,
+`src/mssql_extension_stage.rs`, `src/external/mod.rs`,
+`src/extension/mod.rs`) stay outside the slice. No baseline fingerprint
+changes. Every other record, the two stale ones included, is unchanged.

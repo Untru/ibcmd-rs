@@ -3388,7 +3388,8 @@ fn export_direct_storage_rows_to_source(
     prepare_output_dir(output_dir, overwrite)?;
     // Reuses the same eligibility rule the streamed MSSQL pipeline uses
     // (`MssqlExportInventoryPlan::config_dump_info_eligible`,
-    // `src/adapters/mssql_legacy.rs`) instead of re-deriving the
+    // `crates/ibcmd-platform-spec/src/adapters/mssql_legacy.rs`) instead of
+    // re-deriving the
     // write_binary_rows/extract_module_text/extract_metadata_xml AND-chain
     // by hand: a `cf export` always processes the full, unfiltered storage
     // image as the current configuration (no row selection, metadata XML
