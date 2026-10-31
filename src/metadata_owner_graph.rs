@@ -10,21 +10,21 @@ use std::path::Path;
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{MetadataOrderError, order_metadata_features};
 
-pub(crate) const ROOT_DISCRIMINATOR: &str = "1";
+pub const ROOT_DISCRIMINATOR: &str = "1";
 
 /// Closed physical layouts for the Catalog root record.  The compact layout
 /// is a legacy source profile with no declared child collections; its tail
 /// has different field semantics from the complete owner graph.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CatalogRootLayout {
+pub enum CatalogRootLayout {
     CompleteOwnerGraph,
     CompactLegacy,
 }
 
-pub(crate) struct CatalogPhysicalSchema;
+pub struct CatalogPhysicalSchema;
 
 impl CatalogPhysicalSchema {
-    pub(crate) const fn root_layout(
+    pub const fn root_layout(
         root_field_count: usize,
         owner_field_count: usize,
     ) -> Option<CatalogRootLayout> {
@@ -37,16 +37,16 @@ impl CatalogPhysicalSchema {
 }
 
 /// Schema-neutral view of a physical owned-template reference.
-pub(crate) struct OwnedTemplateReference<'a> {
-    pub(crate) uuid: &'a str,
-    pub(crate) kind: &'a str,
-    pub(crate) relative_path: &'a Path,
-    pub(crate) canonical_reference: Option<String>,
+pub struct OwnedTemplateReference<'a> {
+    pub uuid: &'a str,
+    pub kind: &'a str,
+    pub relative_path: &'a Path,
+    pub canonical_reference: Option<String>,
 }
 
 /// Resolves a declared owned-template UUID collection into canonical child
 /// names without putting name/path policy in a physical adapter.
-pub(crate) fn resolve_owned_template_names(
+pub fn resolve_owned_template_names(
     owner_kind: &str,
     owner_folder: &str,
     owner_name: &str,
@@ -105,7 +105,7 @@ pub(crate) fn resolve_owned_template_names(
 /// the five `Auto` tasks hold `0` there and the one `DontUse` task holds `1`,
 /// while slot 43, the slot that was decoding it, tracks `NumberAllowedLength`
 /// instead (`0`/`Fixed` for the five, `1`/`Variable` for `БюджетнаяЗадача`).
-pub(crate) fn task_reserved_tail_is_zero(fields: &[&str]) -> bool {
+pub fn task_reserved_tail_is_zero(fields: &[&str]) -> bool {
     fields
         .get(49..52)
         .is_some_and(|reserved| reserved.iter().all(|field| field.trim() == "0"))
@@ -114,7 +114,7 @@ pub(crate) fn task_reserved_tail_is_zero(fields: &[&str]) -> bool {
 // Characteristics vocabulary is schema data recovered from the EDT model.
 // The physical adapter consumes these closed tables and keeps parsing logic
 // separate from the canonical model and the XML projection.
-pub(crate) const CHARACTERISTICS_STAGE_TOKENS: [&str; 8] = [
+pub const CHARACTERISTICS_STAGE_TOKENS: [&str; 8] = [
     "characteristics_outer",
     "characteristics_count",
     "characteristics_typed_item",
@@ -124,7 +124,7 @@ pub(crate) const CHARACTERISTICS_STAGE_TOKENS: [&str; 8] = [
     "characteristics_filter_value",
     "characteristics_canonical_model",
 ];
-pub(crate) const CHARACTERISTICS_ROLE_TOKENS: [&str; 13] = [
+pub const CHARACTERISTICS_ROLE_TOKENS: [&str; 13] = [
     "collection",
     "types_from",
     "values_from",
@@ -139,7 +139,7 @@ pub(crate) const CHARACTERISTICS_ROLE_TOKENS: [&str; 13] = [
     "multiple_values_key_field",
     "multiple_values_order_field",
 ];
-pub(crate) const CHARACTERISTICS_REASON_TOKENS: [&str; 9] = [
+pub const CHARACTERISTICS_REASON_TOKENS: [&str; 9] = [
     "invalid_envelope",
     "invalid_count",
     "invalid_type_tag",
@@ -150,7 +150,7 @@ pub(crate) const CHARACTERISTICS_REASON_TOKENS: [&str; 9] = [
     "unsupported_filter_union",
     "invalid_canonical_model",
 ];
-pub(crate) const CHARACTERISTICS_REFERENCE_KIND_TOKENS: [&str; 4] = [
+pub const CHARACTERISTICS_REFERENCE_KIND_TOKENS: [&str; 4] = [
     "source_uuid",
     "field_uuid",
     "standard_attribute",
@@ -158,7 +158,7 @@ pub(crate) const CHARACTERISTICS_REFERENCE_KIND_TOKENS: [&str; 4] = [
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CharacteristicsFieldRole {
+pub enum CharacteristicsFieldRole {
     Collection,
     TypesFrom,
     ValuesFrom,
@@ -175,13 +175,13 @@ pub(crate) enum CharacteristicsFieldRole {
 }
 
 impl CharacteristicsFieldRole {
-    pub(crate) const fn token(self) -> &'static str {
+    pub const fn token(self) -> &'static str {
         CHARACTERISTICS_ROLE_TOKENS[self as usize]
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CharacteristicsTagKind {
+pub enum CharacteristicsTagKind {
     Item,
     StringFill,
     Boolean,
@@ -189,39 +189,39 @@ pub(crate) enum CharacteristicsTagKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CharacteristicsSentinelKind {
+pub enum CharacteristicsSentinelKind {
     Undefined,
     Empty,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CharacteristicsSourceShape {
+pub enum CharacteristicsSourceShape {
     Object,
     TabularSection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CharacteristicsStandardAttributeKind {
+pub enum CharacteristicsStandardAttributeKind {
     Ref,
     FamilyTable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CatalogInputHistoryLayout {
+pub enum CatalogInputHistoryLayout {
     Exact56,
     Legacy,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CatalogDataHistoryMode {
+pub enum CatalogDataHistoryMode {
     Use,
     DontUse,
 }
 
-pub(crate) struct CharacteristicsPhysicalSchema;
+pub struct CharacteristicsPhysicalSchema;
 
 impl CharacteristicsPhysicalSchema {
-    pub(crate) fn outer(discriminator: Option<usize>, field_count: usize) -> bool {
+    pub fn outer(discriminator: Option<usize>, field_count: usize) -> bool {
         discriminator == Some(0) && field_count == 2
     }
 
@@ -236,7 +236,7 @@ impl CharacteristicsPhysicalSchema {
     /// files spell `MultipleValuesUseField`, `MultipleValuesKeyField` and
     /// `MultipleValuesOrderField` as `-1`, and the layout-1 file spells
     /// `DataPathField` as `-1` too.
-    pub(crate) const fn body_arity(discriminator: Option<usize>) -> Option<usize> {
+    pub const fn body_arity(discriminator: Option<usize>) -> Option<usize> {
         match discriminator {
             Some(1) => Some(9),
             Some(3) => Some(10),
@@ -245,14 +245,14 @@ impl CharacteristicsPhysicalSchema {
         }
     }
 
-    pub(crate) fn body(discriminator: Option<usize>, field_count: usize) -> bool {
+    pub fn body(discriminator: Option<usize>, field_count: usize) -> bool {
         Self::body_arity(discriminator) == Some(field_count)
     }
 
     /// Catalog layout 57 stores its legacy choice-history state in the slot
     /// later reused for Characteristics. The exact `{0,{2,{0},{1}}}` profile
     /// means that no canonical Characteristics are declared.
-    pub(crate) fn catalog_57_legacy_empty(
+    pub fn catalog_57_legacy_empty(
         owner_code: &str,
         outer_discriminator: Option<usize>,
         outer_field_count: usize,
@@ -270,18 +270,15 @@ impl CharacteristicsPhysicalSchema {
             && second_marker == Some(1)
     }
 
-    pub(crate) fn catalog_compact_reference_collection_is_empty(
-        field_index: usize,
-        value: &str,
-    ) -> bool {
+    pub fn catalog_compact_reference_collection_is_empty(field_index: usize, value: &str) -> bool {
         value == "{0}" || (field_index == 54 && value == "0")
     }
 
-    pub(crate) fn catalog_compact_input_modes_are_default(value: &str) -> bool {
+    pub fn catalog_compact_input_modes_are_default(value: &str) -> bool {
         value == "0"
     }
 
-    pub(crate) fn catalog_input_history_layout(
+    pub fn catalog_input_history_layout(
         owner_code: &str,
         field_count: usize,
     ) -> Option<CatalogInputHistoryLayout> {
@@ -292,7 +289,7 @@ impl CharacteristicsPhysicalSchema {
         }
     }
 
-    pub(crate) fn catalog_data_history_mode(value: &str) -> Option<CatalogDataHistoryMode> {
+    pub fn catalog_data_history_mode(value: &str) -> Option<CatalogDataHistoryMode> {
         match value {
             "1" => Some(CatalogDataHistoryMode::Use),
             "2" => Some(CatalogDataHistoryMode::DontUse),
@@ -300,7 +297,7 @@ impl CharacteristicsPhysicalSchema {
         }
     }
 
-    pub(crate) fn source(discriminator: Option<usize>, field_count: usize) -> bool {
+    pub fn source(discriminator: Option<usize>, field_count: usize) -> bool {
         discriminator == Some(1) && field_count == 2
     }
 
@@ -310,20 +307,16 @@ impl CharacteristicsPhysicalSchema {
     /// `{0,<payload>}` -- observed on every one of the eight fields of `uh`'s
     /// `Catalogs/ДопАналитикаРасхожденийВГО`, whose native XML names the
     /// payloads (`-1` five times, the `-2` standard attribute once).
-    pub(crate) fn field(
-        discriminator: Option<usize>,
-        tail: Option<usize>,
-        field_count: usize,
-    ) -> bool {
+    pub fn field(discriminator: Option<usize>, tail: Option<usize>, field_count: usize) -> bool {
         (discriminator == Some(1) && tail == Some(0) && field_count == 3)
             || (discriminator == Some(0) && tail.is_none() && field_count == 2)
     }
 
-    pub(crate) fn uuid_field(kind: Option<usize>, field_count: usize) -> bool {
+    pub fn uuid_field(kind: Option<usize>, field_count: usize) -> bool {
         kind == Some(0) && field_count == 2
     }
 
-    pub(crate) fn tag(decoded: &str) -> Option<CharacteristicsTagKind> {
+    pub fn tag(decoded: &str) -> Option<CharacteristicsTagKind> {
         match decoded {
             "#" => Some(CharacteristicsTagKind::Item),
             "S" => Some(CharacteristicsTagKind::StringFill),
@@ -333,7 +326,7 @@ impl CharacteristicsPhysicalSchema {
         }
     }
 
-    pub(crate) const fn sentinel(marker: Option<i32>) -> Option<CharacteristicsSentinelKind> {
+    pub const fn sentinel(marker: Option<i32>) -> Option<CharacteristicsSentinelKind> {
         match marker {
             Some(-1) => Some(CharacteristicsSentinelKind::Undefined),
             Some(0) => Some(CharacteristicsSentinelKind::Empty),
@@ -341,7 +334,7 @@ impl CharacteristicsPhysicalSchema {
         }
     }
 
-    pub(crate) fn source_shape(source: &str) -> Option<CharacteristicsSourceShape> {
+    pub fn source_shape(source: &str) -> Option<CharacteristicsSourceShape> {
         match source.split('.').collect::<Vec<_>>().as_slice() {
             [family, owner] if !family.is_empty() && !owner.is_empty() => {
                 Some(CharacteristicsSourceShape::Object)
@@ -360,7 +353,7 @@ impl CharacteristicsPhysicalSchema {
     /// owner's `Ref`; an object source exposes its family's whole
     /// standard-attribute table. Which marker spells `Ref` is not decided here
     /// -- it comes from the source family's own table.
-    pub(crate) fn standard_attribute(
+    pub fn standard_attribute(
         shape: CharacteristicsSourceShape,
         name: &str,
     ) -> Option<CharacteristicsStandardAttributeKind> {
@@ -374,7 +367,7 @@ impl CharacteristicsPhysicalSchema {
         }
     }
 
-    pub(crate) fn standard_attribute_path(source: &str, name: &str) -> String {
+    pub fn standard_attribute_path(source: &str, name: &str) -> String {
         let mut path =
             String::with_capacity(source.len() + ".StandardAttribute.".len() + name.len());
         path.push_str(source);
@@ -383,11 +376,11 @@ impl CharacteristicsPhysicalSchema {
         path
     }
 
-    pub(crate) fn standard_ref_path(source: &str) -> String {
+    pub fn standard_ref_path(source: &str) -> String {
         Self::standard_attribute_path(source, "Ref")
     }
 
-    pub(crate) fn owns_field(source: &str, field: &str) -> bool {
+    pub fn owns_field(source: &str, field: &str) -> bool {
         field
             .strip_prefix(source)
             .is_some_and(|suffix| suffix.starts_with('.') && suffix.len() > 1)
@@ -395,166 +388,161 @@ impl CharacteristicsPhysicalSchema {
 }
 
 /// Exact lexical facts for CCT root properties that gate Characteristics.
-pub(crate) struct CctPhysicalSchema;
+pub struct CctPhysicalSchema;
 
 impl CctPhysicalSchema {
-    pub(crate) fn zero_pair(first: &str, second: &str) -> bool {
+    pub fn zero_pair(first: &str, second: &str) -> bool {
         first == "0" && second == "0"
     }
 
-    pub(crate) fn binary_flag(value: &str) -> bool {
+    pub fn binary_flag(value: &str) -> bool {
         matches!(value, "0" | "1")
     }
 }
 
 /// Exact lexical facts for DataProcessor type-pattern wrappers.
-pub(crate) struct DataProcessorPhysicalSchema;
+pub struct DataProcessorPhysicalSchema;
 
 impl DataProcessorPhysicalSchema {
-    pub(crate) fn reference_pattern(value: &str) -> bool {
+    pub fn reference_pattern(value: &str) -> bool {
         value == r#""Pattern""#
     }
 
-    pub(crate) fn reference_member(value: &str) -> bool {
+    pub fn reference_member(value: &str) -> bool {
         value == r##""#""##
     }
 }
 
-pub(crate) struct FilterCriterionPhysicalSchema;
+pub struct FilterCriterionPhysicalSchema;
 
 impl FilterCriterionPhysicalSchema {
-    pub(crate) fn root(value: &str) -> bool {
+    pub fn root(value: &str) -> bool {
         value == "1"
     }
 
-    pub(crate) fn zero(value: &str) -> bool {
+    pub fn zero(value: &str) -> bool {
         value == "0"
     }
 
-    pub(crate) fn two(value: &str) -> bool {
+    pub fn two(value: &str) -> bool {
         value == "2"
     }
 
-    pub(crate) fn owner(value: &str) -> bool {
+    pub fn owner(value: &str) -> bool {
         value == "14"
     }
 
-    pub(crate) fn pattern(value: &str) -> bool {
+    pub fn pattern(value: &str) -> bool {
         value == r#""Pattern""#
     }
 
-    pub(crate) fn reference_member(value: &str) -> bool {
+    pub fn reference_member(value: &str) -> bool {
         value == r##""#""##
     }
 }
 
-pub(crate) struct FilterCriterionDiagnosticTokens;
+pub struct FilterCriterionDiagnosticTokens;
 
 impl FilterCriterionDiagnosticTokens {
-    pub(crate) const fn root_stage() -> &'static str {
+    pub const fn root_stage() -> &'static str {
         "filter_criterion_root"
     }
 
-    pub(crate) const fn owner_stage() -> &'static str {
+    pub const fn owner_stage() -> &'static str {
         "filter_criterion_owner"
     }
 
-    pub(crate) const fn pattern_stage() -> &'static str {
+    pub const fn pattern_stage() -> &'static str {
         "filter_criterion_pattern"
     }
 
-    pub(crate) const fn content_stage() -> &'static str {
+    pub const fn content_stage() -> &'static str {
         "filter_criterion_content"
     }
 
-    pub(crate) const fn tail_stage() -> &'static str {
+    pub const fn tail_stage() -> &'static str {
         "filter_criterion_tail"
     }
 
-    pub(crate) const fn resolver_stage() -> &'static str {
+    pub const fn resolver_stage() -> &'static str {
         "filter_criterion_resolver"
     }
 
-    pub(crate) const fn shape() -> &'static str {
+    pub const fn shape() -> &'static str {
         "shape"
     }
 
-    pub(crate) const fn count() -> &'static str {
+    pub const fn count() -> &'static str {
         "count"
     }
 
-    pub(crate) const fn uuid_syntax() -> &'static str {
+    pub const fn uuid_syntax() -> &'static str {
         "uuid_syntax"
     }
 
-    pub(crate) const fn zero_uuid() -> &'static str {
+    pub const fn zero_uuid() -> &'static str {
         "zero_uuid"
     }
 
-    pub(crate) const fn duplicate_uuid() -> &'static str {
+    pub const fn duplicate_uuid() -> &'static str {
         "duplicate_uuid"
     }
 
-    pub(crate) const fn header_mismatch() -> &'static str {
+    pub const fn header_mismatch() -> &'static str {
         "header_mismatch"
     }
 
-    pub(crate) const fn missing_reference() -> &'static str {
+    pub const fn missing_reference() -> &'static str {
         "missing_reference"
     }
 
-    pub(crate) const fn ambiguous_reference() -> &'static str {
+    pub const fn ambiguous_reference() -> &'static str {
         "ambiguous_reference"
     }
 
-    pub(crate) const fn invalid_reference() -> &'static str {
+    pub const fn invalid_reference() -> &'static str {
         "invalid_reference"
     }
 
-    pub(crate) const fn duplicate_reference() -> &'static str {
+    pub const fn duplicate_reference() -> &'static str {
         "duplicate_reference"
     }
 
-    pub(crate) const fn pattern_role() -> &'static str {
+    pub const fn pattern_role() -> &'static str {
         "pattern"
     }
 
-    pub(crate) const fn content_role() -> &'static str {
+    pub const fn content_role() -> &'static str {
         "content"
     }
 
-    pub(crate) const fn form_role() -> &'static str {
+    pub const fn form_role() -> &'static str {
         "form"
     }
 
-    pub(crate) const fn command_role() -> &'static str {
+    pub const fn command_role() -> &'static str {
         "command"
     }
 }
 
-pub(crate) const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
-pub(crate) const CATALOG_COMMAND_COLLECTION_UUID: &str = "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6";
-pub(crate) const CATALOG_TABULAR_SECTION_COLLECTION_UUID: &str =
-    "932159f9-95b2-4e76-a8dd-8849fe5c5ded";
-pub(crate) const CATALOG_FORM_COLLECTION_UUID: &str = "fdf816d2-1ead-11d5-b975-0050bae0a95d";
-pub(crate) const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f80211";
-pub(crate) const DOCUMENT_TABULAR_SECTION_COLLECTION_UUID: &str =
-    "21c53e09-8950-4b5e-a6a0-1054f1bbc274";
-pub(crate) const DOCUMENT_COMMAND_COLLECTION_UUID: &str = "b544fc6a-2ba3-4885-8fb2-cb289fb6d65e";
-pub(crate) const DOCUMENT_FORM_COLLECTION_UUID: &str = "fb880e93-47d7-4127-9357-a20e69c17545";
-pub(crate) const CCT_ATTRIBUTE_COLLECTION_UUID: &str = "31182525-9346-4595-81f8-6f91a72ebe06";
-pub(crate) const CCT_TABULAR_SECTION_COLLECTION_UUID: &str = "54e36536-7863-42fd-bea3-c5edd3122fdc";
-pub(crate) const CCT_COMMAND_COLLECTION_UUID: &str = "95b5e1d4-abfa-4a16-818d-a5b07b7d3f73";
-pub(crate) const CCT_FORM_COLLECTION_UUID: &str = "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94";
-pub(crate) const BUSINESS_PROCESS_FORM_COLLECTION_UUID: &str =
-    "3f7a8120-b71a-4265-98bf-4d9bc09b7719";
-pub(crate) const BUSINESS_PROCESS_COMMAND_COLLECTION_UUID: &str =
-    "7a3e533c-f232-40d5-a932-6a311d2480bf";
-pub(crate) const BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID: &str =
-    "87c988de-ecbf-413b-87b0-b9516df05e28";
-pub(crate) const BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID: &str =
+pub const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
+pub const CATALOG_COMMAND_COLLECTION_UUID: &str = "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6";
+pub const CATALOG_TABULAR_SECTION_COLLECTION_UUID: &str = "932159f9-95b2-4e76-a8dd-8849fe5c5ded";
+pub const CATALOG_FORM_COLLECTION_UUID: &str = "fdf816d2-1ead-11d5-b975-0050bae0a95d";
+pub const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f80211";
+pub const DOCUMENT_TABULAR_SECTION_COLLECTION_UUID: &str = "21c53e09-8950-4b5e-a6a0-1054f1bbc274";
+pub const DOCUMENT_COMMAND_COLLECTION_UUID: &str = "b544fc6a-2ba3-4885-8fb2-cb289fb6d65e";
+pub const DOCUMENT_FORM_COLLECTION_UUID: &str = "fb880e93-47d7-4127-9357-a20e69c17545";
+pub const CCT_ATTRIBUTE_COLLECTION_UUID: &str = "31182525-9346-4595-81f8-6f91a72ebe06";
+pub const CCT_TABULAR_SECTION_COLLECTION_UUID: &str = "54e36536-7863-42fd-bea3-c5edd3122fdc";
+pub const CCT_COMMAND_COLLECTION_UUID: &str = "95b5e1d4-abfa-4a16-818d-a5b07b7d3f73";
+pub const CCT_FORM_COLLECTION_UUID: &str = "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94";
+pub const BUSINESS_PROCESS_FORM_COLLECTION_UUID: &str = "3f7a8120-b71a-4265-98bf-4d9bc09b7719";
+pub const BUSINESS_PROCESS_COMMAND_COLLECTION_UUID: &str = "7a3e533c-f232-40d5-a932-6a311d2480bf";
+pub const BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID: &str = "87c988de-ecbf-413b-87b0-b9516df05e28";
+pub const BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID: &str =
     "a3fe6537-d787-40f7-8a06-419d2f0c1cfd";
-pub(crate) const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
+pub const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
 /// A filter criterion's two owned-child collections, in the order its record
 /// writes them.
 ///
@@ -566,13 +554,11 @@ pub(crate) const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9
 /// `ПротоколРассылкиПоАналитическойПодписке` and `ВзаимодействияКонтакта`,
 /// and БСП 3.1.12.297's `СвязанныеДокументы` -- the same pair opens the
 /// tail in every one of them, whether the collections are populated or empty.
-pub(crate) const FILTER_CRITERION_FORM_COLLECTION_UUID: &str =
-    "00867c40-06b1-11d6-a3c7-0050bae0a776";
-pub(crate) const FILTER_CRITERION_COMMAND_COLLECTION_UUID: &str =
-    "23fa3b84-220a-40e9-8331-e588bed87f7d";
+pub const FILTER_CRITERION_FORM_COLLECTION_UUID: &str = "00867c40-06b1-11d6-a3c7-0050bae0a776";
+pub const FILTER_CRITERION_COMMAND_COLLECTION_UUID: &str = "23fa3b84-220a-40e9-8331-e588bed87f7d";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OwnerGraphFamily {
+pub enum OwnerGraphFamily {
     Catalog,
     Document,
     BusinessProcess,
@@ -585,7 +571,7 @@ pub(crate) enum OwnerGraphFamily {
 /// carries the property but is not decoded through the owner graph at all, and
 /// giving it an owner-graph layout it does not have would be inventing one.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CharacteristicsOwnerFamily {
+pub enum CharacteristicsOwnerFamily {
     Catalog,
     Document,
     ChartOfCharacteristicTypes,
@@ -596,7 +582,7 @@ pub(crate) enum CharacteristicsOwnerFamily {
 }
 
 impl CharacteristicsOwnerFamily {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Catalog => "Catalog",
             Self::Document => "Document",
@@ -625,7 +611,7 @@ impl From<OwnerGraphFamily> for CharacteristicsOwnerFamily {
 /// The physical ordering belongs to the native record layout, but consumers
 /// must use this role instead of repeating a family-specific numeric index.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) enum OwnerCollectionRole {
+pub enum OwnerCollectionRole {
     Template,
     Command,
     TabularSection,
@@ -634,7 +620,7 @@ pub(crate) enum OwnerCollectionRole {
 }
 
 impl OwnerCollectionRole {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Template => "template",
             Self::Command => "command",
@@ -646,17 +632,17 @@ impl OwnerCollectionRole {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct OwnerCollectionLayout {
-    pub(crate) role: OwnerCollectionRole,
-    pub(crate) index: usize,
-    pub(crate) marker: &'static str,
+pub struct OwnerCollectionLayout {
+    pub role: OwnerCollectionRole,
+    pub index: usize,
+    pub marker: &'static str,
     /// Stable source vocabulary used by diagnostics. It deliberately carries
     /// no native payload or UUID.
-    pub(crate) provenance: &'static str,
+    pub provenance: &'static str,
 }
 
 impl OwnerGraphFamily {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Catalog => "Catalog",
             Self::Document => "Document",
@@ -665,7 +651,7 @@ impl OwnerGraphFamily {
         }
     }
 
-    pub(crate) const fn layout(self) -> OwnerGraphLayout {
+    pub const fn layout(self) -> OwnerGraphLayout {
         match self {
             Self::Catalog => OwnerGraphLayout {
                 owner_field_count: 61,
@@ -754,51 +740,48 @@ impl OwnerGraphFamily {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OwnerHeaderEncoding {
+pub enum OwnerHeaderEncoding {
     Direct,
     Wrapped,
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct GeneratedTypeLayout {
-    pub(crate) type_slot: usize,
-    pub(crate) value_slot: usize,
+pub struct GeneratedTypeLayout {
+    pub type_slot: usize,
+    pub value_slot: usize,
     name_prefix: &'static str,
     xml_category: &'static str,
     order_feature: &'static str,
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct OwnerGraphLayout {
-    pub(crate) owner_field_count: usize,
-    pub(crate) owner_discriminators: &'static [&'static str],
-    pub(crate) owner_header_slot: usize,
-    pub(crate) owner_header_encoding: OwnerHeaderEncoding,
-    pub(crate) owner_header_unique: bool,
-    pub(crate) owner_reserved_fields: &'static [(usize, &'static str)],
-    pub(crate) generated_types: &'static [GeneratedTypeLayout],
-    pub(crate) root_collection_count_token: &'static str,
-    pub(crate) collection_markers: &'static [&'static str],
+pub struct OwnerGraphLayout {
+    pub owner_field_count: usize,
+    pub owner_discriminators: &'static [&'static str],
+    pub owner_header_slot: usize,
+    pub owner_header_encoding: OwnerHeaderEncoding,
+    pub owner_header_unique: bool,
+    pub owner_reserved_fields: &'static [(usize, &'static str)],
+    pub generated_types: &'static [GeneratedTypeLayout],
+    pub root_collection_count_token: &'static str,
+    pub collection_markers: &'static [&'static str],
     collection_layouts: &'static [OwnerCollectionLayout],
     produced_types_classifier: &'static str,
 }
 
 impl OwnerGraphLayout {
-    pub(crate) fn collection_layout(
-        self,
-        role: OwnerCollectionRole,
-    ) -> Option<OwnerCollectionLayout> {
+    pub fn collection_layout(self, role: OwnerCollectionRole) -> Option<OwnerCollectionLayout> {
         self.collection_layouts
             .iter()
             .copied()
             .find(|layout| layout.role == role)
     }
 
-    pub(crate) fn collection_layout_at(self, index: usize) -> Option<OwnerCollectionLayout> {
+    pub fn collection_layout_at(self, index: usize) -> Option<OwnerCollectionLayout> {
         self.collection_layouts.get(index).copied()
     }
 
-    pub(crate) fn collection_layouts(self) -> &'static [OwnerCollectionLayout] {
+    pub fn collection_layouts(self) -> &'static [OwnerCollectionLayout] {
         self.collection_layouts
     }
 }
@@ -1126,7 +1109,7 @@ const CCT_GENERATED_TYPES: &[GeneratedTypeLayout] = &[
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OwnerIdentityRole {
+pub enum OwnerIdentityRole {
     Root,
     GeneratedType,
     GeneratedValue,
@@ -1135,7 +1118,7 @@ pub(crate) enum OwnerIdentityRole {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum GeneratedIdentityRole {
+pub enum GeneratedIdentityRole {
     Type,
     Value,
 }
@@ -1150,7 +1133,7 @@ impl From<GeneratedIdentityRole> for OwnerIdentityRole {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct OwnerIdentityLedger {
+pub struct OwnerIdentityLedger {
     by_uuid: BTreeMap<String, OwnerIdentityRole>,
     /// Command value UUIDs are native type/value proofs, not owned child
     /// identities: several commands are allowed to share one.  Keep them in
@@ -1160,21 +1143,21 @@ pub(crate) struct OwnerIdentityLedger {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct OwnerIdentityCollision {
-    pub(crate) previous: OwnerIdentityRole,
-    pub(crate) field_index: usize,
-    pub(crate) collection_role: Option<OwnerCollectionRole>,
+pub struct OwnerIdentityCollision {
+    pub previous: OwnerIdentityRole,
+    pub field_index: usize,
+    pub collection_role: Option<OwnerCollectionRole>,
 }
 
 impl OwnerIdentityLedger {
-    pub(crate) fn new(root_uuid: String) -> Self {
+    pub fn new(root_uuid: String) -> Self {
         Self {
             by_uuid: BTreeMap::from([(root_uuid.to_ascii_lowercase(), OwnerIdentityRole::Root)]),
             command_value_ids: BTreeSet::new(),
         }
     }
 
-    pub(crate) fn insert_generated(
+    pub fn insert_generated(
         &mut self,
         uuid: String,
         field_index: usize,
@@ -1202,7 +1185,7 @@ impl OwnerIdentityLedger {
     /// Records a UUID belonging to a child record. The collection role is
     /// retained only as typed provenance for a collision; raw UUID values are
     /// never exposed by the error.
-    pub(crate) fn insert_child(
+    pub fn insert_child(
         &mut self,
         uuid: String,
         field_index: usize,
@@ -1227,11 +1210,11 @@ impl OwnerIdentityLedger {
         Ok(())
     }
 
-    pub(crate) fn contains(&self, uuid: &str) -> bool {
+    pub fn contains(&self, uuid: &str) -> bool {
         self.by_uuid.contains_key(&uuid.to_ascii_lowercase())
     }
 
-    pub(crate) fn observe_command_value(
+    pub fn observe_command_value(
         &mut self,
         uuid: String,
         field_index: usize,
@@ -1249,7 +1232,7 @@ impl OwnerIdentityLedger {
         Ok(())
     }
 
-    pub(crate) fn generated_identities(&self) -> BTreeSet<String> {
+    pub fn generated_identities(&self) -> BTreeSet<String> {
         self.by_uuid
             .iter()
             .filter_map(|(uuid, role)| {
@@ -1264,7 +1247,7 @@ impl OwnerIdentityLedger {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct DecodedGeneratedType {
+pub struct DecodedGeneratedType {
     name: String,
     category: &'static str,
     type_id: String,
@@ -1272,7 +1255,7 @@ pub(crate) struct DecodedGeneratedType {
 }
 
 impl DecodedGeneratedType {
-    pub(crate) fn new(
+    pub fn new(
         layout: GeneratedTypeLayout,
         owner_name: &str,
         type_id: String,
@@ -1286,23 +1269,23 @@ impl DecodedGeneratedType {
         }
     }
 
-    pub(crate) fn into_parts(self) -> (String, &'static str, String, String) {
+    pub fn into_parts(self) -> (String, &'static str, String, String) {
         (self.name, self.category, self.type_id, self.value_id)
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct DecodedOwnerCollection<'a> {
-    pub(crate) items: Vec<&'a str>,
+pub struct DecodedOwnerCollection<'a> {
+    pub items: Vec<&'a str>,
     provenance: OwnerCollectionProvenance,
 }
 
 impl<'a> DecodedOwnerCollection<'a> {
-    pub(crate) fn new(items: Vec<&'a str>, provenance: OwnerCollectionProvenance) -> Self {
+    pub fn new(items: Vec<&'a str>, provenance: OwnerCollectionProvenance) -> Self {
         Self { items, provenance }
     }
 
-    pub(crate) const fn provenance(&self) -> OwnerCollectionProvenance {
+    pub const fn provenance(&self) -> OwnerCollectionProvenance {
         self.provenance
     }
 }
@@ -1311,15 +1294,15 @@ impl<'a> DecodedOwnerCollection<'a> {
 /// schema-side contract retained by each `DecodedOwnerCollection`; it contains
 /// no raw collection fields or UUIDs.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct OwnerCollectionProvenance {
-    pub(crate) role: OwnerCollectionRole,
-    pub(crate) index: usize,
-    pub(crate) marker: &'static str,
-    pub(crate) source: &'static str,
+pub struct OwnerCollectionProvenance {
+    pub role: OwnerCollectionRole,
+    pub index: usize,
+    pub marker: &'static str,
+    pub source: &'static str,
 }
 
 impl OwnerCollectionProvenance {
-    pub(crate) const fn from_layout(layout: OwnerCollectionLayout) -> Self {
+    pub const fn from_layout(layout: OwnerCollectionLayout) -> Self {
         Self {
             role: layout.role,
             index: layout.index,
@@ -1329,18 +1312,18 @@ impl OwnerCollectionProvenance {
     }
 }
 
-pub(crate) struct DecodedOwnerGraph<'a> {
-    pub(crate) generated_types: Vec<DecodedGeneratedType>,
-    pub(crate) identities: OwnerIdentityLedger,
-    pub(crate) owner_fields: Vec<&'a str>,
-    pub(crate) collections: Vec<DecodedOwnerCollection<'a>>,
+pub struct DecodedOwnerGraph<'a> {
+    pub generated_types: Vec<DecodedGeneratedType>,
+    pub identities: OwnerIdentityLedger,
+    pub owner_fields: Vec<&'a str>,
+    pub collections: Vec<DecodedOwnerCollection<'a>>,
 }
 
 impl<'a> DecodedOwnerGraph<'a> {
     /// Resolves an owner child collection by semantic role. This remains
     /// fail-closed while the physical adapter is migrated: the declared index
     /// must exist, and its marker is available from the same schema layout.
-    pub(crate) fn collection(
+    pub fn collection(
         &self,
         family: OwnerGraphFamily,
         role: OwnerCollectionRole,
@@ -1363,7 +1346,7 @@ impl<'a> DecodedOwnerGraph<'a> {
             .ok_or_else(|| OwnerGraphDiagnosticEvidence::role_mismatch(role, layout.index))
     }
 
-    pub(crate) fn collection_provenance(
+    pub fn collection_provenance(
         family: OwnerGraphFamily,
         role: OwnerCollectionRole,
     ) -> Result<OwnerCollectionProvenance, OwnerGraphDiagnosticEvidence> {
@@ -1375,7 +1358,7 @@ impl<'a> DecodedOwnerGraph<'a> {
     }
 }
 
-pub(crate) fn order_generated_types(
+pub fn order_generated_types(
     family: OwnerGraphFamily,
     generated_types: Vec<DecodedGeneratedType>,
 ) -> Result<Vec<DecodedGeneratedType>, MetadataOrderError> {
@@ -1421,14 +1404,14 @@ pub(crate) fn order_generated_types(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OwnerGraphDiagnosticClass {
+pub enum OwnerGraphDiagnosticClass {
     Malformed,
     Unsupported,
     Invariant,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OwnerGraphReference {
+pub enum OwnerGraphReference {
     Root,
     CollectionMarker,
     ChildUuid,
@@ -1458,7 +1441,7 @@ const OWNER_GRAPH_OWNED_CHILD_REASON_TOKENS: [&str; 8] = [
 /// Redacted, closed vocabulary for post-root owned-child resolution failures.
 #[repr(usize)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OwnerGraphOwnedChildReason {
+pub enum OwnerGraphOwnedChildReason {
     Missing,
     Ambiguous,
     Unexpected,
@@ -1470,13 +1453,13 @@ pub(crate) enum OwnerGraphOwnedChildReason {
 }
 
 impl OwnerGraphOwnedChildReason {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         OWNER_GRAPH_OWNED_CHILD_REASON_TOKENS[self as usize]
     }
 }
 
 impl OwnerGraphReference {
-    pub(crate) const fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Root => "root_uuid",
             Self::CollectionMarker => "collection_marker",
@@ -1492,7 +1475,7 @@ impl OwnerGraphReference {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OwnerGraphDiagnosticKind {
+pub enum OwnerGraphDiagnosticKind {
     RootBracedShape,
     RootShape,
     RootCollectionCount,
@@ -1529,7 +1512,7 @@ const OWNER_GRAPH_OWNED_CHILD_REFERENCE_FACTS: (OwnerGraphDiagnosticClass, &str,
 );
 
 impl OwnerGraphDiagnosticKind {
-    pub(crate) const fn facts(self) -> (OwnerGraphDiagnosticClass, &'static str, &'static str) {
+    pub const fn facts(self) -> (OwnerGraphDiagnosticClass, &'static str, &'static str) {
         use OwnerGraphDiagnosticClass::{Invariant, Malformed, Unsupported};
         match self {
             Self::RootBracedShape => (Malformed, "owner_graph_root", "root_braced_shape"),
@@ -1591,16 +1574,16 @@ impl OwnerGraphDiagnosticKind {
 /// diagnostic. It intentionally excludes native raw fields, names and UUID
 /// values: callers receive only stable schema facts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct OwnerGraphDiagnosticEvidence {
-    pub(crate) kind: OwnerGraphDiagnosticKind,
-    pub(crate) reference: Option<OwnerGraphReference>,
-    pub(crate) field_index: Option<usize>,
-    pub(crate) collection_index: Option<usize>,
-    pub(crate) collection_role: Option<OwnerCollectionRole>,
+pub struct OwnerGraphDiagnosticEvidence {
+    pub kind: OwnerGraphDiagnosticKind,
+    pub reference: Option<OwnerGraphReference>,
+    pub field_index: Option<usize>,
+    pub collection_index: Option<usize>,
+    pub collection_role: Option<OwnerCollectionRole>,
 }
 
 impl OwnerGraphDiagnosticEvidence {
-    pub(crate) const fn missing_collection(role: OwnerCollectionRole) -> Self {
+    pub const fn missing_collection(role: OwnerCollectionRole) -> Self {
         Self {
             kind: OwnerGraphDiagnosticKind::MissingCollection,
             reference: Some(OwnerGraphReference::CollectionMarker),
@@ -1610,7 +1593,7 @@ impl OwnerGraphDiagnosticEvidence {
         }
     }
 
-    pub(crate) const fn role_mismatch(role: OwnerCollectionRole, index: usize) -> Self {
+    pub const fn role_mismatch(role: OwnerCollectionRole, index: usize) -> Self {
         Self {
             kind: OwnerGraphDiagnosticKind::CollectionRoleMismatch,
             reference: Some(OwnerGraphReference::CollectionMarker),
@@ -1620,7 +1603,7 @@ impl OwnerGraphDiagnosticEvidence {
         }
     }
 
-    pub(crate) const fn child_uuid(
+    pub const fn child_uuid(
         kind: OwnerGraphDiagnosticKind,
         field_index: usize,
         role: OwnerCollectionRole,
@@ -1634,7 +1617,7 @@ impl OwnerGraphDiagnosticEvidence {
         }
     }
 
-    pub(crate) const fn owned_child(
+    pub const fn owned_child(
         role: OwnerCollectionRole,
         item_index: usize,
         reference: OwnerGraphReference,
@@ -1650,7 +1633,7 @@ impl OwnerGraphDiagnosticEvidence {
 }
 
 impl OwnerIdentityRole {
-    pub(crate) const fn diagnostic_reference(self) -> &'static str {
+    pub const fn diagnostic_reference(self) -> &'static str {
         match self {
             Self::Root => "root_uuid",
             Self::GeneratedType => "generated_type_id",
