@@ -2160,7 +2160,7 @@ pub(crate) fn file_db_rows_from_reader(
 fn effective_file_db_snapshot(
     rows: offline_rows::OfflineRows,
 ) -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
-    crate::stored_objects::exclusive(|| {
+    ibcmd_cancel::exclusive(|| {
         let _active = offline_rows::activate_rows(rows)?;
         let _views = dynamic_generation::StorageViewScope::begin("");
         let sql = crate::sql::SqlExec::detached("a descriptor snapshot answers every read itself");
@@ -2219,7 +2219,7 @@ mod descriptor_snapshot_tests {
             assert!(db.config_headers("CONFIGSAVE").unwrap().is_empty());
             let descriptor = file_db_rows_from_reader(&mut db).unwrap();
             drop(db);
-            crate::stored_objects::exclusive(|| -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
+            ibcmd_cancel::exclusive(|| -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
                 let read = || -> Result<BTreeMap<String, Arc<Vec<u8>>>> {
                     with_file_db_table(&scratch.0, |table| {
                         let names = table.names()?;

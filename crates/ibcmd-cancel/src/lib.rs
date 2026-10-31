@@ -15,9 +15,23 @@
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 
 static CURRENT: RwLock<Option<Arc<AtomicBool>>> = RwLock::new(None);
+
+static ENGINE: Mutex<()> = Mutex::new(());
+
+pub fn engine() -> MutexGuard<'static, ()> {
+    ENGINE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Runs `operation` while no operation of this module runs: what else reads
+/// or writes through the export's process-wide state (a stage, whose guard
+/// exports in memory; a check of ConfigSave) takes its turn with them.
+pub fn exclusive<T>(operation: impl FnOnce() -> T) -> T {
+    let _engine = engine();
+    operation()
+}
 
 /// The error an operation stopped by its caller fails with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -42,7 +42,7 @@ thread_local! {
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
@@ -60,6 +60,11 @@ use crate::mssql_dump::{
 use crate::platform::PlatformSpec;
 use crate::sql::SqlExec;
 
+// The engine's lock and its one owner are `ibcmd-cancel`'s, below this module
+// and the export; `exclusive` keeps its path here.
+use ibcmd_cancel::engine;
+pub use ibcmd_cancel::exclusive;
+
 /// The root the in-memory export names its files under; nothing is written
 /// there.
 const MEMORY_ROOT: &str = "ibcmd-rs-memory";
@@ -67,12 +72,6 @@ const MEMORY_ROOT: &str = "ibcmd-rs-memory";
 /// Exported files kept per configuration, at most (bytes); beyond it the
 /// cache starts over.
 const CACHE_BYTES: usize = 256 << 20;
-
-static ENGINE: Mutex<()> = Mutex::new(());
-
-fn engine() -> MutexGuard<'static, ()> {
-    ENGINE.lock().unwrap_or_else(PoisonError::into_inner)
-}
 
 /// Where the Config table of one infobase is read from.
 #[derive(Clone)]
@@ -1707,14 +1706,6 @@ fn prune_empty(folder: &Path) {
         // Fails on a folder that still holds something: that one stays.
         let _ = fs::remove_dir(dir);
     }
-}
-
-/// Runs `operation` while no operation of this module runs: what else reads
-/// or writes through the export's process-wide state (a stage, whose guard
-/// exports in memory; a check of ConfigSave) takes its turn with them.
-pub fn exclusive<T>(operation: impl FnOnce() -> T) -> T {
-    let _engine = engine();
-    operation()
 }
 
 /// The source paths of an object by its full name, as `--path-prefix` of a
