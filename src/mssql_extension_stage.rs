@@ -232,7 +232,8 @@ pub fn generate_configinfo_manifest(
 
 /// Generates a standalone CFE manifest. This does not authorize staging an
 /// 8.5 image into SQL; the SQL entry point retains its narrower format gate.
-pub(crate) fn generate_container_configinfo_manifest(
+#[doc(hidden)]
+pub fn generate_container_configinfo_manifest(
     identity: &ConfigInfoIdentity,
     rows: &[ExtensionStageRow],
 ) -> Result<Vec<u8>, ExtensionStageError> {
@@ -307,7 +308,8 @@ pub fn validate_configinfo_manifest(
 /// Validates a standalone CFE's manifest, including evidenced older container
 /// formats. SQL staging and activation retain their existing format gate.
 /// All structural, identity, mapping and digest-width checks remain shared.
-pub(crate) fn validate_container_configinfo_manifest(
+#[doc(hidden)]
+pub fn validate_container_configinfo_manifest(
     bytes: &[u8],
 ) -> Result<ConfigInfoManifest, ExtensionStageError> {
     validate_manifest_with_format_gate(bytes, |storage_format| {
@@ -1153,11 +1155,11 @@ fn encode_hex(bytes: &[u8]) -> String {
 }
 
 fn encode_base64(bytes: &[u8]) -> String {
-    crate::module_blob::encode_base64(bytes)
+    ibcmd_1c_text::encode_base64(bytes)
 }
 
 fn decode_base64_mime(value: &str) -> Option<Vec<u8>> {
-    crate::module_blob::decode_base64_mime(value.trim())
+    ibcmd_1c_text::decode_base64_mime_lenient(value.trim())
 }
 
 #[cfg(test)]
