@@ -688,7 +688,7 @@ mod tests {
         const OLD: &str = "15bcc426-54ca-410a-9543-768987b832ac";
         const NEW: &str = "17894f1a-0404-4132-9792-15816a396671";
         let history = vec![OLD.to_owned(), NEW.to_owned()];
-        let names = vec![
+        let names = [
             "a627e390-8fad-4a95-afe6-674f54813188".to_owned(),
             format!("a627e390-8fad-4a95-afe6-674f54813188_dynupdate_{OLD}"),
             format!("a627e390-8fad-4a95-afe6-674f54813188_dynupdate_{NEW}"),
@@ -852,7 +852,7 @@ mod tests {
         // A generation listed twice keeps its first rank.
         let mut history = generations.clone();
         history.push(generations[3].clone());
-        let names = vec!["x".to_owned(), alias("x", &generations[0], "")];
+        let names = ["x".to_owned(), alias("x", &generations[0], "")];
         let overlay = storage_generation_overlay(&history, names.iter().map(String::as_str));
         let expression = storage_table_expression("[db].dbo.[Config]", Some(&overlay));
         assert_eq!(
