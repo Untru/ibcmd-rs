@@ -8,3 +8,10 @@
 //! extension (the root's other `mssql_extension_*` modules) still reach the
 //! command line or the exporter and stay in the root. The moved code keeps
 //! its `crate::…` paths; the root re-exports the module at its old path.
+
+pub mod mssql_extension_stage;
+
+// The crate behind the root facade the moved code names by its root path
+// (`crate::sql::…`); the root re-exports it, so the path names the same
+// items here as it did in the root.
+use ibcmd_sql::sql;
