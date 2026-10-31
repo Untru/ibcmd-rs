@@ -178,6 +178,10 @@ name = "editor_server"
 path = "tests/editor_server.rs"
 
 [[test]]
+name = "editor_sql_import"
+path = "tests/editor_sql_import.rs"
+
+[[test]]
 name = "native_export_status"
 path = "tests/native_export_status.rs"
 

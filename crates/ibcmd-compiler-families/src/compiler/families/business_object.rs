@@ -690,9 +690,17 @@ pub(crate) fn decode_business_object_blob(
     blob: &[u8],
     profile: &BusinessObjectMetadataProfile,
 ) -> Result<BusinessObjectNativeIr, BusinessObjectBuildError> {
+    decode_business_object_layout(blob, profile.family)
+}
+
+/// Witness a family grammar only, without platform or storage-write admission.
+pub(crate) fn decode_business_object_layout(
+    blob: &[u8],
+    family: BusinessObjectFamily,
+) -> Result<BusinessObjectNativeIr, BusinessObjectBuildError> {
     let plain = inflate_bounded(blob)?;
     let value = NativeParser::new(&plain).parse()?;
-    decode_native_ir(&value, profile.family)
+    decode_native_ir(&value, family)
 }
 
 fn validate_coordinates(
@@ -5456,6 +5464,13 @@ mod tests {
             compile_business_object(&validated, &graph, root_uuid, &axes(), &profile).unwrap();
         assert_eq!(first, second);
         assert_eq!(first.target().key().as_str(), root_uuid.to_string());
+        if family == BusinessObjectFamily::Document {
+            let blob = first.outcome().compiled_payload().unwrap().bytes();
+            assert_eq!(
+                super::super::document::decode_document_layout(blob).unwrap(),
+                decode_business_object_blob(blob, &profile).unwrap()
+            );
+        }
         let ir = decode_business_object_blob(
             first.outcome().compiled_payload().unwrap().bytes(),
             &profile,

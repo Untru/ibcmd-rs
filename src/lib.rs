@@ -23,6 +23,7 @@ mod file_infobase;
 pub mod form_matrix;
 pub mod form_provenance;
 pub(crate) use ibcmd_form_schema as form_schema;
+pub(crate) mod import_plan;
 pub mod infobase;
 #[cfg(feature = "platform-oracle")]
 pub mod infobase_oracle;

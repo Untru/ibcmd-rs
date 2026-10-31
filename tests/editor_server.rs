@@ -142,17 +142,29 @@ struct Server {
 
 impl Server {
     fn start(corpus: &Corpus) -> Self {
-        let mut child = Command::new(BIN)
+        Self::start_with_temp(corpus, None)
+    }
+
+    fn start_with_temp(corpus: &Corpus, retained_temp: Option<&Path>) -> Self {
+        let mut command = Command::new(BIN);
+        command
             .args(["serve", "--stdio"])
             .current_dir(&corpus.root)
             .env("IBCMD_RS_CONFIG", &corpus.settings)
             .env_remove("IBCMD_RS_PLATFORM")
             .env_remove("IBCMD_DB_PSW")
+            .env_remove("IBCMD_RS_DB_USER")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start ibcmd-rs serve");
+            .stderr(Stdio::null());
+        if let Some(temp) = retained_temp {
+            command
+                .env("IBCMD_TEST_KEEP_FIXTURES", "1")
+                .env("TMPDIR", temp)
+                .env("TMP", temp)
+                .env("TEMP", temp);
+        }
+        let mut child = command.spawn().expect("start ibcmd-rs serve");
         let stdin = child.stdin.take();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         Self {
@@ -1028,13 +1040,27 @@ fn file_import_corpus(tag: &str) -> (Corpus, PathBuf, PathBuf) {
 fn file_import_rpc_requires_confirmation_and_consumes_one_opaque_plan() {
     let (corpus, db, tree) = file_import_corpus("file-import-confirm");
     let before = fs::read(db.join("1Cv8.1CD")).unwrap();
-    let mut server = Server::start(&corpus);
+    let child_temp = corpus.root.join("server-private-temp");
+    fs::create_dir(&child_temp).unwrap();
+    // BIN is the non-test production executable: KEEP1 must not retain its
+    // compiler scratch. Only this child receives the isolated temp/retention env.
+    let mut server = Server::start_with_temp(&corpus, Some(&child_temp));
     server.ok("initialize", corpus.initialize_params());
     let prepared = server.ok(
         "objects/import/prepare",
         json!({"infobase":"demo","sourceDir":tree,"objects":["CommonModule.ФайловаяБазаПроверка"]}),
     );
     assert_eq!(prepared["preflight"]["ready"], true);
+    let compiler_scratch = fs::read_dir(&child_temp)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("ibcmd-editor-import-")
+        })
+        .collect::<Vec<_>>();
     assert_eq!(fs::read(db.join("1Cv8.1CD")).unwrap(), before);
     assert_eq!(
         server.error(
@@ -1059,6 +1085,10 @@ fn file_import_rpc_requires_confirmation_and_consumes_one_opaque_plan() {
     );
     server.ok("shutdown", Value::Null);
     assert_eq!(server.finish(true), 0);
+    assert!(
+        compiler_scratch.is_empty(),
+        "production preflight retained compiler scratch under KEEP1: {compiler_scratch:?}"
+    );
 }
 #[cfg(unix)]
 #[test]
@@ -1316,4 +1346,264 @@ fn source_read_refuses_only_requested_invalid_descriptor_cold_and_cached() {
         failures.is_empty(),
         "RPC returned guessed descriptor: {failures:?}"
     );
+}
+
+#[test]
+fn sql_import_without_guarded_plan_refuses_before_source_or_sql() {
+    use std::{
+        net::TcpListener,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        thread::{self, JoinHandle},
+        time::{Duration, Instant},
+    };
+
+    // Only counts and closes loopback connections. No SQL/TDS/authentication
+    // protocol is implemented, and no received byte is read or retained.
+    struct Probe {
+        stop: Arc<AtomicBool>,
+        worker: Option<JoinHandle<std::io::Result<usize>>>,
+    }
+    impl Probe {
+        fn finish(mut self) -> usize {
+            self.stop.store(true, Ordering::SeqCst);
+            self.worker.take().unwrap().join().unwrap().unwrap()
+        }
+    }
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let endpoint = format!("127.0.0.1,{}", listener.local_addr().unwrap().port());
+    listener.set_nonblocking(true).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
+    let worker = thread::spawn(move || {
+        let deadline = Instant::now().checked_add(Duration::from_secs(30)).unwrap();
+        let mut connections = 0;
+        loop {
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "loopback probe expired",
+                ));
+            }
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    drop(stream);
+                    connections += 1;
+                    if connections >= 64 {
+                        return Err(std::io::Error::other(
+                            "loopback probe connection bound exceeded",
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    // Drain connections already in the accept queue before stop.
+                    if stopped.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(connections)
+    });
+    let probe = Probe {
+        stop,
+        worker: Some(worker),
+    };
+    let corpus = Corpus::new("sql-import-guarded-only");
+    fs::write(&corpus.settings, "platform = \"8.3.27\"\n").unwrap();
+    let source = corpus.root.join("missing-owned-source");
+    assert!(!source.exists());
+    let mut server = Server::start(&corpus);
+    server.ok(
+        "initialize",
+        json!({
+            "protocolVersion": "1.4",
+            "settingsFile": corpus.settings,
+            "workspaceFolder": corpus.root,
+            "infobases": [{
+                "id": "sql-guarded-only",
+                "name": "PUBLIC_SYNTHETIC_SQL_IMPORT_GUARD",
+                "server": endpoint,
+                "platform": "8.3.27",
+            }],
+        }),
+    );
+    let listed = server.ok("infobases/list", json!({}));
+    let entries = listed["infobases"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    let entry = entries
+        .iter()
+        .find(|entry| entry["id"] == "sql-guarded-only")
+        .unwrap();
+    assert_eq!(entry["source"], "mssql");
+    assert_eq!(entry["server"], endpoint);
+    assert_eq!(entry["connected"], false);
+    let infobase = entry["id"].as_str().unwrap().to_owned();
+    let mut responses = Vec::new();
+    // Null and missing are deliberately separate wire cases. Unknown UUIDs
+    // must not be routed to a legacy whole-CONFIGSAVE replacement either.
+    for (plan, message) in [
+        (None, "SQL import requires guarded preflight; prepare again"),
+        (
+            Some(Value::Null),
+            "SQL import requires guarded preflight; prepare again",
+        ),
+        (Some(json!("")), "invalid import preflight; prepare again"),
+        (
+            Some(json!("not-a-plan")),
+            "invalid import preflight; prepare again",
+        ),
+        (
+            Some(json!("00000000-0000-4000-8000-000000000999")),
+            "import preflight expired or connection changed; prepare again",
+        ),
+    ] {
+        for verify in [None, Some(false)] {
+            let mut params = json!({
+                "infobase": infobase,
+                "sourceDir": source,
+                "objects": ["CommonModule.PublicSynthetic"],
+                "confirm": true,
+            });
+            if let Some(plan) = &plan {
+                params["plan"] = plan.clone();
+            }
+            if let Some(verify) = verify {
+                params["verify"] = json!(verify);
+            }
+            responses.push((server.call("objects/import", params), message));
+        }
+    }
+    // Unsupported preparation must not read the missing source or ask SQL for
+    // a snapshot. The canonical supported file is tested only with verify=false.
+    let mut prepare_responses = Vec::new();
+    for (selection, label) in [
+        (
+            json!({"files": ["Documents/Synthetic/Ext/ObjectModule.bsl"]}),
+            "other module scope",
+        ),
+        (
+            json!({"files": ["CommonForms/Synthetic/Ext/Form.xml"]}),
+            "form XML",
+        ),
+        (
+            json!({"objects": ["CommonModule.Synthetic"]}),
+            "object selection",
+        ),
+        (json!({"changed": true}), "changed selection"),
+        (
+            json!({"files": ["CommonModules/One/Ext/Module.bsl", "CommonModules/Two/Ext/Module.bsl"]}),
+            "multiple files",
+        ),
+        (
+            json!({"files": ["CommonModules/Synthetic/Ext/Module.bsl"], "objects": ["CommonModule.Synthetic"]}),
+            "multiple selection modes",
+        ),
+    ] {
+        for verify in [None, Some(false)] {
+            let mut params = selection.clone();
+            params["infobase"] = json!(infobase);
+            params["sourceDir"] = json!(source);
+            if let Some(verify) = verify {
+                params["verify"] = json!(verify);
+            }
+            let message = if verify == Some(false) {
+                "SQL editor import requires mandatory verification"
+            } else {
+                "SQL preflight currently supports one existing CommonModule file"
+            };
+            let response = server.call("objects/import/prepare", params);
+            let listed = server.ok("infobases/list", json!({}));
+            prepare_responses.push((response, listed, message, label));
+        }
+    }
+    let response = server.call(
+        "objects/import/prepare",
+        json!({
+            "infobase": infobase,
+            "sourceDir": source,
+            "files": ["CommonModules/Synthetic/Ext/Module.bsl"],
+            "verify": false,
+        }),
+    );
+    let listed = server.ok("infobases/list", json!({}));
+    prepare_responses.push((
+        response,
+        listed,
+        "SQL editor import requires mandatory verification",
+        "canonical file with verify disabled",
+    ));
+    // Both supported module roles reach source custody; an absent owned source
+    // refuses there before any SQL socket. Unsupported roles above stay -32602.
+    let mut source_refusals = Vec::new();
+    for file in [
+        "CommonModules/Synthetic/Ext/Module.bsl",
+        "Documents/Synthetic/Forms/Main/Ext/Form/Module.bsl",
+    ] {
+        source_refusals.push(server.call(
+            "objects/import/prepare",
+            json!({
+                "infobase": infobase,
+                "sourceDir": source,
+                "files": [file],
+                "verify": true,
+            }),
+        ));
+    }
+    server.ok("shutdown", Value::Null);
+    assert_eq!(server.finish(true), 0);
+    assert_eq!(
+        probe.finish(),
+        0,
+        "preflight refusal must never open SQL TCP"
+    );
+    assert!(
+        !source.exists(),
+        "refusal must not create the owned source path"
+    );
+    assert_eq!(responses.len(), 10);
+    for (response, message) in responses {
+        assert!(response.get("result").is_none());
+        assert_eq!(
+            response["error"],
+            json!({
+                "code": -32602,
+                "message": message,
+            })
+        );
+    }
+    assert_eq!(prepare_responses.len(), 13);
+    for (response, listed, message, label) in prepare_responses {
+        let entries = listed["infobases"].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{label}");
+        let entry = entries
+            .iter()
+            .find(|entry| entry["id"] == infobase)
+            .expect("the exact initialized SQL infobase remains registered");
+        assert_eq!(entry["source"], "mssql", "{label}");
+        assert_eq!(entry["server"], endpoint, "{label}");
+        assert!(response.get("result").is_none(), "{label}");
+        assert_eq!(
+            response["error"],
+            json!({"code": -32602, "message": message}),
+            "{label}"
+        );
+    }
+    assert_eq!(source_refusals.len(), 2);
+    for response in source_refusals {
+        assert!(response.get("result").is_none());
+        assert_eq!(response["error"]["code"], -32014);
+    }
 }

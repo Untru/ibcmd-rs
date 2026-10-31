@@ -10,8 +10,10 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+#[cfg(test)]
+mod directory_census_tests;
 mod files;
-use files::{FileIdentity, OriginalFile, RootAnchor};
+use files::{DirectoryWitness, FileIdentity, OriginalFile, RootAnchor};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -135,11 +137,101 @@ impl CensusAdmission {
     }
 }
 
-/// Immutable, alias-safe inventory of every file under a source root.
+// A logical retention budget, not a measurement of allocator/RSS overhead.
+// Legacy callers keep their existing depth admission but now refuse extreme
+// census metadata before retaining an authoritative filesystem inventory.
+const MAX_CENSUS_ENTRIES: usize = 500_000;
+const MAX_CENSUS_METADATA_BYTES: usize = 64 * 1024 * 1024;
+const CENSUS_INDEX_BOOKKEEPING_BYTES: usize = 128;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct SourceDirectoryMember {
+    path: String,
+    witness: DirectoryWitness,
+}
+
+#[derive(Clone, Debug)]
+enum DirectoryCensus {
+    Unbound,
+    Filesystem(Arc<BTreeMap<String, SourceDirectoryMember>>),
+}
+
+#[derive(Clone, Copy)]
+enum CensusMemberKind {
+    File,
+    Directory,
+}
+
+struct CensusRetentionBudget {
+    entries_left: usize,
+    metadata_left: usize,
+}
+impl CensusRetentionBudget {
+    fn new(entries: usize, metadata: usize) -> Self {
+        Self {
+            entries_left: entries,
+            metadata_left: metadata,
+        }
+    }
+
+    fn charge(
+        kind: CensusMemberKind,
+        path_bytes: usize,
+        key_bytes: usize,
+    ) -> Result<usize, SourceChangeError> {
+        let value_bytes = match kind {
+            CensusMemberKind::File => std::mem::size_of::<SourceFileDigest>(),
+            CensusMemberKind::Directory => std::mem::size_of::<SourceDirectoryMember>(),
+        };
+        path_bytes
+            .checked_add(key_bytes)
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<String>()))
+            .and_then(|bytes| bytes.checked_add(value_bytes))
+            .and_then(|bytes| bytes.checked_add(CENSUS_INDEX_BOOKKEEPING_BYTES))
+            .ok_or(SourceChangeError::InventoryLimit(
+                "filesystem census metadata size overflow",
+            ))
+    }
+
+    fn admit(
+        &mut self,
+        kind: CensusMemberKind,
+        path_bytes: usize,
+        key_bytes: usize,
+    ) -> Result<(), SourceChangeError> {
+        let entries = self
+            .entries_left
+            .checked_sub(1)
+            .ok_or(SourceChangeError::InventoryLimit(
+                "filesystem census entry count",
+            ))?;
+        let charge = Self::charge(kind, path_bytes, key_bytes)?;
+        let metadata =
+            self.metadata_left
+                .checked_sub(charge)
+                .ok_or(SourceChangeError::InventoryLimit(
+                    "filesystem census metadata bytes",
+                ))?;
+        self.entries_left = entries;
+        self.metadata_left = metadata;
+        Ok(())
+    }
+}
+
+/// Immutable, alias-safe semantic file inventory. Filesystem captures also
+/// carry private directory provenance, which semantic equality cannot grant.
+#[derive(Clone, Debug)]
 pub struct SourceInventory {
     by_windows_key: BTreeMap<String, SourceFileDigest>,
+    directories: DirectoryCensus,
 }
+
+impl PartialEq for SourceInventory {
+    fn eq(&self, other: &Self) -> bool {
+        self.by_windows_key == other.by_windows_key
+    }
+}
+impl Eq for SourceInventory {}
 
 impl SourceInventory {
     pub fn from_files(files: Vec<SourceFileDigest>) -> Result<Self, SourceChangeError> {
@@ -154,7 +246,10 @@ impl SourceInventory {
             }
             by_windows_key.insert(key, file);
         }
-        Ok(Self { by_windows_key })
+        Ok(Self {
+            by_windows_key,
+            directories: DirectoryCensus::Unbound,
+        })
     }
 
     pub fn files(&self) -> impl ExactSizeIterator<Item = &SourceFileDigest> {
@@ -165,6 +260,7 @@ impl SourceInventory {
     /// It carries no retained body or original-file capability.
     pub(crate) fn digest_projection(&self) -> Self {
         let mut projection = self.clone();
+        projection.directories = DirectoryCensus::Unbound;
         for member in projection.by_windows_key.values_mut() {
             member.verified_bytes = None;
             member.original = None;
@@ -175,6 +271,17 @@ impl SourceInventory {
     pub fn file(&self, path: &str) -> Result<Option<&SourceFileDigest>, SourceChangeError> {
         let path = normalize_relative_path(path)?;
         Ok(self.by_windows_key.get(&windows_path_key(&path)))
+    }
+
+    fn require_same_directories(&self, other: &Self) -> Result<(), SourceChangeError> {
+        match (&self.directories, &other.directories) {
+            (DirectoryCensus::Filesystem(before), DirectoryCensus::Filesystem(after))
+                if before.as_ref() == after.as_ref() =>
+            {
+                Ok(())
+            }
+            _ => Err(SourceChangeError::HeldRootChanged),
+        }
     }
 }
 
@@ -328,6 +435,7 @@ impl HeldSourceRoot {
             }
         }
         let current = self.capture_current()?;
+        self.baseline.require_same_directories(&current)?;
         if self.baseline.files().len() != current.files().len() {
             return Err(SourceChangeError::HeldRootChanged);
         }
@@ -1260,17 +1368,43 @@ fn require_existing(
     Ok(())
 }
 
+fn require_distinct_source_member(
+    files: &BTreeMap<String, SourceFileDigest>,
+    directories: &BTreeMap<String, SourceDirectoryMember>,
+    key: &str,
+    path: &str,
+) -> Result<(), SourceChangeError> {
+    let previous = files.get(key).map(|file| file.path.as_str()).or_else(|| {
+        directories
+            .get(key)
+            .map(|directory| directory.path.as_str())
+    });
+    if let Some(previous) = previous {
+        return Err(SourceChangeError::WindowsPathCollision {
+            first: previous.to_owned(),
+            second: path.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 fn capture_inventory(
     anchor: &Arc<RootAnchor>,
     admission: CensusAdmission,
     retain_bytes: &BTreeSet<String>,
     traversal: Option<SourceTraversalLimits>,
 ) -> Result<SourceInventory, SourceChangeError> {
-    let mut files = Vec::new();
+    let mut files = BTreeMap::<String, SourceFileDigest>::new();
+    let mut directories = BTreeMap::<String, SourceDirectoryMember>::new();
     let mut total = 0_u64;
     let mut identities = BTreeSet::new();
-    let mut directory_spellings = BTreeMap::<String, String>::new();
     let mut entries = 0usize;
+    let mut retention = CensusRetentionBudget::new(
+        traversal.map_or(MAX_CENSUS_ENTRIES, |limits| {
+            limits.max_entries.min(MAX_CENSUS_ENTRIES)
+        }),
+        MAX_CENSUS_METADATA_BYTES,
+    );
     // The extra level is visited only to reject it; never silently truncate a
     // census at max_depth and accidentally authorize an incomplete tree.
     let walker = WalkDir::new(&anchor.path)
@@ -1302,31 +1436,29 @@ fn capture_inventory(
                 entry.path().display().to_string(),
             ));
         }
-        if entry.file_type().is_dir() {
-            let relative = path_to_slash(
-                entry
-                    .path()
-                    .strip_prefix(&anchor.path)
-                    .map_err(|error| SourceChangeError::Io(error.to_string()))?,
-            )?;
-            let key = windows_path_key(&relative);
-            if let Some(first) = directory_spellings.insert(key, relative.clone()) {
-                return Err(SourceChangeError::WindowsPathCollision {
-                    first,
-                    second: relative,
-                });
-            }
-            continue;
-        }
-        if !entry.file_type().is_file() {
-            return Err(SourceChangeError::Io("nonregular source member".to_owned()));
-        }
         let relative = path_to_slash(
             entry
                 .path()
                 .strip_prefix(&anchor.path)
                 .map_err(|e| SourceChangeError::Io(e.to_string()))?,
         )?;
+        let key = windows_path_key(&relative);
+        require_distinct_source_member(&files, &directories, &key, &relative)?;
+        if entry.file_type().is_dir() {
+            retention.admit(CensusMemberKind::Directory, relative.len(), key.len())?;
+            let witness = anchor.directory_witness(&relative)?;
+            directories.insert(
+                key,
+                SourceDirectoryMember {
+                    path: relative,
+                    witness,
+                },
+            );
+            continue;
+        }
+        if !entry.file_type().is_file() {
+            return Err(SourceChangeError::Io("nonregular source member".to_owned()));
+        }
         let original = Arc::new(anchor.open_file(&relative)?);
         total = total
             .checked_add(original.length())
@@ -1336,12 +1468,12 @@ fn capture_inventory(
             .checked_add(1)
             .ok_or(SourceChangeError::InventoryLimit("file count overflow"))?;
         admission.check(count, original.length(), total)?;
+        retention.admit(CensusMemberKind::File, relative.len(), key.len())?;
         if !identities.insert(original.identity()) {
             return Err(SourceChangeError::Io(
                 "duplicate physical source identity".to_owned(),
             ));
         }
-        let key = windows_path_key(&relative);
         let retain = retain_bytes.contains(&key)
             || retain_bytes
                 .iter()
@@ -1355,13 +1487,15 @@ fn capture_inventory(
         if retain && matches!(admission, CensusAdmission::OriginalSource) {
             source.original = Some(original);
         }
-        files
-            .try_reserve(1)
-            .map_err(|e| SourceChangeError::Io(e.to_string()))?;
-        files.push(source);
+        files.insert(key, source);
     }
     anchor.require_path()?;
-    SourceInventory::from_files(files)
+    crate::cancel::check().map_err(SourceChangeError::Cancelled)?;
+    // Only complete, rooted captures can create immutable directory proof.
+    Ok(SourceInventory {
+        by_windows_key: files,
+        directories: DirectoryCensus::Filesystem(Arc::new(directories)),
+    })
 }
 
 fn resolve_selected_path(root: &Path, selected: &Path) -> Result<String, SourceChangeError> {

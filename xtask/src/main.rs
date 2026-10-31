@@ -224,6 +224,10 @@ const CI_NOT_RUN: &str = "not run locally: the release build, native micro-corpu
      SBOM and release audit of the offline matrix (docs/release-criteria.md)";
 
 fn ci_steps(root: &Path) -> Vec<Step> {
+    ci_steps_for_platform(root, cfg!(windows))
+}
+
+fn ci_steps_for_platform(root: &Path, windows: bool) -> Vec<Step> {
     let pwsh = |name: &str, script: &str, self_test: bool| {
         let mut args = vec!["-NoProfile", "-File", script, "-RepositoryRoot", "."];
         if self_test {
@@ -231,7 +235,7 @@ fn ci_steps(root: &Path) -> Vec<Step> {
         }
         Step::new(name, "pwsh", &args).needs_program()
     };
-    let python = if cfg!(windows) { "python" } else { "python3" };
+    let python = if windows { "python" } else { "python3" };
 
     let mut steps = vec![format_step()];
     steps.push(Step::new(
@@ -272,6 +276,11 @@ fn ci_steps(root: &Path) -> Vec<Step> {
         "tools/validate-physical-adapter-policy.ps1",
         true,
     ));
+    steps.push(pwsh(
+        "Windows root lib packaging self-test",
+        "tools/package-windows-root-lib-test.ps1",
+        true,
+    ));
     steps.extend(openspec_steps(root));
     steps.push(clippy_step());
     for script in [
@@ -281,6 +290,7 @@ fn ci_steps(root: &Path) -> Vec<Step> {
         "linux_abi_test",
         "test_issue_claim_bot",
         "test_ci_scope",
+        "test_sql_capture_null_guards",
     ] {
         let path = format!("tests/scripts/{script}.py");
         steps.push(Step::new(format!("python {script}"), python, &[path.as_str()]).needs_program());
@@ -345,6 +355,13 @@ fn ci_steps(root: &Path) -> Vec<Step> {
         )
         .temp(&temp),
     );
+    if windows {
+        steps.push(pwsh(
+            "package Windows root lib test",
+            "tools/package-windows-root-lib-test.ps1",
+            false,
+        ));
+    }
     let xtask =
         env::current_exe().map_or_else(|_| "xtask".to_owned(), |path| path.display().to_string());
     steps.push(
@@ -985,6 +1002,74 @@ fn json_value_start<'a>(json: &'a str, key: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_lib_test_packaging_mirrors_workflow_after_tests() {
+        let root = repository_root();
+        let script = "tools/package-windows-root-lib-test.ps1";
+        for windows in [false, true] {
+            let steps = ci_steps_for_platform(&root, windows);
+            let library = steps
+                .iter()
+                .position(|step| step.name == "test (root library)")
+                .unwrap();
+            let packages: Vec<_> = steps
+                .iter()
+                .enumerate()
+                .filter(|(_, step)| step.name == "package Windows root lib test")
+                .collect();
+            assert_eq!(packages.len(), usize::from(windows));
+            let cleanup = steps
+                .iter()
+                .position(|step| step.name == "temporary directory left empty")
+                .unwrap();
+            assert_eq!(cleanup, library + 1 + usize::from(windows));
+            for name in [
+                "test -p ibcmd-schema",
+                "test (workspace crates)",
+                "test (root integration suites)",
+                "test (root library)",
+            ] {
+                let step = steps.iter().find(|step| step.name == name).unwrap();
+                assert_eq!(step.temp.as_deref(), Some(test_temp(&root).as_path()));
+            }
+            if windows {
+                let (index, step) = packages[0];
+                assert_eq!(index, library + 1);
+                assert_eq!(step.program, "pwsh");
+                assert_eq!(
+                    step.args,
+                    ["-NoProfile", "-File", script, "-RepositoryRoot", "."]
+                );
+            }
+        }
+        let workflow = fs::read_to_string(root.join(MERGE_WORKFLOW)).unwrap();
+        let package = workflow
+            .split("      - name: Package Windows root lib test\n")
+            .nth(1)
+            .unwrap()
+            .split("      - name:")
+            .next()
+            .unwrap();
+        assert!(package.contains("runner.os == 'Windows'"));
+        assert!(package.contains(&format!("./{script} -RepositoryRoot . -OutputDirectory")));
+        assert!(
+            workflow
+                .find("- name: Upload Windows root lib test")
+                .unwrap()
+                < workflow
+                    .find("- name: Check that the tests left the temporary directory empty")
+                    .unwrap()
+        );
+        assert!(
+            workflow
+                .find("- name: Test the root library offline")
+                .unwrap()
+                < workflow
+                    .find("- name: Package Windows root lib test")
+                    .unwrap()
+        );
+    }
 
     #[test]
     fn temp_left_allows_only_the_names_kept_on_purpose() {

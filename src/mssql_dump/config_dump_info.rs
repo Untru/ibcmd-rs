@@ -477,6 +477,10 @@ pub(super) fn current_config_versions(
 fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<ConfigVersionEntry>> {
     let plain = inflate_raw_deflate(blob).context("failed to inflate Config versions row")?;
     let text = std::str::from_utf8(&plain).context("Config versions row is not valid UTF-8")?;
+    parse_versions_text(text, origin)
+}
+
+fn parse_versions_text(text: &str, origin: VersionsBlobOrigin) -> Result<Vec<ConfigVersionEntry>> {
     let text = text.trim_start_matches('\u{feff}');
     if origin == VersionsBlobOrigin::ExtensionConfigInfo {
         return parse_extension_config_info(text);
@@ -552,6 +556,65 @@ fn parse_versions_blob(blob: &[u8], origin: VersionsBlobOrigin) -> Result<Vec<Co
             counted,
         })
         .collect())
+}
+
+/// Strict coverage for a plain SQL snapshot before staging can prune it.
+/// The existing origin-aware validator still decides SQL count semantics.
+pub(crate) fn validate_sql_versions_inventory(
+    plain: &[u8],
+    names: &BTreeSet<String>,
+) -> Result<()> {
+    let entries = parse_versions_text(
+        std::str::from_utf8(plain)?,
+        VersionsBlobOrigin::MssqlConfigTable,
+    )?;
+    validate_versions_inventory(&entries, names, VersionsBlobOrigin::MssqlConfigTable)
+}
+
+/// Checks a body-only SQL versions delta using the SQL parser, including pairs
+/// beyond the declared count. Inputs are bounded, inflated immutable snapshot
+/// bytes. Service generations, count, names and ordering must remain exact;
+/// only the header generation and the explicitly changed body keys may differ.
+/// This validates a delta, not ownership or permission to publish it.
+pub(crate) fn validate_sql_versions_change(
+    before: &[u8],
+    after: &[u8],
+    changed: &BTreeSet<String>,
+) -> Result<()> {
+    let before = std::str::from_utf8(before)?.trim_start_matches('\u{feff}');
+    let after = std::str::from_utf8(after)?.trim_start_matches('\u{feff}');
+    let old = parse_versions_text(before, VersionsBlobOrigin::MssqlConfigTable)?;
+    let _ = parse_versions_text(after, VersionsBlobOrigin::MssqlConfigTable)?;
+    for key in changed {
+        anyhow::ensure!(
+            old.iter().any(|entry| &entry.id == key),
+            "selected SQL body has no versions entry"
+        );
+    }
+    let old = split_1c_braced_fields(before, 0).expect("validated versions list");
+    let new = split_1c_braced_fields(after, 0).expect("validated versions list");
+    anyhow::ensure!(
+        old.len() == new.len() && old[1] == new[1],
+        "SQL versions count or coverage changed"
+    );
+    for (a, b) in old[2..].chunks_exact(2).zip(new[2..].chunks_exact(2)) {
+        anyhow::ensure!(a[0] == b[0], "SQL versions names or ordering changed");
+        let name = parse_1c_quoted_string(a[0].trim()).expect("validated versions name");
+        if name.is_empty() {
+            anyhow::ensure!(
+                !changed.is_empty() || a[1] == b[1],
+                "no-op SQL versions generation changed"
+            );
+        } else if changed.contains(&name) {
+            anyhow::ensure!(
+                Uuid::parse_str(a[1].trim())? != Uuid::parse_str(b[1].trim())?,
+                "changed SQL body retained its generation"
+            );
+        } else {
+            anyhow::ensure!(a[1] == b[1], "unselected SQL versions generation changed");
+        }
+    }
+    Ok(())
 }
 
 /// `configinfo`: `{0,{216,0,{<compat>,0}}},{2,<root>,},{N,("entry",<sha1 base64>)xN}`.

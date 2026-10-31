@@ -164,14 +164,15 @@ pub struct TreeNode {
     pub has_children: bool,
 }
 
-/// What the export writes for one object, in memory.
+/// Raw rendered files for one object, before filesystem module projection.
 #[derive(Debug)]
 pub struct ObjectFiles {
     pub object: StoredObject,
     /// Digest of the `versions` entries of the object's rows: changes when
     /// the object changes in the database.
     pub version: String,
-    /// Relative `/`-separated path -> bytes, as a full export writes them.
+    /// Relative `/`-separated path -> raw bytes. Filesystem BSL publication adds
+    /// the native BOM/CRLF representation; memory readers retain these bytes.
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
@@ -809,6 +810,16 @@ fn relative_slash(root: &Path, path: &Path) -> Option<String> {
             .collect::<Vec<_>>()
             .join("/"),
     )
+}
+
+/// Expected filesystem representation only; actual source bytes and memory caches
+/// remain exact. The full filesystem writer owns the module formatting policy.
+fn filesystem_expected_bytes<'a>(path: &str, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
+    if path.ends_with(".bsl") {
+        std::borrow::Cow::Owned(crate::mssql_dump::native_module_file_bytes(bytes))
+    } else {
+        std::borrow::Cow::Borrowed(bytes)
+    }
 }
 
 /// Source bytes are borrowed from a confined snapshot, or read lazily by the
@@ -1498,7 +1509,7 @@ impl StoredConfiguration {
                 match local.get(path) {
                     None => status.base_only.push(path.clone()),
                     Some(on_disk) => {
-                        if !on_disk.equals(bytes)? {
+                        if !on_disk.equals(&filesystem_expected_bytes(path, bytes))? {
                             status.changed.push(path.clone());
                         }
                     }
@@ -1570,8 +1581,11 @@ impl StoredConfiguration {
                 }
             }
             for (path, bytes) in &files.files {
+                let bytes = filesystem_expected_bytes(path, bytes);
                 let target = dir.join(path);
-                if local.contains_key(path) && fs::read(&target).is_ok_and(|old| &old == bytes) {
+                if local.contains_key(path)
+                    && fs::read(&target).is_ok_and(|old| old == bytes.as_ref())
+                {
                     write.unchanged += 1;
                     continue;
                 }
@@ -1579,7 +1593,7 @@ impl StoredConfiguration {
                     fs::create_dir_all(parent)
                         .with_context(|| format!("failed to create {}", parent.display()))?;
                 }
-                fs::write(&target, bytes)
+                fs::write(&target, bytes.as_ref())
                     .with_context(|| format!("failed to write {}", target.display()))?;
                 write.written.push(path.clone());
             }
@@ -1796,6 +1810,127 @@ mod tests {
         fs::rename(db.join("1Cv8.1CD"), root.join("preserved.1CD")).unwrap();
         fs::write(db.join("1Cv8.1CD"), b"replacement must never be opened").unwrap();
         (configuration, root)
+    }
+
+    #[test]
+    fn native_module_filesystem_status_and_selected_exports_preserve_raw_memory() {
+        if isolated_snapshot_test(
+            "stored_objects::tests::native_module_filesystem_status_and_selected_exports_preserve_raw_memory",
+        ) {
+            return;
+        }
+        let (config, root) = immutable_snapshot_after_rebinding();
+        let raw = b"Procedure Smoke() Export\nEndProcedure\n";
+        let native = b"\xef\xbb\xbfProcedure Smoke() Export\r\nEndProcedure\r\n";
+        assert_eq!(raw.len(), 38);
+        assert_eq!(native.len(), 43);
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/file-infobase/tiny-xml/CommonModules/ФайловаяБазаПроверка/Ext/Module.bsl");
+        let fixture_text = fs::read(fixture).unwrap();
+        let mut rows = config.rows_snapshot.as_ref().unwrap().as_ref().clone();
+        let matching: Vec<_> = rows
+            .iter()
+            .filter_map(|(name, bytes)| {
+                let text = crate::module_blob::unpack_module_blob_text(bytes)
+                    .ok()
+                    .or_else(|| crate::module_blob::unpack_plain_text_module_body(bytes));
+                (text.as_deref() == Some(fixture_text.as_slice())).then(|| name.clone())
+            })
+            .collect();
+        assert_eq!(matching.len(), 1, "one exact synthetic module storage body");
+        rows.insert(
+            matching[0].clone(),
+            Arc::new(
+                crate::module_blob::pack_module_blob_bytes(raw, None, None)
+                    .unwrap()
+                    .blob,
+            ),
+        );
+        let mut config =
+            StoredConfiguration::from_rows_snapshot(config.source, config.platform, rows);
+        let names = vec!["CommonModule.ФайловаяБазаПроверка".to_owned()];
+        let progress = |_, _, _: &str| {};
+        let memory = config.export_complete(&names, &progress).unwrap().remove(0);
+        let module = memory
+            .files
+            .keys()
+            .find(|p| p.ends_with("Module.bsl"))
+            .unwrap()
+            .clone();
+        assert_eq!(memory.files[&module], raw);
+        assert_eq!(config.read_file(&module).unwrap().0.files[&module], raw);
+
+        let full = root.join("full-native");
+        let mut args = export_args(&config.source, config.platform, Vec::new());
+        args.output_dir = full.clone();
+        exclusive(|| {
+            dump_config_with(
+                &args,
+                DumpHooks {
+                    rows_snapshot: config.rows_snapshot.clone(),
+                    ..DumpHooks::default()
+                },
+            )
+        })
+        .unwrap();
+        assert_eq!(fs::read(full.join(&module)).unwrap(), native);
+        let status = config.status(Some(&names), &full, &progress).unwrap();
+        assert_eq!(
+            status[0].status,
+            StatusKind::Same,
+            "fresh full export is clean"
+        );
+
+        let stage = root.join("native-stage");
+        fs::create_dir(&stage).unwrap();
+        let plan = config
+            .prepare_editor_export(&names, false, &full, &stage, &progress)
+            .unwrap();
+        assert_eq!(fs::read(stage.join(&module)).unwrap(), native);
+        assert_eq!(
+            plan.expected[&module],
+            Some(format!("{:x}", Sha256::digest(native)))
+        );
+        let selected = root.join("selected-native");
+        config.export_into(&names, &selected, &progress).unwrap();
+        assert_eq!(fs::read(selected.join(&module)).unwrap(), native);
+        let again = config.export_into(&names, &selected, &progress).unwrap();
+        assert!(
+            again[0].written.is_empty(),
+            "native selected bytes stay unchanged"
+        );
+
+        fs::write(full.join(&module), raw).unwrap();
+        let status = config.status(Some(&names), &full, &progress).unwrap();
+        assert_eq!(
+            status[0].status,
+            StatusKind::Modified,
+            "actual raw disk bytes are not normalized"
+        );
+        assert_eq!(fs::read(full.join(&module)).unwrap(), raw);
+
+        let dirty = b"Procedure Smoke() Export\r\n// actual user edit\r\nEndProcedure\r\n";
+        fs::write(full.join(&module), dirty).unwrap();
+        let status = config.status(Some(&names), &full, &progress).unwrap();
+        assert_eq!(status[0].status, StatusKind::Modified);
+        assert!(status[0].changed.contains(&module));
+        let dirty_stage = root.join("dirty-stage");
+        fs::create_dir(&dirty_stage).unwrap();
+        let plan = config
+            .prepare_editor_export(&names, false, &full, &dirty_stage, &progress)
+            .unwrap();
+        assert_eq!(
+            plan.expected[&module],
+            Some(format!("{:x}", Sha256::digest(dirty)))
+        );
+        assert_eq!(
+            fs::read(full.join(&module)).unwrap(),
+            dirty,
+            "plan preserves exact dirty source"
+        );
+        assert_eq!(fs::read(dirty_stage.join(&module)).unwrap(), native);
+        assert_eq!(config.read_file(&module).unwrap().0.files[&module], raw);
+        // All synthetic fixtures are retained for inspection; no cleanup here.
     }
 
     fn isolated_snapshot_test(name: &str) -> bool {

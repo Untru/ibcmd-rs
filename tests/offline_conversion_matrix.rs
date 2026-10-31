@@ -240,7 +240,7 @@ fn xml_cf_xml_and_same_profile_cf_repack_cover_both_revisions_offline() {
         assert_eq!(relative_files(&restored), restored_files);
         assert_eq!(
             fs::read(restored.join("CommonModules/Portable/Ext/Module.bsl")).unwrap(),
-            fs::read(source.join("CommonModules/Portable/Ext/Module.bsl")).unwrap()
+            b"\xef\xbb\xbfProcedure Smoke() Export\r\nEndProcedure\r\n"
         );
     }
 }

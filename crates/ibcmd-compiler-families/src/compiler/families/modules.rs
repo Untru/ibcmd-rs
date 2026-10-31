@@ -227,6 +227,16 @@ pub fn decode_common_module_blob(
     blob: &[u8],
     _profile: &CommonModuleProfile,
 ) -> Result<CommonModuleNativeIr, CommonModuleBuildError> {
+    decode_common_module_layout(blob)
+}
+
+/// Decode the supported CommonModule grammar layout without platform authority.
+///
+/// Success witnesses this metadata layout only; it does not admit a platform,
+/// SQL schema, storage write or activation operation.
+pub fn decode_common_module_layout(
+    blob: &[u8],
+) -> Result<CommonModuleNativeIr, CommonModuleBuildError> {
     let root = inflate_and_parse(blob).map_err(native_error)?;
     parse_native(&root)
 }
@@ -582,6 +592,29 @@ mod tests {
             privileged: false,
             return_values_reuse: ReturnValuesReuse::DontUse,
         }
+    }
+
+    #[test]
+    fn layout_decoder_matches_profile_decoder_and_refuses_unknown_tail() {
+        let profile = CommonModuleProfile::fixture();
+        let value = fixture();
+        let blob = encode_common_module_blob(&value, &profile).unwrap();
+        let profiled = decode_common_module_blob(&blob, &profile).unwrap();
+        let layout = decode_common_module_layout(&blob).unwrap();
+        assert_eq!(profiled, value);
+        assert_eq!(layout, profiled);
+
+        let mut malformed = build_native(&value);
+        let NativeValue::List { values, .. } = &mut malformed else {
+            panic!("CommonModule fixture must be a list");
+        };
+        values[2] = token("1");
+        let malformed = raw_deflate(&malformed).unwrap();
+        let profiled_error = decode_common_module_blob(&malformed, &profile).unwrap_err();
+        let layout_error = decode_common_module_layout(&malformed).unwrap_err();
+        assert!(matches!(&layout_error, CommonModuleBuildError::Native(_)));
+        assert_eq!(layout_error.to_string(), profiled_error.to_string());
+        assert!(layout_error.to_string().contains("CommonModule root tail"));
     }
 
     #[test]

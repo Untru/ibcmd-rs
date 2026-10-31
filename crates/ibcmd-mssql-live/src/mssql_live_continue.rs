@@ -107,11 +107,25 @@ pub fn pending_operation_query(database: &str) -> String {
 /// Serialize the source-stage mutation/default LIVE activation against a split operation.
 /// The check and the complete supplied SQL body execute on one session in master.
 /// No target database write precedes the lock or pending-history check.
-pub fn guard_pending_live(database: &str, body: &str) -> String {
+fn pending_live_prefix(database: &str, try_open: &str) -> String {
     let db = quote_string(database);
     let pending = pending_operation_query(database);
     format!(
-        "USE [master]; DECLARE @LiveGuardResource nvarchar(255), @LiveGuardLock int; SELECT @LiveGuardResource=N'ibcmd-rs:live:'+LOWER(CONVERT(nvarchar(36),database_guid)) FROM sys.database_recovery_status WHERE database_id=DB_ID(N'{db}'); IF @LiveGuardResource IS NULL THROW 57262,'live guard database identity is unavailable',1; EXEC @LiveGuardLock=sys.sp_getapplock @Resource=@LiveGuardResource,@LockMode='Exclusive',@LockOwner='Session',@LockTimeout=0; IF @LiveGuardLock<0 THROW 57260,'live switch is already running',1; BEGIN TRY IF EXISTS ({pending}) THROW 57269,'an earlier live cycle 1 is unfinished; staging/activation refused before any target write',1;\n{body}\nUSE [master]; EXEC sys.sp_releaseapplock @Resource=@LiveGuardResource,@LockOwner='Session'; END TRY BEGIN CATCH IF @@TRANCOUNT>0 ROLLBACK; USE [master]; EXEC sys.sp_releaseapplock @Resource=@LiveGuardResource,@LockOwner='Session'; THROW; END CATCH;"
+        "USE [master]; DECLARE @LiveGuardResource nvarchar(255), @LiveGuardLock int; SELECT @LiveGuardResource=N'ibcmd-rs:live:'+LOWER(CONVERT(nvarchar(36),database_guid)) FROM sys.database_recovery_status WHERE database_id=DB_ID(N'{db}'); IF @LiveGuardResource IS NULL THROW 57262,'live guard database identity is unavailable',1; EXEC @LiveGuardLock=sys.sp_getapplock @Resource=@LiveGuardResource,@LockMode='Exclusive',@LockOwner='Session',@LockTimeout=0; IF @LiveGuardLock<0 THROW 57260,'live switch is already running',1; {try_open}IF EXISTS ({pending}) THROW 57269,'an earlier live cycle 1 is unfinished; staging/activation refused before any target write',1;\n"
+    )
+}
+
+/// Retains the master-scoped Session LIVE lock until the owned connection closes.
+/// Only for an owned dedicated session; never issue this on an ordinary pool lease.
+#[doc(hidden)]
+pub fn acquire_pending_live_for_dedicated_session(database: &str) -> String {
+    pending_live_prefix(database, "")
+}
+
+pub fn guard_pending_live(database: &str, body: &str) -> String {
+    let prefix = pending_live_prefix(database, "BEGIN TRY ");
+    format!(
+        "{prefix}{body}\nUSE [master]; EXEC sys.sp_releaseapplock @Resource=@LiveGuardResource,@LockOwner='Session'; END TRY BEGIN CATCH IF @@TRANCOUNT>0 ROLLBACK; USE [master]; EXEC sys.sp_releaseapplock @Resource=@LiveGuardResource,@LockOwner='Session'; THROW; END CATCH;"
     )
 }
 

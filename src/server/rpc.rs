@@ -36,6 +36,10 @@ pub mod codes {
     pub const OPERATION_FAILED: i64 = -32014;
     /// Publication succeeded, but backup finalization requires recovery inspection.
     pub const IMPORT_PUBLISHED_RECOVERY_REQUIRED: i64 = -32016;
+    /// SQL publication may have committed; inspect before any retry.
+    pub const IMPORT_OUTCOME_UNKNOWN: i64 = -32017;
+    /// SQL commit was acknowledged but later recovery/verification failed.
+    pub const IMPORT_COMMITTED_RECOVERY_REQUIRED: i64 = -32018;
     /// A write into the database was asked for without `confirm: true`.
     pub const CONFIRMATION_REQUIRED: i64 = -32015;
 }

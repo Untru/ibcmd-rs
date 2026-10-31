@@ -266,3 +266,185 @@ test("dependency expansion covers every canonical root collection", async () => 
     }
   }
 });
+
+test("pre-existing cancellation makes no preparation or publication request", async () => {
+  const { rpc, calls } = harness();
+  const abort = new AbortController();
+  abort.abort();
+  await assert.rejects(
+    runImport(
+      rpc,
+      request,
+      { current: async () => true, confirm: async () => true },
+      abort.signal,
+    ),
+    ImportValidationError,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test("cancellation while awaiting the final current check never publishes", async () => {
+  const { rpc, calls } = harness();
+  const abort = new AbortController();
+  let checks = 0;
+  await assert.rejects(
+    runImport(
+      rpc,
+      request,
+      {
+        current: async () => {
+          if (++checks === 3) abort.abort();
+          return true;
+        },
+        confirm: async () => true,
+      },
+      abort.signal,
+    ),
+    ImportValidationError,
+  );
+  assert.deepEqual(
+    calls.map((c) => c.method),
+    ["objects/import/prepare"],
+  );
+});
+
+test("prepare transport failure stays a normal failure without publication", async () => {
+  const error = new Error("private-prepare-timeout");
+  const calls = [];
+  await assert.rejects(
+    runImport(
+      {
+        request: async (method) => {
+          calls.push(method);
+          throw error;
+        },
+      },
+      request,
+      { current: async () => true, confirm: async () => true },
+    ),
+    (observed) => {
+      assert.equal(observed, error);
+      assert.equal(importErrorMessage(observed), "Import failed");
+      return true;
+    },
+  );
+  assert.deepEqual(calls, ["objects/import/prepare"]);
+});
+
+test("publish transport rejection is unconfirmed and never retried", async () => {
+  for (const reason of ["Timeout", "AbortError", "server crash"]) {
+    const calls = [];
+    const error = new Error(`private-path/password ${reason}`);
+    await assert.rejects(
+      runImport(
+        {
+          request: async (method) => {
+            calls.push(method);
+            if (method === "objects/import/prepare") return ready;
+            throw error;
+          },
+        },
+        request,
+        { current: async () => true, confirm: async () => true },
+      ),
+      (observed) => {
+        assert.equal(observed.constructor.name, "ImportOutcomeUnknownError");
+        assert.equal(
+          importErrorMessage(observed),
+          "Import outcome is unconfirmed; inspect the database before retrying",
+        );
+        assert.equal(observed.message.includes("private"), false);
+        assert.equal(observed.cause, undefined);
+        return true;
+      },
+    );
+    assert.deepEqual(calls, ["objects/import/prepare", "objects/import"]);
+  }
+});
+
+test("synchronous publication transport throw is also unconfirmed", async () => {
+  let publications = 0;
+  await assert.rejects(
+    runImport(
+      {
+        request: (method) => {
+          if (method === "objects/import/prepare")
+            return Promise.resolve(ready);
+          publications++;
+          throw new Error("private synchronous transport failure");
+        },
+      },
+      request,
+      { current: async () => true, confirm: async () => true },
+    ),
+    (error) => {
+      assert.equal(error.constructor.name, "ImportOutcomeUnknownError");
+      return true;
+    },
+  );
+  assert.equal(publications, 1);
+});
+
+test("acknowledged RPC cancellation and reconciliation codes retain their identity", async () => {
+  const { RpcError } = require("../out/rpc");
+  for (const [code, message] of [
+    [-32800, "ibcmd-rs request failed (-32800)"],
+    [
+      -32017,
+      "Import outcome is unconfirmed; inspect the database before retrying",
+    ],
+    [
+      -32018,
+      "Database changes were committed; inspect recovery before retrying",
+    ],
+    [
+      -32016,
+      "Database changes were published; backup update failed. Inspect recovery before retrying",
+    ],
+  ]) {
+    const acknowledged = new RpcError(code);
+    acknowledged.detail = "private-user/password/path";
+    let publications = 0;
+    await assert.rejects(
+      runImport(
+        {
+          request: async (method) => {
+            if (method === "objects/import/prepare") return ready;
+            publications++;
+            throw acknowledged;
+          },
+        },
+        request,
+        { current: async () => true, confirm: async () => true },
+      ),
+      (observed) => {
+        assert.equal(observed, acknowledged);
+        assert.equal(importErrorMessage(observed), message);
+        assert.equal(importErrorMessage(observed).includes("private"), false);
+        return true;
+      },
+    );
+    assert.equal(publications, 1);
+  }
+});
+
+test("acknowledged publication success survives late abort without replay", async () => {
+  const abort = new AbortController();
+  const result = { report: { state: "committed" } };
+  const calls = [];
+  const actual = await runImport(
+    {
+      request: async (method) => {
+        calls.push(method);
+        if (method === "objects/import/prepare") return ready;
+        abort.abort();
+        return result;
+      },
+    },
+    request,
+    { current: async () => true, confirm: async () => true },
+    abort.signal,
+  );
+  assert.equal(actual, result);
+  assert.deepEqual(calls, ["objects/import/prepare", "objects/import"]);
+});

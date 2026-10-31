@@ -223,13 +223,22 @@ const UTF8_BOM: &[u8] = &[0xef, 0xbb, 0xbf];
 pub(crate) fn module_text(edited: &Path, rel: &str) -> std::result::Result<Vec<u8>, String> {
     let bytes =
         fs::read(edited.join(rel)).map_err(|error| format!("failed to read {rel}: {error}"))?;
-    let body = bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes);
+    module_text_from_bytes(&bytes, rel)
+}
+
+/// Apply the same storage-text policy to bytes already held by a source guard.
+/// The source path is only an error label; this function never reopens it.
+pub(crate) fn module_text_from_bytes(
+    bytes: &[u8],
+    rel: &str,
+) -> std::result::Result<Vec<u8>, String> {
+    let body = bytes.strip_prefix(UTF8_BOM).unwrap_or(bytes);
     if std::str::from_utf8(body).is_err() {
         return Err(format!(
             "{rel}: module text must be UTF-8 (save the file as UTF-8)"
         ));
     }
-    Ok(crlf(&bytes))
+    Ok(crlf(bytes))
 }
 
 /// How many refused paths a message names before it only counts the rest.
@@ -380,6 +389,15 @@ pub(crate) fn export_base(
     crate::extension::export_packed_cf_archive_to_source(archive, output_dir, true, source_version)
 }
 
+/// Compare the exported representation against the edited source, without
+/// changing source bytes or relaxing comparison of the produced file.
+fn edited_source_matches_export(path: &str, edited: &[u8], exported: &[u8]) -> bool {
+    edited == exported
+        || path.ends_with(".bsl") && crate::mssql_dump::native_module_file_bytes(edited) == exported
+        || path.ends_with(".xml")
+            && ibcmd_xml::equal_ignoring_structural_line_endings(edited, exported)
+}
+
 /// The loaded file exported back: the files of every object the load
 /// compiled (all of them for an external object) must be the tree's.
 fn verify_loaded(
@@ -425,9 +443,7 @@ fn verify_loaded(
                     fs::read(edited.join(path)).context("tree file")?,
                     fs::read(scratch.0.join(path)).context("exported file")?,
                 );
-                mine == theirs
-                    || path.ends_with(".xml")
-                        && ibcmd_xml::equal_ignoring_structural_line_endings(&mine, &theirs)
+                edited_source_matches_export(path, &mine, &theirs)
             }
             _ => false,
         };
@@ -937,6 +953,44 @@ pub fn keys_by_output(report: &StorageImageSourceExportReport) -> BTreeMap<Strin
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn filesystem_module_verification_projects_only_expected_source_bytes() {
+        let raw = b"Procedure Smoke() Export\nEndProcedure\n";
+        let native = b"\xef\xbb\xbfProcedure Smoke() Export\r\nEndProcedure\r\n";
+        assert!(super::edited_source_matches_export(
+            "Ext/Module.bsl",
+            raw,
+            raw
+        ));
+        assert!(super::edited_source_matches_export(
+            "Ext/Module.bsl",
+            raw,
+            native
+        ));
+        assert!(!super::edited_source_matches_export(
+            "Ext/Module.bin",
+            raw,
+            native
+        ));
+        assert!(!super::edited_source_matches_export(
+            "Ext/Module.txt",
+            raw,
+            native
+        ));
+        // The projection branch compares exact native bytes, rather than
+        // accepting a body obtained by normalizing both sides.
+        assert!(!super::edited_source_matches_export(
+            "Ext/Module.bsl",
+            raw,
+            b"\xef\xbb\xbfProcedure Smoke() Export\nEndProcedure\n",
+        ));
+        assert!(!super::edited_source_matches_export(
+            "Ext/Module.bsl",
+            raw,
+            b"\xef\xbb\xbfProcedure Changed() Export\r\nEndProcedure\r\n",
+        ));
+    }
+
     use super::*;
     use std::fs;
 
@@ -1200,6 +1254,29 @@ mod tests {
         );
         assert!(plan.edits.is_empty(), "{:?}", plan.edits);
         assert_eq!(plan.unsupported.len(), 2, "{:?}", plan.unsupported);
+    }
+
+    #[test]
+    fn held_module_text_uses_existing_storage_policy() {
+        for (input, expected) in [
+            (b"// line\n".as_slice(), b"// line\r\n".as_slice()),
+            (
+                b"\xef\xbb\xbf// line\n".as_slice(),
+                b"\xef\xbb\xbf// line\r\n".as_slice(),
+            ),
+            (b"// line\r\n".as_slice(), b"// line\r\n".as_slice()),
+            ("А\n".as_bytes(), "А\r\n".as_bytes()),
+            (b"tail\r".as_slice(), b"tail\r".as_slice()),
+        ] {
+            assert_eq!(
+                super::module_text_from_bytes(input, "Ext/Module.bsl").unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            super::module_text_from_bytes(&[0xff], "Ext/Module.bsl").unwrap_err(),
+            "Ext/Module.bsl: module text must be UTF-8 (save the file as UTF-8)"
+        );
     }
 
     #[test]

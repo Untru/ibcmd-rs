@@ -210,6 +210,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'edt_release_audit_test failed' }
           python tests/scripts/linux_abi_test.py
           if ($LASTEXITCODE -ne 0) { throw 'linux_abi_test failed' }
+          python tests/scripts/test_sql_capture_null_guards.py
+          if ($LASTEXITCODE -ne 0) { throw 'test_sql_capture_null_guards failed' }
+          ./tools/package-windows-root-lib-test.ps1 -SelfTest
           python tools/coverage/fixture_paths.py
           if ($LASTEXITCODE -ne 0) { throw 'pinned fixtures validation failed' }
           python -m unittest discover -s tests/fixtures/1c-fixtures/tools/coverage -p 'test_*.py'
@@ -260,6 +263,25 @@ jobs:
         env:
           CARGO_NET_OFFLINE: "true"
         run: cargo test --locked -p ibcmd-rs --lib --no-default-features
+
+      # Reuse the Windows lib-test build for sole-operator disposable SQL gates.
+      # Ignored tests are packaged here, never executed against a database in CI.
+      - name: Package Windows root lib test
+        if: steps.scope.outputs.lib == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          ./tools/package-windows-root-lib-test.ps1 -RepositoryRoot . -OutputDirectory (Join-Path $env:RUNNER_TEMP 'windows-root-lib-test')
+
+      - name: Upload Windows root lib test
+        if: steps.scope.outputs.lib == 'true' && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-root-lib-test-${{ github.sha }}
+          path: ${{ runner.temp }}/windows-root-lib-test/
+          if-no-files-found: error
+          retention-days: 3
 
       # Every test removes what it creates in the temporary directory, also
       # when it fails (docs/testing.md, "Temporary directories"). Kept on
