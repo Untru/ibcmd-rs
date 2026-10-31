@@ -147,7 +147,8 @@ pub(crate) type AdoptionReader =
 #[derive(Debug, Clone)]
 pub struct ConfigApplyOptions {
     /// Source apply's original export dependency proof, never caller SQL.
-    pub(crate) source_preimages: Option<dynamic::SourceOwnerPreimages>,
+    #[doc(hidden)]
+    pub source_preimages: Option<dynamic::SourceOwnerPreimages>,
     /// The objects the extensions adopt, read when a removal or the S1 gate needs them.
     pub(crate) read_adoptions: AdoptionReader,
     /// Where the dynamic apply reads the stored rows of its online activation: the root's

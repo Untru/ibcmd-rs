@@ -67,7 +67,8 @@ pub const WARN_GENERATIONS: usize = 50;
 /// Private fields prevent callers from supplying SQL or manufacturing a newer
 /// post-stage snapshot. The raw originals remain owned through publication.
 #[derive(Debug, Clone)]
-pub(crate) struct SourceOwnerPreimages {
+#[doc(hidden)]
+pub struct SourceOwnerPreimages {
     database: String,
     groups: Vec<SourcePreimageGroup>,
 }
@@ -95,7 +96,8 @@ impl SourceOwnerPreimages {
         let client = tests::source_dependency_fixture();
         Self::capture_client(&client, database, &tests::source_dependency_names()).unwrap()
     }
-    pub(crate) fn capture(sql: &SqlExec, database: &str, selected: &[String]) -> Result<Self> {
+    #[doc(hidden)]
+    pub fn capture(sql: &SqlExec, database: &str, selected: &[String]) -> Result<Self> {
         Self::capture_client(require_client(sql)?, database, selected)
     }
 
@@ -195,7 +197,8 @@ impl SourceOwnerPreimages {
         Ok(proof)
     }
 
-    pub(crate) fn require_current(&self, sql: &SqlExec, database: &str) -> Result<()> {
+    #[doc(hidden)]
+    pub fn require_current(&self, sql: &SqlExec, database: &str) -> Result<()> {
         self.require_current_client(require_client(sql)?, database)
     }
 
@@ -214,7 +217,8 @@ impl SourceOwnerPreimages {
         Ok(())
     }
 
-    pub(crate) fn precondition_sql(&self, database: &str) -> Result<String> {
+    #[doc(hidden)]
+    pub fn precondition_sql(&self, database: &str) -> Result<String> {
         if self.database != database {
             bail!("source dependency proof belongs to a different database");
         }
