@@ -1043,6 +1043,7 @@ mod dynamic_generation;
 mod empty_configuration;
 #[doc(hidden)]
 pub mod extension;
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 pub(crate) mod extension_types;
 mod fetch;
 mod file_infobase;
@@ -1248,10 +1249,15 @@ pub use timing::{
 };
 
 // Platform-level 1C standard pictures, not metadata UUIDs from one database.
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 const STD_PICTURE_USER_UUID: &str = "6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f";
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 const STD_PICTURE_LOAD_REPORT_SETTINGS_UUID: &str = "283ecabd-aaed-41d1-ad46-6cca91c29120";
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 const STD_PICTURE_SHOW_DATA_UUID: &str = "a064544f-6037-48ca-b19f-8ad63e43af23";
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 const STD_PICTURE_CUSTOMIZE_LIST_UUID: &str = "f04794cb-c198-4172-86c3-649386013c85";
 // Platform serialized-value type IDs, independent of metadata in any infobase.
 const DESIGN_TIME_REF_TYPE_UUID: &str = "5c14e26f-099b-4d37-84a6-b433d87400da";
@@ -8979,6 +8985,7 @@ fn parse_flowchart_activity_addressing_attributes(
 /// The declaration order is where each attribute's uuid stands in the task's
 /// own metadata row; a task or attribute the rows do not place keeps the
 /// name order.
+#[expect(private_interfaces, reason = "moved verbatim in #559; cleanup later")]
 pub(super) fn order_flowchart_addressing_attributes(
     flowchart: &mut BusinessProcessFlowchart,
     object_refs: &BTreeMap<String, String>,
@@ -9198,6 +9205,7 @@ fn parse_exchange_plan_content_extension(
     Ok(out)
 }
 
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String {
     format_exchange_plan_content_xml_with_extension(items, &[])
 }
@@ -15218,7 +15226,7 @@ fn parse_exchange_plan_properties_from_text(
 
 fn parse_exchange_plan_child_objects(
     text: &str,
-    uuid: &str,
+    _uuid: &str,
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
@@ -15243,7 +15251,7 @@ fn parse_exchange_plan_child_objects(
 
     let mut child_uuids = BTreeSet::new();
     let mut root_names = BTreeSet::new();
-    let mut child_objects = collections[0]
+    let child_objects = collections[0]
         .iter()
         .map(|value| {
             let child = parse_exchange_plan_attribute(
@@ -15431,7 +15439,7 @@ fn parse_strict_tabular_sections(
     }
 
     let mut sections = Vec::with_capacity(values.len());
-    for (section_index, value) in values.iter().enumerate() {
+    for (_section_index, value) in values.iter().enumerate() {
         let item = split_information_register_braced_fields(value)?;
         if item.len() != 3 || item.get(1)?.trim() != "1" {
             return None;
@@ -23062,7 +23070,7 @@ fn parse_catalog_child_properties(
     marker_start: usize,
     child_uuid: &str,
     expected_wrapper_code: u32,
-    value_types: &[ConstantValueType],
+    _value_types: &[ConstantValueType],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,

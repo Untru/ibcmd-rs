@@ -63,6 +63,10 @@ const STATE_EXTENDED: u8 = 3;
 
 /// Property id every adopted object lists when the platform prints
 /// `ExtendedConfigurationObject` for it.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "moved verbatim in #559; cleanup later")
+)]
 pub(crate) const EXTENDED_OBJECT_PROPERTY: &str = "9595ddd6-e72c-47ad-a156-672db811628c";
 
 /// The adoption state of one md header.
@@ -539,6 +543,7 @@ impl ExtensionContext {
         self.adopted.get(&uuid.to_ascii_lowercase())
     }
 
+    #[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
     pub(crate) fn len(&self) -> usize {
         self.adopted.len()
     }
@@ -925,6 +930,7 @@ pub fn base_index_provider(
 }
 
 /// The indexes of [`fetch_base_indexes`] over metadata rows already read.
+#[expect(private_interfaces, reason = "moved verbatim in #559; cleanup later")]
 pub(crate) fn base_indexes_from_rows(
     rows: &[super::ConfigRow],
     source_version: InfobaseConfigSourceVersion,

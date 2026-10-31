@@ -1670,6 +1670,10 @@ pub(super) const SQLCMD_DUMP_BATCH_MAX_DATA_BYTES: u64 = 256 * 1024 * 1024;
 pub(super) const SQLCMD_INLINE_QUERY_MAX_CHARS: usize = 24 * 1024;
 pub(super) const BCP_INLINE_QUERY_MAX_CHARS: usize = 24 * 1024;
 
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "moved verbatim in #559; cleanup later")
+)]
 pub(super) fn run_sql_capture_tsv(
     sqlcmd: &Path,
     server: &str,

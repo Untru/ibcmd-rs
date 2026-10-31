@@ -1074,6 +1074,7 @@ fn config_version(version: Uuid) -> String {
     value
 }
 
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 pub(super) fn empty_config_dump_info(
     source_version: InfobaseConfigSourceVersion,
 ) -> Result<Vec<u8>> {

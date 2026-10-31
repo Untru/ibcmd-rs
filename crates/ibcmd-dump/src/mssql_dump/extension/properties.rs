@@ -27,6 +27,7 @@ pub(crate) enum Meaning {
     ExtendedObject,
     /// An overridden block the platform lists in the header but prints
     /// nowhere (its content is empty or it has no XML form).
+    #[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
     Hidden(&'static str),
     /// One member of a property group that always appears whole; the ids of
     /// the group are known, their assignment to the group's properties is not.

@@ -77,6 +77,7 @@ impl CasHash {
         Ok(Self(bytes))
     }
 
+    #[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
     fn from_base64(value: &str) -> std::result::Result<Self, CasGraphError> {
         let decoded = ibcmd_1c_text::decode_base64_mime_lenient(value).ok_or_else(|| {
             CasGraphError::InvalidManifest("invalid CAS digest base64".to_owned())
@@ -771,6 +772,7 @@ fn inflate_bounded(input: &[u8], maximum: usize) -> std::result::Result<Vec<u8>,
     Ok(output)
 }
 
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 fn parse_count(value: &str) -> std::result::Result<usize, CasGraphError> {
     let value = value.trim();
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -783,6 +785,7 @@ fn parse_count(value: &str) -> std::result::Result<usize, CasGraphError> {
         .map_err(|_| CasGraphError::InvalidManifest("mapping count does not fit usize".to_owned()))
 }
 
+#[expect(dead_code, reason = "moved verbatim in #559; cleanup later")]
 fn parse_quoted_string(value: &str) -> Option<String> {
     let value = value.trim();
     let inner = value.strip_prefix('"')?.strip_suffix('"')?;
