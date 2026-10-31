@@ -31,7 +31,9 @@ pub mod load;
 pub mod metadata_model;
 // `brace_list!`, which `metadata_model::brace` exported at the crate root.
 pub use ibcmd_metadata_model::brace_list;
-pub(crate) mod metadata_owner_graph;
+// The owner schema facts, moved to the dump readers' crate; callers keep
+// `crate::metadata_owner_graph::…`.
+pub(crate) use ibcmd_dump_readers::metadata_owner_graph;
 pub mod module_blob;
 pub mod mssql;
 pub mod mssql_apply;

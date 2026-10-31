@@ -809,6 +809,7 @@ dependencies = [
  "ibcmd-1c-text",
  "ibcmd-metadata-blob",
  "ibcmd-schema",
+ "ibcmd-xml",
 ]
 
 [[package]]
