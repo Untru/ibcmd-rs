@@ -306,6 +306,7 @@ pub fn apply_options(
         database,
         profile,
         crate::restructure::extensions::read_adoptions,
+        &crate::mssql_dump::StoredActivationRows,
     );
     options.exclusivity = match request.exclusivity {
         ExclusivityMode::Sql => Exclusivity::SqlSessions,

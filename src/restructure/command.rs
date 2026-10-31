@@ -388,6 +388,7 @@ fn run_through_apply(
         args.database.clone(),
         MssqlNativePlatformProfile::Platform8_3_27_2214,
         crate::restructure::extensions::read_adoptions,
+        &crate::mssql_dump::StoredActivationRows,
     );
     options.dry_run = args.dry_run;
     options.rehearse = args.rehearse;

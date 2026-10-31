@@ -73,6 +73,7 @@ impl State {
             database,
             profile,
             crate::restructure::extensions::read_adoptions,
+            &crate::mssql_dump::StoredActivationRows,
         );
         options.recovery_dir = Some(params.recovery_dir.join(uuid::Uuid::new_v4().to_string()));
         // Never prune operator artifacts from this editor operation.

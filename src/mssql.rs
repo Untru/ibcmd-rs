@@ -1516,6 +1516,7 @@ fn config_apply_options(
         database,
         profile,
         crate::restructure::extensions::read_adoptions,
+        &crate::mssql_dump::StoredActivationRows,
     );
     options.dry_run = dry_run;
     options.exclusivity = crate::mssql_config_apply::Exclusivity::SqlSessions;

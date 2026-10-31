@@ -1492,8 +1492,8 @@ pub fn plan_dynamic(sql: &SqlExec, options: &ConfigApplyOptions) -> Result<Dynam
     }
 
     // The online engine's plan: the exact stage, the rows it replaces, the markers.
-    let inputs = crate::mssql::read_activation_inputs(
-        &crate::mssql_dump::StoredActivationRows,
+    let inputs = crate::mssql_main_activation::read_activation_inputs(
+        options.activation_rows,
         sql,
         database,
     )?;
@@ -1515,7 +1515,7 @@ pub fn plan_dynamic(sql: &SqlExec, options: &ConfigApplyOptions) -> Result<Dynam
         .staged
         .into_iter()
         .partition(|row| row.file_name.eq_ignore_ascii_case("deleted"));
-    let allowed = crate::mssql::allowed_activation_targets(&published);
+    let allowed = crate::mssql_main_activation::allowed_activation_targets(&published);
     let activation = prepare_main_activation(
         MainActivationMode::Online,
         published,
