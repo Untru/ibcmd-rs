@@ -314,7 +314,8 @@ pub fn note_export_platform(platform: PlatformSpec) {
 }
 
 /// Restore the oldest registered build's spelling when only a dialect is known.
-pub(crate) fn clear_export_platform() {
+#[doc(hidden)]
+pub fn clear_export_platform() {
     EXPORT_DEFAULT_BUTTON_IMPORTANCE.store(false, std::sync::atomic::Ordering::Relaxed);
 }
 
@@ -367,7 +368,8 @@ pub fn for_xml_version(xml: InfobaseConfigSourceVersion) -> Result<PlatformSpec>
 ///
 /// Only when the bundled registry lacks the 8.3.27 or the 8.5.1 release,
 /// which its tests rule out.
-pub(crate) fn of_xml_dialect(dialect: &str) -> PlatformSpec {
+#[doc(hidden)]
+pub fn of_xml_dialect(dialect: &str) -> PlatformSpec {
     ibcmd_platform::of_xml_dialect(dialect).into()
 }
 

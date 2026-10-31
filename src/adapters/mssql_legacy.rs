@@ -21,14 +21,15 @@ use crate::legacy_version::{InfobaseConfigSourceVersion, LegacyVersionAxes};
 /// orchestration must make semantic decisions from this role, rather than from
 /// a SQL table name.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum MssqlConfigurationTableRole {
+#[doc(hidden)]
+pub enum MssqlConfigurationTableRole {
     Current,
     Saved,
 }
 
 impl MssqlConfigurationTableRole {
     /// Returns the one canonical SQL name for this storage role.
-    pub(crate) const fn sql_name(self) -> &'static str {
+    pub const fn sql_name(self) -> &'static str {
         match self {
             Self::Current => "Config",
             Self::Saved => "ConfigSave",
@@ -39,7 +40,8 @@ impl MssqlConfigurationTableRole {
 /// Scope of an export inventory before it is projected into a report-specific
 /// root-metadata or source-asset scope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum MssqlExportInventoryScope {
+#[doc(hidden)]
+pub enum MssqlExportInventoryScope {
     Full,
     Scoped,
 }
@@ -50,7 +52,8 @@ pub(crate) enum MssqlExportInventoryScope {
 /// streamed dumping begins.  It prevents equivalent Config/ConfigSave rules
 /// from drifting across row processing and report construction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct MssqlExportInventoryPlan {
+#[doc(hidden)]
+pub struct MssqlExportInventoryPlan {
     role: MssqlConfigurationTableRole,
     root_metadata_scope: MssqlExportInventoryScope,
     source_asset_scope: MssqlExportInventoryScope,
@@ -59,7 +62,7 @@ pub(crate) struct MssqlExportInventoryPlan {
 
 impl MssqlExportInventoryPlan {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) const fn new(
+    pub const fn new(
         role: MssqlConfigurationTableRole,
         has_selection: bool,
         extract_metadata_xml: bool,
@@ -92,25 +95,25 @@ impl MssqlExportInventoryPlan {
         }
     }
 
-    pub(crate) const fn role(self) -> MssqlConfigurationTableRole {
+    pub const fn role(self) -> MssqlConfigurationTableRole {
         self.role
     }
 
-    pub(crate) const fn root_metadata_scope(self) -> MssqlExportInventoryScope {
+    pub const fn root_metadata_scope(self) -> MssqlExportInventoryScope {
         self.root_metadata_scope
     }
 
-    pub(crate) const fn source_asset_scope(self) -> MssqlExportInventoryScope {
+    pub const fn source_asset_scope(self) -> MssqlExportInventoryScope {
         self.source_asset_scope
     }
 
-    pub(crate) const fn config_dump_info_eligible(self) -> bool {
+    pub const fn config_dump_info_eligible(self) -> bool {
         self.config_dump_info_eligible
     }
 
     /// A strict root gate is meaningful only for the current configuration
     /// identity. Saved configuration is always observational.
-    pub(crate) const fn is_strict_current_identity(self) -> bool {
+    pub const fn is_strict_current_identity(self) -> bool {
         matches!(self.role, MssqlConfigurationTableRole::Current)
     }
 }
@@ -157,26 +160,29 @@ pub const LEGACY_MSSQL_STORAGE_PROFILE_ID: &str = "storage:mssql-config-configsa
 /// Task model.  Keep their shape and zero-UUID normalization at this adapter
 /// boundary so the metadata writer receives only the already-decoded value.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct MssqlLegacyTaskInternalUuidSlots {
-    pub(crate) field_13: Option<String>,
-    pub(crate) field_14: Option<String>,
+#[doc(hidden)]
+pub struct MssqlLegacyTaskInternalUuidSlots {
+    pub field_13: Option<String>,
+    pub field_14: Option<String>,
 }
 
 /// The exact Task owner slot whose physical UUID payload was malformed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct MssqlLegacyTaskInternalUuidSlotError {
+#[doc(hidden)]
+pub struct MssqlLegacyTaskInternalUuidSlotError {
     field_index: usize,
 }
 
 impl MssqlLegacyTaskInternalUuidSlotError {
-    pub(crate) const fn field_index(self) -> usize {
+    pub const fn field_index(self) -> usize {
         self.field_index
     }
 }
 
 /// Decodes the two observed Task-internal UUID slots without accepting a
 /// partial, non-UUID, or non-canonical payload.
-pub(crate) fn decode_task_internal_uuid_slots(
+#[doc(hidden)]
+pub fn decode_task_internal_uuid_slots(
     fields: &[&str],
 ) -> Result<MssqlLegacyTaskInternalUuidSlots, MssqlLegacyTaskInternalUuidSlotError> {
     Ok(MssqlLegacyTaskInternalUuidSlots {
