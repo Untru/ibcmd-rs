@@ -20,7 +20,7 @@ mod fixture {
         pub(super) use ibcmd_metadata_model::metadata_model;
     }
 
-    include!("../../tests/common/eds_generated.rs");
+    include!("../../../../tests/common/eds_generated.rs");
 }
 
 fn compiled(kind: &str, xml: &str, version: &str) -> Brace {

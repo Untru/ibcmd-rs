@@ -2225,6 +2225,8 @@ mod descriptor_snapshot_tests {
             fs::create_dir(&path).unwrap();
             let scratch = Scratch(path);
             let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
                 .join("tests/fixtures/file-infobase/tiny.1CD.gz");
             let mut bytes = Vec::new();
             flate2::read::GzDecoder::new(fs::File::open(fixture).unwrap())

@@ -60,11 +60,11 @@ mod tests {
     #[test]
     fn platform_8_3_27_xml_2_20_dcs_body_exports_byte_exact() {
         let packed = include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/raw/\
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/raw/\
              f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate"
         );
         let expected = include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/native/Reports/\
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/native/Reports/\
              DcsCorpus/Templates/MainSchema/Ext/Template.xml"
         );
 
@@ -100,11 +100,11 @@ mod tests {
     #[test]
     fn platform_query_data_set_body_exports_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-query-data-set/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-query-data-set/native-template.xml.b64"
         )));
         assert_eq!(
@@ -148,11 +148,11 @@ mod tests {
     #[test]
     fn platform_empty_inline_settings_body_exports_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-empty-inline-settings/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-empty-inline-settings/native-template.xml.b64"
         )));
         assert_eq!(
@@ -204,11 +204,11 @@ mod tests {
     #[test]
     fn platform_terminal_area_template_appearance_index_exports_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-area-template-appearance-index/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-area-template-appearance-index/native-template.xml.b64"
         )));
         assert_eq!(
@@ -276,11 +276,11 @@ mod tests {
     #[test]
     fn platform_terminal_area_template_style_prefixes_export_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-area-template-style-prefixes/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-area-template-style-prefixes/native-template.xml.b64"
         )));
         assert_eq!(
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn terminal_side_table_shapes_without_evidence_fail_closed() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-area-template-appearance-index/raw-packed.bin.b64"
         )));
         let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
@@ -420,11 +420,11 @@ mod tests {
     #[test]
     fn platform_terminal_area_template_style_item_ref_exports_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-area-template-style-item-ref/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-area-template-style-item-ref/native-template.xml.b64"
         )));
         assert_eq!(
@@ -504,11 +504,11 @@ mod tests {
     #[test]
     fn platform_multi_variant_settings_body_exports_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-multi-variant-settings/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-multi-variant-settings/native-template.xml.b64"
         )));
         assert_eq!(
@@ -558,11 +558,11 @@ mod tests {
     #[test]
     fn platform_any_ib_ref_type_set_body_exports_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-any-ib-ref-type-set/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-any-ib-ref-type-set/native-template.xml.b64"
         )));
         assert_eq!(
@@ -610,11 +610,11 @@ mod tests {
     #[test]
     fn platform_document_ref_type_set_body_exports_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-document-ref-type-set/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-document-ref-type-set/native-template.xml.b64"
         )));
         assert_eq!(
@@ -667,12 +667,12 @@ mod tests {
     #[test]
     fn platform_data_parameters_source_owned_body_exports_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-data-parameters-source-owned/raw/",
             "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-data-parameters-source-owned/native-template.xml.b64"
         )));
 
@@ -698,12 +698,12 @@ mod tests {
     #[test]
     fn platform_multi_variant_envelope_materializes_settings_positionally_byte_exact() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-multi-variant-envelope/raw/",
             "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-multi-variant-envelope/native-template.xml.b64"
         )));
 
@@ -730,11 +730,11 @@ mod tests {
     #[test]
     fn platform_type_id_reference_body_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-typeid-reference/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-typeid-reference/native-template.xml.b64"
         )));
         let mut type_index = BTreeMap::new();
@@ -764,11 +764,11 @@ mod tests {
     #[test]
     fn platform_query_union_link_body_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link/native-template.xml.b64"
         )));
         let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
@@ -809,11 +809,11 @@ mod tests {
     #[test]
     fn platform_query_union_link_exports_byte_exact_with_non_empty_type_index() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link/native-template.xml.b64"
         )));
         let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
@@ -858,11 +858,11 @@ mod tests {
     #[test]
     fn platform_query_union_link_typeid_body_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link-typeid/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link-typeid/native-template.xml.b64"
         )));
         // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
@@ -911,7 +911,7 @@ mod tests {
     #[test]
     fn query_union_link_third_field_transliterates_instead_of_failing_closed() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link-typeid/raw-packed.bin.b64"
         )));
         let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
@@ -977,11 +977,11 @@ mod tests {
     #[test]
     fn platform_link_parameter_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-link-parameter/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-link-parameter/native-template.xml.b64"
         )));
         // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
@@ -1016,11 +1016,11 @@ mod tests {
     #[test]
     fn platform_link_expressions_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-link-expressions/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-link-expressions/native-template.xml.b64"
         )));
         // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
@@ -1054,11 +1054,11 @@ mod tests {
     #[test]
     fn platform_style_free_area_template_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-template/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-template/native-template.xml.b64"
         )));
         let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
@@ -1080,11 +1080,11 @@ mod tests {
     #[test]
     fn platform_area_appearance_web_color_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-appearance-web-color/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-appearance-web-color/native-template.xml.b64"
         )));
         let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
@@ -1106,11 +1106,11 @@ mod tests {
     #[test]
     fn platform_multi_cell_appearance_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-multi-cell-appearance/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-multi-cell-appearance/native-template.xml.b64"
         )));
         let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
@@ -1132,11 +1132,11 @@ mod tests {
     #[test]
     fn platform_area_style_color_reference_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-style-color-reference/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-style-color-reference/native-template.xml.b64"
         )));
         // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
@@ -1171,11 +1171,11 @@ mod tests {
     #[test]
     fn platform_area_style_item_uuid_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-style-item-uuid/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-style-item-uuid/native-template.xml.b64"
         )));
         // manifest.json: retained.packed_body.sha256 / retained.native_template.sha256
@@ -1254,11 +1254,11 @@ mod tests {
     #[test]
     fn platform_parameter_scalar_types_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-parameter-scalar-types/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-parameter-scalar-types/native-template.xml.b64"
         )));
         let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
@@ -1280,11 +1280,11 @@ mod tests {
     #[test]
     fn platform_output_parameters_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-output-parameters/raw-packed.bin.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-output-parameters/native-template.xml.b64"
         )));
         // manifest.json: rounds.packed_body_sha256 / rounds.native_template_sha256
@@ -1326,11 +1326,11 @@ mod tests {
     #[test]
     fn platform_8_3_27_xml_2_20_root_auto_selection_exports_byte_exact() {
         let packed = include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-selection-auto/raw/\
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-selection-auto/raw/\
              f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate"
         );
         let expected = include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-selection-auto/native/Reports/\
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-selection-auto/native/Reports/\
              DcsCorpus/Templates/MainSchema/Ext/Template.xml"
         );
 

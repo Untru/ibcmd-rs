@@ -1407,13 +1407,13 @@ mod tests {
             (
                 ROOT,
                 include_bytes!(
-                    "../../../tests/fixtures/native-evidence/extension-empty/rows/6a5f6dac-3040-4142-b853-482f745e1e4b.bin"
+                    "../../../../../tests/fixtures/native-evidence/extension-empty/rows/6a5f6dac-3040-4142-b853-482f745e1e4b.bin"
                 ),
             ),
             (
                 LANGUAGE,
                 include_bytes!(
-                    "../../../tests/fixtures/native-evidence/extension-empty/rows/efc14f05-e4ab-4235-8c63-9082143c3ca9.bin"
+                    "../../../../../tests/fixtures/native-evidence/extension-empty/rows/efc14f05-e4ab-4235-8c63-9082143c3ca9.bin"
                 ),
             ),
         ];
@@ -1441,19 +1441,19 @@ mod tests {
             (
                 "Configuration.xml",
                 include_bytes!(
-                    "../../../tests/fixtures/native-evidence/extension-empty/native-8.3.27/Configuration.xml"
+                    "../../../../../tests/fixtures/native-evidence/extension-empty/native-8.3.27/Configuration.xml"
                 ),
             ),
             (
                 "ConfigDumpInfo.xml",
                 include_bytes!(
-                    "../../../tests/fixtures/native-evidence/extension-empty/native-8.3.27/ConfigDumpInfo.xml"
+                    "../../../../../tests/fixtures/native-evidence/extension-empty/native-8.3.27/ConfigDumpInfo.xml"
                 ),
             ),
             (
                 "Languages/Русский.xml",
                 include_bytes!(
-                    "../../../tests/fixtures/native-evidence/extension-empty/native-8.3.27/Language.xml"
+                    "../../../../../tests/fixtures/native-evidence/extension-empty/native-8.3.27/Language.xml"
                 ),
             ),
         ];
@@ -1461,19 +1461,19 @@ mod tests {
             (
                 "Configuration.xml",
                 include_bytes!(
-                    "../../../tests/fixtures/native-evidence/extension-empty/native-8.5.1/Configuration.xml"
+                    "../../../../../tests/fixtures/native-evidence/extension-empty/native-8.5.1/Configuration.xml"
                 ),
             ),
             (
                 "ConfigDumpInfo.xml",
                 include_bytes!(
-                    "../../../tests/fixtures/native-evidence/extension-empty/native-8.5.1/ConfigDumpInfo.xml"
+                    "../../../../../tests/fixtures/native-evidence/extension-empty/native-8.5.1/ConfigDumpInfo.xml"
                 ),
             ),
             (
                 "Languages/Русский.xml",
                 include_bytes!(
-                    "../../../tests/fixtures/native-evidence/extension-empty/native-8.5.1/Language.xml"
+                    "../../../../../tests/fixtures/native-evidence/extension-empty/native-8.5.1/Language.xml"
                 ),
             ),
         ];
@@ -1607,7 +1607,10 @@ mod tests {
         let root = std::env::var_os("IBCMD_UPSTREAM_FIXTURES")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/external")
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("..")
+                    .join("..")
+                    .join("tests/fixtures/external")
             });
         let dir = root.join("adopted/catalog_modules");
         if !dir.is_dir() {
@@ -1803,7 +1806,10 @@ mod tests {
         let root = std::env::var_os("IBCMD_UPSTREAM_FIXTURES")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/external")
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("..")
+                    .join("..")
+                    .join("tests/fixtures/external")
             });
         if !root.join("adopted").is_dir() {
             eprintln!(

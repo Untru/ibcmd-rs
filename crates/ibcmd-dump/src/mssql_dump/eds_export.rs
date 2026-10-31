@@ -147,15 +147,16 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    const ROOT: &str = include_str!("../../tests/fixtures/eds-matrix/root.txt");
-    const CUBE: &str = include_str!("../../tests/fixtures/eds-matrix/cube.txt");
-    const TABLE: &str = include_str!("../../tests/fixtures/eds-matrix/table.txt");
-    const DIMENSION: &str = include_str!("../../tests/fixtures/eds-matrix/dimension.txt");
+    const ROOT: &str = include_str!("../../../../tests/fixtures/eds-matrix/root.txt");
+    const CUBE: &str = include_str!("../../../../tests/fixtures/eds-matrix/cube.txt");
+    const TABLE: &str = include_str!("../../../../tests/fixtures/eds-matrix/table.txt");
+    const DIMENSION: &str = include_str!("../../../../tests/fixtures/eds-matrix/dimension.txt");
 
-    const CORPUS_ROOT: &str = include_str!("../../tests/fixtures/eds-corpus2/root.txt");
-    const CORPUS_CUBE: &str = include_str!("../../tests/fixtures/eds-corpus2/cube.txt");
-    const CORPUS_TABLE: &str = include_str!("../../tests/fixtures/eds-corpus2/table.txt");
-    const CORPUS_DIMENSION: &str = include_str!("../../tests/fixtures/eds-corpus2/dimension.txt");
+    const CORPUS_ROOT: &str = include_str!("../../../../tests/fixtures/eds-corpus2/root.txt");
+    const CORPUS_CUBE: &str = include_str!("../../../../tests/fixtures/eds-corpus2/cube.txt");
+    const CORPUS_TABLE: &str = include_str!("../../../../tests/fixtures/eds-corpus2/table.txt");
+    const CORPUS_DIMENSION: &str =
+        include_str!("../../../../tests/fixtures/eds-corpus2/dimension.txt");
 
     fn row(file_name: &str, text: &str) -> MetadataTextRow {
         super::super::metadata::metadata_text_row_from_text(file_name, text.to_string())
@@ -172,6 +173,8 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{uuid}: {error}"));
             let expected = std::fs::read(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("..")
+                    .join("..")
                     .join("tests/fixtures")
                     .join(directory)
                     .join(fixture),

@@ -150,19 +150,19 @@ mod tests {
             (
                 "Before",
                 include_str!(
-                    "../../tests/fixtures/native-evidence/extension-form-interceptors/before.block.txt"
+                    "../../../../tests/fixtures/native-evidence/extension-form-interceptors/before.block.txt"
                 ),
             ),
             (
                 "After",
                 include_str!(
-                    "../../tests/fixtures/native-evidence/extension-form-interceptors/after.block.txt"
+                    "../../../../tests/fixtures/native-evidence/extension-form-interceptors/after.block.txt"
                 ),
             ),
             (
                 "Override",
                 include_str!(
-                    "../../tests/fixtures/native-evidence/extension-form-interceptors/override.block.txt"
+                    "../../../../tests/fixtures/native-evidence/extension-form-interceptors/override.block.txt"
                 ),
             ),
         ] {

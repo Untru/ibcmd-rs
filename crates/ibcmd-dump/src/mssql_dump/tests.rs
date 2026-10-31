@@ -5818,12 +5818,12 @@ fn extracts_command_interface_visibility_placement_order_and_groups() {
 #[test]
 fn platform_subsystem_command_interface_keeps_per_role_visibility() {
     let packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "command-interface-ut-role-visibility/raw-packed.bin.b64"
     )))
     .expect("platform-attested command interface payload");
     let native = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "command-interface-ut-role-visibility/native-command-interface.xml.b64"
     )))
     .expect("platform-attested command interface export");
@@ -5939,12 +5939,12 @@ fn platform_subsystem_command_interface_keeps_per_role_visibility() {
 #[test]
 fn platform_command_interface_declines_standard_command_when_use_standard_commands_false() {
     let packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "command-interface-mdm-use-standard-commands-false/raw-packed.bin.b64"
     )))
     .expect("platform-attested command interface payload");
     let native = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "command-interface-mdm-use-standard-commands-false/native-command-interface.xml.b64"
     )))
     .expect("platform-attested command interface export");
@@ -6036,12 +6036,12 @@ fn platform_command_interface_declines_standard_command_when_use_standard_comman
 #[test]
 fn metadata_command_reference_index_reads_catalog_use_standard_commands_from_real_rows() {
     let false_packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "catalog-mdm-use-standard-commands/catalog-false-packed.bin.b64"
     )))
     .expect("platform-attested catalog payload");
     let true_packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "catalog-mdm-use-standard-commands/catalog-true-packed.bin.b64"
     )))
     .expect("platform-attested catalog payload");
@@ -6079,7 +6079,7 @@ fn metadata_command_reference_index_reads_catalog_use_standard_commands_from_rea
 fn metadata_command_reference_index_reads_business_process_based_on() {
     let uuid = "dad11c2e-08fc-4a6b-8829-8be6c64c15fc";
     let packed = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.deflate"
     );
     let row = metadata_text_row_from_blob(uuid, packed).expect("the business process row decodes");
     assert_eq!(row.kind.as_deref(), Some("BusinessProcess"));
@@ -7961,7 +7961,7 @@ fn extracts_form_scaling_mode_when_root_child_item_is_pages() {
 fn reads_platform_8_5_1_form_roots_through_their_down_conversion() {
     let save_window = extract_form_body_xml(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.5.1.1150/form-root-8.5.1-down-conversion/raw/1415ba25-2477-4d93-b248-95235d5086ed.deflate"
+            "../../../../tests/fixtures/native-evidence/8.5.1.1150/form-root-8.5.1-down-conversion/raw/1415ba25-2477-4d93-b248-95235d5086ed.deflate"
         ),
         &BTreeMap::new(),
     )
@@ -7974,7 +7974,7 @@ fn reads_platform_8_5_1_form_roots_through_their_down_conversion() {
 
     let long_operation = extract_form_body_xml(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.5.1.1150/form-root-8.5.1-down-conversion/raw/13797e94-aac4-40ef-a64b-a2fba16959b6.deflate"
+            "../../../../tests/fixtures/native-evidence/8.5.1.1150/form-root-8.5.1-down-conversion/raw/13797e94-aac4-40ef-a64b-a2fba16959b6.deflate"
         ),
         &BTreeMap::new(),
     )
@@ -8672,7 +8672,7 @@ fn extracts_form_save_data_in_settings_alongside_a_populated_property_bag() {
 #[test]
 fn extracts_form_vertical_scroll_use_if_necessary_from_tail() {
     let form_body = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-vertical-scroll/raw/fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-vertical-scroll/raw/fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f.deflate"
     );
 
     let form_xml = extract_form_body_xml(form_body, &BTreeMap::new()).unwrap();
@@ -8740,7 +8740,7 @@ fn extracts_form_attributes_and_commands_from_body_tail() {
         text.replace_range(
             payload_start..payload_end,
             include_str!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/form-comparison-storage.xml.b64"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/form-comparison-storage.xml.b64"
             )
             .trim(),
         );
@@ -8924,10 +8924,10 @@ fn extracts_dynamic_list_settings_fields_from_body_tail() {
 #[test]
 fn dcs_form_server_state_corpora_agree_the_envelope_is_byte_identical() {
     const F1_SERVER_STATE_DECODED_B64: &str = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-dynamic-list-server-state/server-state-decoded.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-dynamic-list-server-state/server-state-decoded.xml.b64"
     );
     const F2_SERVER_STATE_DECODED_B64: &str = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/server-state-decoded.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/server-state-decoded.xml.b64"
     );
     let f1 = decode_base64_mime(F1_SERVER_STATE_DECODED_B64).unwrap();
     let f2 = decode_base64_mime(F2_SERVER_STATE_DECODED_B64).unwrap();
@@ -8945,7 +8945,7 @@ fn dcs_form_server_state_corpora_agree_the_envelope_is_byte_identical() {
 #[test]
 fn extracts_form_attributes_conditional_appearance_from_body_tail() {
     let encoded = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
     let tail = format!(
         "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{}}}}}",
@@ -8970,7 +8970,7 @@ fn extracts_form_attributes_conditional_appearance_from_body_tail() {
 #[test]
 fn form_attributes_conditional_appearance_outside_the_cohort_is_transliterated() {
     let encoded = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
     let storage = String::from_utf8(decode_base64_mime(encoded).unwrap())
         .unwrap()
@@ -9007,7 +9007,7 @@ fn form_attributes_conditional_appearance_outside_the_cohort_is_transliterated()
 #[test]
 fn form_attributes_malformed_conditional_appearance_fails_closed() {
     let encoded = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
     let storage = String::from_utf8(decode_base64_mime(encoded).unwrap())
         .unwrap()
@@ -9038,10 +9038,10 @@ fn form_attributes_malformed_conditional_appearance_fails_closed() {
 #[test]
 fn form_attributes_tail_counts_sub_tables_and_bindings_independently() {
     let empty = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
     );
     let filled = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
 
     // Two sub-tables, no binding: the property is absent and the sub-tables
@@ -9079,7 +9079,7 @@ fn form_attributes_tail_counts_sub_tables_and_bindings_independently() {
 #[test]
 fn form_attributes_tail_binding_relations_fail_closed() {
     let filled = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
     for binding in [
         // A one-segment chain against a two-step path.
@@ -9114,7 +9114,7 @@ fn form_attributes_tail_binding_relations_fail_closed() {
 #[test]
 fn form_attributes_tail_with_unaccounted_fields_fails_closed() {
     let empty = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
     );
     let section = extract_form_body_attributes_section(
         &[format!("{{4,0,0,0,{{0}},{{#base64:{}}}}}", empty.trim())],
@@ -9132,7 +9132,7 @@ fn form_attributes_tail_with_unaccounted_fields_fails_closed() {
 #[test]
 fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
     let encoded = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
     let tail = format!(
         "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{}}}}}",
@@ -9209,7 +9209,7 @@ fn empty_appearance_storage_is_omitted_while_an_absent_property_emits_the_defaul
     // Catalog.CorpusList.ListForm's own unpacked body row, sha256 pinned
     // against `form.body_row.unpacked_sha256` in that fixture's manifest.json.
     const FORM_BODY_UNPACKED_B64: &str = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/form-body-unpacked.bin.b64"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state/form-body-unpacked.bin.b64"
     );
     let body = decode_base64_mime(FORM_BODY_UNPACKED_B64)
         .expect("retained form-body-unpacked fixture is valid base64");
@@ -9608,7 +9608,7 @@ fn extracts_form_child_items_from_layout_pairs() {
     // `Items.Список.CurrentData.Ref`.
     let projects = extract_form_body_xml(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-button-table-current-data/raw/b9b7a7e7-3e39-49cd-899d-c23839ab519c.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-button-table-current-data/raw/b9b7a7e7-3e39-49cd-899d-c23839ab519c.deflate"
         ),
         &BTreeMap::new(),
     )
@@ -9745,7 +9745,7 @@ fn extracts_table_standard_command_names_from_kind1_buttons() {
     // `{1,58b2a785-...}` and `{1,49602716-...}`.
     let resend = extract_form_body_xml(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-table-standard-command-owners/raw/cc8cdc82-ee97-4426-b889-95d2286af37c.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-table-standard-command-owners/raw/cc8cdc82-ee97-4426-b889-95d2286af37c.deflate"
         ),
         &BTreeMap::new(),
     )
@@ -9775,7 +9775,7 @@ fn extracts_table_standard_command_names_from_kind1_buttons() {
     // `ДоступныеОбъектыДляИзменения`.
     let kinds = extract_form_body_xml(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-table-standard-command-owners/raw/51f9aff4-71da-4b1b-b48b-04122a17d855.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-table-standard-command-owners/raw/51f9aff4-71da-4b1b-b48b-04122a17d855.deflate"
         ),
         &BTreeMap::new(),
     )
@@ -9788,7 +9788,7 @@ fn extracts_table_standard_command_names_from_kind1_buttons() {
     // Table `Список` is item 1: `{1,37740564-...}` and `{1,fa51b106-...}`.
     let checklist = extract_form_body_xml(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-table-standard-command-owners/raw/d2762764-b5c0-4aeb-8e89-3371972f22d8.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-table-standard-command-owners/raw/d2762764-b5c0-4aeb-8e89-3371972f22d8.deflate"
         ),
         &BTreeMap::new(),
     )
@@ -10490,7 +10490,7 @@ fn design_time_platform_values_are_spelled_as_the_platform_writes_them() {
 fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
     let uuid = "d003f1f8-d632-4f80-adad-af1583998864";
     let text = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types/raw/d003f1f8-d632-4f80-adad-af1583998864.txt"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types/raw/d003f1f8-d632-4f80-adad-af1583998864.txt"
     );
     let row = metadata_text_row_from_text(uuid, text.trim_start_matches('\u{feff}').to_string())
         .expect("native CCT row");
@@ -10621,7 +10621,7 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
         PathBuf::from("ChartsOfCharacteristicTypes/CorpusCharacteristics.xml")
     );
     let expected = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types/native/ChartsOfCharacteristicTypes/CorpusCharacteristics.xml"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types/native/ChartsOfCharacteristicTypes/CorpusCharacteristics.xml"
     );
     assert_eq!(extracted.xml, expected);
 }
@@ -12723,7 +12723,7 @@ fn writes_chart_of_characteristic_types_predefined_data_with_types() {
     let string_item_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let ref_item_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
     let metadata = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types/raw/d003f1f8-d632-4f80-adad-af1583998864.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types/raw/d003f1f8-d632-4f80-adad-af1583998864.deflate"
     )
     .to_vec();
     let predefined = deflate_for_test(
@@ -13730,7 +13730,7 @@ fn parses_and_formats_metadata_child_choice_parameter_values() {
 #[test]
 fn platform_chart_of_characteristic_types_carries_the_data_lock_mode_in_slot_36() {
     let packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "chart-of-characteristic-types-ut-managed-lock/raw-packed.bin.b64"
     )))
     .expect("platform-attested chart payload");
@@ -14194,7 +14194,7 @@ fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         "StyleItem.ЦветШтампаЭП".to_string(),
     )]);
     let spreadsheet = parse_moxel_spreadsheet_text(
-        include_str!("../../tests/fixtures/moxel_signature_stamp_raw.txt"),
+        include_str!("../../../../tests/fixtures/moxel_signature_stamp_raw.txt"),
         &object_refs,
     )
     .unwrap();
@@ -17391,7 +17391,7 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
 
 #[test]
 fn formats_moxel_load_goods_style_slots_keep_border_color_at_zero() {
-    let inflated = include_str!("../../tests/fixtures/moxel_load_goods_source_slots.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_load_goods_source_slots.txt");
     let body_start = inflated.find("{8,").unwrap();
     let fields = split_1c_braced_fields(&inflated[body_start..], 0).unwrap();
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
@@ -18433,7 +18433,7 @@ fn formats_moxel_prefers_leading_width_only_source_column_formats() {
 #[test]
 fn formats_moxel_detail_parameters_and_row_format_offsets() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-        include_str!("../../tests/fixtures/moxel_file_transfer_report_raw.txt"),
+        include_str!("../../../../tests/fixtures/moxel_file_transfer_report_raw.txt"),
         &BTreeMap::new(),
     )
     .unwrap();
@@ -18456,7 +18456,7 @@ fn formats_moxel_detail_parameters_and_row_format_offsets() {
 #[test]
 fn formats_moxel_source_slot_refs_with_default_width_do_not_create_empty_formats() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-        include_str!("../../tests/fixtures/moxel_gs1_source_slots.txt"),
+        include_str!("../../../../tests/fixtures/moxel_gs1_source_slots.txt"),
         &BTreeMap::new(),
     )
     .unwrap();
@@ -18482,7 +18482,7 @@ fn formats_moxel_source_slot_refs_with_default_width_do_not_create_empty_formats
 #[test]
 fn formats_moxel_source_slot_refs_preserve_high_tail_indices() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-        include_str!("../../tests/fixtures/moxel_request_offer_source_slots.txt"),
+        include_str!("../../../../tests/fixtures/moxel_request_offer_source_slots.txt"),
         &BTreeMap::new(),
     )
     .unwrap();
@@ -18511,7 +18511,7 @@ fn formats_moxel_source_slot_refs_preserve_high_tail_indices() {
 #[test]
 fn formats_moxel_request_offer_preserves_native_default_and_report_header_styles() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-        include_str!("../../tests/fixtures/moxel_request_offer_source_slots.txt"),
+        include_str!("../../../../tests/fixtures/moxel_request_offer_source_slots.txt"),
         &BTreeMap::new(),
     )
     .unwrap();
@@ -18560,7 +18560,7 @@ fn formats_moxel_request_offer_preserves_native_default_and_report_header_styles
 #[test]
 fn formats_moxel_clientbank_db_tail_preserves_default_details_lines_and_font_tenths() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-        include_str!("../../tests/fixtures/moxel_clientbank_report_raw.txt"),
+        include_str!("../../../../tests/fixtures/moxel_clientbank_report_raw.txt"),
         &BTreeMap::new(),
     )
     .unwrap();
@@ -18601,7 +18601,7 @@ fn formats_moxel_clientbank_db_tail_preserves_default_details_lines_and_font_ten
 #[test]
 fn formats_moxel_settlement_db_tail_preserves_form_text_auto_and_group_styles() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-        include_str!("../../tests/fixtures/moxel_settlement_registers_raw.txt"),
+        include_str!("../../../../tests/fixtures/moxel_settlement_registers_raw.txt"),
         &BTreeMap::new(),
     )
     .unwrap();
@@ -18652,7 +18652,7 @@ fn formats_moxel_settlement_db_tail_preserves_form_text_auto_and_group_styles() 
 
 #[test]
 fn formats_moxel_source_slot_refs_preserve_native_load_goods_order_and_default() {
-    let inflated = include_str!("../../tests/fixtures/moxel_load_goods_source_slots.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_load_goods_source_slots.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -18704,7 +18704,7 @@ fn formats_moxel_source_slot_refs_preserve_native_load_goods_order_and_default()
 #[test]
 fn formats_moxel_zero_offset_sparse_source_refs_preserve_required_fields_order() {
     let spreadsheet = parse_moxel_spreadsheet_text(
-        include_str!("../../tests/fixtures/moxel_required_fields_template_raw.txt"),
+        include_str!("../../../../tests/fixtures/moxel_required_fields_template_raw.txt"),
         &BTreeMap::new(),
     )
     .unwrap();
@@ -18743,7 +18743,7 @@ fn formats_moxel_zero_offset_sparse_source_refs_preserve_required_fields_order()
 
 #[test]
 fn formats_moxel_invoice_1096_sparse_column_sets_promote_shared_default_without_remap_regression() {
-    let raw = include_str!("../../tests/fixtures/moxel_invoice_1096_raw.txt");
+    let raw = include_str!("../../../../tests/fixtures/moxel_invoice_1096_raw.txt");
     let fields = split_1c_braced_fields(raw, 0).unwrap();
     let (_, _, declared_sheet_height) = parse_moxel_column_sets(&fields);
     let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
@@ -19590,7 +19590,7 @@ fn debug_moxel_bank_purchase_style_slots() {
 
 #[test]
 fn debug_moxel_invoice_1096_raw_format_slots() {
-    let raw = include_str!("../../tests/fixtures/moxel_invoice_1096_raw.txt");
+    let raw = include_str!("../../../../tests/fixtures/moxel_invoice_1096_raw.txt");
     let fields = split_1c_braced_fields(raw, 0).unwrap();
     let rows = parse_moxel_rows(&fields);
     let (column_sets, _, _) = parse_moxel_column_sets(&fields);
@@ -19715,7 +19715,7 @@ fn debug_moxel_invoice_1096_raw_format_slots() {
 
 #[test]
 fn formats_moxel_stamp_offer_uses_field_selection_colors() {
-    let inflated = include_str!("../../tests/fixtures/moxel_stamp_offer_raw.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_stamp_offer_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -19752,7 +19752,7 @@ fn formats_moxel_stamp_offer_uses_field_selection_colors() {
 
 #[test]
 fn formats_moxel_stamp_crypto_preserves_native_line_widths() {
-    let inflated = include_str!("../../tests/fixtures/moxel_stamp_crypto_raw.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_stamp_crypto_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let fields = split_1c_braced_fields(&inflated[body_start..], 0).unwrap();
     let spreadsheet =
@@ -19797,7 +19797,7 @@ fn formats_moxel_stamp_crypto_preserves_native_line_widths() {
 /// no width at all.
 #[test]
 fn moxel_line_table_carries_the_widths_the_colour_palette_cannot() {
-    let inflated = include_str!("../../tests/fixtures/moxel_hotkeys_line_table_raw.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_hotkeys_line_table_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -19831,7 +19831,7 @@ fn moxel_line_table_carries_the_widths_the_colour_palette_cannot() {
 /// first-reference order.
 #[test]
 fn moxel_font_table_is_published_in_first_reference_order() {
-    let inflated = include_str!("../../tests/fixtures/moxel_budget_revenue_admins_raw.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_budget_revenue_admins_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -19869,7 +19869,8 @@ fn moxel_font_table_is_published_in_first_reference_order() {
 /// The platform publishes the declared value.
 #[test]
 fn moxel_sheet_height_is_the_declared_row_count() {
-    let inflated = include_str!("../../tests/fixtures/moxel_document_flow_print_form_raw.txt");
+    let inflated =
+        include_str!("../../../../tests/fixtures/moxel_document_flow_print_form_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -19890,7 +19891,8 @@ fn moxel_sheet_height_is_the_declared_row_count() {
 /// index and not the id.
 #[test]
 fn moxel_drawing_z_order_is_the_sequence_position() {
-    let inflated = include_str!("../../tests/fixtures/moxel_counterparty_check_errors_raw.txt");
+    let inflated =
+        include_str!("../../../../tests/fixtures/moxel_counterparty_check_errors_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -19921,7 +19923,7 @@ fn moxel_drawing_z_order_is_the_sequence_position() {
 /// ordering: 3 is `Double` for a cell line and `Dotted` for a drawing line.
 #[test]
 fn moxel_drawing_line_style_uses_its_own_enumeration() {
-    let inflated = include_str!("../../tests/fixtures/moxel_dss_account_connection_raw.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_dss_account_connection_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -19985,7 +19987,8 @@ fn moxel_named_item_list_is_not_capped_at_512_entries() {
 ///   (`1, {1,1,{"ru","13"}}`), not an enumeration.
 #[test]
 fn moxel_style_overrides_and_mask_come_from_their_own_tables() {
-    let inflated = include_str!("../../tests/fixtures/moxel_sales_plan_norm_file_load_raw.txt");
+    let inflated =
+        include_str!("../../../../tests/fixtures/moxel_sales_plan_norm_file_load_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -20022,7 +20025,7 @@ fn moxel_style_overrides_and_mask_come_from_their_own_tables() {
 /// the third between `<format>` and `<hyperLink>`.
 #[test]
 fn moxel_value_and_control_types_come_from_their_document_tables() {
-    let inflated = include_str!("../../tests/fixtures/moxel_delivery_extra_services_raw.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_delivery_extra_services_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -20134,7 +20137,7 @@ fn moxel_value_type_descriptors_decode_by_their_pattern() {
 #[test]
 fn moxel_font_members_follow_the_descriptor_mask() {
     let inflated =
-        include_str!("../../tests/fixtures/moxel_marketplace_accounts_font_mask_raw.txt");
+        include_str!("../../../../tests/fixtures/moxel_marketplace_accounts_font_mask_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
@@ -20203,7 +20206,8 @@ fn moxel_font_resolves_a_configuration_style_item_by_uuid() {
 /// the document's trailing `<format>`.
 #[test]
 fn moxel_default_format_publishes_the_font_beside_its_width() {
-    let inflated = include_str!("../../tests/fixtures/moxel_edo_notice_default_format_raw.txt");
+    let inflated =
+        include_str!("../../../../tests/fixtures/moxel_edo_notice_default_format_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let fields = split_1c_braced_fields(&inflated[body_start..], 0).unwrap();
     assert_eq!(
@@ -20241,7 +20245,7 @@ fn moxel_default_format_publishes_the_font_beside_its_width() {
 /// every document and the grammar reproduces all 522 published records.
 #[test]
 fn moxel_header_footer_block_publishes_the_plain_text_child() {
-    let inflated = include_str!("../../tests/fixtures/moxel_route_sheet_headers_raw.txt");
+    let inflated = include_str!("../../../../tests/fixtures/moxel_route_sheet_headers_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let body = &inflated[body_start..];
     let fields = split_1c_braced_fields(body, 0).unwrap();
@@ -20298,7 +20302,8 @@ fn moxel_header_footer_block_publishes_the_plain_text_child() {
 /// publish the left pair and never a centre or right element.
 #[test]
 fn moxel_header_footer_block_omits_the_empty_records() {
-    let inflated = include_str!("../../tests/fixtures/moxel_torg29_left_only_headers_raw.txt");
+    let inflated =
+        include_str!("../../../../tests/fixtures/moxel_torg29_left_only_headers_raw.txt");
     let body_start = inflated.find("{8,").unwrap();
     let fields = split_1c_braced_fields(&inflated[body_start..], 0).unwrap();
     assert_eq!(
@@ -22723,7 +22728,7 @@ fn standard_attribute_choice_parameters_decode_with_scope_and_refuse_without() {
 #[test]
 fn platform_business_process_flowchart_reencodes_byte_for_byte() {
     let packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "business-process-flowchart-ut/raw/553dbd65-c1aa-406a-8ccc-ca1538267b13.7.deflate.b64"
     )))
     .expect("platform-attested flowchart payload");
@@ -22777,7 +22782,7 @@ fn platform_business_process_flowchart_reencodes_byte_for_byte() {
             .expect("the platform flowchart parses whole");
     let xml = format_business_process_flowchart_xml(&flowchart);
     let native: &[u8] = include_bytes!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "business-process-flowchart-ut/native/BusinessProcesses/",
         "СогласованиеЦенНоменклатуры/Ext/Flowchart.xml"
     ));
@@ -22798,7 +22803,7 @@ fn platform_business_process_flowchart_reencodes_byte_for_byte() {
 #[test]
 fn platform_graphical_scheme_template_reencodes_byte_for_byte() {
     let text = include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "graphical-scheme-do/raw/ШаблонЭлементаДекорация.scheme.txt"
     ));
     assert_eq!(
@@ -22814,7 +22819,7 @@ fn platform_graphical_scheme_template_reencodes_byte_for_byte() {
     )
     .expect("the platform graphical scheme parses whole");
     let native: &[u8] = include_bytes!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "graphical-scheme-do/native/Catalogs/СхемыПроцессов/Templates/",
         "ШаблонЭлементаДекорация/Ext/Template.xml"
     ));
@@ -22836,7 +22841,7 @@ fn platform_graphical_scheme_template_reencodes_byte_for_byte() {
 #[test]
 fn platform_graphical_scheme_switch_item_reencodes_byte_for_byte() {
     let text = include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "graphical-scheme-do/raw/Рассмотрение.flowchart.txt"
     ));
     assert_eq!(
@@ -22866,7 +22871,7 @@ fn platform_graphical_scheme_switch_item_reencodes_byte_for_byte() {
         "the route map must publish the Switch item the decoder gained"
     );
     let native: &[u8] = include_bytes!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "graphical-scheme-do/native/BusinessProcesses/Рассмотрение/Ext/Flowchart.xml"
     ));
     assert_eq!(
@@ -23121,7 +23126,7 @@ fn disambiguates_colliding_metadata_object_codes() {
     // instead of hand-crafting one.
     let task_uuid = "32838304-a94f-4eb0-b1a6-4e5e855f022c";
     let task_text = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
     );
     let task_blob = deflate_for_test(task_text.as_bytes());
 
@@ -26631,13 +26636,13 @@ fn validates_platform_proven_register_generated_types_and_writer_order() {
             kind: "AccountingRegister",
             uuid: "8b6ea484-0164-4c68-a0cb-175a31c56186",
             packed: include_bytes!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8b6ea484-0164-4c68-a0cb-175a31c56186.deflate"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8b6ea484-0164-4c68-a0cb-175a31c56186.deflate"
             ),
             text: include_str!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8b6ea484-0164-4c68-a0cb-175a31c56186.txt"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8b6ea484-0164-4c68-a0cb-175a31c56186.txt"
             ),
             native_xml: include_bytes!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/AccountingRegisters/CorpusAccountingRegister.xml"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/AccountingRegisters/CorpusAccountingRegister.xml"
             ),
             packed_sha256: "f57a55cef8c67835c466ad6ac08d5c9a279e326d499ead6b219d112c096d4a54",
             unpacked_sha256: "c50b678b13c2558088ea48762e4add19a4166a5a3c4d176e44b2fa9fd437f4f6",
@@ -26674,13 +26679,13 @@ fn validates_platform_proven_register_generated_types_and_writer_order() {
             kind: "CalculationRegister",
             uuid: "5ad20ecf-0375-4218-b348-0534286973a5",
             packed: include_bytes!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/5ad20ecf-0375-4218-b348-0534286973a5.deflate"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/5ad20ecf-0375-4218-b348-0534286973a5.deflate"
             ),
             text: include_str!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/5ad20ecf-0375-4218-b348-0534286973a5.txt"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/5ad20ecf-0375-4218-b348-0534286973a5.txt"
             ),
             native_xml: include_bytes!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/CalculationRegisters/CorpusCalculationRegister.xml"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/CalculationRegisters/CorpusCalculationRegister.xml"
             ),
             packed_sha256: "a7ff330491297f22b4a7d7784d2c2ac776ce7d2d75547786daf908acb8c0a940",
             unpacked_sha256: "df522317ae39662f57192fd9d25f520a4e68fe0242eebbd07b1b39e0d26fb89a",
@@ -26825,13 +26830,13 @@ fn validates_platform_proven_plan_generated_types_and_type_index() {
             owner_field_count: 57,
             header_index: 15,
             packed: include_bytes!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/7671ada0-5cde-47a2-b49e-8de67818fb10.deflate"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/7671ada0-5cde-47a2-b49e-8de67818fb10.deflate"
             ),
             text: include_str!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/7671ada0-5cde-47a2-b49e-8de67818fb10.txt"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/7671ada0-5cde-47a2-b49e-8de67818fb10.txt"
             ),
             native_xml: include_bytes!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/ChartsOfAccounts/CorpusAccounts.xml"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/ChartsOfAccounts/CorpusAccounts.xml"
             ),
             packed_sha256: "467813bd8fed7c1c5901dbfa7a9eac45293361e1d5f42c37aae22f2b66493cfa",
             unpacked_sha256: "3b6553f9ef66d373457b5fcda2de4cf8585ad8ea3535454b936636ab4c217a20",
@@ -26863,13 +26868,13 @@ fn validates_platform_proven_plan_generated_types_and_type_index() {
             owner_field_count: 63,
             header_index: 1,
             packed: include_bytes!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8c132029-d49c-49db-b12b-64519b64d755.deflate"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8c132029-d49c-49db-b12b-64519b64d755.deflate"
             ),
             text: include_str!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8c132029-d49c-49db-b12b-64519b64d755.txt"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8c132029-d49c-49db-b12b-64519b64d755.txt"
             ),
             native_xml: include_bytes!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/ChartsOfCalculationTypes/CorpusCalculationTypes.xml"
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/ChartsOfCalculationTypes/CorpusCalculationTypes.xml"
             ),
             packed_sha256: "bcc374c0e7e21e2f712fd7d5ea9c50471adf24590ea7a62f50fbfdf3b5c4af25",
             unpacked_sha256: "6295f2983f300ef9e311324480bea88216cfd9df95c7a48697f5d76d5aeba3a1",
@@ -35925,7 +35930,7 @@ fn extracts_task_child_form_ref_from_current_index() {
     let form_uuid = "44444444-4444-4444-8444-444444444441";
     let empty_form_collection = "{3f58cbfb-4172-4e54-be49-561a579bb38b,0}";
     let task_text = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
     );
     assert_eq!(task_text.matches(empty_form_collection).count(), 1);
     let task_text = task_text.replace(
@@ -37889,7 +37894,7 @@ fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
 #[test]
 fn platform_report_attribute_wrapper_carries_no_data_history_tail() {
     let packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "report-ut-attribute-wrapper/raw-packed.bin.b64"
     )))
     .expect("platform-attested report payload");
@@ -37971,7 +37976,7 @@ fn platform_report_attribute_wrapper_carries_no_data_history_tail() {
 #[test]
 fn platform_catalog_based_on_accepts_catalog_references() {
     let packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "catalog-ut-based-on-catalog/raw-packed.bin.b64"
     )))
     .expect("platform-attested catalog payload");
@@ -38051,7 +38056,7 @@ fn platform_catalog_based_on_accepts_catalog_references() {
 #[test]
 fn platform_catalog_input_modes_read_full_text_search_from_its_own_slot() {
     let packed = decode_base64_mime(include_str!(concat!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/",
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
         "catalog-ut-full-text-search-on-input/raw-packed.bin.b64"
     )))
     .expect("platform-attested catalog payload");
@@ -38115,7 +38120,7 @@ fn platform_style_font_members_follow_the_mask_not_the_arity() {
     let cases = [
         (
             include_str!(concat!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
                 "style-item-ut-font-member-mask/raw-packed-strikeout.bin.b64"
             )),
             "b5d1e99eecf915b098ff20db59ebac3e42b314423af3fbb46d64a3f87c8446c3",
@@ -38128,7 +38133,7 @@ fn platform_style_font_members_follow_the_mask_not_the_arity() {
         ),
         (
             include_str!(concat!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
                 "style-item-ut-font-member-mask/raw-packed-height-bold.bin.b64"
             )),
             "3564922688293e207818f9ae1fe207126bc17d6364fc8fa8c0960b601608f631",
@@ -38141,7 +38146,7 @@ fn platform_style_font_members_follow_the_mask_not_the_arity() {
         ),
         (
             include_str!(concat!(
-                "../../tests/fixtures/native-evidence/8.3.27.2214/",
+                "../../../../tests/fixtures/native-evidence/8.3.27.2214/",
                 "style-item-ut-font-member-mask/raw-packed-italic.bin.b64"
             )),
             "27c6ecded3131f97a29cb3b3824464be9feb7362eeea14b06e56520cc33c6b4f",
@@ -39464,10 +39469,10 @@ fn extracts_document_child_attribute_data_history_tail() {
 fn validates_platform_proven_business_process_generated_types_and_writer_order() {
     let business_process_uuid = "dad11c2e-08fc-4a6b-8829-8be6c64c15fc";
     let packed = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.deflate"
     );
     let business_process_text = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.txt"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.txt"
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(packed)),
@@ -39564,7 +39569,7 @@ fn validates_platform_proven_business_process_generated_types_and_writer_order()
     }
 
     let native_xml = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/native/BusinessProcesses/Задание.xml"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/native/BusinessProcesses/Задание.xml"
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(native_xml)),
@@ -39602,7 +39607,7 @@ fn validates_platform_proven_business_process_generated_types_and_writer_order()
 fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
     let task_uuid = "32838304-a94f-4eb0-b1a6-4e5e855f022c";
     let task_text = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
     );
     let root = split_information_register_braced_fields(task_text.trim_start_matches('\u{feff}'))
         .expect("platform-proven Task root");
@@ -39718,7 +39723,7 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
     assert_eq!(
         extracted.xml.as_slice(),
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/native/Tasks/CorpusTask.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/native/Tasks/CorpusTask.xml"
         ),
         "platform-proven Task XML must remain byte-identical to the native export"
     );
@@ -39833,10 +39838,10 @@ fn extracts_task_variable_number_allowed_length_to_platform_proven_xml() {
     assert_platform_proven_task_number_allowed_length_and_data_lock_mode(
         "d4ee4506-4005-40fe-be44-ef91da738ecc",
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/raw/task-a-variable-managed.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/raw/task-a-variable-managed.txt"
         ),
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/native/Tasks/ЗадачаА.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/native/Tasks/ЗадачаА.xml"
         ),
         "Variable",
         "Managed",
@@ -39848,10 +39853,10 @@ fn extracts_task_automatic_data_lock_control_mode_to_platform_proven_xml() {
     assert_platform_proven_task_number_allowed_length_and_data_lock_mode(
         "46d1466e-126b-4442-96c4-040b4728c17d",
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/raw/task-b-fixed-automatic.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/raw/task-b-fixed-automatic.txt"
         ),
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/native/Tasks/ЗадачаБ.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-number-allowed-length-data-lock-mode/native/Tasks/ЗадачаБ.xml"
         ),
         "Fixed",
         "Automatic",
@@ -39862,10 +39867,10 @@ fn extracts_task_automatic_data_lock_control_mode_to_platform_proven_xml() {
 fn validates_platform_proven_task_assignee_native_shape() {
     let task_uuid = "3ad08f4a-6202-4099-b6cc-bc116e6731a0";
     let packed = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/raw/3ad08f4a-6202-4099-b6cc-bc116e6731a0.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/raw/3ad08f4a-6202-4099-b6cc-bc116e6731a0.deflate"
     );
     let task_text = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/raw/3ad08f4a-6202-4099-b6cc-bc116e6731a0.txt"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/raw/3ad08f4a-6202-4099-b6cc-bc116e6731a0.txt"
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(packed)),
@@ -39927,7 +39932,7 @@ fn validates_platform_proven_task_assignee_native_shape() {
     assert!(internal_slots.field_14.is_none());
 
     let native_xml = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/native/Tasks/ЗадачаИсполнителя.xml"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/native/Tasks/ЗадачаИсполнителя.xml"
     );
     assert_eq!(
         format!("{:x}", Sha256::digest(native_xml)),
@@ -52605,7 +52610,8 @@ fn assert_platform_proven_bot_predefined_and_picture(
 /// `docs/evidence/mxl-line-table-order-lead.md`.
 #[test]
 fn full_coverage_line_table_reorders_when_first_entry_is_first_cited() {
-    let text = include_str!("../../tests/fixtures/moxel_transaction_report_line_order_raw.txt");
+    let text =
+        include_str!("../../../../tests/fixtures/moxel_transaction_report_line_order_raw.txt");
     let spreadsheet =
         parse_moxel_spreadsheet_text(text, &BTreeMap::new()).expect("parse spreadsheet body");
     let observed: Vec<(&str, usize)> = spreadsheet
@@ -52632,10 +52638,10 @@ fn extracts_predefined_bot_without_picture_to_platform_proven_xml() {
     assert_platform_proven_bot_predefined_and_picture(
         "4c9fe47d-8f20-4d84-9df8-a7276405f4e0",
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/raw/bot-a-predefined-no-picture.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/raw/bot-a-predefined-no-picture.txt"
         ),
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/native/Bots/БотА.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/native/Bots/БотА.xml"
         ),
         true,
         None,
@@ -52647,10 +52653,10 @@ fn extracts_non_predefined_bot_with_picture_to_platform_proven_xml() {
     assert_platform_proven_bot_predefined_and_picture(
         "e4fa25c0-8b8e-4848-83a4-3dda8fe1918d",
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/raw/bot-b-not-predefined-with-picture.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/raw/bot-b-not-predefined-with-picture.txt"
         ),
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/native/Bots/БотБ.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/bot-predefined-picture/native/Bots/БотБ.xml"
         ),
         false,
         Some("StdPicture.Information"),
@@ -53004,7 +53010,7 @@ fn a_form_parse_context_takes_the_extension_export_running_when_it_is_built() {
 #[test]
 fn graphical_schema_field_under_leftwidest_page_publishes_no_default_geometry() {
     let raw = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/graphical-schema-field-leftwidest-page/raw/gsftest-form-body.txt"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/graphical-schema-field-leftwidest-page/raw/gsftest-form-body.txt"
     );
     let form_body = deflate_for_test(raw.as_bytes());
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new())
@@ -53256,10 +53262,10 @@ fn assert_platform_proven_moxel_chart(raw_payload: &str, native_object_xml: &str
 fn renders_empty_stacked_bar_chart_with_extended_scales_to_platform_proven_xml() {
     assert_platform_proven_moxel_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-extended-scales.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-extended-scales.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-extended-scales-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-extended-scales-object.xml"
         ),
     );
 }
@@ -53268,10 +53274,10 @@ fn renders_empty_stacked_bar_chart_with_extended_scales_to_platform_proven_xml()
 fn renders_stacked_bar_chart_with_one_real_series_to_platform_proven_xml() {
     assert_platform_proven_moxel_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/one-real-series-extended-scales.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/one-real-series-extended-scales.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/one-real-series-extended-scales-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/one-real-series-extended-scales-object.xml"
         ),
     );
 }
@@ -53280,10 +53286,10 @@ fn renders_stacked_bar_chart_with_one_real_series_to_platform_proven_xml() {
 fn renders_stacked_bar_chart_with_one_real_point_to_platform_proven_xml() {
     assert_platform_proven_moxel_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/one-real-point-extended-scales.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/one-real-point-extended-scales.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/one-real-point-extended-scales-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/one-real-point-extended-scales-object.xml"
         ),
     );
 }
@@ -53292,10 +53298,10 @@ fn renders_stacked_bar_chart_with_one_real_point_to_platform_proven_xml() {
 fn renders_empty_stacked_bar_chart_with_legend_none_to_platform_proven_xml() {
     assert_platform_proven_moxel_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-legend-none.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-legend-none.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-legend-none-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-legend-none-object.xml"
         ),
     );
 }
@@ -53304,10 +53310,10 @@ fn renders_empty_stacked_bar_chart_with_legend_none_to_platform_proven_xml() {
 fn renders_empty_stacked_bar_chart_with_design_init_flags_to_platform_proven_xml() {
     assert_platform_proven_moxel_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-design-init.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-design-init.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-design-init-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-design-init-object.xml"
         ),
     );
 }
@@ -53316,10 +53322,10 @@ fn renders_empty_stacked_bar_chart_with_design_init_flags_to_platform_proven_xml
 fn renders_empty_stacked_bar_chart_without_extended_scales_to_platform_proven_xml() {
     assert_platform_proven_moxel_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-no-extended-scales.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/raw/empty-no-extended-scales.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-no-extended-scales-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-no-extended-scales-object.xml"
         ),
     );
 }
@@ -53353,10 +53359,10 @@ native export; block missing or different in:\n{xml}"
 fn renders_mobile_device_command_bar_content_for_business_process_list_form_with_navigator_gap() {
     assert_platform_proven_mobile_device_command_bar_content(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/1a7c7427-bead-4655-9dd6-df6e722663c5.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/1a7c7427-bead-4655-9dd6-df6e722663c5.deflate"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
         ),
     );
 }
@@ -53365,10 +53371,10 @@ fn renders_mobile_device_command_bar_content_for_business_process_list_form_with
 fn renders_mobile_device_command_bar_content_for_catalog_list_form_with_navigator_gap() {
     assert_platform_proven_mobile_device_command_bar_content(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/5f91b00f-d8fc-4d63-8486-66339357ab22.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/raw/5f91b00f-d8fc-4d63-8486-66339357ab22.deflate"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-mobile-device-command-bar-content-navigator-gap/native/mobile-device-command-bar-content-block.xml"
         ),
     );
 }
@@ -53392,14 +53398,14 @@ fn assert_platform_proven_save_window_settings_false(raw_deflate: &[u8]) {
 #[test]
 fn renders_save_window_settings_for_catalog_list_form_with_navigator_gap() {
     assert_platform_proven_save_window_settings_false(include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/085702c9-6d28-441d-b4ee-3319c23b2fef.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/085702c9-6d28-441d-b4ee-3319c23b2fef.deflate"
     ));
 }
 
 #[test]
 fn renders_save_window_settings_for_document_list_form_with_navigator_gap() {
     assert_platform_proven_save_window_settings_false(include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/ffbe920e-f47c-495e-8d96-bedbc0a631e2.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-save-window-settings-navigator-gap/raw/ffbe920e-f47c-495e-8d96-bedbc0a631e2.deflate"
     ));
 }
 
@@ -53423,7 +53429,7 @@ fn assert_platform_proven_form_root_tag(raw_deflate: &[u8], expected_tag: &str) 
 fn renders_group_always_horizontal_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/cd41f832-773f-42e8-a4ed-8f521eace1fc.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/cd41f832-773f-42e8-a4ed-8f521eace1fc.deflate"
         ),
         "<Group>AlwaysHorizontal</Group>",
     );
@@ -53433,7 +53439,7 @@ fn renders_group_always_horizontal_for_form_with_navigator_gap() {
 fn renders_group_horizontal_if_possible_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/e2ce87bf-3feb-4c15-870e-d876fd5f3ab7.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/e2ce87bf-3feb-4c15-870e-d876fd5f3ab7.deflate"
         ),
         "<Group>HorizontalIfPossible</Group>",
     );
@@ -53443,7 +53449,7 @@ fn renders_group_horizontal_if_possible_for_form_with_navigator_gap() {
 fn renders_vertical_spacing_half_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/1e9ea8b1-7ff1-463b-b249-60c15fc5fb33.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/1e9ea8b1-7ff1-463b-b249-60c15fc5fb33.deflate"
         ),
         "<VerticalSpacing>Half</VerticalSpacing>",
     );
@@ -53453,7 +53459,7 @@ fn renders_vertical_spacing_half_for_form_with_navigator_gap() {
 fn renders_vertical_spacing_one_and_half_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/2bf025be-45bd-4ff8-bc86-02feabc4bfda.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-grouping-navigator-gap/raw/2bf025be-45bd-4ff8-bc86-02feabc4bfda.deflate"
         ),
         "<VerticalSpacing>OneAndHalf</VerticalSpacing>",
     );
@@ -53479,7 +53485,7 @@ fn assert_platform_proven_form_root_alignment_tag(raw_deflate: &[u8], expected_t
 fn renders_conversations_representation_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_alignment_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/595e5752-36a7-4bba-8a40-26920acae01d.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/595e5752-36a7-4bba-8a40-26920acae01d.deflate"
         ),
         "<ConversationsRepresentation>Show</ConversationsRepresentation>",
     );
@@ -53489,7 +53495,7 @@ fn renders_conversations_representation_for_form_with_navigator_gap() {
 fn renders_vertical_align_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_alignment_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/826c2821-147d-4aaf-910c-acfbdb58a29f.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/826c2821-147d-4aaf-910c-acfbdb58a29f.deflate"
         ),
         "<VerticalAlign>Bottom</VerticalAlign>",
     );
@@ -53499,7 +53505,7 @@ fn renders_vertical_align_for_form_with_navigator_gap() {
 fn renders_children_align_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_alignment_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/36454dc5-ab04-4773-85cf-f634b17dfc4f.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/36454dc5-ab04-4773-85cf-f634b17dfc4f.deflate"
         ),
         "<ChildrenAlign>None</ChildrenAlign>",
     );
@@ -53509,7 +53515,7 @@ fn renders_children_align_for_form_with_navigator_gap() {
 fn renders_scaling_mode_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_alignment_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/79a77da6-ce40-4cd8-ab79-f70d5b5aa7b0.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/79a77da6-ce40-4cd8-ab79-f70d5b5aa7b0.deflate"
         ),
         "<ScalingMode>Normal</ScalingMode>",
     );
@@ -53519,7 +53525,7 @@ fn renders_scaling_mode_for_form_with_navigator_gap() {
 fn renders_horizontal_align_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_alignment_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/beed4e3c-4d47-4881-82f0-2f57f9d2bc7b.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/beed4e3c-4d47-4881-82f0-2f57f9d2bc7b.deflate"
         ),
         "<HorizontalAlign>Center</HorizontalAlign>",
     );
@@ -53529,7 +53535,7 @@ fn renders_horizontal_align_for_form_with_navigator_gap() {
 fn renders_show_close_button_for_form_with_navigator_gap() {
     assert_platform_proven_form_root_alignment_tag(
         include_bytes!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/f30b88e9-919b-45bc-ba99-a2c32ca399e7.deflate"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-root-alignment-navigator-gap/raw/f30b88e9-919b-45bc-ba99-a2c32ca399e7.deflate"
         ),
         "<ShowCloseButton>false</ShowCloseButton>",
     );
@@ -53551,10 +53557,10 @@ fn renders_show_close_button_for_form_with_navigator_gap() {
 #[test]
 fn extracts_command_bar_with_conditional_group_prefix() {
     let raw: &[u8] = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/89738071-8272-45ca-b19c-17b0f4423c1e.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/89738071-8272-45ca-b19c-17b0f4423c1e.deflate"
     );
     let expected = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/command-bar-open.xml"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/command-bar-open.xml"
     );
     let xml = extract_form_body_xml(raw, &BTreeMap::new())
         .expect("platform-proven form body payload must decode");
@@ -53568,10 +53574,10 @@ conditional-prefix fix, own subtree intact; missing or different in:\n{xml}"
 #[test]
 fn extracts_popup_with_conditional_group_prefix() {
     let raw: &[u8] = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/f46eb0f0-c10e-4bff-b40d-200dc10ce7b9.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/f46eb0f0-c10e-4bff-b40d-200dc10ce7b9.deflate"
     );
     let expected = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/popup-block.xml"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/popup-block.xml"
     );
     let xml = extract_form_body_xml(raw, &BTreeMap::new())
         .expect("platform-proven form body payload must decode");
@@ -53585,10 +53591,10 @@ to the native export; block missing or different in:\n{xml}"
 #[test]
 fn extracts_button_group_with_conditional_group_prefix() {
     let raw: &[u8] = include_bytes!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/9582d589-957a-404a-aae8-a705e82882c1.deflate"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/raw/9582d589-957a-404a-aae8-a705e82882c1.deflate"
     );
     let expected = include_str!(
-        "../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/button-group-block.xml"
+        "../../../../tests/fixtures/native-evidence/8.3.27.2214/form-conditional-group-command-bar-popup-buttongroup/native/button-group-block.xml"
     );
     let xml = extract_form_body_xml(raw, &BTreeMap::new())
         .expect("platform-proven form body payload must decode");
@@ -53635,10 +53641,10 @@ fn assert_platform_proven_moxel_chart_from_gantt_wrapper(
 fn renders_gantt_chart_embedded_chart_with_elements_not_init_to_platform_proven_xml() {
     assert_platform_proven_moxel_chart_from_gantt_wrapper(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-chart-only-payload.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-chart-only-payload.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-chart-only-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-chart-only-object.xml"
         ),
     );
 }
@@ -53647,10 +53653,10 @@ fn renders_gantt_chart_embedded_chart_with_elements_not_init_to_platform_proven_
 fn renders_gantt_chart_embedded_chart_with_elements_init_to_platform_proven_xml() {
     assert_platform_proven_moxel_chart_from_gantt_wrapper(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-chart-only-payload.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-chart-only-payload.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-chart-only-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-chart-only-object.xml"
         ),
     );
 }
@@ -53676,10 +53682,10 @@ fn assert_platform_proven_moxel_gantt_chart(raw_payload: &str, native_object_xml
 fn renders_gantt_chart_with_elements_not_init_to_platform_proven_xml() {
     assert_platform_proven_moxel_gantt_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-object-payload.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-object-payload.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-object.xml"
         ),
     );
 }
@@ -53688,10 +53694,10 @@ fn renders_gantt_chart_with_elements_not_init_to_platform_proven_xml() {
 fn renders_gantt_chart_with_four_time_scale_levels_to_native_xml() {
     assert_platform_proven_moxel_gantt_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object-payload.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object-payload.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object.xml"
         ),
     );
 }
@@ -53741,10 +53747,10 @@ fn legacy_v12_form_descriptor_is_not_a_common_module() {
 fn renders_gantt_chart_with_elements_init_to_platform_proven_xml() {
     assert_platform_proven_moxel_gantt_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-object-payload.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-object-payload.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-object.xml"
         ),
     );
 }
@@ -53757,10 +53763,10 @@ fn renders_gantt_chart_with_elements_init_to_platform_proven_xml() {
 fn renders_version_18_gantt_chart_with_elements_not_init_to_platform_proven_xml() {
     assert_platform_proven_moxel_gantt_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-v18/raw/dlitelnost-otlozhennogo-obnovleniya-object-payload.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-v18/raw/dlitelnost-otlozhennogo-obnovleniya-object-payload.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-v18/native/dlitelnost-otlozhennogo-obnovleniya-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-v18/native/dlitelnost-otlozhennogo-obnovleniya-object.xml"
         ),
     );
 }
@@ -53769,10 +53775,10 @@ fn renders_version_18_gantt_chart_with_elements_not_init_to_platform_proven_xml(
 fn renders_version_18_gantt_chart_with_elements_init_to_platform_proven_xml() {
     assert_platform_proven_moxel_gantt_chart(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-v18/raw/analiz-zhurnala-registratsii-object-payload.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-v18/raw/analiz-zhurnala-registratsii-object-payload.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-v18/native/analiz-zhurnala-registratsii-object.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-v18/native/analiz-zhurnala-registratsii-object.xml"
         ),
     );
 }
@@ -53822,10 +53828,10 @@ fn assert_platform_proven_moxel_gantt_drawing(raw_drawing_field: &str, native_dr
 fn renders_gantt_chart_drawing_with_elements_not_init_from_real_wrapped_field() {
     assert_platform_proven_moxel_gantt_drawing(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-full-drawing-field.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/dlitelnost-otlozhennogo-obnovleniya-full-drawing-field.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-drawing.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-drawing.xml"
         ),
     );
 }
@@ -53834,10 +53840,10 @@ fn renders_gantt_chart_drawing_with_elements_not_init_from_real_wrapped_field() 
 fn renders_gantt_chart_drawing_with_elements_init_from_real_wrapped_field() {
     assert_platform_proven_moxel_gantt_drawing(
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-full-drawing-field.txt"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/raw/analiz-zhurnala-registratsii-full-drawing-field.txt"
         ),
         include_str!(
-            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-drawing.xml"
+            "../../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/analiz-zhurnala-registratsii-drawing.xml"
         ),
     );
 }
