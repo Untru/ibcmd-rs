@@ -1,0 +1,50 @@
+[package]
+name = "ibcmd-config-apply"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The own configuration apply over SQL Server: what an infobase import staged in ConfigSave moved into Config in one transaction, with its gates (the restructuring check, the conservative gate, S1's structural gate and its size guard), recovery artifacts, removals and the dynamic apply"
+
+[dependencies]
+anyhow = "1.0"
+flate2 = "1.1"
+# The restructuring check the default gate runs.
+ibcmd-apply-check = { path = "../ibcmd-apply-check" }
+# The process-wide cancellation flag the apply checks between its phases.
+ibcmd-cancel = { path = "../ibcmd-cancel" }
+# The template and managed form readers of the dynamic apply's body check.
+ibcmd-compiler = { path = "../ibcmd-compiler" }
+# The source asset registry and the native descriptor reader.
+ibcmd-compiler-families = { path = "../ibcmd-compiler-families" }
+# The storage generation overlay's stored row names.
+ibcmd-dynamic-generation = { path = "../ibcmd-dynamic-generation" }
+# The form body record and its container revision.
+ibcmd-form-body = { path = "../ibcmd-form-body" }
+# The module text packer of a form body.
+ibcmd-metadata-blob = { path = "../ibcmd-metadata-blob" }
+# The descriptor model: the stored rows' brace trees and their export names.
+ibcmd-metadata-model = { path = "../ibcmd-metadata-model" }
+# The 8.3 `v8` container of the stored rows.
+ibcmd-module-blob = { path = "../ibcmd-module-blob" }
+# The native platform profile and the main activation plan.
+ibcmd-mssql-live = { path = "../ibcmd-mssql-live" }
+# The restructuring engine S1's gate plans and runs.
+ibcmd-restructure-engine = { path = "../ibcmd-restructure-engine" }
+# The database clients.
+ibcmd-sql = { path = "../ibcmd-sql" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+# The SQL Server error behind a failed apply transaction (`errors`); the
+# client and its features are `ibcmd-sql`'s.
+tiberius = { version = "0.13", default-features = false }
+uuid = { version = "1.19", features = ["v4"] }
+
+[dev-dependencies]
+# The objects an extension adopts (`restructure::tests_s1`) and the brace
+# trees of the shared restructuring fixtures (`tests/support`).
+ibcmd-restructure = { path = "../ibcmd-restructure" }
+
+[lints.rust]
+unsafe_code = "forbid"

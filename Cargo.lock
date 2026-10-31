@@ -766,6 +766,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibcmd-config-apply"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "ibcmd-apply-check",
+ "ibcmd-cancel",
+ "ibcmd-compiler",
+ "ibcmd-compiler-families",
+ "ibcmd-dynamic-generation",
+ "ibcmd-form-body",
+ "ibcmd-metadata-blob",
+ "ibcmd-metadata-model",
+ "ibcmd-module-blob",
+ "ibcmd-mssql-live",
+ "ibcmd-restructure",
+ "ibcmd-restructure-engine",
+ "ibcmd-sql",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tiberius",
+ "uuid",
+]
+
+[[package]]
 name = "ibcmd-core"
 version = "0.1.0"
 dependencies = [
@@ -1040,6 +1066,7 @@ dependencies = [
  "ibcmd-compiler",
  "ibcmd-compiler-families",
  "ibcmd-compiler-readiness",
+ "ibcmd-config-apply",
  "ibcmd-core",
  "ibcmd-dump-readers",
  "ibcmd-dynamic-generation",
