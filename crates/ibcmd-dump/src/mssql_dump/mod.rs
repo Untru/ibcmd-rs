@@ -2202,6 +2202,10 @@ fn effective_file_db_snapshot(
 #[cfg(test)]
 mod descriptor_snapshot_tests {
     use super::*;
+    #[cfg_attr(
+        not(unix),
+        expect(dead_code, reason = "moved verbatim in #559; cleanup later")
+    )]
     fn snapshot(rows: BTreeMap<String, Arc<Vec<u8>>>) -> BTreeMap<String, Arc<Vec<u8>>> {
         #[cfg(unix)]
         {
