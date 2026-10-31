@@ -45244,6 +45244,9 @@ mod interface_root_tests;
 mod tests;
 
 #[cfg(test)]
+mod root_tests;
+
+#[cfg(test)]
 mod external_data_source_tests;
 
 #[cfg(test)]
