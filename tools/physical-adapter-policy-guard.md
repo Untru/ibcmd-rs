@@ -4,10 +4,11 @@ Run `pwsh -File tools/validate-physical-adapter-policy.ps1 -RepositoryRoot .`
 and `pwsh -File tools/validate-physical-adapter-policy.ps1 -RepositoryRoot .
 -SelfTest`.
 
-The guarded production slice is `src/module_blob.rs` plus non-test Rust modules
-under `src/mssql_dump/`, plus the non-test Rust modules under the `crates/`
-directories that hold code moved out of them (`$GuardedCrateDirectories`):
-`crates/ibcmd-1c-text/src/` (the 1C braced-text primitives and scalar fields,
+The guarded production slice is `src/module_blob.rs` plus the non-test Rust
+modules under the `crates/` directories that hold code moved out of it and out
+of the former `src/mssql_dump/` (`$GuardedCrateDirectories`):
+`crates/ibcmd-dump/src/` (the exporter itself, formerly `src/mssql_dump/`; see
+the last section), `crates/ibcmd-1c-text/src/` (the 1C braced-text primitives and scalar fields,
 and the source tree's file-name segment, formerly in `src/mssql_dump/mod.rs`,
 `source_assets.rs` and `refs.rs`),
 `crates/ibcmd-1c-vocab/src/` (the platform-type, standard-attribute, style and
@@ -62,7 +63,8 @@ only of moved code is listed by its `src/`.  The MOXCEL decoder itself
 (`crates/ibcmd-moxel`, formerly `src/mssql_dump/moxel.rs` and `mxl_ir.rs`) was
 outside the slice and stays outside it, so only the module directory that holds
 what it took from the slice is listed; its root entry points in
-`src/mssql_dump/moxel_entry.rs` are guarded.
+`crates/ibcmd-dump/src/mssql_dump/moxel_entry.rs` (formerly
+`src/mssql_dump/moxel_entry.rs`) are guarded.
 A module the compiler reads only for tests is not production and is left out
 with every file below its directory: the guard finds it from the declaration
 `#[cfg(test)] mod name;` (also `pub`, or with other attributes) in a scoped
@@ -504,3 +506,59 @@ path: `"CommonPicture"`
 exporter's tests that call root-only code moved into
 `src/mssql_dump/root_tests.rs`, a test-only module. Every other record,
 the two stale ones included, is unchanged.
+
+The exporter's move into its crate (#559) takes the rest of
+`src/mssql_dump/` out of the root. Its 50 Rust files move to
+`crates/ibcmd-dump/src/mssql_dump/`, and `crates/ibcmd-dump/src/` joins
+`$GuardedCrateDirectories`. The script's hard-coded scan of `src/mssql_dump/`
+goes, and its self-test fixtures build under the crate's path. The root keeps
+its facade `src/mssql_dump.rs`, outside the slice, and two test-only modules
+beside it, `src/mssql_dump/root_tests.rs` and `src/mssql_dump/live_moxel_probes.rs`.
+The crate's `lib.rs` joins with an empty record. The 41 file records of
+`src/mssql_dump/` change only their key, to the same path under
+`crates/ibcmd-dump/`, record by record, with every occurrence entry
+unchanged. Each of 39 of them equals a scan of its file at the old path.
+The other two carry stale allowances on purpose:
+`src/mssql_dump/config_dump_info.rs` (10 entries where a scan finds 3) and
+`src/mssql_dump/incremental.rs` (10 where a scan finds 2), now
+`crates/ibcmd-dump/src/mssql_dump/config_dump_info.rs` and
+`crates/ibcmd-dump/src/mssql_dump/incremental.rs`. They are rekeyed
+verbatim, stale entries included, as the earlier moves kept them, and no
+entry is dropped or refreshed.
+
+The edits that follow the move change nine fingerprints around unchanged
+literals, count one each, in two files:
+- `crates/ibcmd-dump/src/mssql_dump/mod.rs`, `uuid-literal`: the
+  `#[expect(dead_code, …)]` attribute joins the statement of each of the five
+  unused standard-picture constants:
+  `6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f`
+  `fc99d8a92482464a82994f08bef71c0a334c952bdc8e5f34a727c18105e84e80` to
+  `5d1eecadf8c5b12ad51689e2e4c4a084f97872ace7643abf1c1633ab9fc25a35`;
+  `283ecabd-aaed-41d1-ad46-6cca91c29120`
+  `c8c95009044c7eef7ec7b59ee83ba953295b4b6d2c91d55dc538e69f5bb9f054` to
+  `3905a699464adab632f0d9a63efc7bcebee044fc4e3542ea4ef00f267d9a004d`;
+  `5b87ad1b-d8cc-43c1-b5c4-dc43613c518c`
+  `96906dce7d268b47025e3f56be3d9455147a80595059d051b5c8fc50f25dcb54` to
+  `f854474e7c4e5fbbc71b49c993fd39fe3477a89b73d0743fe7ef61168847d869`;
+  `a064544f-6037-48ca-b19f-8ad63e43af23`
+  `c819c72d663dc92bcd523ce0a6e78573ab40e394e1a8127ef49f138d86c7194a` to
+  `9873bf60e539605d96bcfe2dc28f2aebb0df4e647d21e02257cc0e21abd8f964`;
+  `f04794cb-c198-4172-86c3-649386013c85`
+  `ffc9e3058b400941de60a957722fcaa859398441737f7ba9052244754dfea0c8` to
+  `153eaefe7fc5a0048ff810c2df7fd15960a60d3a6cd845dde5e2eb55bf6b322b`;
+- `crates/ibcmd-dump/src/mssql_dump/extension/mod.rs`, `uuid-literal`, the
+  same for `EXTENDED_OBJECT_PROPERTY` (`9595ddd6-e72c-47ad-a156-672db811628c`):
+  `395f7a63c294119a1fc3c03429c1568243b74ee73632060d72a8936caf6809ab` to
+  `5c04568b9b9a65fa57b5d6f222c7596d6e9546c3c8986305a53a888fd3c3cc76`;
+- `crates/ibcmd-dump/src/mssql_dump/mod.rs`, `name-special-case`, from the
+  clippy fixes: `"ScheduledJob"`
+  `f5d7efcf91c55d203583531aba372fd4609cd80bfcc0cc21cb011025c35ae238` to
+  `9e7dc1ba451d00f000936dcf3a72f894257407dbe92566e394cd4b7f9e78d4a5` and
+  `"EventSubscription"`
+  `3267dd60ba445bf116d2d2e48b327833244dbac86417934bf0fbee056086736b` to
+  `13e5751ff3fc55db57b1a95ee124c932412a0e3f6a37c5025a9b30153ab6942c` (an
+  `if` folded into a let chain), `"DataProcessor"`
+  `96eb06fe074c9e30e34e02601b92fa7edad57cb73c23e30268d6ebb48b96a342` to
+  `7a30a52c2d3f649386ff8058df5a1e4faad390fa40c22999dc33ae3a8aadb29c` (a
+  `then(…).unwrap_or_default()` written as `if … else`).
+Every other record, the two stale ones included, is unchanged.

@@ -126,8 +126,9 @@ pub mod model_export {
     pub(crate) use ibcmd_dump::mssql_dump::model_export::configuration_compatibility_with_snapshot;
 }
 
-// What `root_tests` reads of the exporter; where it reads nothing they still
-// hide the widened modules from the glob.
+// What the root's own tests of the exporter read (`root_tests`,
+// `live_moxel_probes`); in a build without them these still hide the widened
+// modules from the glob.
 #[cfg_attr(
     not(all(
         test,
