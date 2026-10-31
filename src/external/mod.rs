@@ -6,7 +6,8 @@
 //! rewritten into the internal row shape, the pipeline runs unchanged, and
 //! the produced tree is moved and renamed into the external layout.
 
-pub mod brace;
+// The brace-list reader, moved to the dump readers' crate; its paths stay.
+pub use ibcmd_dump_readers::external::brace;
 pub mod copyinfo;
 pub mod export;
 pub mod header;
