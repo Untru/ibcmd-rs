@@ -1338,9 +1338,9 @@ mod tests {
         ) {
             return;
         }
-        use crate::metadata_model::brace::Brace;
         use crate::mssql_dump::MetadataSourceFailureClass;
         use crate::mssql_dump::configuration_interface_pair_tests::{fixture, physical, tuple_mut};
+        use ibcmd_metadata_model::metadata_model::brace::Brace;
 
         let (original, context) = fixture("2.21", "Taxi", true);
         assert!(physical(&original, &context, InfobaseConfigSourceVersion::V2_21).is_ok());
@@ -1500,7 +1500,7 @@ mod tests {
                     .collect::<Vec<_>>();
                 entries.push((
                     "configinfo".to_owned(),
-                    crate::module_blob::deflate_raw(&manifest).unwrap(),
+                    ibcmd_module_blob::deflate_raw(&manifest).unwrap(),
                 ));
                 entries
             };
@@ -1572,7 +1572,7 @@ mod tests {
             let wrong_manifest = generate_configinfo_manifest(&wrong_identity, &stage).unwrap();
             let mut wrong_root = entries();
             wrong_root.last_mut().unwrap().1 =
-                crate::module_blob::deflate_raw(&wrong_manifest).unwrap();
+                ibcmd_module_blob::deflate_raw(&wrong_manifest).unwrap();
             assert!(
                 super::export_extension_entries_to_source(
                     "storage:cfe-test",

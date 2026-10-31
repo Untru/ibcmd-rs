@@ -1131,15 +1131,21 @@ mod compatibility_tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file-infobase/tiny-source");
         let path = root.join("Configuration.xml");
         let xml = fs::read(&path).unwrap();
-        let facts = crate::metadata_model::root::configuration_facts(&xml).unwrap();
-        let context = crate::metadata_model::DescriptorContext::new(&root, "2.21").unwrap();
-        let packed = |bytes: Vec<u8>| crate::module_blob::deflate_raw(&bytes).unwrap();
+        let facts = ibcmd_metadata_model::metadata_model::root::configuration_facts(&xml).unwrap();
+        let context =
+            ibcmd_metadata_model::metadata_model::DescriptorContext::new(&root, "2.21").unwrap();
+        let packed = |bytes: Vec<u8>| ibcmd_module_blob::deflate_raw(&bytes).unwrap();
         let descriptor = packed(
-            crate::metadata_model::compile_descriptor("Configuration", &path, &xml, &context)
-                .unwrap(),
+            ibcmd_metadata_model::metadata_model::compile_descriptor(
+                "Configuration",
+                &path,
+                &xml,
+                &context,
+            )
+            .unwrap(),
         );
-        let root_row = packed(crate::metadata_model::root::root_row(&facts));
-        let versions = packed(crate::metadata_model::root::versions_row(
+        let root_row = packed(ibcmd_metadata_model::metadata_model::root::root_row(&facts));
+        let versions = packed(ibcmd_metadata_model::metadata_model::root::versions_row(
             &[facts.uuid.clone()],
             || "10000000-0000-4000-8000-000000000001".to_owned(),
         ));

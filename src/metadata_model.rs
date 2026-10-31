@@ -50,15 +50,16 @@ pub mod objects {
 
     /// The parts every reference object composes.
     pub(crate) mod parts {
-        #[cfg_attr(
-            not(test),
-            expect(
-                unused_imports,
-                reason = "the root keeps the path; its one reader, the exporter, names the crate"
-            )
+        #[expect(
+            unused_imports,
+            reason = "the root keeps the path; its one reader, the exporter, names the crate"
         )]
         pub(crate) use ibcmd_metadata_model::metadata_model::objects::parts::Compat;
         #[cfg(test)]
+        #[expect(
+            unused_imports,
+            reason = "the root keeps the path; its one reader, the exporter, names the crate"
+        )]
         pub(crate) use ibcmd_metadata_model::metadata_model::objects::parts::compatibility;
         pub(crate) use ibcmd_restructure::descriptor::Slot;
     }

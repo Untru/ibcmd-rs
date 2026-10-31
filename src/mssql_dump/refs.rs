@@ -5399,7 +5399,7 @@ pub(super) fn parse_metadata_command_reference_blob(
 #[cfg(test)]
 mod mobile_short_table_tests {
     use super::*;
-    use crate::metadata_model::{
+    use ibcmd_metadata_model::metadata_model::{
         DescriptorContext,
         brace::{Brace, parse_row, serialize},
         compile_descriptor,

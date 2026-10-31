@@ -1,17 +1,33 @@
 use super::*;
-use crate::metadata_model::{
+use ibcmd_metadata_model::metadata_model::{
     DescriptorContext,
     brace::{Brace, parse_row, serialize},
     compile_descriptor,
-    external_data_source::generated as fixture,
     index::ConfigIndex,
 };
+
+/// The generated ExternalDataSource sources of `tests/common/eds_generated.rs`
+/// (the root's `metadata_model::external_data_source::generated`), built
+/// through the crates behind the root paths it names as `product::…`.
+#[expect(
+    dead_code,
+    reason = "the fixture serves other tests too; these read only part of it"
+)]
+mod fixture {
+    mod product {
+        pub(super) use ibcmd_compiler::compiler;
+        pub(super) use ibcmd_compiler_families::profile_registry;
+        pub(super) use ibcmd_metadata_model::metadata_model;
+    }
+
+    include!("../../tests/common/eds_generated.rs");
+}
 
 fn compiled(kind: &str, xml: &str, version: &str) -> Brace {
     let context = DescriptorContext {
         root: PathBuf::from("."),
         index: ConfigIndex::default(),
-        source: crate::module_blob::MetadataSourceContext::new(PathBuf::from(".")),
+        source: ibcmd_metadata_blob::MetadataSourceContext::new(PathBuf::from(".")),
         version: version.into(),
     };
     parse_row(
@@ -174,7 +190,8 @@ fn shared_code_two_scheduled_job_still_uses_its_existing_route() {
         )
         .unwrap();
         let current_module =
-            crate::metadata_model::export::object_names("CommonModule", &module_row).unwrap();
+            ibcmd_metadata_model::metadata_model::export::object_names("CommonModule", &module_row)
+                .unwrap();
         assert_eq!(current_module.uuid, MODULE_UUID);
         assert_eq!(current_module.full_name, "CommonModule.Handler435");
         let refs = BTreeMap::from([(current_module.uuid, current_module.full_name)]);
@@ -261,7 +278,7 @@ fn malformed_synonym_counts_do_not_panic_or_publish_physical_xml() {
 
 #[test]
 fn compiled_root_projects_owned_eds_before_integration_on_both_routes() {
-    use crate::metadata_model::{
+    use ibcmd_metadata_model::metadata_model::{
         export::{ExportContext, NameIndex, decode_object, object_names},
         objects::parts::Compat,
     };
@@ -361,7 +378,9 @@ fn compiled_root_projects_owned_eds_before_integration_on_both_routes() {
             version,
         )
         .unwrap();
-        let physical = crate::metadata_model::xml::parse_element_tree(physical.as_bytes()).unwrap();
+        let physical =
+            ibcmd_metadata_model::metadata_model::xml::parse_element_tree(physical.as_bytes())
+                .unwrap();
         let children = physical.path(&["Configuration", "ChildObjects"]).unwrap();
         assert_eq!(
             children

@@ -619,7 +619,7 @@ mod tests {
         let a = uuid::Uuid::new_v4().hyphenated().to_string();
         let b = uuid::Uuid::new_v4().hyphenated().to_string();
         let versions = format!("\u{feff}{{1,3,\"\",{generation},\"a\",{a},\"a.0\",{b}}}");
-        let versions = crate::module_blob::deflate_raw(versions.as_bytes()).unwrap();
+        let versions = ibcmd_module_blob::deflate_raw(versions.as_bytes()).unwrap();
         let rows = OfflineRows::from_memory([
             ("a".to_string(), row(b"a")),
             ("a.0".to_string(), row(b"a.0")),

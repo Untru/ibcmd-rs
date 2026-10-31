@@ -15,11 +15,12 @@ use ibcmd_core::validate::validate_configuration;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 
-use crate::module_blob::{
-    ReturnValuesReuse, pack_module_blob_bytes, pack_moxel_spreadsheet_blob_from_xml,
-    pack_simple_metadata_blob_from_xml, parse_common_module_xml_properties,
+use ibcmd_compiler::compiler::bodies::mxl_native::pack_moxel_spreadsheet_blob_from_xml;
+use ibcmd_metadata_blob::{
+    ReturnValuesReuse, pack_simple_metadata_blob_from_xml, parse_common_module_xml_properties,
     parse_simple_metadata_xml_properties,
 };
+use ibcmd_module_blob::pack_module_blob_bytes;
 
 #[test]
 fn information_register_master_dimension_scan_keeps_only_a_proven_prefix() {
@@ -654,7 +655,9 @@ fn source_asset_discovery_fails_closed_for_aggregate_decoder_miss() {
 
 #[test]
 fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
-    use crate::compiler::families::assets::{ConfigRowId, SourceAssetRegistry, SourceAssetRole};
+    use ibcmd_compiler_families::compiler::families::assets::{
+        ConfigRowId, SourceAssetRegistry, SourceAssetRole,
+    };
 
     let cases = [
         (
@@ -8972,7 +8975,7 @@ fn form_attributes_conditional_appearance_outside_the_cohort_is_transliterated()
     let storage = String::from_utf8(decode_base64_mime(encoded).unwrap())
         .unwrap()
         .replace("xs:string\">A", "xs:boolean\">true");
-    let payload = crate::module_blob::encode_base64(storage.as_bytes());
+    let payload = ibcmd_1c_text::encode_base64(storage.as_bytes());
     let section = extract_form_body_attributes_section(
         &[format!(
             "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
@@ -9009,7 +9012,7 @@ fn form_attributes_malformed_conditional_appearance_fails_closed() {
     let storage = String::from_utf8(decode_base64_mime(encoded).unwrap())
         .unwrap()
         .replace("</conditionalAppearance>", "");
-    let payload = crate::module_blob::encode_base64(storage.as_bytes());
+    let payload = ibcmd_1c_text::encode_base64(storage.as_bytes());
     let section = extract_form_body_attributes_section(
         &[format!(
             "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
@@ -9317,7 +9320,7 @@ fn rejects_non_dcs_or_malformed_dynamic_list_appearance() {
 #[test]
 fn extracts_form_attribute_additional_columns_from_body_tail() {
     let body = ParsedFormBodyBlob {
-            revision: crate::module_blob::FormBodyRevision::V4,
+            revision: ibcmd_form_body::FormBodyRevision::V4,
             layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"}}".to_string(),
             module_text: String::new(),
             trailing: vec![r##"{4,1,{9,{3},0,"СписокЗаказов",{1,1,{"ru","Список заказов"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,1,{5,8,0,"СтрокиЗаказа",{1,1,{"ru","Строки заказа"}},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}},1,{0,{2,{3},{8}},2,{5,1,0,"GTIN",{1,1,{"ru","GTIN"}},{"Pattern",{"S",50,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{5,2,0,"КоличествоКодов",{1,1,{"ru","Количество кодов"}},{"Pattern",{"N",6,0,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}},0,{0}}"##.to_string()],
@@ -9341,7 +9344,7 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
         }
     }
     let body = ParsedFormBodyBlob {
-        revision: crate::module_blob::FormBodyRevision::V4,
+        revision: ibcmd_form_body::FormBodyRevision::V4,
         layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"},{31,{1,0},0,0,0,\"Trace\"}}".to_string(),
         module_text: String::new(),
         trailing: Vec::new(),
@@ -10303,7 +10306,7 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
         .replacen("{5006,0}", primary, 1)
         .replacen("{5007,0}", duplicate, 1);
     let body = ParsedFormBodyBlob {
-        revision: crate::module_blob::FormBodyRevision::V4,
+        revision: ibcmd_form_body::FormBodyRevision::V4,
         layout: format!("{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{field}}}"),
         module_text: String::new(),
         trailing: Vec::new(),
@@ -52983,7 +52986,7 @@ fn extension_export_probe_body() -> ParsedFormBodyBlob {
 {1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
     const INPUT: &str = r##"{37,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Организация",2,0,{1,1,{"ru","От организации"}},{1,1,{"ru","Организация, от имени которой будете приглашать."}},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},1,1,0,{"Pattern",{"#",f6841c6b-6c71-4c82-ae9e-d08b49db326c}},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Организация, от имени которой будете приглашать."}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ОрганизацияПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОрганизацияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОрганизацияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"##;
     ParsedFormBodyBlob {
-        revision: crate::module_blob::FormBodyRevision::V4,
+        revision: ibcmd_form_body::FormBodyRevision::V4,
         // The form's child items are `<count>,<uuid>,<item>` pairs.
         layout: format!(
             "{{59,3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{GROUP},\

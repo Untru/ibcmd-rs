@@ -45251,7 +45251,7 @@ fn extension_activation_web_colors_share_the_native_dictionary() {
             Some(format!("web:{name}").as_str())
         );
         assert!(
-            crate::compiler::bodies::form_native::WEB_COLOR_CODES
+            ibcmd_form_native::WEB_COLOR_CODES
                 .iter()
                 .any(|(n, c)| *n == name && c.parse::<i32>().ok() == Some(code))
         );

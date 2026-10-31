@@ -91,14 +91,17 @@ mod tests {
         };
         let mut bodies = Vec::new();
         for writes in [false, true] {
-            let exported = crate::platform::with_export_default_button_importance(writes, || {
-                super::apply_form_facts_8_5_1_for_export(
-                    xml.clone(),
-                    &facts,
-                    &BTreeMap::new(),
-                    None,
-                )
-            })
+            let exported = ibcmd_platform_spec::platform::with_export_default_button_importance(
+                writes,
+                || {
+                    super::apply_form_facts_8_5_1_for_export(
+                        xml.clone(),
+                        &facts,
+                        &BTreeMap::new(),
+                        None,
+                    )
+                },
+            )
             .unwrap();
             let written = super::xml_2_21_writer::apply_form_facts_8_5_1(
                 xml.clone(),

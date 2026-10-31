@@ -68,8 +68,8 @@ mod tests {
              DcsCorpus/Templates/MainSchema/Ext/Template.xml"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -116,8 +116,8 @@ mod tests {
             "1d04899ee7fe61cddaa3efb51892d91fcea94db481db34e3ecaf0a2bfa3fc6b7"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -164,8 +164,8 @@ mod tests {
             "c1b1771520a0c8153e3c2f8d8381fa90f02c78338dc9e936eaef68caf2dffe67"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -220,8 +220,8 @@ mod tests {
             "8cb4cddc8ecc053d74cf349ba3d4f78fe2d6f080ea966a9a3488184b2a2360a2"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -292,8 +292,8 @@ mod tests {
             "d2f420275b235890de29152125610f97bc995114e98c62a834bd7e54201efbde"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -347,8 +347,8 @@ mod tests {
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-ut-area-template-appearance-index/raw-packed.bin.b64"
         )));
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -436,8 +436,8 @@ mod tests {
             "0d1894d8624dd00fd566afcc37d6816cf71dd223f4124f1cbcff97502c200082"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -520,8 +520,8 @@ mod tests {
             "afaa6a8bc76bb34a3d5bf4650c60b0a7e740625fd690ec8da039675578eecbc5"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -574,8 +574,8 @@ mod tests {
             "98d644bc92ee7fb5b100277478f90d075ab22bea2b358e6e2e86bbb34c07d6f9"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -633,8 +633,8 @@ mod tests {
                 qname: "cfg:DocumentRef".to_owned(),
             },
         );
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested DCS body must decode");
@@ -676,8 +676,8 @@ mod tests {
             "dcs-data-parameters-source-owned/native-template.xml.b64"
         )));
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested source-owned DCS body must decode");
@@ -707,8 +707,8 @@ mod tests {
             "dcs-multi-variant-envelope/native-template.xml.b64"
         )));
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .expect("platform-attested multi-variant body must decode");
@@ -744,8 +744,8 @@ mod tests {
                 qname: "cfg:CatalogRef.FilterProbe".to_owned(),
             },
         );
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -771,8 +771,8 @@ mod tests {
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link/native-template.xml.b64"
         )));
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -816,8 +816,8 @@ mod tests {
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link/native-template.xml.b64"
         )));
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -874,8 +874,8 @@ mod tests {
             format!("{:x}", Sha256::digest(&expected)),
             "5ce6f74897ce0428f2898fcf54ed542dcd23af6aafdbd0f331a0fde1e18bb3be"
         );
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -914,8 +914,8 @@ mod tests {
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link-typeid/raw-packed.bin.b64"
         )));
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -993,8 +993,8 @@ mod tests {
             format!("{:x}", Sha256::digest(&expected)),
             "381e86721884c63c9f99dcde21f1cd78cca07b4644714bf635e954b1f59fc698"
         );
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1032,8 +1032,8 @@ mod tests {
             format!("{:x}", Sha256::digest(&expected)),
             "e80cc9492ab93cabff9799fb14e7e4c6fafff0d96129acba19ba53d4aa4faf54"
         );
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1061,8 +1061,8 @@ mod tests {
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-template/native-template.xml.b64"
         )));
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1087,8 +1087,8 @@ mod tests {
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-appearance-web-color/native-template.xml.b64"
         )));
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1113,8 +1113,8 @@ mod tests {
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-multi-cell-appearance/native-template.xml.b64"
         )));
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1148,8 +1148,8 @@ mod tests {
             format!("{:x}", Sha256::digest(&expected)),
             "4269ac193b76bb88ecaaf65a5b4ef9ed12a31cdcf1d36d8ac429de68cf10f970"
         );
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1187,8 +1187,8 @@ mod tests {
             format!("{:x}", Sha256::digest(&expected)),
             "98f1857d3424198275cc35834a6635c28623568aae8d01a95cb5e220f91b818f"
         );
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1261,8 +1261,8 @@ mod tests {
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-parameter-scalar-types/native-template.xml.b64"
         )));
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1297,8 +1297,8 @@ mod tests {
             "bc27a20de1bb75a83b3727ac457db04791cdd092c64e2e31e5b58ebecf296ddb"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
         )
         .unwrap();
@@ -1334,8 +1334,8 @@ mod tests {
              DcsCorpus/Templates/MainSchema/Ext/Template.xml"
         );
 
-        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
-            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+        let body = ibcmd_compiler::compiler::bodies::dcs::decode_compatible_dcs(
+            ibcmd_compiler::compiler::bodies::dcs::DcsTemplateKind::Schema,
             packed,
         )
         .expect("platform-attested root Auto selection body must decode");

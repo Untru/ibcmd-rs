@@ -4,7 +4,7 @@ use super::*;
 #[test]
 fn unresolved_configuration_child_refuses_root_instead_of_omitting_inventory() {
     let (row, context) = super::configuration_interface_pair_tests::fixture("2.21", "Taxi", true);
-    let text = crate::metadata_model::brace::serialize(&row);
+    let text = ibcmd_metadata_model::metadata_model::brace::serialize(&row);
     let configuration = context
         .index
         .objects
@@ -35,7 +35,7 @@ fn unresolved_configuration_child_refuses_root_instead_of_omitting_inventory() {
 
 #[test]
 fn interface_preflight_uses_production_root_classification() {
-    use crate::metadata_model::brace::{Brace, serialize};
+    use ibcmd_metadata_model::metadata_model::brace::{Brace, serialize};
     use ibcmd_schema::interface::InterfaceLayout as Layout;
     const ID: &str = "10000000-0000-4000-8000-000000000559";
     fn declare(tree: &mut Brace) -> bool {

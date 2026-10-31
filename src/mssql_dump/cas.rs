@@ -861,7 +861,7 @@ mod tests {
     }
 
     fn base64(hash: CasHash) -> String {
-        crate::module_blob::encode_base64(hash.as_bytes())
+        ibcmd_1c_text::encode_base64(hash.as_bytes())
     }
 
     fn row(plain: &[u8]) -> CasStorageRow {

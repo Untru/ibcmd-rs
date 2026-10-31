@@ -1753,7 +1753,7 @@ mod activation_capture_tests {
                 SqlValue::Text(modified.to_owned()),
                 SqlValue::Int(bytes.len() as i64),
                 SqlValue::Int(bytes.len() as i64),
-                SqlValue::Text(crate::mssql_config_apply::model::hex_upper(
+                SqlValue::Text(ibcmd_config_apply::mssql_config_apply::model::hex_upper(
                     &Sha256::digest(bytes),
                 )),
             ],
