@@ -10935,6 +10935,7 @@ struct ExactAccumulationRegisterOwnerProperties {
 }
 
 struct ExactCalculationRegisterOwnerProperties {
+    use_standard_commands: bool,
     data_lock_control_mode: &'static str,
     standard_attributes: Vec<RegisterStandardAttribute>,
 }
@@ -10945,6 +10946,10 @@ struct CalculationRegisterFormPair {
     /// writes `<DefaultListForm/>` for both, where the single БСП demo
     /// calculation register names one.
     default_list_form: Option<String>,
+    /// The auxiliary list form, read from its own slot and written as an empty
+    /// element when the register names none. A register that names a form the
+    /// designer does not own refuses here instead of dropping the element.
+    auxiliary_list_form: Option<String>,
 }
 
 struct CalculationRegisterPeriodProperties {
@@ -18234,6 +18239,8 @@ fn parse_register_properties_from_text(
             .unwrap_or(true)
     } else if let Some(properties) = exact_accumulation_register.as_ref() {
         properties.use_standard_commands
+    } else if let Some(properties) = exact_calculation_register.as_ref() {
+        properties.use_standard_commands
     } else {
         parse_register_use_standard_commands(&fields, uuid)
     };
@@ -19107,8 +19114,12 @@ fn parse_exact_calculation_register_owner_properties(
         return Some(None);
     }
 
+    // Slot 24 is `<UseStandardCommands>`: the fallback reads it from the
+    // header-relative offset, which lands on `Periodicity` for a calculation
+    // register and wrote the wrong flag for the two registers that set it.
     let data_lock_control_mode = information_register_data_lock_control_mode_xml(fields.get(26)?)?;
     Some(Some(ExactCalculationRegisterOwnerProperties {
+        use_standard_commands: parse_1c_bool_field(fields.get(24).copied())?,
         data_lock_control_mode,
         standard_attributes: parse_exact_register_standard_attributes(
             fields.get(28)?,
@@ -19179,6 +19190,19 @@ fn parse_calculation_register_empty_presentations(
     Some(true)
 }
 
+/// A calculation register's `<Periodicity>` code: `0` `Year`, `1` `Quarter`,
+/// `2` `Month`, `3` `Day`. The corpus separates all four against the platform's
+/// own XML; an unobserved code refuses rather than being invented.
+fn calculation_register_periodicity_xml(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("Year"),
+        "1" => Some("Quarter"),
+        "2" => Some("Month"),
+        "3" => Some("Day"),
+        _ => None,
+    }
+}
+
 fn parse_calculation_register_fixed_period(
     kind: &str,
     fields: &[&str],
@@ -19189,29 +19213,14 @@ fn parse_calculation_register_fixed_period(
     {
         return Some(None);
     }
-    // `<ActionPeriod>` and `<BasePeriod>` ride slots 17 and 18 and were pinned
-    // to `1`/`true`, which refused the whole period block of one of the two ERP
-    // УХ 3.2.12.6 calculation registers: it holds `0` in slot 17 and the
-    // platform writes `<ActionPeriod>false</ActionPeriod>` there, against
-    // `<ActionPeriod>true` for the other ERP УХ register and the single БСП
-    // demo one. Slot 18 is `1` on all three and slot 16 is `2`/`Month` on all
-    // three; both stay checked constants so an unobserved code refuses rather
-    // than being invented.
-    let (Some("2"), Some(action_period), Some(base_period)) = (
-        fields.get(16).map(|field| field.trim()),
-        fields
-            .get(17)
-            .and_then(|field| parse_1c_bool_field(Some(*field))),
-        fields
-            .get(18)
-            .and_then(|field| parse_1c_bool_field(Some(*field))),
-    ) else {
-        return Some(None);
-    };
+    // Slots 16/17/18 carry `<Periodicity>`/`<ActionPeriod>`/`<BasePeriod>`.
+    // The corpus separates all four `Periodicity` codes and both `BasePeriod`
+    // values; `ActionPeriod` is a plain boolean too. An unobserved code refuses
+    // the whole register instead of inventing a value.
     Some(Some(CalculationRegisterPeriodProperties {
-        periodicity: "Month",
-        action_period,
-        base_period,
+        periodicity: calculation_register_periodicity_xml(fields.get(16)?)?,
+        action_period: parse_1c_bool_field(fields.get(17).copied())?,
+        base_period: parse_1c_bool_field(fields.get(18).copied())?,
     }))
 }
 
@@ -19324,38 +19333,46 @@ fn parse_calculation_register_fixed_form_pair(
         return Some(None);
     }
 
-    let Some(auxiliary_form_uuid) = fields
-        .get(29)
-        .and_then(|field| parse_information_register_uuid(field))
-    else {
+    // A nil uuid is the register naming no form, not an unreadable record: the
+    // two ERP УХ 3.2.12.6 calculation registers own no form at all and the
+    // platform still writes `<DefaultListForm/>` and `<AuxiliaryListForm/>`,
+    // which the whole-block refusal dropped. A non-nil reference that is not an
+    // owned form of this register refuses the whole record instead of dropping
+    // the element: the designer types both slots as the register's own forms.
+    Some(Some(CalculationRegisterFormPair {
+        default_list_form: calculation_register_owned_list_form(
+            fields.get(23)?,
+            &expected_header.name,
+            form_refs,
+        )?,
+        auxiliary_list_form: calculation_register_owned_list_form(
+            fields.get(29)?,
+            &expected_header.name,
+            form_refs,
+        )?,
+    }))
+}
+
+/// The owned list-form name behind one form slot of a calculation register.
+///
+/// `Some(None)` is a nil uuid, the register naming no form. `None` refuses a
+/// value that names anything but an owned form of this very register (a common
+/// form, another owner's form, an unknown or ambiguous uuid, a malformed value),
+/// so such a record never reaches the export.
+fn calculation_register_owned_list_form(
+    value: &str,
+    register_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?;
+    if information_register_uuid_is_zero(&uuid) {
         return Some(None);
-    };
-    if !information_register_uuid_is_zero(&auxiliary_form_uuid) {
-        return Some(None);
-    }
-    // A nil default-list-form uuid is the register naming no form, not an
-    // unreadable record: `uh` `CalculationRegisters/Начисления` and
-    // `.../Удержания` own no form at all and the platform still writes
-    // `<DefaultListForm/>` and `<AuxiliaryListForm/>`, which the whole-block
-    // refusal dropped.
-    let Some(default_form_uuid) = fields
-        .get(23)
-        .and_then(|field| parse_information_register_uuid(field))
-    else {
-        return Some(None);
-    };
-    if information_register_uuid_is_zero(&default_form_uuid) {
-        return Some(Some(CalculationRegisterFormPair {
-            default_list_form: None,
-        }));
     }
 
     let mut matches = form_refs
         .iter()
-        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&default_form_uuid));
-    let Some((_, form)) = matches.next() else {
-        return Some(None);
-    };
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
+    let (_, form) = matches.next()?;
     if matches.next().is_some()
         || form.kind != "Form"
         || form
@@ -19366,27 +19383,20 @@ fn parse_calculation_register_fixed_form_pair(
         || !is_owned_metadata_child_path(
             &form.relative_path,
             "CalculationRegisters",
-            &expected_header.name,
+            register_name,
             "Forms",
         )
     {
-        return Some(None);
+        return None;
     }
 
-    let Some(default_list_form) = form_source_reference_name(form) else {
-        return Some(None);
-    };
-    let expected_prefix = format!("CalculationRegister.{}.Form.", expected_header.name);
-    let Some(form_name) = default_list_form.strip_prefix(&expected_prefix) else {
-        return Some(None);
-    };
+    let reference = form_source_reference_name(form)?;
+    let expected_prefix = format!("CalculationRegister.{register_name}.Form.");
+    let form_name = reference.strip_prefix(&expected_prefix)?;
     if form_name.is_empty() || form_name.contains('.') {
-        return Some(None);
+        return None;
     }
-
-    Some(Some(CalculationRegisterFormPair {
-        default_list_form: Some(default_list_form),
-    }))
+    Some(Some(reference))
 }
 
 fn parse_calculation_register_fixed_include_help(
@@ -19399,10 +19409,8 @@ fn parse_calculation_register_fixed_include_help(
     {
         return Some(None);
     }
-    if fields.get(25)?.trim() != "0" {
-        return Some(None);
-    }
-    Some(Some(false))
+    // Slot 25 is `<IncludeHelpInContents>`; an unobserved code refuses.
+    Some(Some(parse_1c_bool_field(fields.get(25).copied())?))
 }
 
 fn parse_calculation_register_fixed_full_text_search(
@@ -19415,10 +19423,10 @@ fn parse_calculation_register_fixed_full_text_search(
     {
         return Some(None);
     }
-    if fields.get(27)?.trim() != "0" {
-        return Some(None);
-    }
-    Some(Some("DontUse"))
+    // Slot 27 is `<FullTextSearch>`; an unobserved code refuses.
+    Some(Some(information_register_full_text_search(
+        fields.get(27)?,
+    )?))
 }
 
 fn parse_register_full_text_search(
@@ -38551,7 +38559,12 @@ fn format_register_source_xml(
                     "DefaultListForm",
                     form_pair.default_list_form.as_deref(),
                 );
-                properties.push_str("\t\t\t<AuxiliaryListForm/>\r\n");
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "AuxiliaryListForm",
+                    form_pair.auxiliary_list_form.as_deref(),
+                );
             }
             if kind == "CalculationRegister"
                 && let Some(period) = register.calculation_period.as_ref()

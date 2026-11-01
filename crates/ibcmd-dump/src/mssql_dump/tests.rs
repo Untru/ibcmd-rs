@@ -47318,7 +47318,8 @@ impl CalculationRegisterPresentationsFixture {
             16 => "2".to_string(),
             17 | 18 => "1".to_string(),
             22 => CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
-            23 => CALCULATION_DEFAULT_FORM_TEST_UUID.to_string(),
+            23 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            24 => "1".to_string(),
             29 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
             28 => exact_register_standard_attributes_for_test(&[
                 ("-13", "RegistrationPeriod"),
@@ -48273,26 +48274,29 @@ fn calculation_period_emits_fixed_vector_once_in_schema_order() {
 }
 
 #[test]
-fn calculation_period_alternative_scalars_remain_accepted_omissions() {
+fn calculation_period_scalar_domains_fail_closed_on_unobserved_codes() {
     let fixed = CalculationRegisterPresentationsFixture::exact()
         .xml()
         .unwrap();
-    let fixed_without_period = fixed
-        .replace("\t\t\t<Periodicity>Month</Periodicity>\r\n", "")
-        .replace("\t\t\t<ActionPeriod>true</ActionPeriod>\r\n", "")
-        .replace("\t\t\t<BasePeriod>true</BasePeriod>\r\n", "");
-    // Slot 17 is `<ActionPeriod>` and separates both values on the corpus, so
-    // `0` is a reading and no longer an omission; slot 18 is `<BasePeriod>`,
-    // whose `0` the calculation register of an extension separates (`false`).
-    // Every other scalar there, and every alternative on the slot that stays a
-    // checked constant, still refuses the block whole.
-    let alternatives = [
-        (16, vec!["0", "1", "3", "-1", "value", "{0}"]),
+    // Every code the corpus separates is a reading: `<Periodicity>` stores
+    // `0`..`3` for `Year`/`Quarter`/`Month`/`Day`.
+    for (raw, expected) in [
+        ("0", "<Periodicity>Year</Periodicity>"),
+        ("1", "<Periodicity>Quarter</Periodicity>"),
+        ("2", "<Periodicity>Month</Periodicity>"),
+        ("3", "<Periodicity>Day</Periodicity>"),
+    ] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[16] = raw.to_string();
+        let xml = fixture.xml().expect("observed periodicity code");
+        assert_eq!(xml.matches(expected).count(), 1, "code {raw}");
+    }
+
+    for (slot, values) in [
+        (16, vec!["4", "-1", "value", "{0}"]),
         (17, vec!["2", "-1", "value", "{0}"]),
         (18, vec!["2", "-1", "value", "{0}"]),
-    ];
-
-    for (slot, values) in alternatives {
+    ] {
         for value in values {
             let mut fixture = CalculationRegisterPresentationsFixture::exact();
             fixture.fields[slot] = value.to_string();
@@ -48304,79 +48308,34 @@ fn calculation_period_alternative_scalars_remain_accepted_omissions() {
                 .collect::<Vec<_>>();
             let header =
                 parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
-            assert!(matches!(
-                parse_calculation_register_fixed_period("CalculationRegister", &fields, &header,),
-                Some(None)
-            ));
-
-            let source = fixture
-                .extract()
-                .expect("alternative period vector must remain accepted");
-            let xml = String::from_utf8(source.xml).unwrap();
-            assert!(!xml.contains("<Periodicity>"));
-            assert!(!xml.contains("<ActionPeriod>"));
-            assert!(!xml.contains("<BasePeriod>"));
-            if slot == 16 && value == "0" {
-                assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
-            }
-
-            let mut register = parse_register_properties_from_text(
-                "CalculationRegister",
-                &raw,
-                CALCULATION_PRESENTATIONS_TEST_UUID,
-                &BTreeMap::new(),
-                &BTreeMap::new(),
-                &BTreeMap::new(),
-                InfobaseConfigSourceVersion::V2_21,
-            )
-            .unwrap();
-            assert!(register.calculation_period.is_none());
-            let before = format_register_source_xml(
-                "CalculationRegister",
-                &header,
-                &register,
-                InfobaseConfigSourceVersion::V2_21,
-                &MetadataTypeSetLeafIndex::new(),
+            assert!(
+                parse_calculation_register_fixed_period("CalculationRegister", &fields, &header,)
+                    .is_none(),
+                "unobserved {slot}={value} must refuse the register"
             );
-            register.calculation_period = None;
-            let after = format_register_source_xml(
-                "CalculationRegister",
-                &header,
-                &register,
-                InfobaseConfigSourceVersion::V2_21,
-                &MetadataTypeSetLeafIndex::new(),
+            assert!(
+                fixture.extract().is_none(),
+                "unobserved {slot}={value} must reject the record"
             );
-            assert_eq!(before, after, "period marker changed slot {slot}={value}");
-
-            if slot != 16 {
-                assert_eq!(
-                    xml, fixed_without_period,
-                    "non-neighbor scalar changed XML at slot {slot}={value}"
-                );
-            }
         }
     }
 
-    // `0` in slot 17 is `<ActionPeriod>false</ActionPeriod>`, the second value
-    // the corpus separates, and the block stays whole around it.
+    // `0` in slot 17 is `<ActionPeriod>false</ActionPeriod>`, `0` in slot 18 is
+    // `<BasePeriod>false</BasePeriod>`, and the block stays whole around them.
     let mut false_action = CalculationRegisterPresentationsFixture::exact();
     false_action.fields[17] = "0".to_string();
-    let false_action_xml = false_action.xml().unwrap();
     assert_eq!(
-        false_action_xml,
+        false_action.xml().unwrap(),
         fixed.replace(
             "\t\t\t<ActionPeriod>true</ActionPeriod>\r\n",
             "\t\t\t<ActionPeriod>false</ActionPeriod>\r\n",
         )
     );
 
-    // `0` in slot 18 is `<BasePeriod>false</BasePeriod>`: the calculation
-    // register of the `_ДемоРасширение` extension writes `0` in both slots.
     let mut false_base = CalculationRegisterPresentationsFixture::exact();
     false_base.fields[18] = "0".to_string();
-    let false_base_xml = false_base.xml().unwrap();
     assert_eq!(
-        false_base_xml,
+        false_base.xml().unwrap(),
         fixed.replace(
             "\t\t\t<BasePeriod>true</BasePeriod>\r\n",
             "\t\t\t<BasePeriod>false</BasePeriod>\r\n",
@@ -48539,16 +48498,30 @@ fn calculation_include_help_emits_fixed_false_once_in_schema_order() {
 }
 
 #[test]
-fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
+fn calculation_include_help_reads_both_booleans_and_refuses_other_atoms() {
     let exact = CalculationRegisterPresentationsFixture::exact()
         .xml()
         .unwrap();
-    let include_help_line = "\t\t\t<IncludeHelpInContents>false</IncludeHelpInContents>\r\n";
-    let expected_omission = exact.replace(include_help_line, "");
+    // Slot 25 is `<IncludeHelpInContents>`: both boolean codes are readings.
+    let mut enabled = CalculationRegisterPresentationsFixture::exact();
+    enabled.fields[25] = "1".to_string();
+    assert_eq!(
+        enabled.xml().unwrap(),
+        exact.replace(
+            "<IncludeHelpInContents>false</IncludeHelpInContents>",
+            "<IncludeHelpInContents>true</IncludeHelpInContents>",
+        )
+    );
+    let mut padded = CalculationRegisterPresentationsFixture::exact();
+    padded.fields[25] = " 1 ".to_string();
+    assert!(
+        padded
+            .xml()
+            .unwrap()
+            .contains("<IncludeHelpInContents>true</IncludeHelpInContents>")
+    );
 
     for value in [
-        "1",
-        " 1 ",
         "2",
         "-1",
         "00",
@@ -48569,15 +48542,15 @@ fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
 
-        assert!(matches!(
-            parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &header,),
-            Some(None)
-        ));
-        let xml = fixture
-            .xml()
-            .expect("alternative include-help atom must remain accepted");
-        assert!(!xml.contains("<IncludeHelpInContents>"));
-        assert_eq!(xml, expected_omission, "consumed field 25 value {value}");
+        assert!(
+            parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &header,)
+                .is_none(),
+            "unobserved field 25 value {value} must refuse the register"
+        );
+        assert!(
+            fixture.extract().is_none(),
+            "unobserved field 25 value {value} must reject the record"
+        );
     }
 }
 
@@ -48783,7 +48756,8 @@ fn calculation_include_help_has_no_production_corpus_literals() {
 #[test]
 fn calculation_form_pair_emits_same_owner_default_and_mandatory_empty_auxiliary() {
     let form_refs = calculation_form_refs_for_test();
-    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let mut fixture = CalculationRegisterPresentationsFixture::exact();
+    fixture.fields[23] = CALCULATION_DEFAULT_FORM_TEST_UUID.to_string();
     let source = fixture
         .extract_with_form_refs(&form_refs)
         .expect("exact calculation form pair");
@@ -48817,10 +48791,15 @@ fn calculation_form_pair_emits_same_owner_default_and_mandatory_empty_auxiliary(
 }
 
 #[test]
-fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
+fn calculation_form_pair_resolver_refuses_references_the_designer_does_not_own() {
     let preferred_fallback_uuid = "11111111-1111-4111-8111-111111111111";
     let unknown_uuid = "22222222-2222-4222-8222-222222222222";
     let mut cases = Vec::new();
+    let form_fixture = || {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[23] = CALCULATION_DEFAULT_FORM_TEST_UUID.to_string();
+        fixture
+    };
 
     // A nil default-list-form uuid is no longer an omission: it is the register
     // naming no form, and the platform writes `<DefaultListForm/>` and
@@ -48852,7 +48831,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
 
     cases.push((
         "cross-owner F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Other/Forms/List.xml",
@@ -48861,7 +48840,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "CommonForm F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CommonForms/List.xml",
@@ -48870,7 +48849,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "wrong-kind F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Payroll/Forms/List.xml",
@@ -48879,7 +48858,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "nested-path F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Payroll/Forms/Nested/List.xml",
@@ -48888,7 +48867,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "wrong-extension F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Payroll/Forms/List.bin",
@@ -48897,7 +48876,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "multi-segment QName F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Payroll/Forms/List.Detail.xml",
@@ -48915,7 +48894,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     );
     cases.push((
         "case-insensitive UUID collision",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         collisions,
     ));
 
@@ -48928,34 +48907,43 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
             .collect::<Vec<_>>();
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
-        assert!(matches!(
+        assert!(
             parse_calculation_register_fixed_form_pair(
                 "CalculationRegister",
                 &fields,
                 &header,
                 &form_refs,
-            ),
-            Some(None)
-        ));
-
-        let xml = fixture
-            .xml_with_form_refs(&form_refs)
-            .unwrap_or_else(|| panic!("rejected resolver omission: {label}"));
-        assert!(!xml.contains("<DefaultListForm"), "{label}");
-        assert!(!xml.contains("<AuxiliaryListForm"), "{label}");
-
-        let mut baseline = fixture.clone();
-        baseline.fields[23] = "0".to_string();
-        let baseline_xml = baseline.xml_with_form_refs(&form_refs).unwrap();
-        assert_eq!(xml, baseline_xml, "resolver consumed {label}");
+            )
+            .is_none(),
+            "{label} must refuse the register"
+        );
+        assert!(
+            fixture.extract_with_form_refs(&form_refs).is_none(),
+            "{label} must reject the record"
+        );
     }
 }
 
 #[test]
-fn calculation_form_pair_nonzero_or_malformed_auxiliary_is_accepted_omission() {
+fn calculation_form_pair_reads_auxiliary_slot_and_refuses_non_owned_values() {
     let form_refs = calculation_form_refs_for_test();
+    // An owned auxiliary form is written from its own slot, next to an empty
+    // default one.
+    let mut owned = CalculationRegisterPresentationsFixture::exact();
+    owned.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+    owned.fields[29] = CALCULATION_DEFAULT_FORM_TEST_UUID.to_string();
+    let source = owned
+        .extract_with_form_refs(&form_refs)
+        .expect("owned auxiliary list form");
+    let xml = String::from_utf8(source.xml).unwrap();
+    assert!(xml.contains("\t\t\t<DefaultListForm/>\r\n"));
+    assert!(
+        xml.contains(
+            "<AuxiliaryListForm>CalculationRegister.Payroll.Form.List</AuxiliaryListForm>"
+        )
+    );
+
     for value in [
-        CALCULATION_DEFAULT_FORM_TEST_UUID,
         "00000000-0000-0000-0000-000000000001",
         "0",
         "00",
@@ -48972,24 +48960,20 @@ fn calculation_form_pair_nonzero_or_malformed_auxiliary_is_accepted_omission() {
             .collect::<Vec<_>>();
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
-        assert!(matches!(
+        assert!(
             parse_calculation_register_fixed_form_pair(
                 "CalculationRegister",
                 &fields,
                 &header,
                 &form_refs,
-            ),
-            Some(None)
-        ));
-
-        let xml = fixture
-            .xml_with_form_refs(&form_refs)
-            .expect("alternative F29 must remain accepted");
-        assert!(!xml.contains("<DefaultListForm"));
-        assert!(!xml.contains("<AuxiliaryListForm"));
-        let mut baseline = fixture;
-        baseline.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
-        assert_eq!(xml, baseline.xml_with_form_refs(&form_refs).unwrap());
+            )
+            .is_none(),
+            "unowned F29 {value} must refuse the register"
+        );
+        assert!(
+            fixture.extract_with_form_refs(&form_refs).is_none(),
+            "unowned F29 {value} must reject the record"
+        );
     }
 }
 
@@ -49167,7 +49151,8 @@ fn calculation_form_pair_preserves_accounting_and_accumulation_form_slots() {
 
 #[test]
 fn calculation_form_pair_changes_only_the_two_mandatory_lines() {
-    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let mut fixture = CalculationRegisterPresentationsFixture::exact();
+    fixture.fields[23] = CALCULATION_DEFAULT_FORM_TEST_UUID.to_string();
     let raw = fixture.raw();
     let header =
         parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
@@ -49700,14 +49685,22 @@ fn calculation_full_text_search_emits_fixed_dont_use_once_in_native_order() {
 }
 
 #[test]
-fn calculation_full_text_search_alternatives_are_accepted_omissions() {
-    let mut omitted = CalculationRegisterPresentationsFixture::exact();
-    omitted.fields[27] = "1".to_string();
-    let expected_omission = omitted.xml().unwrap();
-    assert!(!expected_omission.contains("<FullTextSearch>"));
+fn calculation_full_text_search_reads_both_codes_and_refuses_other_atoms() {
+    let exact = CalculationRegisterPresentationsFixture::exact()
+        .xml()
+        .unwrap();
+    // Slot 27 is `<FullTextSearch>`: `0` is `DontUse` and `1` is `Use`.
+    let mut used = CalculationRegisterPresentationsFixture::exact();
+    used.fields[27] = "1".to_string();
+    assert_eq!(
+        used.xml().unwrap(),
+        exact.replace(
+            "<FullTextSearch>DontUse</FullTextSearch>",
+            "<FullTextSearch>Use</FullTextSearch>",
+        )
+    );
 
     for value in [
-        "1",
         "2",
         "-1",
         "00",
@@ -49728,19 +49721,19 @@ fn calculation_full_text_search_alternatives_are_accepted_omissions() {
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
 
-        assert!(matches!(
+        assert!(
             parse_calculation_register_fixed_full_text_search(
                 "CalculationRegister",
                 &fields,
                 &header,
-            ),
-            Some(None)
-        ));
-        let xml = fixture
-            .xml()
-            .unwrap_or_else(|| panic!("rejected accepted F27 omission {value}"));
-        assert!(!xml.contains("<FullTextSearch>"), "F27 {value}");
-        assert_eq!(xml, expected_omission, "consumed F27 {value}");
+            )
+            .is_none(),
+            "unobserved F27 {value} must refuse the register"
+        );
+        assert!(
+            fixture.extract().is_none(),
+            "unobserved F27 {value} must reject the record"
+        );
     }
 }
 
