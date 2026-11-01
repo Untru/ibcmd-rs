@@ -165,7 +165,9 @@ jobs:
           } elseif ($IsMacOS) {
             "cpu: $(sysctl -n machdep.cpu.brand_string); logical processors: $([Environment]::ProcessorCount)"
           } else {
-            "$((lscpu | Select-String -Pattern '^Model name' | Select-Object -First 1).Line); logical processors: $([Environment]::ProcessorCount)"
+            $model = (lscpu | Select-String -Pattern '^Model name:\s*(.+)$' | Select-Object -First 1)
+            $name = if ($model) { $model.Matches[0].Groups[1].Value.Trim() } else { "$(uname -m) (lscpu names no model)" }
+            "cpu: $name; logical processors: $([Environment]::ProcessorCount)"
           }
           Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null -and ($_.Used + $_.Free) -gt 0 } |
             ForEach-Object { "drive $($_.Name): $([math]::Round($_.Free / 1GB)) GB free" }
@@ -205,8 +207,9 @@ jobs:
 
       # PowerShell 7 above runs the same validator on every target. Windows
       # PowerShell 5.1 takes ~4 min on a slow runner, so a pull request runs
-      # it when the validator, its test, the corpus or this workflow change
-      # (the `powershell` lane); every push to master runs it.
+      # it when the validator, its Pester test, its self-test fixtures, the
+      # corpus or this workflow change (the `powershell` lane); every push to
+      # master runs it.
       - name: Test EDT corpus governance under Windows PowerShell
         if: runner.os == 'Windows' && steps.scope.outputs.powershell == 'true'
         shell: powershell
@@ -355,7 +358,8 @@ jobs:
         run: python scripts/audit_linux_abi.py --binary ${{ matrix.binary }} --target ${{ matrix.target }} --output target/offline-evidence/${{ matrix.target }}.abi.json
 
       # Without the release build, on the debug binary the root integration
-      # suites built from the same sources and features (--no-default-features).
+      # suites built: the same sources with --no-default-features, plus the
+      # dev-dependencies' `test-fixtures` hooks, inert unless a test sets them.
       - name: Verify native micro-corpus parity offline
         if: steps.scope.outputs.rust == 'true'
         shell: pwsh

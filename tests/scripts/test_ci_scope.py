@@ -70,11 +70,13 @@ class ScopeTests(unittest.TestCase):
 
     def test_windows_powershell_runs_when_its_inputs_change(self):
         for path in ["tools/validate-edt-corpus.ps1", "tests/scripts/validate-edt-corpus.Tests.ps1",
+                     "tests/fixtures/schema-governance/valid/edt-x.json",
                      "crates/ibcmd-schema/data/edt-x.json", ".github/workflows/offline-e2e.yml"]:
             self.assertTrue(self.lanes(["src/mcp.rs", path])["powershell"], path)
 
     def test_windows_powershell_skips_other_changes(self):
         for path in ["src/mcp.rs", "tools/validate-physical-adapter-policy.ps1",
+                     "tests/fixtures/schema-governance-other/x.json",
                      "crates/ibcmd-schema/src/lib.rs", ".github/workflows/ci.yml", "README.md"]:
             self.assertFalse(self.lanes([path])["powershell"], path)
 

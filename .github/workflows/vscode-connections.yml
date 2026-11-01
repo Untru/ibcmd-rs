@@ -2,7 +2,10 @@ name: VSCode connections
 on:
   pull_request:
     paths: ['editors/vscode/**', 'src/**', 'crates/**', 'Cargo.toml', 'Cargo.lock', 'tests/**', '.github/workflows/vscode-connections.yml', '.github/workflows/release.yml']
+  # A branch is tested through its pull request; a push builds master's
+  # release VSIX.
   push:
+    branches: [master]
     paths: ['editors/vscode/**', 'src/**', 'crates/**', 'Cargo.toml', 'Cargo.lock', 'tests/**', '.github/workflows/vscode-connections.yml', '.github/workflows/release.yml']
   workflow_dispatch:
 permissions:

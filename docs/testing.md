@@ -34,11 +34,15 @@ examples are compiled by the `platform-oracle` lane below.
 A pull request builds the release binary and audits it (GLIBC, SBOM,
 release boundary, packaging) on Linux x86_64 only; Windows, Linux ARM64 and
 macOS check native micro-corpus parity on the debug binary of the
-integration suites instead. Windows PowerShell 5.1 validates the EDT corpus
-on a pull request only when the validator, its test, the corpus or the
-workflow changes; PowerShell 7 validates it on every target. Pushes to
-master run all of it on every target. Only master writes the Cargo caches;
-a pull request restores master's.
+integration suites instead (the same sources with `--no-default-features`,
+plus the dev-dependencies' `test-fixtures` hooks, inert unless a test sets
+them). Windows PowerShell 5.1 validates the EDT corpus on a pull request
+only when `tools/validate-edt-corpus.ps1`, its Pester test, its self-test
+fixtures (`tests/fixtures/schema-governance/`), the corpus
+(`crates/ibcmd-schema/data/`) or `offline-e2e.yml` changes; PowerShell 7
+validates it on every target. Pushes to master build and audit the release
+binary on all four targets and run Windows PowerShell 5.1 on Windows. Only
+master writes the Cargo caches; a pull request restores master's.
 
 The research probes and the live MSSQL tests below are behind features and
 not part of the gate. `.github/workflows/ci.yml` also compiles the root

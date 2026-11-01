@@ -24,11 +24,16 @@ Two lanes depend on the event rather than only on the files:
   the matrix entries that pass --pr-release (Linux x86_64), when `rust` runs;
   pushes and manual runs build it on every entry. The other entries of a
   pull request check native micro-corpus parity on the debug binary the
-  integration suites built.
+  integration suites built: the same sources with --no-default-features,
+  plus the `test-fixtures` hooks of the root's dev-dependencies, which stay
+  inert unless a test sets them.
 - powershell: the EDT corpus validator under Windows PowerShell 5.1. A pull
-  request runs it when it changes the validator, its Pester test, the corpus
-  it validates or the workflow that runs it; PowerShell 7 runs the same
-  validator on every pull request and every target.
+  request runs it when it changes the validator, its Pester test, its
+  self-test fixtures (`tests/fixtures/schema-governance/`), the corpus under
+  `crates/ibcmd-schema/data/` or `.github/workflows/offline-e2e.yml`.
+  PowerShell 7 runs the same validator on every pull request and every
+  target; the two editions parse JSON differently (5.1 has no -AsHashtable
+  or -Depth), so JSON the validator reads is an input.
 
 Usage: ci_scope.py [--base <rev>] [--all] [--pr-release]. Without a base,
 or with --all (pushes to master, manual runs), every lane runs.
@@ -45,6 +50,7 @@ REFERENCE_DIRS = ["src", "tests", "crates", "profiles", "compatibility", "tools"
 POWERSHELL_INPUTS = (
     "tools/validate-edt-corpus.ps1",
     "tests/scripts/validate-edt-corpus.Tests.ps1",
+    "tests/fixtures/schema-governance/",
     "crates/ibcmd-schema/data/",
     ".github/workflows/offline-e2e.yml",
 )
