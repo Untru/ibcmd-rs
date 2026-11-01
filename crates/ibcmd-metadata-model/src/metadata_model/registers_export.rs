@@ -474,7 +474,7 @@ fn command(stored: &Brace, context: &ExportContext) -> Result<Element> {
         .child(code(
             "OnMainServerUnavalableBehavior",
             item(record, 12)?,
-            &[("Auto", 0)],
+            crate::metadata_model::common::MAIN_SERVER_UNAVAILABLE_BEHAVIORS,
         )?);
     Ok(el("Command").attr("uuid", uuid).child(properties))
 }

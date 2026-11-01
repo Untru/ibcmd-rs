@@ -763,7 +763,11 @@ impl<'a> Obj<'a> {
                 "ParameterUseMode",
                 &[("Single", 0), ("Multiple", 1)]
             )?,
-            code_of(properties, "OnMainServerUnavalableBehavior", &[("Auto", 0)])?,
+            code_of(
+                properties,
+                "OnMainServerUnavalableBehavior",
+                crate::metadata_model::common::MAIN_SERVER_UNAVAILABLE_BEHAVIORS,
+            )?,
         ];
         Ok(brace_list![
             num(1),

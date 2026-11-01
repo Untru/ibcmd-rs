@@ -514,7 +514,7 @@ pub fn command(element: &Element, context: &DescriptorContext) -> Result<Brace> 
         code(
             "OnMainServerUnavalableBehavior",
             text("OnMainServerUnavalableBehavior"),
-            &[("Auto", 0)],
+            crate::metadata_model::common::MAIN_SERVER_UNAVAILABLE_BEHAVIORS,
         )?,
     ];
     Ok(item(brace_list![

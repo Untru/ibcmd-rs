@@ -1086,8 +1086,12 @@ const COMMAND_CLASS: &str = "078a6af8-d22c-4248-9c33-7e90075a3d2c";
 #[doc(hidden)]
 pub const PARAMETER_USE_MODES: &[(&str, i64)] = &[("Single", 0), ("Multiple", 1)];
 
+/// `<OnMainServerUnavalableBehavior>`. The stored codes are read off the
+/// matrix corpus: `Auto` writes `0`, `MakeDisable` `1`, `DontChangeBehavior`
+/// `2` (the two commands that are not `Auto`).
 #[doc(hidden)]
-pub const MAIN_SERVER_UNAVAILABLE_BEHAVIORS: &[(&str, i64)] = &[("Auto", 0)];
+pub const MAIN_SERVER_UNAVAILABLE_BEHAVIORS: &[(&str, i64)] =
+    &[("Auto", 0), ("MakeDisable", 1), ("DontChangeBehavior", 2)];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommonCommand {
