@@ -12093,6 +12093,7 @@ struct CommonAttributePropertyDetails {
     quick_choice: &'static str,
     create_on_input: &'static str,
     choice_history_on_input: &'static str,
+    choice_form: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -34674,8 +34675,22 @@ fn parse_common_attribute_properties_from_text(
     let use_fields = fields
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0));
-    let auto_use = parse_common_attribute_declared_auto_use(&fields, use_fields.as_deref())
-        .unwrap_or("DontUse");
+    // The record shape that carries a `3`-marked use block keeps `<AutoUse>` on
+    // slot 6 (`1` = `DontUse`, `0` = `Use`); the older shape states it inside
+    // the use block itself.
+    let auto_use = match use_fields
+        .as_deref()
+        .and_then(|fields| fields.first())
+        .map(|field| field.trim())
+    {
+        Some("3") => match fields.get(6).map(|field| field.trim()) {
+            Some("1") | None => "DontUse",
+            Some("0") => "Use",
+            Some(_) => return None,
+        },
+        _ => parse_common_attribute_declared_auto_use(&fields, use_fields.as_deref())
+            .unwrap_or("DontUse"),
+    };
     let content = use_fields
         .as_deref()
         .map(|fields| parse_common_attribute_content(fields, object_refs))
@@ -34683,7 +34698,7 @@ fn parse_common_attribute_properties_from_text(
 
     Some(CommonAttributeProperties {
         value_types: typed.value_types,
-        property_details: parse_common_attribute_property_details(&fields),
+        property_details: parse_common_attribute_property_details(&fields, object_refs),
         auto_use,
         content,
         separation: additional_order_tail
@@ -34784,6 +34799,7 @@ fn common_attribute_zero_reference_envelope(value: &str) -> bool {
 
 fn parse_common_attribute_property_details(
     fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<CommonAttributePropertyDetails> {
     let typed_fields = fields
         .get(1)
@@ -34856,6 +34872,11 @@ fn parse_common_attribute_property_details(
             Some("1") => "DontUse",
             _ => "Auto",
         },
+        choice_form: typed_fields
+            .get(11)
+            .map(|field| field.trim())
+            .filter(|uuid| *uuid != "00000000-0000-0000-0000-000000000000")
+            .and_then(|uuid| object_refs.get(uuid).cloned()),
     })
 }
 
@@ -34903,7 +34924,7 @@ fn parse_common_attribute_separation_properties(
         // ConfigurationExtensionsSeparation, swapping both on every one of
         // 11 differing CommonAttributes in the corpus.
         users_separation: common_attribute_separation_xml(fields.get(10)?.trim())?,
-        authentication_separation: common_attribute_reversed_separation_xml(fields.get(6)?.trim())?,
+        authentication_separation: common_attribute_separation_xml(fields.get(11)?.trim())?,
         data_separation_value: parse_common_attribute_optional_ref(fields.get(7)?, object_refs),
         data_separation_use: parse_common_attribute_optional_ref(fields.get(8)?, object_refs),
         conditional_separation: parse_common_attribute_optional_ref(fields.get(9)?, object_refs),
@@ -42981,6 +43002,10 @@ fn format_common_attribute_property_details_xml(
         xml.push_str(&format_common_attribute_fill_value_xml(fill_value));
         xml.push_str("\r\n\t\t\t");
     }
+    let choice_form = match &details.choice_form {
+        Some(form) => format!("<ChoiceForm>{form}</ChoiceForm>"),
+        None => "<ChoiceForm/>".to_string(),
+    };
     xml.push_str(&format!(
         "<FillChecking>{}</FillChecking>\r\n\
 \t\t\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n\
@@ -42988,13 +43013,14 @@ fn format_common_attribute_property_details_xml(
 \t\t\t<ChoiceParameters/>\r\n\
 \t\t\t<QuickChoice>{}</QuickChoice>\r\n\
 \t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
-\t\t\t<ChoiceForm/>\r\n\
+\t\t\t{}\r\n\
 \t\t\t<LinkByType/>\r\n\
 \t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n",
         details.fill_checking,
         details.choice_folders_and_items,
         details.quick_choice,
         details.create_on_input,
+        choice_form,
         details.choice_history_on_input,
     ));
     xml
