@@ -11505,6 +11505,7 @@ fn constant_record_for_test(
     extended: &str,
 ) -> String {
     RECORD_LITERAL
+        .replace("{LOCK}", "1")
         .replace("{MULTILINE}", multi_line)
         .replace("{FOLDERS}", folders)
         .replace("{QUICK}", quick)
@@ -11513,7 +11514,19 @@ fn constant_record_for_test(
         .replace("{EXTENDED}", extended)
 }
 
-const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},{NEGATIVES},\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},{EXTENDED},\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,1,1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
+/// The same record with a chosen stored `<DataLockControlMode>` code.
+fn constant_record_with_lock(lock: &str) -> String {
+    RECORD_LITERAL
+        .replace("{LOCK}", lock)
+        .replace("{MULTILINE}", "0")
+        .replace("{FOLDERS}", "0")
+        .replace("{QUICK}", "2")
+        .replace("{HISTORY}", "0")
+        .replace("{NEGATIVES}", "0")
+        .replace("{EXTENDED}", "0")
+}
+
+const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},{NEGATIVES},\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},{EXTENDED},\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,{LOCK},1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
 
 #[test]
 fn common_attribute_indexing_names_every_code_the_corpus_stores() {
@@ -11662,6 +11675,44 @@ fn constant_reads_the_four_properties_the_writer_used_to_pin() {
     assert!(parse(&constant_record_for_test("0", "0", "2", "9", "0", "0")).is_none());
     assert!(parse(&constant_record_for_test("0", "0", "2", "0", "2", "0")).is_none());
     assert!(parse(&constant_record_for_test("0", "0", "2", "0", "0", "2")).is_none());
+}
+
+#[test]
+fn constant_keeps_automatic_and_managed_and_refuses_an_unknown_mode() {
+    // The platform stores `DataLockControlMode` as a code and writes it back by
+    // name: `0` `Automatic`, `1` `Managed`, `2` `AutomaticAndManaged`. The
+    // constant converter used to read "anything but 0" as `Managed`, so a
+    // constant that stored `2` was written as `Managed` and differed from the
+    // platform's own XML for the same row.
+    const UUID: &str = "1d3d0d77-e5da-484f-9bb6-f25b74778d2f";
+    let parse = |lock: &str| {
+        parse_constant_properties_from_text(
+            &constant_record_with_lock(lock),
+            UUID,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+    };
+    assert_eq!(
+        parse("0")
+            .expect("automatic constant")
+            .data_lock_control_mode,
+        "Automatic"
+    );
+    assert_eq!(
+        parse("1").expect("managed constant").data_lock_control_mode,
+        "Managed"
+    );
+    assert_eq!(
+        parse("2")
+            .expect("automatic-and-managed constant")
+            .data_lock_control_mode,
+        "AutomaticAndManaged"
+    );
+    // A code outside the platform's set refuses the object instead of
+    // degrading to a neighbouring mode.
+    assert!(parse("3").is_none());
 }
 
 #[test]
@@ -24188,7 +24239,7 @@ fn extracts_exact_exchange_plan_owner_properties_atomically_and_in_native_order(
         (25, "0"),
         (26, "2"),
         (27, "{1,{0,0}}"),
-        (28, "2"),
+        (28, "3"),
         (29, "2"),
         (30, "{1,{1,8}}"),
         (34, "{1,\"en\"}"),
@@ -24969,7 +25020,11 @@ fn covers_information_register_owner_scalar_protocol_domains() {
     for (raw, expected) in [("0", "InList"), ("1", "InDialog"), ("2", "BothWays")] {
         assert_eq!(information_register_edit_type_xml(raw), Some(expected));
     }
-    for (raw, expected) in [("0", "Automatic"), ("1", "Managed")] {
+    for (raw, expected) in [
+        ("0", "Automatic"),
+        ("1", "Managed"),
+        ("2", "AutomaticAndManaged"),
+    ] {
         assert_eq!(
             information_register_data_lock_control_mode_xml(raw),
             Some(expected)
@@ -51902,6 +51957,8 @@ fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_
         ("1", "1", "Variable", "Managed"),
         ("0", "0", "Fixed", "Automatic"),
         ("0", "1", "Variable", "Automatic"),
+        // The third value the platform writes for this property.
+        ("2", "0", "Fixed", "AutomaticAndManaged"),
     ] {
         let mut owned = vec!["0".to_owned(); 49];
         owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = slot28.to_owned();
@@ -51916,13 +51973,14 @@ fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_
             Some(lock_mode)
         );
     }
-    // Neither slot admits a value outside its closed pair.
+    // Neither slot admits a value outside its closed set: the length keeps two
+    // codes, the lock mode the platform's three.
     let mut owned = vec!["0".to_owned(); 49];
     owned[BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT] = "2".to_owned();
     let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
     assert_eq!(parse_business_process_number_allowed_length(&fields), None);
     let mut owned = vec!["0".to_owned(); 49];
-    owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = "2".to_owned();
+    owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = "3".to_owned();
     let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
     assert_eq!(parse_business_process_data_lock_control_mode(&fields), None);
 }

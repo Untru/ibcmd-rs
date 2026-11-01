@@ -1258,7 +1258,11 @@ fn build_catalog(
     fields[43] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[44] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[45] = list(vec![token("0")]);
@@ -1387,7 +1391,11 @@ fn build_document(
     fields[30] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[31] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[32] = list(vec![token("0")]);
@@ -1557,7 +1565,11 @@ fn build_exchange_plan(
     fields[28] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[29] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[30] = standard_attributes(&["-14", "-13", "-10", "-9", "-6", "-4", "-3", "-2"])?;
@@ -1688,7 +1700,11 @@ fn build_business_process(
     fields[28] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[29] = bool_token(object, "CreateTaskInPrivilegedMode")?;
     fields[30] = standard_attributes(&["-9", "-8", "-7", "-5", "-4", "-3", "-2"])?;
@@ -1822,7 +1838,11 @@ fn build_task(
     fields[32] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[33] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[34] = standard_attributes(&["-10", "-9", "-8", "-7", "-5", "-4", "-3", "-2"])?;
@@ -6060,7 +6080,11 @@ mod tests {
     /// counts its one collection whatever the mode.
     #[test]
     fn recalculation_lock_mode_rides_the_owner_record() {
-        for (mode, code) in [("Managed", "1"), ("Automatic", "0")] {
+        for (mode, code) in [
+            ("Managed", "1"),
+            ("Automatic", "0"),
+            ("AutomaticAndManaged", "2"),
+        ] {
             let (fields, count) = owner_record(&compile_edited(
                 BusinessObjectFamily::Recalculation,
                 &[(

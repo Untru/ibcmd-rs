@@ -15243,11 +15243,7 @@ fn parse_exchange_plan_properties_from_text(
             &header.name,
             object_refs,
         )?,
-        data_lock_control_mode: match fields.get(28)?.trim() {
-            "0" => "Automatic",
-            "1" => "Managed",
-            _ => return None,
-        },
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(28)?)?,
         full_text_search: match fields.get(29)?.trim() {
             "0" => "DontUse",
             "1" => "Use",
@@ -15628,11 +15624,7 @@ fn parse_recalculation_properties_from_text(
     })
     .collect::<Option<Vec<_>>>()?;
 
-    let data_lock_control_mode = match data_lock_field.trim() {
-        "0" => "Automatic",
-        "1" => "Managed",
-        _ => return None,
-    };
+    let data_lock_control_mode = information_register_data_lock_control_mode_xml(data_lock_field)?;
     let dimensions = parse_recalculation_dimensions(
         dimension_field,
         &recalculation_ref.owner_name,
@@ -17262,12 +17254,22 @@ fn information_register_edit_type_xml(value: &str) -> Option<&'static str> {
     }
 }
 
+/// `<DataLockControlMode>`: the stored code and the name the platform writes.
+///
+/// `Automatic` `0`, `Managed` `1`, `AutomaticAndManaged` `2`. A code outside
+/// the table fails closed instead of degrading to a neighbouring mode.
+const DATA_LOCK_CONTROL_MODES: &[(&str, &str)] = &[
+    ("0", "Automatic"),
+    ("1", "Managed"),
+    ("2", "AutomaticAndManaged"),
+];
+
 fn information_register_data_lock_control_mode_xml(value: &str) -> Option<&'static str> {
-    match value.trim() {
-        "0" => Some("Automatic"),
-        "1" => Some("Managed"),
-        _ => None,
-    }
+    let value = value.trim();
+    DATA_LOCK_CONTROL_MODES
+        .iter()
+        .find(|(code, _)| *code == value)
+        .map(|(_, name)| *name)
 }
 
 fn parse_information_register_owned_form_ref(
@@ -18900,14 +18902,7 @@ fn parse_register_data_lock_control_mode(
         "AccumulationRegister" => 5,
         _ => return None,
     };
-    match fields
-        .get(header_index + field_offset)
-        .map(|field| field.trim())
-    {
-        Some("0") => Some("Automatic"),
-        Some("1") => Some("Managed"),
-        _ => None,
-    }
+    information_register_data_lock_control_mode_xml(fields.get(header_index + field_offset)?)
 }
 
 fn parse_wrapped_register_owner_header(value: &str) -> Option<MetadataHeader> {
@@ -19112,11 +19107,7 @@ fn parse_exact_calculation_register_owner_properties(
         return Some(None);
     }
 
-    let data_lock_control_mode = match fields.get(26)?.trim() {
-        "0" => "Automatic",
-        "1" => "Managed",
-        _ => return None,
-    };
+    let data_lock_control_mode = information_register_data_lock_control_mode_xml(fields.get(26)?)?;
     Some(Some(ExactCalculationRegisterOwnerProperties {
         data_lock_control_mode,
         standard_attributes: parse_exact_register_standard_attributes(
@@ -25643,7 +25634,7 @@ fn parse_chart_of_accounts_properties(
         // `"1"`). Field 34 is `<CheckUnique>` and is `"0"` on two of the four.
         auto_order_by_code: information_register_bool(fields.get(24)?)?,
         order_length: parse_exchange_plan_u32(fields.get(25)?)?,
-        // `<DataLockControlMode>` rides field 36 with the shared 0/1 encoding:
+        // `<DataLockControlMode>` rides field 36 with the shared 0/1/2 encoding:
         // `uh` `МСФО` and `Хозрасчетный` write `"0"`/`Automatic`, `ssl`
         // `_ДемоОсновной` and `uh` `Международный` write `"1"`/`Managed`.
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(36)?)?,
@@ -27016,15 +27007,11 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             &header.name,
             form_refs,
         )?,
-        // The data-lock mode lives in slot 36 and uses the shared 0/1 encoding
-        // (8.3.27.2214 CorpusCharacteristics = 0/Automatic, 1C:УТ 11.5.27.75
-        // charts = 1/Managed). Slot 51 is not part of it: it carries
-        // `<CreateOnInput>` above.
-        data_lock_control_mode: match fields.get(36)?.trim() {
-            "0" => "Automatic",
-            "1" => "Managed",
-            _ => return None,
-        },
+        // The data-lock mode lives in slot 36 and uses the shared 0/1/2
+        // encoding (8.3.27.2214 CorpusCharacteristics = 0/Automatic,
+        // 1C:УТ 11.5.27.75 charts = 1/Managed, 2/AutomaticAndManaged).
+        // Slot 51 is not part of it: it carries `<CreateOnInput>` above.
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(36)?)?,
         full_text_search: match fields.get(37)?.trim() {
             "0" => "DontUse",
             "1" => "Use",
@@ -34059,10 +34046,8 @@ fn parse_constant_properties_from_text(
         Some("1") => "DontUse",
         _ => "Auto",
     };
-    let data_lock_control_mode = match constant_fields.get(6).map(|field| field.trim()) {
-        Some("0") => "Automatic",
-        _ => "Managed",
-    };
+    let data_lock_control_mode =
+        information_register_data_lock_control_mode_xml(constant_fields.get(6)?)?;
     // Owner slot 12, the one object of the stand that writes `Use`:
     // `uh` `Constants/РежимАктуализацииГрафикаПриИзмененииПервичныхДокументов`.
     let data_history = match constant_fields.get(12).map(|field| field.trim()) {

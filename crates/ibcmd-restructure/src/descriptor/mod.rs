@@ -159,7 +159,8 @@ pub const EDIT_TYPE: Codes = &[("InList", 0), ("InDialog", 1), ("BothWays", 2)];
 pub const CHOICE_MODE: Codes = &[("FromForm", 0), ("QuickChoice", 1), ("BothWays", 2)];
 pub const CODE_TYPE: Codes = &[("Number", 0), ("String", 1)];
 pub const DEFAULT_PRESENTATION: Codes = &[("AsCode", 0), ("AsDescription", 1)];
-pub const DATA_LOCK_CONTROL_MODE: Codes = &[("Automatic", 0), ("Managed", 1)];
+pub const DATA_LOCK_CONTROL_MODE: Codes =
+    &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)];
 pub const USE: Codes = &[("DontUse", 0), ("Use", 1)];
 pub const ALLOWED_LENGTH: Codes = &[("Fixed", 0), ("Variable", 1)];
 pub const CREATE_ON_INPUT: Codes = &[("Auto", 0), ("DontUse", 1), ("Use", 2)];

@@ -242,7 +242,11 @@ const COT_SCHEMA: &[&str] = &[
 // Enumerations as the stored rows spell them. The codes are the metadata
 // model's (`metadata_model::objects`), measured on the four corpora the lab
 // holds (ERP УХ 8.3.27, БСП 8.3.27 and 8.5, an extension).
-const DATA_LOCK_CONTROL_MODE: &[(&str, &str)] = &[("Automatic", "0"), ("Managed", "1")];
+const DATA_LOCK_CONTROL_MODE: &[(&str, &str)] = &[
+    ("Automatic", "0"),
+    ("Managed", "1"),
+    ("AutomaticAndManaged", "2"),
+];
 const FULL_TEXT_SEARCH: &[(&str, &str)] = &[("DontUse", "0"), ("Use", "1")];
 const DATA_HISTORY: &[(&str, &str)] = &[("DontUse", "0"), ("Use", "1")];
 const EDIT_TYPE: &[(&str, &str)] = &[("InList", "0"), ("InDialog", "1"), ("BothWays", "2")];
@@ -453,7 +457,11 @@ fn build_information(
     fields[24] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[25] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[26] = standard_attributes(&["-5", "-4", "-3", "-2"])?;
@@ -531,7 +539,11 @@ fn build_accumulation(
     fields[18] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[19] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[20] = bool_token(object, "EnableTotalsSplitting")?;
@@ -772,7 +784,11 @@ fn build_calculation(
     fields[26] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[27] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[28] = standard_attributes(&[

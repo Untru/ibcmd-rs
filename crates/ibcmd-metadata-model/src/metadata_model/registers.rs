@@ -47,7 +47,8 @@ pub fn compile(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Br
 // ---------------------------------------------------------------------------
 // Code tables.
 
-const DATA_LOCK_CONTROL_MODE: &[(&str, i64)] = &[("Automatic", 0), ("Managed", 1)];
+const DATA_LOCK_CONTROL_MODE: &[(&str, i64)] =
+    &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)];
 const FULL_TEXT_SEARCH: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1)];
 const DATA_HISTORY: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1)];
 const INDEXING: &[(&str, i64)] = &[

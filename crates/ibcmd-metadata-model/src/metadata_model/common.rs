@@ -1490,7 +1490,8 @@ const WEB_PARAMETERS: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
 
 const TRANSFER_DIRECTIONS: &[(&str, i64)] = &[("In", 0), ("Out", 1), ("InOut", 2)];
 
-const DATA_LOCK_CONTROL_MODES: &[(&str, i64)] = &[("Automatic", 0), ("Managed", 1)];
+const DATA_LOCK_CONTROL_MODES: &[(&str, i64)] =
+    &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)];
 
 /// An XDTO type named by a QName: `{0,"namespace","name"}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
