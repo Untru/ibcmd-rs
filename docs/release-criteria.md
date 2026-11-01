@@ -35,7 +35,12 @@ generation. It runs:
 
 On a pull request the matrix skips the steps the changed files cannot
 affect (`scripts/ci_scope.py`, see `docs/testing.md`); the job always runs,
-so the four required checks always report. The root library's unit tests
+so the four required checks always report. On a pull request the release
+binary is built and audited (item 8, the SBOM and packaging) on Linux x86_64
+only, and Windows PowerShell 5.1 validates the corpus only when its inputs
+change; every push to master builds and audits the release binary on all
+four targets and runs Windows PowerShell 5.1 on Windows, and `Standalone
+Release` builds, packages and audits all four targets again. The root library's unit tests
 run in full on every target; the research
 probes and the live database tests are behind the `research-corpus-tests` and
 `mssql-live-tests` features, which these gates never enable.

@@ -31,6 +31,19 @@ integration suites (`tests/*.rs`, `tests/support/`) and `tests/scripts/` skip
 the root library. Pushes to master and manual runs run every lane. Root
 examples are compiled by the `platform-oracle` lane below.
 
+A pull request builds the release binary and audits it (GLIBC, SBOM,
+release boundary, packaging) on Linux x86_64 only; Windows, Linux ARM64 and
+macOS check native micro-corpus parity on the debug binary of the
+integration suites instead (the same sources with `--no-default-features`,
+plus the dev-dependencies' `test-fixtures` hooks, inert unless a test sets
+them). Windows PowerShell 5.1 validates the EDT corpus on a pull request
+only when `tools/validate-edt-corpus.ps1`, its Pester test, its self-test
+fixtures (`tests/fixtures/schema-governance/`), the corpus
+(`crates/ibcmd-schema/data/`) or `offline-e2e.yml` changes; PowerShell 7
+validates it on every target. Pushes to master build and audit the release
+binary on all four targets and run Windows PowerShell 5.1 on Windows. Only
+master writes the Cargo caches; a pull request restores master's.
+
 The research probes and the live MSSQL tests below are behind features and
 not part of the gate. `.github/workflows/ci.yml` also compiles the root
 package with `platform-oracle` on Windows:
