@@ -117,10 +117,15 @@ fn ibcmd_rs(args: &[&std::ffi::OsStr]) -> Output {
 /// checkout path and separator. The writers' messages hold no other `\`, so
 /// every one is read as a separator: a Windows path may mix both (the root
 /// joins `tests/fixtures/1c-fixtures` to the manifest directory, and a path
-/// rebuilt by components spells `\` throughout).
+/// rebuilt by components spells `\` throughout). The file infobase import
+/// names the files it read by their canonical Windows path, which carries the
+/// verbatim prefix `\\?\`.
 fn normalized(text: &str) -> String {
     let root = coverage_root().to_string_lossy().replace('\\', "/");
-    let mut text = text.replace('\\', "/").replace(&root, "<coverage>");
+    let mut text = text
+        .replace('\\', "/")
+        .replace(&format!("//?/{root}"), "<coverage>")
+        .replace(&root, "<coverage>");
     let mut out = String::new();
     while let Some(start) = text.find("<coverage>") {
         out.push_str(&text[..start]);
@@ -842,9 +847,14 @@ fn refusals_are_split_into_the_files_they_name() {
         "A/B.xml not written by the platform"
     );
     assert_eq!(gap_detail(&Verdict::Refused, None), "refused: *");
-    // Either separator, or a mix of both, names the same corpus file.
+    // Either separator, and the verbatim prefix of a canonical Windows path,
+    // name the same corpus file.
     let root = coverage_root().to_string_lossy().replace('\\', "/");
-    for spelling in [root.clone(), root.replace('/', "\\")] {
+    for spelling in [
+        root.clone(),
+        root.replace('/', "\\"),
+        format!(r"\\?\{}", root.replace('/', "\\")),
+    ] {
         assert_eq!(
             normalized(&format!(
                 "failed to compile {spelling}/8.5.1.1529/corpus-x/native/CommonForms/F/Ext/Form.xml: no"
