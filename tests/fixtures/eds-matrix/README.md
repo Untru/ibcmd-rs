@@ -47,7 +47,7 @@ specific to the matrix.
 ## Reproduction
 
 ```bash
-cargo test --lib mssql_dump::eds_export::tests
+cargo test --locked -p ibcmd-dump --lib mssql_dump::eds_export::tests
 ```
 
 The test feeds the four stored bodies through `EdsExport::build` and asserts

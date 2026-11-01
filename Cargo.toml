@@ -45,6 +45,7 @@ members = [
     "crates/ibcmd-config-apply",
     "crates/ibcmd-platform-spec",
     "crates/ibcmd-mssql-extensions",
+    "crates/ibcmd-dump",
 ]
 resolver = "3"
 exclude = ["crates/ibcmd-edt/vendor/morph1c"]
@@ -54,8 +55,8 @@ default = []
 # Research-only integrations that locate or execute an installed 1C platform.
 # This feature is intentionally excluded from default and release builds.
 platform-oracle = []
-mssql-live-tests = ["ibcmd-sql/mssql-live-tests"]
-research-corpus-tests = []
+mssql-live-tests = ["ibcmd-sql/mssql-live-tests", "ibcmd-dump/mssql-live-tests"]
+research-corpus-tests = ["ibcmd-dump/research-corpus-tests"]
 
 [dependencies]
 rmcp = { version = "=3.6.0", default-features = false, features = ["server", "transport-io"] }
@@ -101,6 +102,7 @@ ibcmd-dynamic-generation = { path = "crates/ibcmd-dynamic-generation" }
 ibcmd-config-apply = { path = "crates/ibcmd-config-apply" }
 ibcmd-platform-spec = { path = "crates/ibcmd-platform-spec" }
 ibcmd-mssql-extensions = { path = "crates/ibcmd-mssql-extensions" }
+ibcmd-dump = { path = "crates/ibcmd-dump" }
 # The process allocator, installed in main.rs.
 mimalloc = "0.1.52"
 quick-xml = "0.38"
@@ -124,6 +126,9 @@ ibcmd-compiler-families = { path = "crates/ibcmd-compiler-families", features = 
 ibcmd-compiler = { path = "crates/ibcmd-compiler", features = ["test-fixtures"] }
 # The export platform's per-thread override, for the exporter's form tests.
 ibcmd-platform-spec = { path = "crates/ibcmd-platform-spec", features = ["test-fixtures"] }
+# The exporter's probes, for the root's tests of the stored objects, the
+# infobase export and the form writer.
+ibcmd-dump = { path = "crates/ibcmd-dump", features = ["test-fixtures"] }
 # Substring search in tests/platform_oracle_boundary.rs; already in the
 # runtime graph (tiberius, futures-util).
 memchr = "2.8"

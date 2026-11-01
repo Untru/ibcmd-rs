@@ -22,6 +22,10 @@ pub mod file_import;
 mod file_infobase;
 pub mod form_matrix;
 pub mod form_provenance;
+#[expect(
+    unused_imports,
+    reason = "the root keeps the path; its one reader, the exporter, names the crate"
+)]
 pub(crate) use ibcmd_form_schema as form_schema;
 pub mod infobase;
 #[cfg(feature = "platform-oracle")]
@@ -35,6 +39,10 @@ pub mod metadata_model;
 pub use ibcmd_metadata_model::brace_list;
 // The owner schema facts, moved to the dump readers' crate; callers keep
 // `crate::metadata_owner_graph::…`.
+#[expect(
+    unused_imports,
+    reason = "the root keeps the path; its one reader, the exporter, names the crate"
+)]
 pub(crate) use ibcmd_dump_readers::metadata_owner_graph;
 pub mod module_blob;
 pub mod mssql;
@@ -73,6 +81,14 @@ pub mod profile_registry;
 pub mod restructure;
 // The journal schema of the database calls, moved to `ibcmd-sql`; callers
 // keep `crate::runtime_evidence_schema::…`.
+// `dump_sources` (`platform-oracle`) reads it too.
+#[cfg_attr(
+    not(feature = "platform-oracle"),
+    expect(
+        unused_imports,
+        reason = "the root keeps the path; its one reader, the exporter, names the crate"
+    )
+)]
 pub(crate) use ibcmd_sql::runtime_evidence_schema;
 pub mod server;
 pub mod settings;

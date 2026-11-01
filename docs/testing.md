@@ -127,7 +127,11 @@ class with:
 
 ```text
 cargo test --locked -p ibcmd-rs --features research-corpus-tests --lib -- --ignored --nocapture
+cargo test --locked -p ibcmd-dump --features research-corpus-tests --lib -- --ignored --nocapture
 ```
+
+The exporter's own probes live in `ibcmd-dump`; the root's feature forwards
+to the crate's, and the root keeps the ones that read root code.
 
 The `--ignored` selector is intentional: enabling the feature alone must not
 also run the 179 known legacy failures. Some diagnostics still return early
@@ -161,8 +165,10 @@ disposable `tempdb` tables described in that module:
 cargo test --locked -p ibcmd-sql --features mssql-live-tests sql::mssql::live_tests:: -- --nocapture
 ```
 
-The root's `mssql-live-tests` feature forwards to the crate; the ignored
-root blob comparisons above remain in `ibcmd-rs`.
+The root's `mssql-live-tests` feature forwards to the crate and to
+`ibcmd-dump`, whose ignored live test of the storage generation overlay reads
+a lab database named by `IBCMD_RS_DYNGEN_DB`; the ignored root blob
+comparisons above remain in `ibcmd-rs`.
 
 ## Public Coverage corpus
 

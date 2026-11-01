@@ -1,0 +1,5602 @@
+use super::{
+    BTreeMap, BTreeSet, CATALOG_OWNER_FIELD_CODE_LENGTH, CATALOG_OWNER_FIELD_DESCRIPTION_LENGTH,
+    CATALOG_OWNER_FIELD_HIERARCHICAL, CATALOG_OWNER_FIELD_HIERARCHY_TYPE,
+    CATALOG_OWNER_FIELD_OWNERS, ConfigRow, ConfigurationAllowedIncomingShareRequestType,
+    ConfigurationContainedObject, ConfigurationLocalizedProperties,
+    ConfigurationMobileApplicationFunctionality, ConfigurationMobileApplicationPermissionMessage,
+    ConfigurationProperties, ConfigurationRootChildObject, ConfigurationRootLayout,
+    ConfigurationRootReference, ConstantValueType, DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME,
+    DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID, FormSourceReference,
+    INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY, InfobaseConfigSourceVersion,
+    InformationRegisterFieldReference, InformationRegisterFieldReferenceIndex,
+    InformationRegisterMasterDimensionIndex, METADATA_OBJECT_REF_TYPE_UUID,
+    MetadataCommandReference, MetadataHeader, MetadataObjectReferenceIndexes, MetadataTextRow,
+    MetadataTypeSetLeafIndex, Path, PathBuf, Result, SourceAsset, SourceAssetKind,
+    StandaloneContentReferences, SubsystemSourceReference, TemplateSourceReference,
+    WEB_SERVICE_PARAMETER_COLLECTION_UUID, build_metadata_text_rows, builtin_type_reference,
+    catalog_hierarchy_type_xml, chart_of_characteristic_types_declared_value_types,
+    contains_metadata_header_name_between, contains_metadata_header_uuid_between,
+    decode_owner_graph_for_family_parser, enclosing_metadata_header_for_code,
+    form_source_reference_name, format_configuration_source_xml, inflate_raw_deflate,
+    information_register_bool, information_register_decimal_is_valid,
+    information_register_periodicity_xml, information_register_uuid_is_zero,
+    information_register_write_mode_xml, insert_configuration_internal_info_xml,
+    insert_configuration_root_child_objects_xml, insert_metadata_child_objects_xml,
+    is_defined_type_metadata_text, is_form_metadata_text, is_metadata_header_marker,
+    is_offset_inside_metadata_object_code, is_template_metadata_text, is_uuid_text,
+    looks_like_graphical_scheme_blob_text, metadata_header_field_index,
+    metadata_kind_can_own_forms, metadata_kind_can_own_templates, metadata_kind_for_source_folder,
+    metadata_object_field_candidates_around_header, metadata_object_fields,
+    metadata_reference_collection_len, metadata_source_for_object_text, metadata_source_for_text,
+    nested_command_headers_for_owner_from_text, nested_headers_with_offsets_from_text,
+    nested_metadata_headers_from_text, nested_web_service_operation_headers_from_text,
+    owned_form_uuid_values_matching, owner_graph, parallel, parse_1c_bool_field,
+    parse_1c_bool_flag, parse_1c_quoted_string, parse_1c_quoted_string_with_len, parse_1c_synonyms,
+    parse_chart_direct_object_reference, parse_common_attribute_content,
+    parse_common_attribute_declared_auto_use, parse_defined_type_properties_from_text,
+    parse_design_time_reference, parse_document_journal_registered_documents,
+    parse_enum_values_from_text, parse_exchange_plan_u32, parse_generated_metadata_reference_owner,
+    parse_help_blob_pages, parse_http_service_url_templates_from_text,
+    parse_information_register_child_payload, parse_information_register_child_value_types,
+    parse_information_register_non_zero_uuid, parse_information_register_owner_fields,
+    parse_information_register_owner_header, parse_metadata_child_value_types_with_builtin,
+    parse_metadata_header_from_text, parse_metadata_object_code, parse_non_zero_uuid,
+    parse_uuid_field, preceding_metadata_header_for_code,
+    preceding_metadata_header_for_code_with_bounds, push_localized_property,
+    push_metadata_header_child_object_xml, push_optional_text_element, register_brace_jumps,
+    register_child_object_tag, sanitize_source_path_segment, scan_1c_braced_value,
+    split_1c_braced_fields, split_information_register_braced_fields, uuid_like_values,
+    uuid_like_values_in_text_order,
+};
+use ibcmd_schema::configuration_mobile::FUNCTIONALITIES as CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES;
+use ibcmd_schema::configuration_v85_projection as configuration_v85_defaults;
+use rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+
+#[allow(dead_code)]
+pub(super) fn build_metadata_command_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, MetadataCommandReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_metadata_command_reference_index_from_texts(&metadata_texts)
+}
+
+pub(super) fn build_metadata_command_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, MetadataCommandReference> {
+    // Read in parallel, inserted in row order.
+    let per_row = |row: &MetadataTextRow| {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            return None;
+        };
+        let _brace_jumps = register_brace_jumps([row.text.as_str()]);
+        let use_standard_commands =
+            metadata_use_standard_commands(kind, &row.text, header).unwrap_or(true);
+        let based_on_declared = metadata_based_on_declared(kind, &row.text, header);
+        let owners_declared = metadata_owners_declared(kind, &row.text, header);
+        let recorder_subordinate = metadata_recorder_subordinate(kind, &row.text, header);
+        Some((
+            row.file_name.clone(),
+            MetadataCommandReference {
+                kind: kind.to_string(),
+                name: header.name.clone(),
+                use_standard_commands,
+                based_on_declared,
+                owners_declared,
+                recorder_subordinate,
+            },
+        ))
+    };
+    let found = parallel::install(|| rows.par_iter().map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().map(per_row).collect());
+    let mut index = BTreeMap::new();
+    for (file_name, reference) in found.into_iter().flatten() {
+        index.insert(file_name, reference);
+    }
+    index
+}
+
+/// The `<UseStandardCommands>` of a kind whose row the metadata model decodes,
+/// read at the slot the model writes the object's own XML from. The platform
+/// keeps the raw `<code>:<uuid>` sentinel for such an object when it is
+/// `false`: measured on a database whose staged constant has
+/// `<UseStandardCommands>false</UseStandardCommands>`, where the subsystem that
+/// hides the constant's `Open` command prints the sentinel and this export
+/// printed the name.
+fn model_use_standard_commands(kind: &str, text: &str) -> Option<bool> {
+    let row = ibcmd_metadata_model::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
+    ibcmd_metadata_model::metadata_model::simple::export::use_standard_commands(kind, &row)
+}
+
+/// The target's own `<UseStandardCommands>`, read through the same decoder and
+/// at the same slot the kind's own properties parser uses -- offset 31 of the
+/// normalized owner fields for `Catalog`, offset 23 for `Document`, logical
+/// field 7 for `InformationRegister`, and slot 7 of the object fields for
+/// `Report`, and the flag the metadata model itself reads for the kinds it
+/// decodes (`Constant`). `None` for every other kind, or when the decode
+/// fails: the caller
+/// then keeps the pre-existing `true` assumption rather than a guessed offset,
+/// per the project's fail-closed rule on unevidenced field positions.
+///
+/// `Document` and `Report` were added on a corpus-wide census rather than a
+/// single file. Every `code:uuid` sentinel the platform writes in a
+/// `Ext/CommandInterface.xml` of ERP УХ 3.2.12.6 belongs to one of four kinds
+/// -- `Catalog` (6 targets), `InformationRegister` (12), `Document` (5),
+/// `Report` (2) -- and the first two were the only ones this function could
+/// answer for, so the last two synthesized a `.StandardCommand.X` name over
+/// the platform's sentinel in seven `Subsystems/.../Ext/CommandInterface.xml`
+/// files. The converse direction is clean across the whole stand: over ERP УХ,
+/// UT, Документооборот and БСП demo, of the 904 documents and reports that
+/// declare `<UseStandardCommands>false</UseStandardCommands>` not one is named
+/// with a `.StandardCommand.` anywhere in the platform's own trees, so reading
+/// the declaration can only remove synthesized names the platform never wrote.
+fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeader) -> Option<bool> {
+    if kind == "InformationRegister" {
+        // Same slot `parse_information_register_owner_properties` already
+        // reads for the register's own `InformationRegisters/<name>.xml`
+        // (`UseStandardCommands`, logical field 7). Confirmed missing here
+        // specifically on ERP УХ 3.2.12.6,
+        // `InformationRegisters/СоответствиеВнутригрупповыхПоказателей`
+        // (`UseStandardCommands=false`): every `Subsystems/.../Ext/
+        // CommandInterface.xml` referencing its `StandardCommand.OpenList`
+        // synthesized the name instead of keeping the platform's own
+        // `0:<uuid>` sentinel, because this function returned `None` (falling
+        // back to the default `true`) for every kind but `Catalog`.
+        let fields = parse_information_register_owner_fields(text, header)?;
+        return information_register_bool(fields.logical.get(7)?);
+    }
+    if kind == "Report" {
+        // Same slot `parse_report_properties_from_text` reads for the report's
+        // own `Reports/<name>.xml`, behind the same layout-marker guard it
+        // uses: a marker this reader does not know is a refusal, not a slot 7
+        // read blind.
+        let fields = metadata_object_fields(text)?;
+        if !matches!(fields.first().map(|value| value.trim()), Some("19" | "20")) {
+            return None;
+        }
+        return parse_1c_bool_field(fields.get(7).copied());
+    }
+    if kind == "CommonForm" {
+        // Slot 4 of the `{4,...}` object record, as `form_metadata_properties`
+        // reads it for the form's own `CommonForms/<name>.xml`.
+        let fields = metadata_object_fields(text)?;
+        if fields.first().map(|value| value.trim()) != Some("4") {
+            return None;
+        }
+        return parse_1c_bool_field(fields.get(4).copied());
+    }
+    if kind == "DataProcessor" {
+        // Slot 5 (`UseStandardCommands`) of the `{17,...}` record. `Open`
+        // exists only with a default form: ERP 2.5 `DataProcessor.
+        // НастройкаСпособовОбеспеченияПотребностей` declares
+        // `UseStandardCommands=true` with an empty `<DefaultForm/>` and the
+        // platform keeps its `0:<uuid>` sentinel; across erpwe, erp, bsp, do
+        // and dm no processor with an empty default form is named with a
+        // `.StandardCommand.Open`.
+        let fields = metadata_object_fields(text)?;
+        if fields.first().map(|value| value.trim()) != Some("17") {
+            return None;
+        }
+        let uses = parse_1c_bool_field(fields.get(5).copied())?;
+        return Some(uses && parse_non_zero_uuid(fields.get(4)?.trim()).is_some());
+    }
+    if kind == "Constant" {
+        // Slot 7 of the constant object record, as
+        // `parse_constant_properties_from_text` reads it.
+        let marker = format!("{{1,0,{}}}", header.uuid);
+        let marker_start = text.find(&marker)?;
+        let start = text[..marker_start].rfind("{16,")?;
+        let fields = split_1c_braced_fields(text, start)?;
+        return parse_1c_bool_flag(fields.get(7)?.trim());
+    }
+    let family = match kind {
+        "Catalog" => owner_graph::OwnerGraphFamily::Catalog,
+        // Same slot `parse_document_properties_from_text` reads for the
+        // document's own `Documents/<name>.xml`, through the same owner-graph
+        // decoder.
+        "Document" => owner_graph::OwnerGraphFamily::Document,
+        _ => return model_use_standard_commands(kind, text),
+    };
+    let slot = match kind {
+        "Catalog" => 31,
+        _ => 23,
+    };
+    let mut diagnostic = None;
+    let graph = decode_owner_graph_for_family_parser(family, text, header, &mut diagnostic)?;
+    information_register_bool(graph.owner_fields.get(slot)?)
+}
+
+/// How many members the target's own `<BasedOn>` list declares, read at the
+/// slot the kind's own properties parser reads it from -- offset 22 of the
+/// normalized owner fields for `Document`, offset 32 for `Catalog` and offset
+/// 15 for `BusinessProcess`. A business process with an empty `<BasedOn/>` has
+/// no `CreateBasedOn` either: the 10 ЗУП 3.1.18 buttons naming
+/// `BusinessProcess.УдалитьЗаявкаКабинетСотрудника` are written `2:<uuid>` by
+/// 8.3.27.2214. `None` for every other kind and whenever
+/// the slot is not the counted reference collection every one of these
+/// properties shares: an unread declaration withholds nothing and the caller
+/// keeps naming the command exactly as before.
+fn metadata_based_on_declared(kind: &str, text: &str, header: &MetadataHeader) -> Option<usize> {
+    let (family, slot) = match kind {
+        "Catalog" => (owner_graph::OwnerGraphFamily::Catalog, 32),
+        "Document" => (owner_graph::OwnerGraphFamily::Document, 22),
+        kind if kind == owner_graph::OwnerGraphFamily::BusinessProcess.as_str() => {
+            (owner_graph::OwnerGraphFamily::BusinessProcess, 15)
+        }
+        _ => return None,
+    };
+    let mut diagnostic = None;
+    let graph = decode_owner_graph_for_family_parser(family, text, header, &mut diagnostic)?;
+    metadata_reference_collection_len(graph.owner_fields.get(slot)?)
+}
+
+/// How many owners the target's own `<Owners>` list declares, off the very slot
+/// `catalog_declared_standard_attributes` already reads for the `Owner`
+/// standard attribute of the same catalog. `None` for every other kind and
+/// whenever the slot is not the counted reference collection every one of these
+/// properties shares: an unread declaration withholds nothing.
+fn metadata_owners_declared(kind: &str, text: &str, header: &MetadataHeader) -> Option<usize> {
+    if kind != "Catalog" {
+        return None;
+    }
+    let mut diagnostic = None;
+    let graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        text,
+        header,
+        &mut diagnostic,
+    )?;
+    metadata_reference_collection_len(graph.owner_fields.get(CATALOG_OWNER_FIELD_OWNERS)?)
+}
+
+/// Whether an information register declares
+/// `<WriteMode>RecorderSubordinate</WriteMode>`, off logical field 5 -- the
+/// same slot `parse_information_register_owner_properties` reads for the
+/// register's own `InformationRegisters/<name>.xml`. `None` for every other
+/// kind and whenever the slot does not decode to one of the two declared write
+/// modes.
+fn metadata_recorder_subordinate(kind: &str, text: &str, header: &MetadataHeader) -> Option<bool> {
+    if kind != "InformationRegister" {
+        return None;
+    }
+    let fields = parse_information_register_owner_fields(text, header)?;
+    Some(information_register_write_mode_xml(fields.logical.get(5)?)? == "RecorderSubordinate")
+}
+
+// What a dynamic list's field universe and a constants set's `<UseAlways>`
+// are read against is the `ibcmd-form-body` crate's (`FormParseContext`
+// holds it); the builder below fills it. `written_as` reads the root's
+// `InfobaseConfigSourceVersion`, so it stays here, as a trait method callers
+// reach exactly as before; so do the test-only builders.
+pub(super) use ibcmd_form_body::{
+    MetadataCommonAttributeContent, MetadataConstantDeclaration, MetadataFieldDeclarationIndex,
+    MetadataTableStandardAttributes,
+};
+
+pub(super) trait MetadataFieldDeclarationIndexExt {
+    /// The index as the writer of `source_version` reads it.
+    fn written_as(self, source_version: InfobaseConfigSourceVersion) -> Self;
+}
+
+impl MetadataFieldDeclarationIndexExt for MetadataFieldDeclarationIndex {
+    fn written_as(mut self, source_version: InfobaseConfigSourceVersion) -> Self {
+        self.writes_value_storage_constants = source_version == InfobaseConfigSourceVersion::V2_21;
+        self
+    }
+}
+
+/// Reads the declarations above off the same metadata records the rest of the
+/// dump is written from.
+pub(super) fn build_metadata_field_declaration_index_from_texts(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+) -> MetadataFieldDeclarationIndex {
+    let mut index = MetadataFieldDeclarationIndex::default();
+    // Only the configuration's own root row is parsed: it carries the class
+    // uuid `9cd510cd-…` of the configuration properties.
+    index.english_script = rows.iter().any(|row| {
+        row.text.contains(ibcmd_schema::metadata_record_upgrades::ConfigurationRecordLayout::PROPERTIES_CLASS_ID)
+            && configuration_root_fields(&row.text)
+                .is_some_and(|(fields, _)| fields.get(ibcmd_schema::metadata_record_upgrades::ConfigurationRecordLayout::SCRIPT_VARIANT_SLOT)
+                    .and_then(|field| ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::from_record_code(field.trim()))
+                    == Some(ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::English))
+    });
+    index.declared_tables = object_refs
+        .values()
+        .filter(|reference| reference.split('.').count() == 2)
+        .map(|reference| reference.to_lowercase())
+        .collect();
+    for reference in object_refs.values() {
+        let parts = reference.split('.').collect::<Vec<_>>();
+        if parts.len() == 2 {
+            index.data_fields.entry(reference.clone()).or_default();
+        } else if parts.len() == 4 && DECLARED_DATA_FIELD_KINDS.contains(&parts[2]) {
+            index
+                .data_fields
+                .entry(format!("{}.{}", parts[0], parts[1]))
+                .or_default()
+                .insert(parts[3].to_lowercase());
+        }
+    }
+    // Every row is read on its own, in parallel; the index is filled in row
+    // order, so a later row still wins a shared key exactly as the
+    // sequential walk had it.
+    let per_row = |row: &MetadataTextRow| field_declarations_of_row(row, object_refs, type_index);
+    let found = parallel::install(|| rows.par_iter().map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().map(per_row).collect());
+    // The type sides of all rows first, then the declarations: the two
+    // walks the sequential builder made, in its order.
+    for row in &found {
+        for (table, field, owner) in &row.field_types {
+            index
+                .field_types
+                .entry(table.clone())
+                .or_default()
+                .insert(field.clone(), owner.clone());
+        }
+    }
+    for row in found {
+        match row.declared {
+            Some(RowFieldDeclaration::Table(table, declared)) => {
+                index.tables.insert(table, declared);
+            }
+            Some(RowFieldDeclaration::CommonAttribute(name, content)) => {
+                index.common_attributes.insert(name, content);
+            }
+            Some(RowFieldDeclaration::Constant(uuid, declared)) => {
+                index.constants.insert(uuid, declared);
+            }
+            Some(RowFieldDeclaration::DocumentJournal(journal, documents)) => {
+                index.document_journal_documents.insert(journal, documents);
+            }
+            None => {}
+        }
+        for (owner, field) in row.password_fields {
+            index
+                .password_fields
+                .entry(owner)
+                .or_default()
+                .insert(field);
+        }
+    }
+    index
+}
+
+const DECLARED_DATA_FIELD_KINDS: &[&str] = &[
+    "Attribute",
+    "TabularSection",
+    "Dimension",
+    "Resource",
+    "AddressingAttribute",
+    "AccountingFlag",
+    "ExtDimensionAccountingFlag",
+    "EnumValue",
+];
+
+/// What one metadata row declares for [`MetadataFieldDeclarationIndex`].
+struct RowFieldDeclarations {
+    /// (owning table, folded field name, owner its one reference type names).
+    field_types: Vec<(String, String, String)>,
+    declared: Option<RowFieldDeclaration>,
+    /// (owning table, folded field name) of password-mode fields.
+    password_fields: Vec<(String, String)>,
+}
+
+enum RowFieldDeclaration {
+    Table(String, MetadataTableStandardAttributes),
+    CommonAttribute(String, MetadataCommonAttributeContent),
+    Constant(String, MetadataConstantDeclaration),
+    DocumentJournal(String, BTreeSet<String>),
+}
+
+fn field_declarations_of_row(
+    row: &MetadataTextRow,
+    object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+) -> RowFieldDeclarations {
+    let mut out = RowFieldDeclarations {
+        field_types: Vec::new(),
+        declared: None,
+        password_fields: Vec::new(),
+    };
+    // The type side of the same field names: for every top-level data field
+    // that declares exactly one reference type, the object that type names.
+    // Read from the same header walk the field-type index is built from, and
+    // keyed the way the query side asks -- by table and field name rather
+    // than by the child's uuid.
+    // Each child's type is read from the values enclosing its header, so the
+    // record's nesting is read once for all of its children.
+    let _brace_jumps = register_brace_jumps([row.text.as_str()]);
+    let nested = nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true);
+    for (header, marker_start) in &nested {
+        let marker_start = *marker_start;
+        let Some(reference) = object_refs.get(&header.uuid) else {
+            continue;
+        };
+        let parts = reference.split('.').collect::<Vec<_>>();
+        if parts.len() != 4 || !DECLARED_DATA_FIELD_KINDS.contains(&parts[2]) {
+            continue;
+        }
+        let value_types = parse_metadata_child_value_types_with_builtin(
+            &row.text,
+            marker_start,
+            &header.uuid,
+            type_index,
+            builtin_type_reference,
+        );
+        let [
+            ConstantValueType::Reference {
+                reference: type_reference,
+            },
+        ] = value_types.as_slice()
+        else {
+            continue;
+        };
+        let Some(owner) = parse_generated_metadata_reference_owner(type_reference)
+            .map(|owner| owner.owner_reference())
+        else {
+            continue;
+        };
+        out.field_types.push((
+            format!("{}.{}", parts[0], parts[1]),
+            parts[3].to_lowercase(),
+            owner,
+        ));
+    }
+    let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+        return out;
+    };
+    out.declared = match kind {
+        "Catalog" => catalog_declared_standard_attributes(&row.text, header).map(|declared| {
+            RowFieldDeclaration::Table(format!("Catalog.{}", header.name), declared)
+        }),
+        "InformationRegister" => {
+            information_register_declared_standard_attributes(&row.text, header).map(|declared| {
+                RowFieldDeclaration::Table(format!("InformationRegister.{}", header.name), declared)
+            })
+        }
+        "CommonAttribute" => common_attribute_declared_content(&row.text, object_refs)
+            .map(|content| RowFieldDeclaration::CommonAttribute(header.name.clone(), content)),
+        "Constant" => constant_declared_use_always(&row.text, &header.uuid)
+            .map(|declared| RowFieldDeclaration::Constant(header.uuid.clone(), declared)),
+        "DocumentJournal" => {
+            document_journal_registered_documents_from_text(&row.text, header, object_refs).map(
+                |documents| {
+                    RowFieldDeclaration::DocumentJournal(
+                        format!("DocumentJournal.{}", header.name),
+                        documents.into_iter().collect(),
+                    )
+                },
+            )
+        }
+        _ => None,
+    };
+    let owner_reference = format!("{kind}.{}", header.name);
+    let child_prefix = format!("{owner_reference}.");
+    for (child, marker_start) in &nested {
+        let marker_start = *marker_start;
+        let Some(reference) = object_refs.get(&child.uuid) else {
+            continue;
+        };
+        let Some(child_reference) = reference.strip_prefix(&child_prefix) else {
+            continue;
+        };
+        let Some((_child_kind, child_name)) = child_reference.split_once('.') else {
+            continue;
+        };
+        if child_name.is_empty() || child_name.contains('.') {
+            continue;
+        }
+        if metadata_child_declares_password_mode(&row.text, marker_start, &child.uuid) == Some(true)
+        {
+            out.password_fields
+                .push((owner_reference.clone(), child_name.to_lowercase()));
+        }
+    }
+    out
+}
+
+/// Reads only the registered-document declaration from a document-journal
+/// owner record. The structural guards are the same ones used by the full
+/// journal decoder; keeping this smaller reader independent lets the form
+/// declaration index use the fact before form/template child indexes exist.
+fn document_journal_registered_documents_from_text(
+    text: &str,
+    header: &MetadataHeader,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let root_fields = split_information_register_braced_fields(text)?;
+    if root_fields.len() != 7
+        || root_fields.first()?.trim() != "1"
+        || root_fields.get(2)?.trim() != "4"
+    {
+        return None;
+    }
+    let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
+    if owner_fields.len() != 17
+        || owner_fields.first()?.trim() != "26"
+        || metadata_header_field_index(&owner_fields, &header.uuid) != Some(3)
+    {
+        return None;
+    }
+    let header_wrapper = split_information_register_braced_fields(owner_fields.get(3)?)?;
+    if header_wrapper.len() != 2 || header_wrapper.first()?.trim() != "0" {
+        return None;
+    }
+    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    if !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
+    {
+        return None;
+    }
+    parse_document_journal_registered_documents(owner_fields.get(6)?, object_refs)
+}
+
+/// Reads the common metadata-child `PasswordMode` member without interpreting
+/// any owner- or field-specific names. The common property record places it
+/// immediately after the child header; candidates that do not expose the full
+/// common-property tail are refused.
+fn metadata_child_declares_password_mode(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+) -> Option<bool> {
+    for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
+        let Some(header_index) = metadata_header_field_index(&fields, child_uuid) else {
+            continue;
+        };
+        if fields.len() <= header_index + 13 {
+            continue;
+        }
+        if let Some(value) = parse_1c_bool_field(fields.get(header_index + 1).copied()) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+/// Catalog properties read off the very slots
+/// `parse_strict_catalog_properties_from_text` reads for the catalog's own
+/// `Catalogs/<name>.xml`.
+fn catalog_declared_standard_attributes(
+    text: &str,
+    header: &MetadataHeader,
+) -> Option<MetadataTableStandardAttributes> {
+    let mut diagnostic = None;
+    let graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        text,
+        header,
+        &mut diagnostic,
+    )?;
+    let fields = &graph.owner_fields;
+    Some(MetadataTableStandardAttributes {
+        code_length: parse_exchange_plan_u32(fields.get(CATALOG_OWNER_FIELD_CODE_LENGTH)?),
+        description_length: parse_exchange_plan_u32(
+            fields.get(CATALOG_OWNER_FIELD_DESCRIPTION_LENGTH)?,
+        ),
+        owned: metadata_reference_collection_len(fields.get(CATALOG_OWNER_FIELD_OWNERS)?)
+            .map(|count| count > 0),
+        hierarchical: information_register_bool(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?),
+        folder_hierarchy: catalog_hierarchy_type_xml(
+            fields.get(CATALOG_OWNER_FIELD_HIERARCHY_TYPE)?,
+        )
+        .map(|hierarchy_type| hierarchy_type == "HierarchyFoldersAndItems"),
+        periodical: None,
+    })
+}
+
+/// The register's `<InformationRegisterPeriodicity>`, off the slot
+/// `parse_information_register_owner_properties` reads for the register's own
+/// `InformationRegisters/<name>.xml`.
+fn information_register_declared_standard_attributes(
+    text: &str,
+    header: &MetadataHeader,
+) -> Option<MetadataTableStandardAttributes> {
+    let fields = parse_information_register_owner_fields(text, header)?;
+    let periodicity = information_register_periodicity_xml(
+        fields.get(INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY)?,
+    )?;
+    Some(MetadataTableStandardAttributes {
+        periodical: Some(periodicity != "Nonperiodical"),
+        ..MetadataTableStandardAttributes::default()
+    })
+}
+
+/// The platform's own `v8:ValueStorage`, the type id
+/// `metadata_builtin_type_reference` names.
+const VALUE_STORAGE_TYPE_UUID: &str = "e199ca70-93cf-46ce-a54b-6edc88c3a296";
+
+/// The constant's own always-used flag and value type, off the same `{16,…}`
+/// owner record `parse_constant_properties_from_text` reads every exported
+/// constant property from -- slot 11 there, between the default form of slot 10
+/// and the data history of slot 12.
+fn constant_declared_use_always(text: &str, uuid: &str) -> Option<MetadataConstantDeclaration> {
+    let marker = format!("{{1,0,{uuid}}}");
+    let marker_start = text.find(&marker)?;
+    let owner_start = text[..marker_start].rfind("{16,")?;
+    let owner_fields = split_1c_braced_fields(text, owner_start)?;
+    let always_used = match owner_fields.get(11)?.trim() {
+        "0" => false,
+        "1" => true,
+        // A flag this reader cannot name is a refusal: the constant is left out
+        // of the index and its use-always record is written exactly as stored.
+        _ => return None,
+    };
+    let detail_fields = split_1c_braced_fields(owner_fields.get(1)?, 0)?;
+    let value_storage = constant_declared_pattern_type_uuid(detail_fields.get(1).copied())
+        .is_some_and(|type_uuid| type_uuid == VALUE_STORAGE_TYPE_UUID);
+    Some(MetadataConstantDeclaration {
+        always_used,
+        value_storage,
+    })
+}
+
+/// Whether a constant's stored row flags it always used (slot 11), `None`
+/// when the row does not read: what a load onto a database needs to write a
+/// constants set's `<UseAlways>` record as the delta the platform keeps.
+#[doc(hidden)]
+pub fn constant_row_always_used(text: &str, uuid: &str) -> Option<bool> {
+    constant_declared_use_always(text, uuid).map(|declaration| declaration.always_used)
+}
+
+/// The single platform type id a constant's `{"Pattern",{"#",<uuid>}}` names,
+/// when it names exactly one.
+fn constant_declared_pattern_type_uuid(detail: Option<&str>) -> Option<String> {
+    let fields = split_1c_braced_fields(detail?.trim(), 0)?;
+    let pattern = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
+    if pattern.first().map(|value| value.trim()) != Some(r#""Pattern""#) || pattern.len() != 2 {
+        return None;
+    }
+    let entry = split_1c_braced_fields(pattern.get(1)?.trim(), 0)?;
+    if entry.first().map(|value| value.trim()) != Some("\"#\"") || entry.len() != 2 {
+        return None;
+    }
+    parse_uuid_field(entry.get(1)?.trim())
+}
+
+/// `<AutoUse>` and `<Content>` off the same record
+/// `parse_common_attribute_properties_from_text` writes them from.
+fn common_attribute_declared_content(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataCommonAttributeContent> {
+    let fields = metadata_object_fields(text)?;
+    if fields.first().map(|field| field.trim()) != Some("5") {
+        return None;
+    }
+    let use_fields = fields
+        .get(2)
+        .and_then(|field| split_1c_braced_fields(field, 0));
+    let auto_use = match parse_common_attribute_declared_auto_use(&fields, use_fields.as_deref())? {
+        "Use" => true,
+        "DontUse" => false,
+        // `AutoUse` itself is unobserved on the stand and its meaning for a
+        // table the content does not name is unevidenced: refused, not guessed.
+        _ => return None,
+    };
+    let content = parse_common_attribute_content(use_fields.as_deref()?, object_refs)
+        .into_iter()
+        .map(|item| (item.metadata, item.use_mode == "Use"))
+        .collect();
+    Some(MetadataCommonAttributeContent { auto_use, content })
+}
+
+#[allow(dead_code)]
+pub(super) fn build_metadata_object_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, String> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_metadata_object_reference_index_from_texts(&metadata_texts)
+}
+
+pub(super) fn build_metadata_object_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, String> {
+    build_metadata_object_reference_indexes_from_texts(rows).references
+}
+
+/// Where a reference builder puts what it finds: the index itself, or the
+/// list of its insertions a row records to apply later in row order.
+pub(super) trait ReferenceSink {
+    fn insert(&mut self, uuid: String, reference: String);
+}
+
+impl ReferenceSink for MetadataObjectReferenceIndexes {
+    fn insert(&mut self, uuid: String, reference: String) {
+        MetadataObjectReferenceIndexes::insert(self, uuid, reference);
+    }
+}
+
+/// One row's insertions into [`MetadataObjectReferenceIndexes`], in order:
+/// (`or_insert` rather than `insert`, uuid, reference).
+#[derive(Default)]
+struct ReferenceOps(Vec<(bool, String, String)>);
+
+impl ReferenceOps {
+    fn or_insert(&mut self, uuid: String, reference: String) {
+        self.0.push((true, uuid, reference));
+    }
+}
+
+impl ReferenceSink for ReferenceOps {
+    fn insert(&mut self, uuid: String, reference: String) {
+        self.0.push((false, uuid, reference));
+    }
+}
+
+/// A row's nested children, each with its marker offset and the reference
+/// [`standalone_child_reference`] gives it without form or template
+/// references (what the object reference index reads). The standalone
+/// content references read the same children with those references laid
+/// over: `standalone_child_reference` consults them first and nothing after.
+pub(super) type RowChildReferences = Vec<(MetadataHeader, usize, Option<String>)>;
+
+/// [`RowChildReferences`] of every row with a kind and a header, read in
+/// parallel; `None` for the others. One reading for both indexes.
+pub(super) fn child_references_by_row(rows: &[MetadataTextRow]) -> Vec<Option<RowChildReferences>> {
+    let per_row = |row: &MetadataTextRow| {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            return None;
+        };
+        let empty_form_refs = BTreeMap::new();
+        let empty_template_refs = BTreeMap::new();
+        let _brace_jumps = register_brace_jumps([row.text.as_str()]);
+        Some(
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+                .into_iter()
+                .map(|(child, marker_start)| {
+                    let base = standalone_child_reference(
+                        kind,
+                        &header.name,
+                        &header.uuid,
+                        &row.text,
+                        marker_start,
+                        &child,
+                        &empty_form_refs,
+                        &empty_template_refs,
+                    );
+                    (child, marker_start, base)
+                })
+                .collect(),
+        )
+    };
+    parallel::install(|| rows.par_iter().map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().map(per_row).collect())
+}
+
+pub(super) fn build_metadata_object_reference_indexes_from_texts(
+    rows: &[MetadataTextRow],
+) -> MetadataObjectReferenceIndexes {
+    build_metadata_object_reference_indexes_with_children(rows, &child_references_by_row(rows))
+}
+
+/// [`build_metadata_object_reference_indexes_from_texts`] over children
+/// already read ([`child_references_by_row`] of the same rows).
+pub(super) fn build_metadata_object_reference_indexes_with_children(
+    rows: &[MetadataTextRow],
+    children: &[Option<RowChildReferences>],
+) -> MetadataObjectReferenceIndexes {
+    let mut index = MetadataObjectReferenceIndexes::default();
+    let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
+    let recalculation_refs = build_calculation_recalculation_reference_index(rows);
+    // Each row's references are read on their own, in parallel, and applied
+    // in row order: the index (and which uuids it saw twice) comes out
+    // exactly as the sequential walk made it.
+    let per_row = |(row, children): (&MetadataTextRow, &Option<RowChildReferences>)| {
+        object_references_of_row(row, &subsystem_refs, children.as_ref())
+    };
+    let found = parallel::install(|| {
+        rows.par_iter()
+            .zip(children.par_iter())
+            .map(per_row)
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| rows.iter().zip(children.iter()).map(per_row).collect());
+    for ops in found {
+        for (or_insert, uuid, reference) in ops.0 {
+            if or_insert {
+                index.or_insert(uuid, reference);
+            } else {
+                index.insert(uuid, reference);
+            }
+        }
+    }
+    for (uuid, recalculation) in &recalculation_refs {
+        index.insert(uuid.clone(), recalculation.object_reference());
+    }
+    insert_recalculation_dimension_refs(&mut index, rows, &recalculation_refs);
+    index
+}
+
+fn object_references_of_row(
+    row: &MetadataTextRow,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    children: Option<&RowChildReferences>,
+) -> ReferenceOps {
+    let mut index = ReferenceOps::default();
+    {
+        if let Some(name) = parse_configuration_reference_text_for_row(&row.text, &row.file_name) {
+            index.insert(row.file_name.clone(), format!("Configuration.{name}"));
+            return index;
+        }
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            return index;
+        };
+        let _brace_jumps = register_brace_jumps([row.text.as_str()]);
+        let reference = if kind == "Subsystem" {
+            subsystem_refs
+                .get(&header.uuid)
+                .and_then(subsystem_source_reference_name)
+                .unwrap_or_else(|| format!("{kind}.{}", header.name))
+        } else {
+            format!("{kind}.{}", header.name)
+        };
+        index.insert(row.file_name.clone(), reference);
+        if kind == "Enum" {
+            for value in parse_enum_values_from_text(&row.text) {
+                index.insert(
+                    value.uuid,
+                    format!("Enum.{}.EnumValue.{}", header.name, value.name),
+                );
+            }
+        }
+        for command in nested_command_headers_for_owner_from_text(kind, &row.text, &row.file_name) {
+            index.insert(
+                command.uuid,
+                format!("{}.{}.Command.{}", kind, header.name, command.name),
+            );
+        }
+        for (child, _, reference) in children.into_iter().flatten() {
+            if let Some(reference) = reference {
+                index.or_insert(child.uuid.clone(), reference.clone());
+            }
+        }
+        if kind == "WebService" {
+            let operations =
+                nested_web_service_operation_headers_from_text(&row.text, &row.file_name);
+            for operation in &operations {
+                index.insert(
+                    operation.uuid.clone(),
+                    format!("WebService.{}.Operation.{}", header.name, operation.name),
+                );
+            }
+            insert_web_service_parameter_refs(
+                &mut index,
+                &row.text,
+                &row.file_name,
+                &header.name,
+                &operations,
+            );
+        }
+        if kind == "HTTPService" {
+            insert_http_service_child_role_refs(&mut index, &row.text, &header.uuid, &header.name);
+        }
+    }
+    index
+}
+
+pub(super) fn build_configuration_root_object_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut index = object_refs.clone();
+    for row in rows {
+        if row.object_code != Some(0) || !is_defined_type_metadata_text(&row.text, &row.file_name) {
+            continue;
+        }
+        let Some(header) = row.header.as_ref() else {
+            continue;
+        };
+        index.insert(
+            row.file_name.clone(),
+            format!("DefinedType.{}", header.name),
+        );
+    }
+    index
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(super) struct CalculationRecalculationReference {
+    pub(super) owner_name: String,
+    pub(super) recalculation_name: String,
+}
+
+impl CalculationRecalculationReference {
+    pub(super) fn object_reference(&self) -> String {
+        format!(
+            "CalculationRegister.{}.Recalculation.{}",
+            self.owner_name, self.recalculation_name
+        )
+    }
+}
+
+pub(super) fn build_calculation_recalculation_reference_index(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, CalculationRecalculationReference> {
+    let headers_by_uuid = metadata_headers_by_uuid(rows);
+    let mut refs = BTreeMap::new();
+    let mut owner_uuids = BTreeMap::<String, String>::new();
+    let mut ambiguous = BTreeSet::new();
+    for row in rows {
+        let (Some("CalculationRegister"), Some(owner)) = (row.kind.as_deref(), row.header.as_ref())
+        else {
+            continue;
+        };
+        let declared = calculation_register_recalculation_uuids_from_text(&row.text);
+        for uuid in declared {
+            let Some(recalculation) = headers_by_uuid.get(&uuid) else {
+                continue;
+            };
+            let reference = CalculationRecalculationReference {
+                owner_name: owner.name.clone(),
+                recalculation_name: recalculation.name.clone(),
+            };
+            if let Some(previous) = refs.get(&uuid) {
+                if previous != &reference
+                    || owner_uuids.get(&uuid).map(String::as_str) != Some(owner.uuid.as_str())
+                {
+                    refs.remove(&uuid);
+                    owner_uuids.remove(&uuid);
+                    ambiguous.insert(uuid);
+                }
+            } else if !ambiguous.contains(&uuid) {
+                owner_uuids.insert(uuid.clone(), owner.uuid.clone());
+                refs.insert(uuid, reference);
+            }
+        }
+    }
+    let mut ids_by_path = BTreeMap::<(String, String), String>::new();
+    let mut colliding_ids = BTreeSet::new();
+    for (uuid, reference) in &refs {
+        let path_key = (
+            sanitize_source_path_segment(&reference.owner_name),
+            sanitize_source_path_segment(&reference.recalculation_name),
+        );
+        if let Some(previous_uuid) = ids_by_path.insert(path_key, uuid.clone()) {
+            colliding_ids.insert(previous_uuid);
+            colliding_ids.insert(uuid.clone());
+        }
+    }
+    for uuid in colliding_ids {
+        refs.remove(&uuid);
+    }
+    refs
+}
+
+fn insert_web_service_parameter_refs(
+    index: &mut impl ReferenceSink,
+    text: &str,
+    owner_uuid: &str,
+    owner_name: &str,
+    operations: &[MetadataHeader],
+) {
+    let parameter_list_marker = format!("{{{WEB_SERVICE_PARAMETER_COLLECTION_UUID},");
+
+    let operation_ids = operations
+        .iter()
+        .map(|operation| operation.uuid.as_str())
+        .collect::<BTreeSet<_>>();
+    let nested = nested_headers_with_offsets_from_text(text, owner_uuid, |_| true);
+    let operation_offsets = nested
+        .iter()
+        .filter(|(header, _)| operation_ids.contains(header.uuid.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut offset = 0usize;
+    while let Some(relative_start) = text[offset..].find(&parameter_list_marker) {
+        let start = offset + relative_start;
+        offset = start + parameter_list_marker.len();
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        let Some((operation, _)) = operation_offsets
+            .iter()
+            .rev()
+            .find(|(_, operation_start)| *operation_start < start)
+        else {
+            continue;
+        };
+        let operation_ref = format!("WebService.{owner_name}.Operation.{}", operation.name);
+        for (parameter, parameter_start) in &nested {
+            if *parameter_start <= start
+                || *parameter_start >= end
+                || operation_ids.contains(parameter.uuid.as_str())
+            {
+                continue;
+            }
+            index.insert(
+                parameter.uuid.clone(),
+                format!("{operation_ref}.Parameter.{}", parameter.name),
+            );
+        }
+    }
+}
+
+fn insert_recalculation_dimension_refs(
+    index: &mut MetadataObjectReferenceIndexes,
+    rows: &[MetadataTextRow],
+    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+) {
+    for row in rows {
+        let Some(recalculation) = recalculation_refs.get(&row.file_name) else {
+            continue;
+        };
+        let owner_ref = recalculation.object_reference();
+        for (dimension, _marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |marker_start| {
+                is_offset_inside_recalculation_dimension_list(&row.text, marker_start)
+            })
+        {
+            index.insert(
+                dimension.uuid,
+                format!("{owner_ref}.Dimension.{}", dimension.name),
+            );
+        }
+    }
+}
+
+fn metadata_headers_by_uuid(rows: &[MetadataTextRow]) -> BTreeMap<String, MetadataHeader> {
+    rows.iter()
+        .filter_map(|row| {
+            row.header
+                .as_ref()
+                .map(|header| (header.uuid.clone(), header.clone()))
+        })
+        .collect()
+}
+
+pub(super) fn build_role_rights_object_reference_index(
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut refs = object_refs.clone();
+    for (uuid, form_ref) in form_refs {
+        if let Some(reference) = form_source_reference_name(form_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    refs
+}
+
+pub(super) fn build_metadata_order_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, usize> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        let Some(header_uuid) = parse_configuration_header_uuid(&row.text) else {
+            continue;
+        };
+        for (order, child) in
+            parse_configuration_child_objects(&row.text, &row.file_name, &header_uuid)
+                .into_iter()
+                .enumerate()
+        {
+            index.entry(child.header.uuid).or_insert(order);
+        }
+    }
+    index
+}
+
+/// Returns the exact top-level metadata UUID inventory embedded in the
+/// Configuration root row. Unlike the broad reference indexes, this list does
+/// not contain forms, templates, or other dependency rows owned by a selected
+/// object.
+pub(super) fn configuration_root_metadata_file_names_from_texts(
+    rows: &[MetadataTextRow],
+) -> Option<BTreeSet<String>> {
+    let mut roots = None::<BTreeSet<String>>;
+    for row in rows {
+        let Some(layout) = parse_configuration_root_layout(&row.text, &row.file_name) else {
+            continue;
+        };
+        if roots.is_some() {
+            // A Config table has one Configuration root. Refuse to turn an
+            // ambiguous index into evidence for a complete export.
+            return None;
+        }
+        let mut current = BTreeSet::from([row.file_name.clone()]);
+        current.extend(
+            layout
+                .child_families
+                .iter()
+                .flat_map(|family| family.iter().cloned()),
+        );
+        roots = Some(current);
+    }
+    roots
+}
+
+/// Each top-level metadata object's position inside its own family, as the
+/// Configuration root row lists them.
+///
+/// This is the order `Configuration.xml` writes its `<ChildObjects>` in, and
+/// it is the only order a style body can be written in: a style names its
+/// items by identifier, and the platform writes them in exactly this order
+/// (see [`super::extract_style_body_xml`]). The index is per family, because
+/// the families are already partitioned by kind, and a caller that mixes two
+/// families is a caller that already knows which kind it is asking about.
+pub(super) fn build_configuration_root_child_order_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, usize> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        let Some(layout) = parse_configuration_root_layout(&row.text, &row.file_name) else {
+            continue;
+        };
+        for family in &layout.child_families {
+            for (order, uuid) in family.iter().enumerate() {
+                index.entry(uuid.clone()).or_insert(order);
+            }
+        }
+    }
+    index
+}
+
+pub(super) fn parse_configuration_header_uuid(text: &str) -> Option<String> {
+    if !text.trim_start().starts_with("{2,") {
+        return None;
+    }
+    let marker = "{1,0,";
+    let marker_start = text.find(marker)?;
+    let header_uuid_start = marker_start + marker.len();
+    let header_uuid_end = header_uuid_start + 36;
+    let header_uuid = text.get(header_uuid_start..header_uuid_end)?;
+    if !is_uuid_text(header_uuid) || !is_metadata_header_marker(text, header_uuid_end) {
+        return None;
+    }
+    Some(header_uuid.to_string())
+}
+
+pub(super) fn insert_http_service_child_role_refs(
+    index: &mut impl ReferenceSink,
+    text: &str,
+    owner_uuid: &str,
+    owner_name: &str,
+) {
+    for template in parse_http_service_url_templates_from_text(text, owner_uuid) {
+        let template_ref = format!(
+            "HTTPService.{owner_name}.URLTemplate.{}",
+            template.header.name
+        );
+        index.insert(template.header.uuid.clone(), template_ref.clone());
+        for method in template.methods {
+            index.insert(
+                method.header.uuid,
+                format!("{template_ref}.Method.{}", method.header.name),
+            );
+        }
+    }
+}
+
+pub(super) fn build_standalone_content_references(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> StandaloneContentReferences {
+    build_standalone_content_references_with_children(
+        rows,
+        object_refs,
+        form_refs,
+        template_refs,
+        subsystem_refs,
+        &child_references_by_row(rows),
+    )
+}
+
+/// [`build_standalone_content_references`] over children already read
+/// ([`child_references_by_row`] of the same rows).
+pub(super) fn build_standalone_content_references_with_children(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    row_children: &[Option<RowChildReferences>],
+) -> StandaloneContentReferences {
+    let mut standalone_object_refs = object_refs.clone();
+    for (uuid, form_ref) in form_refs {
+        if let Some(reference) = form_source_reference_name(form_ref) {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        }
+    }
+    for (uuid, template_ref) in template_refs {
+        if let Some(reference) = template_source_reference_name(template_ref) {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        }
+    }
+    for (uuid, subsystem_ref) in subsystem_refs {
+        if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        }
+    }
+
+    // Each row read on its own, in parallel: its children's references, and
+    // the form and template references its uuid-like values name. Applied in
+    // row order, the second only where nothing named the uuid yet -- exactly
+    // the sequential walk.
+    let per_row = |(row, row_children): (&MetadataTextRow, &Option<RowChildReferences>)| {
+        let row_children = row_children.as_ref()?;
+        // `standalone_child_reference` with these form and template
+        // references: theirs first, else the reading without them.
+        let mut seen = BTreeSet::new();
+        let mut children = Vec::new();
+        for (child, _, base) in row_children {
+            let reference = form_refs
+                .get(&child.uuid)
+                .and_then(form_source_reference_name)
+                .or_else(|| {
+                    template_refs
+                        .get(&child.uuid)
+                        .and_then(template_source_reference_name)
+                })
+                .or_else(|| base.clone());
+            if let Some(reference) = reference
+                && seen.insert(child.uuid.clone())
+            {
+                children.push((child.uuid.clone(), reference));
+            }
+        }
+        let mut named = Vec::new();
+        for uuid in uuid_like_values(&row.text) {
+            if let Some(reference) = form_refs.get(&uuid).and_then(form_source_reference_name) {
+                named.push((uuid, reference));
+            } else if let Some(reference) = template_refs
+                .get(&uuid)
+                .and_then(template_source_reference_name)
+            {
+                named.push((uuid, reference));
+            }
+        }
+        Some((children, named))
+    };
+    let found = parallel::install(|| {
+        rows.par_iter()
+            .zip(row_children.par_iter())
+            .map(per_row)
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| rows.iter().zip(row_children.iter()).map(per_row).collect());
+    for (children, named) in found.into_iter().flatten() {
+        for (uuid, reference) in children {
+            standalone_object_refs.insert(uuid, reference);
+        }
+        for (uuid, reference) in named {
+            if standalone_object_refs.contains_key(&uuid) {
+                continue;
+            }
+            standalone_object_refs.insert(uuid, reference);
+        }
+    }
+
+    StandaloneContentReferences {
+        object_refs: standalone_object_refs,
+        storage_record_uuids: BTreeSet::new(),
+    }
+}
+
+pub(super) fn build_standalone_object_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    required_refs: &BTreeSet<String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut index = BTreeMap::new();
+    if required_refs.is_empty() {
+        return index;
+    }
+
+    for row in rows {
+        if required_refs.contains(&row.file_name) {
+            if let Some(name) =
+                parse_configuration_reference_text_for_row(&row.text, &row.file_name)
+            {
+                index.insert(row.file_name.clone(), format!("Configuration.{name}"));
+                continue;
+            }
+            let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+                continue;
+            };
+            let reference = if kind == "Subsystem" {
+                subsystem_refs
+                    .get(&header.uuid)
+                    .and_then(subsystem_source_reference_name)
+                    .unwrap_or_else(|| format!("{kind}.{}", header.name))
+            } else {
+                format!("{kind}.{}", header.name)
+            };
+            index.insert(row.file_name.clone(), reference);
+        }
+
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        if kind == "Enum" {
+            for value in parse_enum_values_from_text(&row.text) {
+                if required_refs.contains(&value.uuid) {
+                    index.insert(
+                        value.uuid,
+                        format!("Enum.{}.EnumValue.{}", header.name, value.name),
+                    );
+                }
+            }
+        }
+        if kind == "HTTPService" {
+            insert_required_http_service_child_role_refs(
+                &mut index,
+                &row.text,
+                &header.uuid,
+                &header.name,
+                required_refs,
+            );
+        }
+        for (child, marker_start) in
+            nested_headers_with_offsets_matching_uuids(&row.text, &row.file_name, required_refs)
+        {
+            if index.contains_key(&child.uuid) {
+                continue;
+            }
+            if let Some(reference) = standalone_child_reference(
+                kind,
+                &header.name,
+                &header.uuid,
+                &row.text,
+                marker_start,
+                &child,
+                form_refs,
+                template_refs,
+            ) {
+                index.insert(child.uuid, reference);
+            }
+        }
+    }
+
+    index
+}
+
+pub(super) fn insert_required_http_service_child_role_refs(
+    index: &mut BTreeMap<String, String>,
+    text: &str,
+    owner_uuid: &str,
+    owner_name: &str,
+    required_refs: &BTreeSet<String>,
+) {
+    for template in parse_http_service_url_templates_from_text(text, owner_uuid) {
+        let template_ref = format!(
+            "HTTPService.{owner_name}.URLTemplate.{}",
+            template.header.name
+        );
+        if required_refs.contains(&template.header.uuid) {
+            index.insert(template.header.uuid.clone(), template_ref.clone());
+        }
+        for method in template.methods {
+            if required_refs.contains(&method.header.uuid) {
+                index.insert(
+                    method.header.uuid,
+                    format!("{template_ref}.Method.{}", method.header.name),
+                );
+            }
+        }
+    }
+}
+
+pub(super) fn build_standalone_content_references_for_uuids(
+    rows: &[MetadataTextRow],
+    required_refs: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> StandaloneContentReferences {
+    let mut standalone_object_refs = object_refs.clone();
+    for uuid in required_refs {
+        if standalone_object_refs.contains_key(uuid) {
+            continue;
+        }
+        if let Some(reference) = form_refs.get(uuid).and_then(form_source_reference_name) {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        } else if let Some(reference) = template_refs
+            .get(uuid)
+            .and_then(template_source_reference_name)
+        {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        } else if let Some(reference) = subsystem_refs
+            .get(uuid)
+            .and_then(subsystem_source_reference_name)
+        {
+            standalone_object_refs.insert(uuid.clone(), reference);
+        }
+    }
+
+    for row in rows {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        for (child, marker_start) in
+            nested_headers_with_offsets_matching_uuids(&row.text, &row.file_name, required_refs)
+        {
+            if standalone_object_refs.contains_key(&child.uuid) {
+                continue;
+            }
+            if let Some(reference) = standalone_child_reference(
+                kind,
+                &header.name,
+                &header.uuid,
+                &row.text,
+                marker_start,
+                &child,
+                form_refs,
+                template_refs,
+            ) {
+                standalone_object_refs.insert(child.uuid, reference);
+            }
+        }
+    }
+
+    StandaloneContentReferences {
+        object_refs: standalone_object_refs,
+        storage_record_uuids: BTreeSet::new(),
+    }
+}
+
+pub(super) fn build_help_reference_index(
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut refs = object_refs.clone();
+    for (uuid, form_ref) in form_refs {
+        if let Some(reference) = form_source_reference_name(form_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    for (uuid, template_ref) in template_refs {
+        if let Some(reference) = template_source_reference_name(template_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    for (uuid, subsystem_ref) in subsystem_refs {
+        if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    refs
+}
+
+pub(super) fn build_functional_option_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut refs = object_refs.clone();
+    for (uuid, subsystem_ref) in subsystem_refs {
+        if let Some(reference) = subsystem_source_reference_name(subsystem_ref) {
+            refs.insert(uuid.clone(), reference);
+        }
+    }
+    let required_refs = functional_option_reference_uuids_from_texts(rows);
+    if required_refs.is_empty() {
+        return refs;
+    }
+    for row in rows {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        let mut seen = BTreeSet::new();
+        for (child, marker_start) in
+            nested_headers_with_offsets_matching_uuids(&row.text, &row.file_name, &required_refs)
+        {
+            if refs.contains_key(&child.uuid) || seen.contains(&child.uuid) {
+                continue;
+            }
+            if let Some(reference) = standalone_child_reference(
+                kind,
+                &header.name,
+                &header.uuid,
+                &row.text,
+                marker_start,
+                &child,
+                form_refs,
+                template_refs,
+            ) {
+                seen.insert(child.uuid.clone());
+                refs.insert(child.uuid, reference);
+            }
+        }
+    }
+    refs
+}
+
+pub(super) fn functional_option_reference_uuids_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeSet<String> {
+    let mut refs = BTreeSet::new();
+    for row in rows {
+        if row.kind.as_deref() != Some("FunctionalOption") {
+            continue;
+        }
+        let Some(fields) = metadata_object_fields(&row.text) else {
+            continue;
+        };
+        if let Some(uuid) = fields
+            .get(2)
+            .and_then(|field| parse_non_zero_uuid(field.trim()))
+        {
+            refs.insert(uuid);
+        }
+        if let Some(content) = fields.get(3) {
+            refs.extend(uuid_like_values_in_text_order(content));
+        }
+    }
+    refs
+}
+
+pub(super) fn nested_headers_with_offsets_matching_uuids(
+    text: &str,
+    owner_uuid: &str,
+    uuids: &BTreeSet<String>,
+) -> Vec<(MetadataHeader, usize)> {
+    let mut headers = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut offset = 0usize;
+    let marker = "{1,0,";
+
+    while let Some(relative) = text[offset..].find(marker) {
+        let marker_start = offset + relative;
+        let uuid_start = marker_start + marker.len();
+        let uuid_end = uuid_start + 36;
+        offset = uuid_start;
+
+        let Some(uuid) = text.get(uuid_start..uuid_end) else {
+            continue;
+        };
+        if uuid == owner_uuid
+            || !uuids.contains(uuid)
+            || !is_uuid_text(uuid)
+            || !is_metadata_header_marker(text, uuid_end)
+            || !seen.insert(uuid.to_string())
+        {
+            continue;
+        }
+        if let Some(header) = parse_metadata_header_from_text(text, uuid) {
+            headers.push((header, marker_start));
+        }
+    }
+
+    headers
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "moved verbatim in #559; cleanup later"
+)]
+pub(super) fn standalone_child_reference(
+    owner_kind: &str,
+    owner_name: &str,
+    owner_uuid: &str,
+    text: &str,
+    marker_start: usize,
+    child: &MetadataHeader,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<String> {
+    if let Some(reference) = form_refs
+        .get(&child.uuid)
+        .and_then(form_source_reference_name)
+    {
+        return Some(reference);
+    }
+    if let Some(reference) = template_refs
+        .get(&child.uuid)
+        .and_then(template_source_reference_name)
+    {
+        return Some(reference);
+    }
+    if owner_kind == "InformationRegister"
+        && let Some(tag) = register_child_object_tag(owner_kind, text, marker_start)
+    {
+        return Some(format!("{owner_kind}.{owner_name}.{tag}.{}", child.name));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 9) {
+        return Some(format!("{owner_kind}.{owner_name}.Command.{}", child.name));
+    }
+    if owner_kind == "WebService" && is_offset_inside_metadata_object_code(text, marker_start, 1) {
+        return Some(format!("WebService.{owner_name}.Operation.{}", child.name));
+    }
+    if owner_kind == "IntegrationService"
+        && is_offset_inside_metadata_object_code(text, marker_start, 1)
+    {
+        return Some(format!(
+            "IntegrationService.{owner_name}.IntegrationServiceChannel.{}",
+            child.name
+        ));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 11) {
+        if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
+            && tabular_section.uuid != child.uuid
+        {
+            return Some(format!(
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                tabular_section.name, child.name
+            ));
+        }
+        return Some(format!(
+            "{owner_kind}.{owner_name}.TabularSection.{}",
+            child.name
+        ));
+    }
+    if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
+        && tabular_section.uuid != child.uuid
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+            tabular_section.name, child.name
+        ));
+    }
+    if let Some(reference) = tabular_section_attribute_reference(
+        owner_kind,
+        owner_name,
+        owner_uuid,
+        text,
+        marker_start,
+        child,
+    ) {
+        return Some(reference);
+    }
+    if owner_kind == "AccountingRegister"
+        && is_offset_inside_register_dimension_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    {
+        return Some(format!(
+            "AccountingRegister.{owner_name}.Dimension.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "AccountingRegister"
+        && is_offset_inside_register_resource_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some(format!(
+            "AccountingRegister.{owner_name}.Resource.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "AccountingRegister"
+        && is_offset_inside_accounting_register_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some(format!(
+            "AccountingRegister.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "AccumulationRegister"
+        && is_offset_inside_accumulation_register_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        // Same shape as the AccountingRegister arm above, and all 74
+        // measured attribute headers satisfy the code-2 containment too
+        // (see `is_offset_inside_accumulation_register_attribute_list`).
+        return Some(format!(
+            "AccumulationRegister.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "CalculationRegister"
+        && is_offset_inside_calculation_register_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some(format!(
+            "CalculationRegister.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "ChartOfCalculationTypes"
+        && is_offset_inside_chart_of_calculation_types_attribute_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+    {
+        return Some(format!(
+            "ChartOfCalculationTypes.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "ChartOfAccounts"
+        && is_offset_inside_chart_of_accounts_accounting_flag_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    {
+        return Some(format!(
+            "ChartOfAccounts.{owner_name}.AccountingFlag.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "ChartOfAccounts"
+        && is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(text, marker_start)
+        && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    {
+        return Some(format!(
+            "ChartOfAccounts.{owner_name}.ExtDimensionAccountingFlag.{}",
+            child.name
+        ));
+    }
+    if metadata_kind_uses_register_resources(owner_kind)
+        && is_offset_inside_register_resource_list(text, marker_start)
+    {
+        return Some(format!("{owner_kind}.{owner_name}.Resource.{}", child.name));
+    }
+    if metadata_kind_uses_register_resources(owner_kind)
+        && is_offset_inside_register_dimension_list(text, marker_start)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Dimension.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "Sequence" && is_offset_inside_sequence_dimension_list(text, marker_start) {
+        return Some(format!("Sequence.{owner_name}.Dimension.{}", child.name));
+    }
+    if owner_kind == "CalculationRegister"
+        && is_offset_inside_metadata_object_code(text, marker_start, 4)
+        && is_offset_inside_calculation_register_recalculation_list(text, marker_start)
+    {
+        return Some(format!(
+            "CalculationRegister.{owner_name}.Recalculation.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "Task"
+        && is_offset_inside_metadata_object_code(text, marker_start, 4)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(format!(
+            "Task.{owner_name}.AddressingAttribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "DataProcessor"
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+        && is_offset_inside_tabular_section_attribute_list(text, marker_start)
+        && let Some((tabular_section, tabular_end)) =
+            preceding_metadata_header_for_code_with_bounds(text, marker_start, 11)
+        && tabular_section.uuid != child.uuid
+        && !contains_metadata_header_uuid_between(text, tabular_end, marker_start, owner_uuid)
+        && !contains_metadata_header_name_between(text, tabular_end, marker_start, owner_name)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+            tabular_section.name, child.name
+        ));
+    }
+    if owner_kind == "DataProcessor"
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if metadata_kind_uses_code27_attributes(owner_kind)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if metadata_kind_uses_code4_attributes(owner_kind)
+        && is_offset_inside_metadata_object_code(text, marker_start, 4)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if owner_kind == "BusinessProcess"
+        && is_offset_inside_metadata_object_code(text, marker_start, 3)
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+        && !is_offset_inside_metadata_object_code(text, marker_start, 8)
+    {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 5) {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 6) {
+        if let Some(tabular_section) = enclosing_metadata_header_for_code(text, marker_start, 11)
+            && tabular_section.uuid != child.uuid
+        {
+            return Some(format!(
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                tabular_section.name, child.name
+            ));
+        }
+        if is_offset_inside_tabular_section_attribute_list(text, marker_start)
+            && let Some(tabular_section) =
+                preceding_metadata_header_for_code(text, marker_start, 11)
+            && tabular_section.uuid != child.uuid
+        {
+            return Some(format!(
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                tabular_section.name, child.name
+            ));
+        }
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Attribute.{}",
+            child.name
+        ));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 8) {
+        if let Some(tabular_section) = preceding_metadata_header_for_code(text, marker_start, 11) {
+            return Some(format!(
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                tabular_section.name, child.name
+            ));
+        }
+        return Some(format!("{owner_kind}.{owner_name}.Resource.{}", child.name));
+    }
+    if is_offset_inside_metadata_object_code(text, marker_start, 10) {
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Dimension.{}",
+            child.name
+        ));
+    }
+    None
+}
+
+pub(super) fn tabular_section_attribute_reference(
+    owner_kind: &str,
+    owner_name: &str,
+    _owner_uuid: &str,
+    text: &str,
+    marker_start: usize,
+    child: &MetadataHeader,
+) -> Option<String> {
+    if !is_offset_inside_tabular_section_attribute_list(text, marker_start) {
+        return None;
+    }
+    let (tabular_section, _) =
+        preceding_metadata_header_for_code_with_bounds(text, marker_start, 11)?;
+    if tabular_section.uuid == child.uuid {
+        return None;
+    }
+    Some(format!(
+        "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+        tabular_section.name, child.name
+    ))
+}
+
+pub(super) fn metadata_kind_uses_register_resources(kind: &str) -> bool {
+    matches!(
+        kind,
+        "AccumulationRegister"
+            | "AccountingRegister"
+            | "CalculationRegister"
+            | "InformationRegister"
+    )
+}
+
+pub(super) fn metadata_kind_uses_code27_attributes(kind: &str) -> bool {
+    matches!(
+        kind,
+        "ChartOfAccounts" | "ChartOfCharacteristicTypes" | "ExchangePlan" | "Report" | "Task"
+    )
+}
+
+pub(super) fn metadata_kind_uses_code4_attributes(kind: &str) -> bool {
+    kind == "ExchangePlan" || metadata_kind_uses_register_resources(kind)
+}
+
+pub(super) fn is_offset_inside_register_resource_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &[
+            "{b64d9a41-1642-11d6-a3c7-0050bae0a776,",
+            "{63405499-7491-4ce3-ac72-43433cbe4112,",
+            "{702b33ad-843e-41aa-8064-112cd38cc92c,",
+        ],
+    )
+}
+
+pub(super) fn is_offset_inside_register_dimension_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &[
+            "{b64d9a43-1642-11d6-a3c7-0050bae0a776,",
+            "{35b63b9d-0adf-4625-a047-10ae874c19a3,",
+            "{b12fc850-8210-43c8-ae05-89567e698fbb,",
+        ],
+    )
+}
+
+pub(super) fn is_offset_inside_accounting_register_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{9d28ee33-9c7e-4a1b-8f13-50aa9b36607b,"])
+}
+
+/// True inside an accumulation register's attribute list.
+///
+/// The register's three child families are adjacent UUIDs: `…a41` resources,
+/// `…a42` attributes, `…a43` dimensions (the latter two already named by
+/// `is_offset_inside_register_resource_list` /
+/// `is_offset_inside_register_dimension_list`). Measured on ERP УХ 3.2.12.6
+/// (2026-08-25) over nine extracted `AccumulationRegisters/*` storage
+/// elements: the headers inside `…a42` spans are exactly the 74 `Attribute`
+/// uuids their native XML declares -- none missing, and no `Dimension` or
+/// `Resource` header inside any such span.
+/// Every collection an owner's commands are serialized into, one family uuid
+/// per owner kind.
+///
+/// Measured on ERP УХ 3.2.12.6 (2026-08-25) by dumping, for every nested
+/// header of every metadata row, the innermost enclosing `{uuid,…}` span and
+/// cross-referencing the header against the native source tree's own
+/// inventory of declared children (139,868 of them, 1,097 `<Command>`):
+///
+/// * all **1,097/1,097** declared commands lie inside one of these fourteen
+///   spans, none outside;
+/// * the spans contain **nothing else** -- 0 `Attribute`, `Resource`,
+///   `Dimension`, `TabularSection` or any other declared child, in any of the
+///   fourteen;
+/// * each family belongs to exactly one owner kind, and its member count is
+///   that kind's command count exactly (DataProcessor 426, Catalog 208,
+///   Document 207, InformationRegister 115, Report 82, DocumentJournal 19,
+///   ExchangePlan 12, BusinessProcess 10, Task 8, ChartOfAccounts 3,
+///   FilterCriterion 2, ChartOfCharacteristicTypes 2, AccountingRegister 2,
+///   AccumulationRegister 1).
+///
+/// Re-measured the same way on the other five stand corpora: `mdm` 3/3,
+/// `sslbase` 102/102, `ssl` 153/153 declared commands inside these families,
+/// none outside, nothing else inside; `ws` and `wms` declare no command at
+/// all.
+const COMMAND_COLLECTION_LIST_MARKERS: [&str; 14] = [
+    "{45556acb-826a-4f73-898a-6025fc9536e1,", // DataProcessor
+    "{4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6,", // Catalog
+    "{b544fc6a-2ba3-4885-8fb2-cb289fb6d65e,", // Document
+    "{b44ba719-945c-445c-8aab-1088fa4df16e,", // InformationRegister
+    "{e7ff38c0-ec3c-47a0-ae90-20c73ca72246,", // Report
+    "{a49a35ce-120a-4c80-8eea-b0618479cd70,", // DocumentJournal
+    "{d5207c64-11d5-4d46-bba2-55b7b07ff4eb,", // ExchangePlan
+    "{7a3e533c-f232-40d5-a932-6a311d2480bf,", // BusinessProcess
+    "{f27c2152-a2c9-4c30-adb1-130f5eb2590f,", // Task
+    "{0df30176-6865-4787-9fc8-609eb144174f,", // ChartOfAccounts
+    "{23fa3b84-220a-40e9-8331-e588bed87f7d,", // FilterCriterion
+    "{95b5e1d4-abfa-4a16-818d-a5b07b7d3f73,", // ChartOfCharacteristicTypes
+    "{7162da60-f7fe-4d78-ad5d-e31700f9af18,", // AccountingRegister
+    "{99f328af-a77f-4572-a2d8-80ed20c81890,", // AccumulationRegister
+];
+
+/// True inside any owner's command collection.
+pub(super) fn is_offset_inside_command_collection(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &COMMAND_COLLECTION_LIST_MARKERS)
+}
+
+/// True inside the command collection declared by this owner family.
+///
+/// The metadata family is already known at every production call site.  Use
+/// that discriminator instead of searching the complete text once for every
+/// platform family marker.  Unknown families retain the broad fallback so a
+/// newly observed layout is not silently excluded.
+pub(super) fn is_offset_inside_owner_command_collection(
+    owner_kind: &str,
+    text: &str,
+    offset: usize,
+) -> bool {
+    let marker = match owner_kind {
+        "DataProcessor" => COMMAND_COLLECTION_LIST_MARKERS[0],
+        "Catalog" => COMMAND_COLLECTION_LIST_MARKERS[1],
+        "Document" => COMMAND_COLLECTION_LIST_MARKERS[2],
+        "InformationRegister" => COMMAND_COLLECTION_LIST_MARKERS[3],
+        "Report" => COMMAND_COLLECTION_LIST_MARKERS[4],
+        "DocumentJournal" => COMMAND_COLLECTION_LIST_MARKERS[5],
+        "ExchangePlan" => COMMAND_COLLECTION_LIST_MARKERS[6],
+        "BusinessProcess" => COMMAND_COLLECTION_LIST_MARKERS[7],
+        "Task" => COMMAND_COLLECTION_LIST_MARKERS[8],
+        "ChartOfAccounts" => COMMAND_COLLECTION_LIST_MARKERS[9],
+        "FilterCriterion" => COMMAND_COLLECTION_LIST_MARKERS[10],
+        "ChartOfCharacteristicTypes" => COMMAND_COLLECTION_LIST_MARKERS[11],
+        "AccountingRegister" => COMMAND_COLLECTION_LIST_MARKERS[12],
+        "AccumulationRegister" => COMMAND_COLLECTION_LIST_MARKERS[13],
+        _ => return is_offset_inside_command_collection(text, offset),
+    };
+    is_offset_inside_any_list_marker(text, offset, &[marker])
+}
+
+pub(super) fn is_offset_inside_accumulation_register_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{b64d9a42-1642-11d6-a3c7-0050bae0a776,"])
+}
+
+/// True inside a calculation register's attribute list.
+///
+/// Measured on ERP УХ 3.2.12.6 (2026-08-25) over both extracted
+/// `CalculationRegisters/*` storage elements: the headers inside this family's
+/// spans are exactly the 25 and 9 `Attribute` uuids their native XML declares
+/// -- none missing, no `Dimension` or `Resource` among them -- and all of them
+/// satisfy the code-2 containment too. The kind's attributes were previously
+/// read through `metadata_kind_uses_code4_attributes`, which also demands code
+/// 4; none of the 34 carries it, so none was indexed.
+pub(super) fn is_offset_inside_calculation_register_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{1b304502-2216-440b-960f-60decd04bb5d,"])
+}
+
+/// True inside a chart of calculation types' own attribute list.
+///
+/// Measured the same way on `ChartsOfCalculationTypes/Начисления` and
+/// `.../Удержания`: 95 and 33 headers inside this family's spans, all of them
+/// `Attribute` and nothing else, all inside code 2. The remaining 20 and 9
+/// attributes those charts declare belong to their tabular sections and sit in
+/// a different family, which already resolves.
+pub(super) fn is_offset_inside_chart_of_calculation_types_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{0dc22ad2-476a-4794-afae-cfa7ed251752,"])
+}
+
+fn is_offset_inside_chart_of_accounts_accounting_flag_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{78bd1243-c4df-46c3-8138-e147465cb9a4,"])
+}
+
+fn is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{c70ca527-5042-4cad-a315-dcb4007e32a3,"])
+}
+
+fn is_offset_inside_sequence_dimension_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{437488c0-35e2-11d6-a3c7-0050bae0a776,"])
+}
+
+/// Which of a chart of accounts' two flag collections to walk.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ChartOfAccountsFlagFamily {
+    Accounting,
+    ExtDimensionAccounting,
+}
+
+/// The uuids a chart of accounts declares in one of its flag collections, in
+/// the order its own record lists them.
+///
+/// That order is the order the platform writes the flags in, both in the
+/// chart's metadata XML and in every `<AccountingFlags>` block of its
+/// `Ext/Predefined.xml`: on all four charts of accounts of the stand the two
+/// agree element for element, and the same holds for a seed whose declaration
+/// order was permuted and re-imported (`accflag-seed1`/`seedtree2`).
+pub(super) fn chart_of_accounts_declared_flag_uuids(
+    text: &str,
+    owner_uuid: &str,
+    family: ChartOfAccountsFlagFamily,
+) -> Vec<String> {
+    nested_headers_with_offsets_from_text(text, owner_uuid, |marker_start| {
+        let inside = match family {
+            ChartOfAccountsFlagFamily::Accounting => {
+                is_offset_inside_chart_of_accounts_accounting_flag_list(text, marker_start)
+            }
+            ChartOfAccountsFlagFamily::ExtDimensionAccounting => {
+                is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(
+                    text,
+                    marker_start,
+                )
+            }
+        };
+        inside && is_offset_inside_metadata_object_code(text, marker_start, 6)
+    })
+    .into_iter()
+    .map(|(header, _)| header.uuid)
+    .collect()
+}
+
+/// The chart of characteristic types a chart of accounts declares as its own
+/// `<ExtDimensionTypes>`.
+///
+/// Field 19 is the same carrier `parse_chart_of_accounts_properties` reads for
+/// the metadata XML, and all four charts of the stand export that property
+/// byte for byte. The predefined-data writer needs it because a predefined
+/// item uuid is unique only inside its owner: `uh` stores
+/// `23114858-dd43-4912-aa6c-cf52cfa4b660` under both
+/// `ВидыСубконтоХозрасчетные` and `ВидыСубконтоМеждународные`, and
+/// `Хозрасчетный` names the first of the two -- the one it declares here.
+pub(super) fn chart_of_accounts_ext_dimension_types_reference(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 10 || root.first()?.trim() != "1" || root.get(2)?.trim() != "7" {
+        return None;
+    }
+    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    if fields.len() != 57 || fields.first()?.trim() != "32" {
+        return None;
+    }
+    parse_chart_direct_object_reference(fields.get(19)?, "ChartOfCharacteristicTypes", object_refs)
+}
+
+pub(super) const RECALCULATION_DIMENSION_LIST_MARKER: &str = "3c456b74-4ea5-4b22-a957-e9fad9133b54";
+
+fn is_offset_inside_recalculation_dimension_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(text, offset, &["{3c456b74-4ea5-4b22-a957-e9fad9133b54,"])
+}
+
+pub(super) fn is_offset_inside_any_list_marker(
+    text: &str,
+    offset: usize,
+    markers: &[&str],
+) -> bool {
+    markers.iter().any(|marker| {
+        let Some(start) = text[..offset].rfind(marker) else {
+            return false;
+        };
+        scan_1c_braced_value(text, start)
+            .map(|end| offset < end)
+            .unwrap_or(false)
+    })
+}
+
+pub(super) fn is_offset_inside_calculation_register_recalculation_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    const RECALCULATION_LIST_MARKER: &str = "{274bf899-db0e-4df6-8ab5-67bf6371ec0b,";
+    let Some(start) = text[..offset].rfind(RECALCULATION_LIST_MARKER) else {
+        return false;
+    };
+    scan_1c_braced_value(text, start)
+        .map(|end| offset < end)
+        .unwrap_or(false)
+}
+
+pub(super) fn calculation_register_recalculation_uuids_from_text(text: &str) -> Vec<String> {
+    const RECALCULATION_LIST_MARKER: &str = "{274bf899-db0e-4df6-8ab5-67bf6371ec0b,";
+    let mut uuids = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut offset = 0usize;
+    while let Some(relative_start) = text[offset..].find(RECALCULATION_LIST_MARKER) {
+        let start = offset + relative_start;
+        offset = start + RECALCULATION_LIST_MARKER.len();
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        let Some(fields) = split_1c_braced_fields(&text[start..end], 0) else {
+            continue;
+        };
+        let count = fields
+            .get(1)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        for uuid in fields
+            .iter()
+            .skip(2)
+            .take(count)
+            .filter_map(|field| parse_non_zero_uuid(field.trim()))
+        {
+            if seen.insert(uuid.clone()) {
+                uuids.push(uuid);
+            }
+        }
+    }
+    uuids
+}
+
+pub(super) fn is_offset_inside_tabular_section_attribute_list(text: &str, offset: usize) -> bool {
+    is_offset_inside_any_list_marker(
+        text,
+        offset,
+        &[
+            "{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,",
+            "{888744e1-b616-11d4-9436-004095e12fc7,",
+            "{c339c860-29e2-11d6-a3c7-0050bae0a776,",
+        ],
+    )
+}
+
+pub(super) fn is_offset_inside_data_processor_legacy_attribute_list(
+    text: &str,
+    offset: usize,
+) -> bool {
+    const DATA_PROCESSOR_LEGACY_ATTRIBUTE_LIST_MARKER: &str =
+        "{ec6bb5e5-b7a8-4d75-bec9-658107a699cf,";
+    let Some(start) = text[..offset].rfind(DATA_PROCESSOR_LEGACY_ATTRIBUTE_LIST_MARKER) else {
+        return false;
+    };
+    scan_1c_braced_value(text, start)
+        .map(|end| offset < end)
+        .unwrap_or(false)
+}
+
+pub(super) fn template_source_reference_name(
+    template_ref: &TemplateSourceReference,
+) -> Option<String> {
+    let parts = template_ref
+        .relative_path
+        .iter()
+        .filter_map(|part| part.to_str())
+        .collect::<Vec<_>>();
+    if parts.len() == 2 && parts.first() == Some(&"CommonTemplates") {
+        let template_name = Path::new(parts[1]).file_stem()?.to_str()?;
+        return Some(format!("CommonTemplate.{template_name}"));
+    }
+    if parts.len() == 4 && parts.get(2) == Some(&"Templates") {
+        let owner_kind = metadata_kind_for_source_folder(parts[0])?;
+        let owner_name = parts[1];
+        let template_name = Path::new(parts[3]).file_stem()?.to_str()?;
+        return Some(format!(
+            "{owner_kind}.{owner_name}.Template.{template_name}"
+        ));
+    }
+    None
+}
+
+pub(super) fn subsystem_source_reference_name(
+    subsystem_ref: &SubsystemSourceReference,
+) -> Option<String> {
+    let mut names = Vec::new();
+    for part in subsystem_ref
+        .relative_path
+        .iter()
+        .filter_map(|part| part.to_str())
+    {
+        if part == "Subsystems" {
+            continue;
+        }
+        let name = Path::new(part).file_stem()?.to_str()?;
+        names.push(name.to_string());
+    }
+    let mut names = names.into_iter();
+    let first = names.next()?;
+    let mut reference = format!("Subsystem.{first}");
+    for name in names {
+        reference.push_str(".Subsystem.");
+        reference.push_str(&name);
+    }
+    Some(reference)
+}
+
+/// `ChildObjects` in a subsystem source document lists child object *names*,
+/// exactly like every other metadata family, rather than the qualified
+/// `Subsystem.Owner.Subsystem.Child` reference that cross-object properties
+/// use. Native 1C:УТ 11.5.27.75 writes the bare leaf name here.
+pub(super) fn subsystem_source_reference_child_name(
+    subsystem_ref: &SubsystemSourceReference,
+) -> Option<String> {
+    Some(
+        subsystem_ref
+            .relative_path
+            .file_stem()?
+            .to_str()?
+            .to_string(),
+    )
+}
+
+#[allow(dead_code)]
+pub(super) fn build_metadata_field_reference_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_metadata_field_reference_index_from_texts(&metadata_texts)
+}
+
+pub(super) fn build_metadata_field_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, String> {
+    // Rows are parsed in parallel and inserted in their own order, so a later
+    // row still wins a shared key exactly as the sequential walk had it.
+    let per_row = |row: &MetadataTextRow| {
+        nested_metadata_headers_from_text(&row.text, &row.file_name)
+            .into_iter()
+            .map(|header| (header.uuid, header.name))
+            .collect::<Vec<_>>()
+    };
+    let found = parallel::install(|| rows.par_iter().map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().map(per_row).collect());
+    let mut index = BTreeMap::new();
+    for pairs in found {
+        index.extend(pairs);
+    }
+    index
+}
+
+/// The single reference type each nested metadata child is *declared* to hold,
+/// keyed by that child's uuid.
+///
+/// The child names themselves already have an index -- this is its type-side
+/// twin, built from the same walk over the same headers. A child that declares
+/// no type, several types, or a non-reference type is left out entirely rather
+/// than approximated: the only consumer dereferences the declared type to reach
+/// its standard attributes, and a value with more than one possible type has no
+/// single set of those.
+/// The one platform type this index has to name in its own right.
+///
+/// A data-composition settings composer is not a configuration type, so it is
+/// absent from the type index and the child that declares it came out with no
+/// declared type at all -- which is what left the settings-composer route with
+/// nothing to check a chain segment against.  The row names exactly that one
+/// platform type; every other builtin stays out, so no other child changes its
+/// answer.
+fn settings_composer_builtin_type_reference(type_id: &str) -> Option<&'static str> {
+    builtin_type_reference(type_id).or_else(|| {
+        type_id
+            .eq_ignore_ascii_case(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID)
+            .then_some(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME)
+    })
+}
+
+pub(super) fn build_metadata_field_type_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    type_index: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let per_row = |row: &MetadataTextRow| {
+        // Each child's type is read from the values enclosing its header, so
+        // the record's nesting is read once for all of its children.
+        let _brace_jumps = register_brace_jumps([row.text.as_str()]);
+        let mut pairs = Vec::new();
+        for (header, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            let value_types = parse_metadata_child_value_types_with_builtin(
+                &row.text,
+                marker_start,
+                &header.uuid,
+                type_index,
+                settings_composer_builtin_type_reference,
+            );
+            let [ConstantValueType::Reference { reference }] = value_types.as_slice() else {
+                continue;
+            };
+            pairs.push((header.uuid, reference.clone()));
+        }
+        pairs
+    };
+    let found = parallel::install(|| rows.par_iter().map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().map(per_row).collect());
+    let mut index = BTreeMap::new();
+    for pairs in found {
+        index.extend(pairs);
+    }
+    index.extend(catalog_single_owner_type_entries(rows));
+    index
+}
+
+/// `owner-of:cfg:CatalogRef.<catalogue>` -> `cfg:CatalogRef.<owner>` for every
+/// catalogue whose `<Owners>` names exactly one catalogue: the type a chain
+/// reaches through the catalogue's `Owner`, so that a further member of the
+/// owner can be named. 1С:Конвертация данных `Catalogs/Свойства` binds
+/// `Объект.СвойствоВышестоящегоРелиза.Owner.Owner`.
+fn catalog_single_owner_type_entries(rows: &[MetadataTextRow]) -> Vec<(String, String)> {
+    let catalogs = rows
+        .iter()
+        .filter(|row| row.kind.as_deref() == Some("Catalog"))
+        .filter_map(|row| Some((row.header.as_ref()?.uuid.to_ascii_lowercase(), row)))
+        .collect::<BTreeMap<_, _>>();
+    let mut entries = Vec::new();
+    for row in catalogs.values() {
+        let Some(header) = row.header.as_ref() else {
+            continue;
+        };
+        let mut diagnostic = None;
+        let Some(graph) = decode_owner_graph_for_family_parser(
+            owner_graph::OwnerGraphFamily::Catalog,
+            &row.text,
+            header,
+            &mut diagnostic,
+        ) else {
+            continue;
+        };
+        let Some(owners) = graph
+            .owner_fields
+            .get(CATALOG_OWNER_FIELD_OWNERS)
+            .and_then(|field| split_information_register_braced_fields(field))
+        else {
+            continue;
+        };
+        if metadata_reference_collection_len(graph.owner_fields[CATALOG_OWNER_FIELD_OWNERS])
+            != Some(1)
+        {
+            continue;
+        }
+        let Some(owner_uuid) = owners.get(2).and_then(|owner| {
+            let typed = split_information_register_braced_fields(owner)?;
+            let payload = split_information_register_braced_fields(typed.get(2)?)?;
+            parse_information_register_non_zero_uuid(payload.get(1)?)
+        }) else {
+            continue;
+        };
+        let Some(owner) = catalogs
+            .get(&owner_uuid.to_ascii_lowercase())
+            .and_then(|owner| owner.header.as_ref())
+        else {
+            continue;
+        };
+        entries.push((
+            format!("owner-of:cfg:CatalogRef.{}", header.name),
+            format!("cfg:CatalogRef.{}", owner.name),
+        ));
+    }
+    entries
+}
+
+/// The *ordered* names of every information-register dimension that declares
+/// itself master, keyed by the register's uuid.
+///
+/// The alphabetic field index beside it cannot serve this: it sorts its keys, it
+/// mixes resources and attributes in with the dimensions, and it carries no
+/// master flag. The one consumer needs the declaration order because it selects
+/// a dimension positionally.
+///
+/// Order and flag both come from the metadata emitter's own calls -- the same
+/// header walk and the same `parse_information_register_child_payload` that
+/// decides what the register's `Dimension` elements say -- so the index cannot
+/// name a dimension the export does not write, nor order them differently.
+pub(super) fn build_information_register_master_dimension_index_from_texts(
+    rows: &[MetadataTextRow],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> InformationRegisterMasterDimensionIndex {
+    // The dimensions every register declares, counted in one pass over the
+    // owner graph: filtering all of it once per register was quadratic, and
+    // ERP УХ spent most of its field-index time there.
+    let mut declared_dimensions = std::collections::HashMap::<&str, usize>::new();
+    for reference in object_refs.values() {
+        if let Some((register, name)) = reference
+            .strip_prefix("InformationRegister.")
+            .and_then(|rest| rest.split_once(".Dimension."))
+            && !name.is_empty()
+            && !name.contains('.')
+        {
+            *declared_dimensions.entry(register).or_default() += 1;
+        }
+    }
+    let entries = |row: &MetadataTextRow| {
+        information_register_master_dimension_entry(
+            row,
+            &declared_dimensions,
+            type_index,
+            object_refs,
+            form_refs,
+            preserve_raw_data_paths,
+        )
+    };
+    let found = parallel::install(|| rows.par_iter().filter_map(entries).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().filter_map(entries).collect());
+    let mut index = InformationRegisterMasterDimensionIndex::new();
+    for (register_uuid, masters) in found {
+        index.insert(register_uuid, masters);
+    }
+    index
+}
+
+fn information_register_master_dimension_entry(
+    row: &MetadataTextRow,
+    declared_dimensions: &std::collections::HashMap<&str, usize>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> Option<(String, Vec<String>)> {
+    {
+        let (Some("InformationRegister"), Some(register)) =
+            (row.kind.as_deref(), row.header.as_ref())
+        else {
+            return None;
+        };
+        // Each dimension is read from the values enclosing its header.
+        let _brace_jumps = register_brace_jumps([row.text.as_str()]);
+        let dimension_prefix = format!("InformationRegister.{}.Dimension.", register.name);
+        let expected_dimensions = declared_dimensions
+            .get(register.name.as_str())
+            .copied()
+            .unwrap_or(0);
+        let mut decoded_dimensions = 0usize;
+        let mut dimension_scan = Vec::new();
+        for (field, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            let declared_dimension = object_refs.get(&field.uuid).is_some_and(|reference| {
+                reference
+                    .strip_prefix(&dimension_prefix)
+                    .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+            });
+            if !declared_dimension {
+                continue;
+            }
+            let Some((_, properties)) = parse_information_register_child_payload(
+                &row.text,
+                marker_start,
+                &field,
+                &register.name,
+                "Dimension",
+                type_index,
+                object_refs,
+                form_refs,
+                preserve_raw_data_paths,
+            ) else {
+                dimension_scan.push(None);
+                continue;
+            };
+            decoded_dimensions += 1;
+            dimension_scan.push(Some((field.name, properties.master == Some(true))));
+        }
+        // An empty vector is a decoded declaration too: it proves the register
+        // has no master dimensions. It is inserted only when every dimension
+        // the owner graph declares was decoded, so parser silence can never be
+        // mistaken for an empty declaration.
+        information_register_known_master_dimension_prefix(
+            &dimension_scan,
+            expected_dimensions,
+            decoded_dimensions,
+        )
+        .map(|masters| (register.uuid.clone(), masters))
+    }
+}
+
+/// The master-dimension positions proven by a left-to-right declaration scan.
+///
+/// A complete scan proves the whole vector, including an empty one. An
+/// incomplete scan proves only master dimensions before its first refused
+/// declaration: a later refusal cannot change their positions, while anything
+/// after it may have been shifted by an unknown master and is discarded.
+pub(super) fn information_register_known_master_dimension_prefix(
+    scan: &[Option<(String, bool)>],
+    expected_dimensions: usize,
+    decoded_dimensions: usize,
+) -> Option<Vec<String>> {
+    if scan.len() != expected_dimensions {
+        return None;
+    }
+    let complete = decoded_dimensions == expected_dimensions && scan.iter().all(Option::is_some);
+    let prefix = scan
+        .iter()
+        .map_while(|entry| entry.as_ref())
+        .filter(|(_, master)| *master)
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    (complete || !prefix.is_empty()).then_some(prefix)
+}
+
+pub(super) fn build_information_register_field_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    type_index: &BTreeMap<String, String>,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) -> InformationRegisterFieldReferenceIndex {
+    let row_fields = parallel::install(|| {
+        rows.par_iter()
+            .filter_map(|row| {
+                information_register_field_reference_entries(row, type_index, type_set_leaves)
+            })
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        rows.iter()
+            .filter_map(|row| {
+                information_register_field_reference_entries(row, type_index, type_set_leaves)
+            })
+            .collect()
+    });
+    let mut fields_by_register = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
+    for (register_uuid, fields) in row_fields {
+        for (field_reference, value_owner_references) in fields {
+            fields_by_register
+                .entry(register_uuid.clone())
+                .or_default()
+                .entry(field_reference)
+                .or_default()
+                .extend(value_owner_references);
+        }
+    }
+    fields_by_register
+        .into_iter()
+        .map(|(register_uuid, fields)| {
+            (
+                register_uuid,
+                fields
+                    .into_iter()
+                    .map(|(field_reference, value_owner_references)| {
+                        InformationRegisterFieldReference {
+                            field_reference,
+                            value_owner_references,
+                        }
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+#[expect(
+    clippy::type_complexity,
+    reason = "moved verbatim in #559; cleanup later"
+)]
+fn information_register_field_reference_entries(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) -> Option<(String, Vec<(String, BTreeSet<String>)>)> {
+    let (Some("InformationRegister"), Some(register)) = (row.kind.as_deref(), row.header.as_ref())
+    else {
+        return None;
+    };
+    // Each field is read from the values enclosing its header.
+    let _brace_jumps = register_brace_jumps([row.text.as_str()]);
+    let mut entries = Vec::new();
+    for (field, marker_start) in
+        nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+    {
+        let Some(tag) = register_child_object_tag("InformationRegister", &row.text, marker_start)
+        else {
+            continue;
+        };
+        let Some(value_types) = parse_information_register_child_value_types(
+            &row.text,
+            marker_start,
+            &field,
+            tag,
+            type_index,
+        ) else {
+            continue;
+        };
+        let value_owner_references =
+            information_register_value_owner_references(&value_types, type_set_leaves);
+        if value_owner_references.is_empty() {
+            continue;
+        }
+        entries.push((
+            format!("InformationRegister.{}.{tag}.{}", register.name, field.name),
+            value_owner_references,
+        ));
+    }
+    (!entries.is_empty()).then(|| (register.uuid.clone(), entries))
+}
+
+/// The leaves every *named type set* of the configuration declares.
+///
+/// A `cfg:DefinedType.X` or a `cfg:Characteristic.X` is a name, not a type: the
+/// leaves it stands for are declared by another metadata object, and nothing in
+/// the bytes of a field that carries the name says what they are. Two readers
+/// need exactly that declaration -- the information-register value-owner route,
+/// which used to keep the owners of the reference leaves and throw the leaves
+/// away, and the `<FillValue>` writer, which has to know whether a string is
+/// among them. Keeping the leaves keeps one table: the owners are derived from
+/// them where they are needed, so the two readers cannot drift apart.
+pub(super) fn build_metadata_type_set_leaf_index_from_texts(
+    rows: &[MetadataTextRow],
+    type_index: &BTreeMap<String, String>,
+) -> MetadataTypeSetLeafIndex {
+    let per_row = |row: &MetadataTextRow| type_set_leaf_entry(row, type_index);
+    parallel::install(|| rows.par_iter().filter_map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().filter_map(per_row).collect())
+        .into_iter()
+        .collect()
+}
+
+fn type_set_leaf_entry(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+) -> Option<(String, Vec<ConstantValueType>)> {
+    std::iter::once(row)
+        .filter_map(|row| {
+            let header = row.header.as_ref()?;
+            // A defined type is recognised the way its own writer recognises
+            // it -- object code `0` plus the header/pattern shape -- and not
+            // through `row.kind`, which never spells `DefinedType`: object code
+            // `0` with the header in field 1 is a functional-option parameter,
+            // a language or an integration service, and a defined type carries
+            // its header in field 3 instead. The predecessor index keyed off
+            // `row.kind` and was therefore empty on every configuration of the
+            // stand.
+            if row.object_code == Some(0)
+                && is_defined_type_metadata_text(&row.text, &row.file_name)
+            {
+                let properties =
+                    parse_defined_type_properties_from_text(&row.text, &header.uuid, type_index)
+                        .filter(|properties| !properties.value_types.is_empty())?;
+                return Some((
+                    format!("cfg:DefinedType.{}", header.name),
+                    properties.value_types,
+                ));
+            }
+            // The characteristic type set of a chart of characteristic types is
+            // the chart's own declared `<Type>`, read from the very same slot
+            // and with the very same pattern parser the chart's own writer
+            // reads it with.
+            if row.kind.as_deref() == Some("ChartOfCharacteristicTypes") {
+                let value_types = chart_of_characteristic_types_declared_value_types(
+                    &row.text, header, type_index,
+                )?;
+                return Some((format!("cfg:Characteristic.{}", header.name), value_types));
+            }
+            None
+        })
+        .next()
+}
+
+/// Whether the declared leaves of a type list provably exclude the `String`
+/// type.
+///
+/// A leaf that names a type set is resolved through the index and its own
+/// leaves are read in its place; a name the index cannot answer, or a cycle,
+/// leaves the whole list undecided, and so does an empty list. Only a decided
+/// list answers `true`.
+pub(super) fn metadata_declared_leaves_exclude_string(
+    value_types: &[ConstantValueType],
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) -> bool {
+    fn walk(
+        value_types: &[ConstantValueType],
+        type_set_leaves: &MetadataTypeSetLeafIndex,
+        visiting: &mut BTreeSet<String>,
+    ) -> Option<bool> {
+        if value_types.is_empty() {
+            return None;
+        }
+        let mut excludes = true;
+        for value_type in value_types {
+            match value_type {
+                ConstantValueType::Boolean
+                | ConstantValueType::Number { .. }
+                | ConstantValueType::DateTime { .. }
+                | ConstantValueType::BinaryData { .. }
+                | ConstantValueType::Reference { .. } => {}
+                ConstantValueType::String { .. } => excludes = false,
+                // An unresolved form type can itself be string-like; without
+                // its definition this predicate has no safe answer. An
+                // extension names the types of the configuration it extends
+                // by id only, and the platform reads them as references there.
+                ConstantValueType::TypeId { .. } => {
+                    super::extension::active()?;
+                }
+                ConstantValueType::ReferenceTypeSet { reference } => {
+                    let leaves = type_set_leaves.get(reference)?;
+                    if !visiting.insert(reference.clone()) {
+                        return None;
+                    }
+                    let nested = walk(leaves, type_set_leaves, visiting);
+                    visiting.remove(reference);
+                    excludes &= nested?;
+                }
+            }
+        }
+        Some(excludes)
+    }
+
+    walk(value_types, type_set_leaves, &mut BTreeSet::new()).unwrap_or(false)
+}
+
+pub(super) fn information_register_value_owner_references(
+    value_types: &[ConstantValueType],
+    type_set_leaves: &MetadataTypeSetLeafIndex,
+) -> BTreeSet<String> {
+    value_types
+        .iter()
+        .flat_map(|value_type| match value_type {
+            ConstantValueType::Reference { reference } => {
+                parse_generated_metadata_reference_owner(reference)
+                    .map(|owner| owner.owner_reference())
+                    .into_iter()
+                    .collect::<BTreeSet<_>>()
+            }
+            // The owners of a named set are the owners of the leaves it
+            // declares -- derived here rather than stored beside them, so the
+            // leaves and their owners are one fact read one way.
+            ConstantValueType::ReferenceTypeSet { reference } => type_set_leaves
+                .get(reference)
+                .map(|leaves| {
+                    leaves
+                        .iter()
+                        .filter_map(|value_type| match value_type {
+                            ConstantValueType::Reference { reference } => {
+                                parse_generated_metadata_reference_owner(reference)
+                                    .map(|owner| owner.owner_reference())
+                            }
+                            _ => None,
+                        })
+                        .collect::<BTreeSet<_>>()
+                })
+                .unwrap_or_default(),
+            _ => BTreeSet::new(),
+        })
+        .collect()
+}
+
+#[allow(dead_code)]
+pub(super) fn build_form_source_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, FormSourceReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_form_source_reference_index_from_texts(&metadata_texts)
+}
+
+pub(super) fn build_form_source_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, FormSourceReference> {
+    // Which rows are forms, in parallel; the forms in row order.
+    let is_form = |row: &MetadataTextRow| is_form_metadata_text(&row.text, &row.file_name);
+    let form_flags = parallel::install(|| rows.par_iter().map(is_form).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().map(is_form).collect());
+    let forms = rows
+        .iter()
+        .zip(&form_flags)
+        .filter(|(_, is_form)| **is_form)
+        .filter_map(|(row, _)| row.header.clone())
+        .collect::<Vec<MetadataHeader>>();
+    let form_uuids = forms
+        .iter()
+        .map(|form| form.uuid.clone())
+        .collect::<BTreeSet<_>>();
+
+    // Each owner's form uuids, in parallel; each form's owners form a set, so
+    // the order they are added in does not matter.
+    let owned = |(row, is_form): (&MetadataTextRow, &bool)| {
+        if *is_form {
+            return None;
+        }
+        let (Some(kind), Some(folder), Some(header)) =
+            (row.kind.as_deref(), row.folder, row.header.as_ref())
+        else {
+            return None;
+        };
+        if !metadata_kind_can_own_forms(kind) {
+            return None;
+        }
+        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        let references = owned_form_uuid_values_matching(&row.text, &form_uuids)?;
+        Some((owner_path, references))
+    };
+    let found = parallel::install(|| {
+        rows.par_iter()
+            .zip(form_flags.par_iter())
+            .map(owned)
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| rows.iter().zip(form_flags.iter()).map(owned).collect());
+    let mut owner_paths_by_ref = BTreeMap::<String, BTreeSet<PathBuf>>::new();
+    for (owner_path, references) in found.into_iter().flatten() {
+        for reference in references {
+            owner_paths_by_ref
+                .entry(reference)
+                .or_default()
+                .insert(owner_path.clone());
+        }
+    }
+
+    let mut index = BTreeMap::new();
+    for form in forms {
+        let owner_matches = owner_paths_by_ref.get(&form.uuid).map(BTreeSet::iter);
+        let relative_path = if let Some(mut owner_paths) = owner_matches {
+            let first = owner_paths.next();
+            let second = owner_paths.next();
+            if let (Some(owner_path), None) = (first, second) {
+                owner_path
+                    .join("Forms")
+                    .join(sanitize_source_path_segment(&form.name))
+                    .with_extension("xml")
+            } else {
+                PathBuf::from("CommonForms")
+                    .join(sanitize_source_path_segment(&form.name))
+                    .with_extension("xml")
+            }
+        } else {
+            PathBuf::from("CommonForms")
+                .join(sanitize_source_path_segment(&form.name))
+                .with_extension("xml")
+        };
+        let kind = if relative_path.starts_with("CommonForms") {
+            "CommonForm"
+        } else {
+            "Form"
+        };
+        index.insert(
+            form.uuid,
+            FormSourceReference {
+                relative_path,
+                kind,
+            },
+        );
+    }
+
+    index
+}
+
+pub(super) fn build_form_owner_resolution_diagnostics_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, String> {
+    let mut forms = Vec::<MetadataHeader>::new();
+    let mut owner_paths_by_ref = BTreeMap::<String, BTreeSet<PathBuf>>::new();
+
+    for row in rows {
+        if is_form_metadata_text(&row.text, &row.file_name)
+            && let Some(header) = row.header.as_ref()
+        {
+            forms.push(header.clone());
+        }
+    }
+    let form_uuids = forms
+        .iter()
+        .map(|form| form.uuid.clone())
+        .collect::<BTreeSet<_>>();
+
+    for row in rows {
+        if is_form_metadata_text(&row.text, &row.file_name) {
+            continue;
+        }
+        let (Some(kind), Some(folder), Some(header)) =
+            (row.kind.as_deref(), row.folder, row.header.as_ref())
+        else {
+            continue;
+        };
+        if !metadata_kind_can_own_forms(kind) {
+            continue;
+        }
+        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        let Some(references) = owned_form_uuid_values_matching(&row.text, &form_uuids) else {
+            continue;
+        };
+        for reference in references {
+            owner_paths_by_ref
+                .entry(reference)
+                .or_default()
+                .insert(owner_path.clone());
+        }
+    }
+
+    let mut diagnostics = BTreeMap::new();
+    for form in forms {
+        let owner_paths = owner_paths_by_ref.get(&form.uuid);
+        let owner_count = owner_paths.map_or(0, BTreeSet::len);
+        if owner_count == 1 {
+            continue;
+        }
+
+        let candidates = owner_paths
+            .map(|paths| {
+                paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().replace('\\', "/"))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let candidates = if candidates.is_empty() {
+            "none".to_string()
+        } else {
+            candidates.join(", ")
+        };
+        diagnostics.insert(
+            format!("{}.0", form.uuid),
+            format!(
+                "form \"{}\" ({}) owner resolution expected exactly 1 owner, found {}; candidates: {}; fallback path: CommonForms/{}.xml",
+                form.name,
+                form.uuid,
+                owner_count,
+                candidates,
+                sanitize_source_path_segment(&form.name)
+            ),
+        );
+    }
+
+    diagnostics
+}
+
+// Platform-level 1C markers for owned form lists in metadata blobs. These are
+// not configuration object UUIDs and must not be replaced with DB-specific IDs.
+#[allow(dead_code)]
+pub(super) fn build_template_source_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, TemplateSourceReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_template_source_reference_index_from_texts(rows, &metadata_texts)
+}
+
+pub(super) fn build_template_source_reference_index_from_texts<'a>(
+    rows: &[ConfigRow],
+    metadata_texts: &'a [MetadataTextRow],
+) -> BTreeMap<String, TemplateSourceReference> {
+    let rows_by_file_name = rows
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    // Which rows are templates and which can own one, in parallel; then only
+    // the uuid-like values that name a template are kept for the owners (the
+    // index below asks for nothing else), in row order.
+    enum TemplateRow<'a> {
+        Template(MetadataHeader),
+        Owner(&'a MetadataTextRow, PathBuf),
+    }
+    let classify = |row: &'a MetadataTextRow| -> Option<TemplateRow<'a>> {
+        if is_template_metadata_text(&row.text, &row.file_name) {
+            return row.header.clone().map(TemplateRow::Template);
+        }
+        let (Some(kind), Some(folder), Some(header)) =
+            (row.kind.as_deref(), row.folder, row.header.as_ref())
+        else {
+            return None;
+        };
+        if !metadata_kind_can_own_templates(kind) {
+            return None;
+        }
+        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        Some(TemplateRow::Owner(row, owner_path))
+    };
+    let classified =
+        parallel::install(|| metadata_texts.par_iter().map(classify).collect::<Vec<_>>())
+            .unwrap_or_else(|_| metadata_texts.iter().map(classify).collect());
+    let mut templates = Vec::<MetadataHeader>::new();
+    let mut owners = Vec::new();
+    for row in classified.into_iter().flatten() {
+        match row {
+            TemplateRow::Template(header) => templates.push(header),
+            TemplateRow::Owner(row, owner_path) => owners.push((row, owner_path)),
+        }
+    }
+    let template_uuids = templates
+        .iter()
+        .map(|template| template.uuid.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let named = |(row, _): &(&MetadataTextRow, PathBuf)| {
+        uuid_like_values(&row.text)
+            .into_iter()
+            .filter(|reference| template_uuids.contains(reference.as_str()))
+            .collect::<Vec<_>>()
+    };
+    let owner_refs = parallel::install(|| owners.par_iter().map(named).collect::<Vec<_>>())
+        .unwrap_or_else(|_| owners.iter().map(named).collect());
+    let mut owner_paths_by_ref = BTreeMap::<String, Vec<PathBuf>>::new();
+    for ((_, owner_path), references) in owners.iter().zip(owner_refs) {
+        for reference in references {
+            owner_paths_by_ref
+                .entry(reference)
+                .or_default()
+                .push(owner_path.clone());
+        }
+    }
+
+    let mut index = BTreeMap::new();
+    for template in templates {
+        let owner_matches = owner_paths_by_ref
+            .get(&template.uuid)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let relative_path = if let [owner_path] = owner_matches {
+            owner_path
+                .join("Templates")
+                .join(sanitize_source_path_segment(&template.name))
+                .with_extension("xml")
+        } else {
+            PathBuf::from("CommonTemplates")
+                .join(sanitize_source_path_segment(&template.name))
+                .with_extension("xml")
+        };
+        let kind = if relative_path.starts_with("CommonTemplates") {
+            "CommonTemplate"
+        } else {
+            "Template"
+        };
+        let body_id = format!("{}.0", template.uuid);
+        let template_type = template_template_type_from_metadata(&template)
+            .or_else(|| {
+                rows_by_file_name
+                    .get(body_id.as_str())
+                    .and_then(|row| row.binary_bytes().ok())
+                    .and_then(|bytes| infer_template_type_from_body(&bytes))
+            })
+            .unwrap_or("BinaryData");
+        index.insert(
+            template.uuid,
+            TemplateSourceReference {
+                relative_path,
+                kind,
+                template_type,
+            },
+        );
+    }
+
+    index
+}
+
+#[allow(dead_code)]
+pub(super) fn build_subsystem_source_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, SubsystemSourceReference> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_subsystem_source_reference_index_from_texts(&metadata_texts)
+}
+
+pub(super) fn build_subsystem_source_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, SubsystemSourceReference> {
+    let mut subsystems = BTreeMap::<String, (MetadataHeader, String)>::new();
+
+    for row in rows {
+        let Some(kind) = row.kind.as_deref() else {
+            continue;
+        };
+        if kind != "Subsystem" {
+            continue;
+        }
+        let Some(header) = row.header.as_ref() else {
+            continue;
+        };
+        subsystems.insert(header.uuid.clone(), (header.clone(), row.text.clone()));
+    }
+
+    let subsystem_uuids = subsystems.keys().cloned().collect::<BTreeSet<_>>();
+    let mut owners_by_child = BTreeMap::<String, Vec<String>>::new();
+    for (owner_uuid, (_, owner_text)) in &subsystems {
+        for reference in uuid_like_values(owner_text) {
+            if reference != *owner_uuid && subsystem_uuids.contains(&reference) {
+                owners_by_child
+                    .entry(reference)
+                    .or_default()
+                    .push(owner_uuid.clone());
+            }
+        }
+    }
+    let mut parent_by_child = BTreeMap::<String, String>::new();
+    for (child_uuid, owners) in owners_by_child {
+        if let [owner_uuid] = owners.as_slice() {
+            parent_by_child.insert(child_uuid, owner_uuid.clone());
+        }
+    }
+
+    let mut memo = BTreeMap::<String, PathBuf>::new();
+    for uuid in subsystems.keys() {
+        let mut visiting = BTreeSet::<String>::new();
+        let _ = resolve_subsystem_source_path(
+            uuid,
+            &subsystems,
+            &parent_by_child,
+            &mut memo,
+            &mut visiting,
+        );
+    }
+
+    memo.into_iter()
+        .map(|(uuid, relative_path)| (uuid, SubsystemSourceReference { relative_path }))
+        .collect()
+}
+
+pub(super) fn resolve_subsystem_source_path(
+    uuid: &str,
+    subsystems: &BTreeMap<String, (MetadataHeader, String)>,
+    parent_by_child: &BTreeMap<String, String>,
+    memo: &mut BTreeMap<String, PathBuf>,
+    visiting: &mut BTreeSet<String>,
+) -> Option<PathBuf> {
+    if let Some(path) = memo.get(uuid) {
+        return Some(path.clone());
+    }
+    if !visiting.insert(uuid.to_string()) {
+        return None;
+    }
+    let (header, _) = subsystems.get(uuid)?;
+    let name = sanitize_source_path_segment(&header.name);
+    let relative_path = if let Some(parent_uuid) = parent_by_child.get(uuid) {
+        resolve_subsystem_source_path(parent_uuid, subsystems, parent_by_child, memo, visiting)
+            .map(|parent_path| {
+                parent_path
+                    .with_extension("")
+                    .join("Subsystems")
+                    .join(&name)
+                    .with_extension("xml")
+            })
+            .unwrap_or_else(|| {
+                PathBuf::from("Subsystems")
+                    .join(&name)
+                    .with_extension("xml")
+            })
+    } else {
+        PathBuf::from("Subsystems")
+            .join(&name)
+            .with_extension("xml")
+    };
+    visiting.remove(uuid);
+    memo.insert(uuid.to_string(), relative_path.clone());
+    Some(relative_path)
+}
+
+pub(super) fn infer_template_type_from_body(bytes: &[u8]) -> Option<&'static str> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    if inflated.starts_with(b"MOXCEL") {
+        return Some("SpreadsheetDocument");
+    }
+    let Ok(text) = std::str::from_utf8(&inflated) else {
+        return Some("BinaryData");
+    };
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    let xml_text = text
+        .starts_with("<?xml")
+        .then_some(text)
+        .or_else(|| text.find("<?xml").map(|index| &text[index..]));
+    if xml_text.is_some_and(|xml| xml.contains("data-composition-system/appearance-template")) {
+        Some("DataCompositionAppearanceTemplate")
+    } else if xml_text.is_some_and(|xml| xml.contains("data-composition-system/schema")) {
+        Some("DataCompositionSchema")
+    } else if xml_text.is_some_and(|xml| xml.contains("8.3/xcf/scheme")) {
+        Some("GraphicalSchema")
+    } else if text.starts_with("<!DOCTYPE")
+        || text.starts_with("<html")
+        || text.starts_with("<?xml") && text.contains("<html")
+    {
+        Some("HTMLDocument")
+    } else if looks_like_graphical_scheme_blob_text(text) {
+        // Real ERP UH bytes: a `GraphicalSchema` Template body is not
+        // always pre-serialized XML (the three markers above cover that
+        // case) -- the platform also stores it in the same brace-tuple
+        // grammar `BusinessProcess.Flowchart`'s `Ext/Flowchart.xml` decodes
+        // from (`parse_business_process_flowchart_text_with_types`; see
+        // `flowchart_grammar_fields`'s doc comment). Falling through to
+        // `TextDocument` here (the previous behavior) wrote every one of
+        // these at `Templates/<name>/Ext/Template.txt` -- a path the
+        // platform never produces -- while the platform's own
+        // `Templates/<name>/Ext/Template.xml` sat unwritten: the entire
+        // evidenced `extra` class documented in `output-path-collisions-
+        // and-module-text-fallback-20260825.md` section 4. Recognizing the
+        // shape here only fixes the *type* (and so the output path); the
+        // write-time decode can still fail on an item shape this project's
+        // flowchart parser does not yet model (e.g. a `Decoration` with a
+        // `Picture`), which is a typed failure, not a second wrong default.
+        Some("GraphicalSchema")
+    } else {
+        Some("TextDocument")
+    }
+}
+
+pub(super) fn template_template_type_from_metadata(
+    header: &MetadataHeader,
+) -> Option<&'static str> {
+    template_type_from_code(header.template_type_code?)
+}
+
+pub(super) fn template_type_from_code(code: u32) -> Option<&'static str> {
+    match code {
+        0 => Some("SpreadsheetDocument"),
+        1 => Some("BinaryData"),
+        3 => Some("HTMLDocument"),
+        4 => Some("TextDocument"),
+        6 => Some("DataCompositionSchema"),
+        7 => Some("DataCompositionAppearanceTemplate"),
+        // Confirmed on real ERP УХ 3.2.12.6 raw metadata via `cf extract` on
+        // two owned templates whose native XML declares
+        // `<TemplateType>GraphicalSchema</TemplateType>`:
+        // `DataProcessors/ВыполнениеМаршрутныхЛистов/Templates/МетодикаББВ`
+        // (uuid b882ff8c-b85a-4c2a-bcd9-4321c2dbb154) and
+        // `Reports/АнализСостоянияНалоговогоУчетаПоНДС/Templates/УчетНДС`
+        // (uuid 325ac0f9-1bc2-49d9-8a62-c9fe1a988830) both carry raw code 8
+        // (`{2,8,{3,{1,0,<uuid>},...}}`). Neither БСП demo/base nor УТ
+        // 11.5.27.75 ever writes this code among their owned templates, so it
+        // was previously unmapped and every such template fell back through
+        // body content-sniffing to `BinaryData` -- wrong, since a
+        // GraphicalSchema body is not always distinguishable as such by
+        // sniffing raw bytes.
+        8 => Some("GraphicalSchema"),
+        9 => Some("AddIn"),
+        _ => None,
+    }
+}
+
+pub(super) fn form_help_asset_paths(
+    rows: &[ConfigRow],
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> BTreeMap<String, SourceAsset> {
+    let file_names = rows
+        .iter()
+        .map(|row| row.file_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut paths = BTreeMap::new();
+    for (form_uuid, form_ref) in form_refs {
+        let row_prefix = format!("{form_uuid}.");
+        let mut form_dir = form_ref.relative_path.clone();
+        form_dir.set_extension("");
+        // The form's rows sort together right after the prefix: a range read
+        // instead of a scan of every file name for each form.
+        for body_id in file_names
+            .range(row_prefix.as_str()..)
+            .take_while(|file_name| file_name.starts_with(&row_prefix))
+        {
+            let module_body_id = format!("{form_uuid}.0");
+            if *body_id == module_body_id.as_str() {
+                continue;
+            }
+            if let Some(row) = rows_by_file_name.get(*body_id)
+                && let Ok(bytes) = row.binary_bytes()
+                && parse_help_blob_pages(&bytes).is_some()
+            {
+                paths.insert(
+                    (*body_id).to_string(),
+                    SourceAsset {
+                        primary_path: form_dir.join("Ext").join("Help.xml"),
+                        kind: SourceAssetKind::Help,
+                    },
+                );
+            }
+        }
+    }
+    paths
+}
+
+#[allow(dead_code)]
+pub(super) fn parse_configuration_reference_blob(blob: &[u8]) -> Option<String> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}');
+    parse_configuration_reference_text(text)
+}
+
+pub(super) fn parse_configuration_reference_text(text: &str) -> Option<String> {
+    parse_configuration_reference_text_with_identity(text).map(|(_, name)| name)
+}
+
+pub(super) fn parse_configuration_reference_text_for_row(
+    text: &str,
+    expected_identity: &str,
+) -> Option<String> {
+    let (identity, name) = parse_configuration_reference_text_with_identity(text)?;
+    identity
+        .eq_ignore_ascii_case(expected_identity)
+        .then_some(name)
+}
+
+fn parse_configuration_reference_text_with_identity(text: &str) -> Option<(String, String)> {
+    let envelope = parse_configuration_root_envelope(text)?;
+    let header_uuid = parse_configuration_header_uuid(text)?;
+    let header = parse_metadata_header_from_text(text, &header_uuid)?;
+    Some((envelope.identity, header.name))
+}
+
+/// What 8.5 writes for the properties it adds to a configuration: read from
+/// the members an 8.5 `{76,...}` tuple appends, or the platform's defaults for
+/// a configuration still in the 8.3.27 `{68,...}` tuple.
+struct ConfigurationPropertiesV8_5_1 {
+    auxiliary_forms: Vec<Option<String>>,
+    interface_variant: &'static str,
+    theme: &'static str,
+    windows_open_variant: &'static str,
+    caption: Vec<(String, String)>,
+    short_caption: Vec<(String, String)>,
+    migration_mode: &'static str,
+}
+
+fn configuration_properties_8_5_1(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<ConfigurationPropertiesV8_5_1> {
+    let tuple_8_5_1 = !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,");
+    if !tuple_8_5_1 {
+        // 8.5.1.1150 ERP УХ, whose configuration is still in the 8.3.27
+        // tuple: every added form empty, the navigation-left main window, the
+        // automatic theme, data opened in dialogs, no captions, no 8.5
+        // interface migration.
+        return Some(ConfigurationPropertiesV8_5_1 {
+            auxiliary_forms: vec![None; configuration_v85_defaults::AUXILIARY_FORM_NAMES.len()],
+            interface_variant: configuration_v85_defaults::INTERFACE_VARIANT,
+            theme: configuration_v85_defaults::THEME,
+            windows_open_variant: configuration_v85_defaults::WINDOWS_OPEN_VARIANT,
+            caption: Vec::new(),
+            short_caption: Vec::new(),
+            migration_mode: configuration_v85_defaults::MIGRATION_MODE,
+        });
+    }
+    let start = text.find("{76,")?;
+    let fields = split_1c_braced_fields(text, start)?;
+    if fields.len() != 77 {
+        return None;
+    }
+    // Members 61, 63 and 66-68 carry the four enumerations; 62 is the 8.5
+    // code of `InterfaceCompatibilityMode`, paired with member 38 by the
+    // shared schema policy (Taxi 3/3, Version8_5EnableTaxi 3/6,
+    // TaxiEnableVersion8_2 2/2). Interface mode is decoded separately from
+    // the owner-validated stored tuple, before normalization loses member 62.
+    // Two combinations are on record, so only they are read; any other
+    // refuses rather than attributing codes to properties on a guess:
+    // - BSP 3.2.1.356 under 8.5.1.1150: tabs, the 8.5 interface migration;
+    // - the configuration 8.5.1.1529 saved from an XML 2.20 tree at
+    //   compatibility 8.3.27 (`home_page/one_column_v85/input.cf`): the tree
+    //   names none of these properties, so the platform stored the values it
+    //   gives a configuration without them, the ones it prints for a
+    //   `{68,...}` tuple (above). Which of 67 and 68 is which is not known.
+    let codes = [61, 63, 66, 67, 68].map(|index| fields[index].trim());
+    let (interface_variant, theme, windows_open_variant, migration_mode) = match codes {
+        ["0", "0", "0", "0", "0"] => ("NavigationLeft", "Auto", "OpenDataInTabs", "Use"),
+        ["0", "0", "0", "1", "1"] => ("NavigationLeft", "Auto", "OpenDataInDialogs", "DontUse"),
+        _ => return None,
+    };
+    let mut auxiliary_forms = Vec::with_capacity(8);
+    for field in &fields[69..77] {
+        let uuid = parse_uuid_field(field.trim())?;
+        if information_register_uuid_is_zero(&uuid) {
+            auxiliary_forms.push(None);
+        } else {
+            auxiliary_forms.push(Some(object_refs.get(&uuid)?.clone()));
+        }
+    }
+    Some(ConfigurationPropertiesV8_5_1 {
+        auxiliary_forms,
+        interface_variant,
+        theme,
+        windows_open_variant,
+        caption: parse_1c_synonyms(fields[64].trim()),
+        short_caption: parse_1c_synonyms(fields[65].trim()),
+        migration_mode,
+    })
+}
+
+/// The configuration row `text` is an extension's root: its header, the one
+/// under `header_uuid`, records an adoption.
+fn extension_root_row(text: &str, header_uuid: &str) -> bool {
+    ibcmd_dump_readers::extension::adoption::header_of(text, header_uuid)
+        .and_then(ibcmd_dump_readers::extension::adoption::parse)
+        .is_some_and(|adoption| adoption.adopted)
+}
+
+/// Inserts the 8.5 properties after the elements they follow in 2.21. A
+/// neighbour the record did not let the writer spell (a partial record) takes
+/// its 8.5 followers with it; a complete configuration record writes all five.
+fn insert_configuration_properties_8_5_1_xml(
+    xml: &mut String,
+    properties: &ConfigurationPropertiesV8_5_1,
+) -> Option<()> {
+    fn after_element(xml: &str, name: &str) -> Option<usize> {
+        let empty = format!("\t\t\t<{name}/>\r\n");
+        if let Some(at) = xml.find(&empty) {
+            return Some(at + empty.len());
+        }
+        let close = format!("</{name}>\r\n");
+        let open = xml.find(&format!("\t\t\t<{name}>"))?;
+        Some(xml[open..].find(&close)? + open + close.len())
+    }
+    let mut inserts = Vec::new();
+    let mut forms = String::new();
+    for (name, value) in configuration_v85_defaults::AUXILIARY_FORM_NAMES
+        .iter()
+        .zip(&properties.auxiliary_forms)
+    {
+        push_optional_text_element(&mut forms, "\t\t\t", name, value.as_deref());
+    }
+    let mut captions = String::new();
+    push_localized_property(&mut captions, "\t\t\t", "Caption", &properties.caption);
+    push_localized_property(
+        &mut captions,
+        "\t\t\t",
+        "ShortCaption",
+        &properties.short_caption,
+    );
+    let candidates = [
+        ("DefaultCollaborationSystemUsersChoiceForm", forms),
+        (
+            "AllowedIncomingShareRequestTypes",
+            format!(
+                "\t\t\t<MainClientApplicationWindowInterfaceVariant>{}</MainClientApplicationWindowInterfaceVariant>\r\n\t\t\t<ClientApplicationTheme>{}</ClientApplicationTheme>\r\n",
+                properties.interface_variant, properties.theme
+            ),
+        ),
+        (
+            "MainClientApplicationWindowMode",
+            format!(
+                "\t\t\t<ClientApplicationWindowsOpenVariant>{}</ClientApplicationWindowsOpenVariant>\r\n",
+                properties.windows_open_variant
+            ),
+        ),
+        ("DefaultInterface", captions),
+        (
+            "InterfaceCompatibilityMode",
+            format!(
+                "\t\t\t<Version85InterfaceMigrationMode>{}</Version85InterfaceMigrationMode>\r\n",
+                properties.migration_mode
+            ),
+        ),
+    ];
+    for (anchor, text) in candidates {
+        if let Some(at) = after_element(xml, anchor) {
+            inserts.push((at, text));
+        }
+    }
+    inserts.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+    for (at, text) in inserts {
+        xml.insert_str(at, &text);
+    }
+    Some(())
+}
+
+/// The parts of a configuration extension's root row that the extension export
+/// prints itself (`extension::root`): the header, the properties tuple as
+/// trimmed member texts, the contained objects and the root's children.
+pub(super) struct ExtensionRootParts {
+    pub(super) header: MetadataHeader,
+    /// The uuid of the md header (the row's own uuid names the element).
+    pub(super) header_uuid: String,
+    pub(super) fields: Vec<String>,
+    pub(super) contained_objects: Vec<ConfigurationContainedObject>,
+    pub(super) child_objects: Option<Vec<ConfigurationRootChildObject>>,
+}
+
+pub(super) fn extension_root_parts(
+    text: &str,
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<ExtensionRootParts> {
+    let header_uuid = parse_configuration_header_uuid(text)?;
+    let mut header = parse_metadata_header_from_text(text, &header_uuid)?;
+    header.uuid = uuid.to_string();
+    let layout = parse_configuration_root_layout(text, uuid)?;
+    let envelope = parse_configuration_root_envelope(text)?;
+    let contained_fields = split_1c_braced_fields(envelope.sections.first()?.trim(), 0)?;
+    let payload_fields = split_1c_braced_fields(contained_fields.get(1)?.trim(), 0)?;
+    if payload_fields.first()?.trim() != "1" {
+        return None;
+    }
+    let fields = split_1c_braced_fields(payload_fields.get(1)?.trim(), 0)?
+        .iter()
+        .map(|field| field.trim().to_owned())
+        .collect();
+    let child_objects = resolve_configuration_root_child_objects(&layout, object_refs);
+    Some(ExtensionRootParts {
+        header,
+        header_uuid,
+        fields,
+        contained_objects: layout.contained_objects,
+        child_objects,
+    })
+}
+
+pub(super) fn extract_configuration_source_xml(
+    text: &str,
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<String> {
+    if !text.trim_start().starts_with("{2,") {
+        return None;
+    }
+    if let Some(extension) = super::extension::active() {
+        // A configuration extension prints its root object its own way.
+        return super::extension::root::extension_root_xml(
+            &extension,
+            text,
+            uuid,
+            object_refs,
+            source_version,
+        );
+    }
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    let uuid_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    if uuid_fields.first()?.trim() != uuid {
+        return None;
+    }
+    // Capture both coordinates from the SAME owner before normalization.
+    // Shared mode vocabulary does not prove the whole V76 root representable
+    // in XML 2.20: keep canonical profile admission and refuse partial output.
+    let interface = configuration_v76_interface_mode(text, uuid).ok()?;
+    if interface.is_some() && source_version != InfobaseConfigSourceVersion::V2_21 {
+        return None;
+    }
+    let header_uuid = parse_configuration_header_uuid(text)?;
+    let mut header = parse_metadata_header_from_text(text, &header_uuid)?;
+    header.uuid = uuid.to_string();
+    let mut properties =
+        parse_configuration_properties_from_text(text, object_refs, source_version)
+            .unwrap_or_default();
+    properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
+    let evidenced_property_fields = configuration_root_property_fields(text, uuid);
+    if let Some(property_fields) = evidenced_property_fields.as_deref() {
+        match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block_on(
+            property_fields,
+            interface,
+        ) {
+            Ok(fields) => properties.configuration_properties_evidenced_default_block = Some(fields),
+            Err(
+                super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnexpectedTupleArity { .. }
+                | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnexpectedFieldShape { .. }
+                | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnexpectedFieldClass { .. },
+            ) => {
+                // This tuple doesn't have the shape the proven field indices
+                // were established against at all (e.g. a synthetic/SQL-sourced
+                // text a non-CF caller constructed) -- never proven to be the
+                // evidenced family, so fall back to today's existing per-field
+                // behavior rather than fail closed on a coordinate we have no
+                // evidence about either way.
+            }
+            Err(
+                super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnrecognizedDigit { .. }
+                | super::configuration_properties_evidence::ConfigurationPropertiesEvidenceError::UnprovenFieldMismatch { .. },
+            ) => {
+                // The tuple DOES have the evidenced family's shape, but a
+                // field we cannot yet decode diverges from the proven
+                // all-default reference -- fail closed (no XML for this
+                // Configuration object at all) rather than silently repeat
+                // the incomplete-but-quiet omission of ~30 Properties fields.
+                return None;
+            }
+        }
+    }
+    if configuration_root_property_fields(text, uuid).is_some() {
+        properties.default_roles =
+            parse_configuration_default_roles_from_root(text, uuid, object_refs)
+                .unwrap_or_default();
+        properties.brief_information.clear();
+        properties.detailed_information.clear();
+        properties.copyright.clear();
+        properties.vendor_information_address.clear();
+        properties.configuration_information_address.clear();
+        properties.localized_properties =
+            parse_configuration_localized_properties_from_root(text, uuid);
+    }
+    let (functionalities, permission_messages) =
+        parse_configuration_used_mobile_application_functionalities(
+            text,
+            uuid,
+            source_version.as_str(),
+        )
+        .unwrap_or_default();
+    properties.used_mobile_application_functionalities = functionalities;
+    properties.used_mobile_application_permission_messages = permission_messages;
+    if properties
+        .configuration_properties_evidenced_default_block
+        .is_some()
+    {
+        // The same gate the writer uses for this span. Inside it, fail closed
+        // on a list this reader cannot decode rather than print the evidenced
+        // empty element over a record that declares members.
+        properties.allowed_incoming_share_request_types =
+            parse_configuration_allowed_incoming_share_request_types(text, uuid)?;
+        // A complete Properties projection distinguishes an empty list from
+        // an undecodable one; the legacy partial route above stays unchanged.
+        properties.use_purposes = parse_configuration_use_purposes(text, uuid)?;
+        let fields = evidenced_property_fields.as_deref()?;
+        if properties.default_language.is_none() {
+            let stored = fields.get(10)?.trim();
+            let language = parse_uuid_field(stored)?;
+            if !information_register_uuid_is_zero(&language) {
+                return None;
+            }
+        }
+    }
+    if let Some(property_fields) = evidenced_property_fields.as_deref() {
+        // A default style naming no style of the container cannot be spelled.
+        let stored_style = property_fields.get(9).map(|field| field.trim());
+        if properties.default_style.is_none()
+            && stored_style.and_then(parse_non_zero_uuid).is_some()
+        {
+            return None;
+        }
+        let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+        for (slot, target) in [
+            (
+                policy.default_report_form_tuple_field(),
+                &mut properties.default_report_form,
+            ),
+            (
+                policy.default_report_variant_form_tuple_field(),
+                &mut properties.default_report_variant_form,
+            ),
+            (
+                policy.default_report_settings_form_tuple_field(),
+                &mut properties.default_report_settings_form,
+            ),
+            (
+                policy.default_search_form_tuple_field(),
+                &mut properties.default_search_form,
+            ),
+        ] {
+            *target = parse_configuration_root_reference_slot(
+                property_fields,
+                slot,
+                object_refs,
+                "CommonForm.",
+            );
+            // A slot naming no common form of the container cannot be
+            // spelled; printing it empty would say the configuration has
+            // none. Fail closed, and the export report names the file.
+            let stored = property_fields.get(slot).map(|field| field.trim());
+            if target.is_none() && stored.and_then(parse_non_zero_uuid).is_some() {
+                return None;
+            }
+        }
+    }
+    let root_layout = parse_configuration_root_layout(text, uuid);
+    let child_objects = if root_layout.is_none() {
+        parse_configuration_child_objects(text, uuid, &header_uuid)
+    } else {
+        Default::default()
+    };
+    let mut xml = format_configuration_source_xml(&header, &properties, source_version);
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        match configuration_properties_8_5_1(text, object_refs) {
+            Some(properties_8_5_1) => {
+                insert_configuration_properties_8_5_1_xml(&mut xml, &properties_8_5_1)?
+            }
+            // An extension's root properties are rewritten whole by the
+            // extension writer (`crate::extension::root`), which spells the
+            // members 8.5 adds to an extension; only this file's frame counts.
+            None if extension_root_row(text, &header_uuid) => {}
+            None => return None,
+        }
+    }
+    if let Some(root_layout) = &root_layout {
+        insert_configuration_internal_info_xml(&mut xml, &root_layout.contained_objects).ok()?;
+        // An unresolved family is not an empty inventory: refuse the root
+        // instead of publishing Properties alone and dropping all children.
+        let child_objects = resolve_configuration_root_child_objects(root_layout, object_refs)?;
+        insert_configuration_root_child_objects_xml(&mut xml, &child_objects);
+    } else if !child_objects.is_empty() {
+        let mut child_xml = String::new();
+        for child_object in &child_objects {
+            push_metadata_header_child_object_xml(
+                &mut child_xml,
+                child_object.tag,
+                &child_object.header,
+            );
+        }
+        insert_metadata_child_objects_xml(&mut xml, "Configuration", &child_xml);
+    }
+    Some(xml)
+}
+
+pub(super) fn parse_configuration_properties_from_text(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<ConfigurationProperties> {
+    let (fields, is_native_68_shape) = configuration_root_fields(text)?;
+    // Field 26 mirroring field 43 (`CompatibilityMode`, below) into
+    // `ConfigurationExtensionCompatibilityMode` is proven only for the
+    // genuine `{68,...}` shape -- three corpora, "none match their own field
+    // 43 ... under `configuration_compatibility_mode_xml`'s formula", i.e.
+    // field 26 was the only working coordinate for either property there.
+    // SSL/БСП 3.1.12.297's `{67,...}` short revision (which
+    // `configuration_root_fields` normalizes into this same 61-field shape,
+    // leaving fields 1..59 -- 26 and 43 among them -- at their original
+    // tuple positions) is a different record altogether: both `sslbase`'s
+    // and `ssl`-demo's copies carry `80324` at *both* fields 26 and 43, and
+    // native prints `CompatibilityMode` `Version8_3_24` (matching field 43
+    // directly, not mirrored) alongside `ConfigurationExtensionCompatibilityMode`
+    // `Version8_3_27` -- a value present nowhere in the tuple. `Version8_3_27`
+    // is exactly this reading platform's own build
+    // (`MAX_EVIDENCED_PACKED_PLATFORM_VERSION`, `ibcmd` 8.3.27.2214): the
+    // shorter `{67,...}` shape predates the extension-compatibility property,
+    // so a config still in that shape has no explicit value for it and the
+    // platform substitutes its own version when reading it back, while field
+    // 43 there -- unlike on the genuine `{68,...}` shape -- is this record's
+    // own faithful `CompatibilityMode` storage, not a stale alias of field 26.
+    //
+    // `configuration_root_fields` is a blind text search, not the
+    // uuid-anchored kind `configuration_root_property_fields` does: a
+    // coincidental `{67,` match elsewhere in the same text (e.g. an
+    // unrelated metadata header shaped `{67,{0,{3,...}}}`, 2 top-level
+    // members) also comes back with `is_native_68_shape == false` without
+    // ever having been the genuine, 60-field short Properties tuple.
+    // `normalize_short_configuration_root_property_fields` only pads to the
+    // full 61-field shape when the match really was `("67", 60)`; anything
+    // else it returns unchanged and short. Requiring the post-normalization
+    // length here tells the two apart instead of defaulting off of a match
+    // that was never this record to begin with.
+    let is_normalized_67_shape = !is_native_68_shape && fields.len() == 61;
+    // The platform that writes the export clamps a configuration's
+    // compatibility to its own edition: 8.3.27 prints `80501` as
+    // `Version8_3_27`, while 8.5 prints it as `Version8_5_1` (8.5.1.1150 BSP
+    // 3.2.1.356, both properties).
+    let ceiling = if source_version == InfobaseConfigSourceVersion::V2_21 {
+        PACKED_PLATFORM_VERSION_8_5_1
+    } else {
+        MAX_EVIDENCED_PACKED_PLATFORM_VERSION
+    };
+    let stored_compatibility_mode = if is_native_68_shape {
+        fields
+            .get(26)
+            .and_then(|field| configuration_compatibility_mode_xml_under(field.trim(), ceiling))
+    } else {
+        None
+    };
+    // A configuration still in an 8.3.27 tuple keeps no extension
+    // compatibility 8.5 reads as its own, and 8.5 substitutes its own edition
+    // -- exactly as 8.3.27 does for the older `{67,...}` shape below. ERP УХ
+    // stores `80327` in field 26 and 8.5.1.1150 writes `Version8_5_1` for
+    // `ConfigurationExtensionCompatibilityMode` beside `Version8_3_27` for
+    // `CompatibilityMode`.
+    let tuple_8_5_1 = !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,");
+    // An extension's root (its header adopted) stores its own compatibility
+    // in field 43 and the platform prints it (extension_roots fixtures, ИР:
+    // 80309 -> Version8_3_9); the edition below is a configuration's.
+    let extension_root = fields
+        .get(1)
+        .and_then(|field| field.find("{3,").map(|at| &field[at..]))
+        .and_then(ibcmd_dump_readers::extension::adoption::parse)
+        .is_some_and(|adoption| adoption.adopted);
+    let configuration_extension_compatibility_mode = if extension_root {
+        fields
+            .get(43)
+            .and_then(|field| configuration_compatibility_mode_xml_under(field.trim(), ceiling))
+    } else if source_version == InfobaseConfigSourceVersion::V2_21
+        && !tuple_8_5_1
+        && (is_native_68_shape || is_normalized_67_shape)
+    {
+        configuration_compatibility_mode_xml_under(
+            &PACKED_PLATFORM_VERSION_8_5_1.to_string(),
+            ceiling,
+        )
+    } else if is_native_68_shape {
+        // 8.3.27.2214 prints its own edition here whatever the tuple stores:
+        // field 43 holds the requested extension compatibility, yet
+        // Version8_3_27 comes back for 10/27, 27/10, 19/12, 21/24 (fields
+        // 26/43; fixtures `config_compat`), 8/27, 13..26 against 27, and 1Cv8
+        // 21/23. The corpora this reader was fitted to all store 80327 in field
+        // 26, which is why reading field 26 matched them.
+        // The dialect's edition: 8.5 prints Version8_5_1 the same way.
+        configuration_compatibility_mode_xml_under(&ceiling.to_string(), ceiling)
+    } else if is_normalized_67_shape {
+        configuration_compatibility_mode_xml(&MAX_EVIDENCED_PACKED_PLATFORM_VERSION.to_string())
+    } else {
+        None
+    };
+    let compatibility_mode = if is_native_68_shape {
+        stored_compatibility_mode
+    } else if is_normalized_67_shape {
+        fields
+            .get(43)
+            .and_then(|field| configuration_compatibility_mode_xml(field.trim()))
+    } else {
+        None
+    };
+    // ScriptVariant and DefaultRunMode are independent coordinates in the
+    // normalized configuration record. Keep their storage interpretation out
+    // of the property assembly below.
+    let default_run_mode = fields
+        .get(ibcmd_schema::metadata_record_upgrades::ConfigurationRecordLayout::DEFAULT_RUN_MODE_SLOT)
+        .and_then(|field| configuration_default_run_mode_xml(field.trim()));
+    let script_variant = fields
+        .get(ibcmd_schema::metadata_record_upgrades::ConfigurationRecordLayout::SCRIPT_VARIANT_SLOT)
+        .and_then(|field| configuration_script_variant_xml(field.trim()));
+    Some(ConfigurationProperties {
+        name_prefix: fields
+            .get(2)
+            .and_then(|field| parse_1c_quoted_string(field.trim())),
+        configuration_extension_compatibility_mode,
+        default_run_mode,
+        use_purposes: Vec::new(),
+        localized_properties: None,
+        brief_information: parse_configuration_localized_property(&fields, 4),
+        detailed_information: parse_configuration_localized_property(&fields, 5),
+        copyright: parse_configuration_localized_property(&fields, 6),
+        vendor_information_address: parse_configuration_localized_property(&fields, 7),
+        configuration_information_address: parse_configuration_localized_property(&fields, 8),
+        default_style: parse_configuration_root_reference(&fields, 9, object_refs, "Style."),
+        default_language: parse_configuration_root_reference(&fields, 10, object_refs, "Language."),
+        script_variant,
+        default_roles: fields
+            .get(39)
+            .map(|field| parse_configuration_default_roles(field, object_refs))
+            .unwrap_or_default(),
+        vendor: fields
+            .get(14)
+            .and_then(|field| parse_1c_quoted_string(field.trim())),
+        version: fields
+            .get(15)
+            .and_then(|field| parse_1c_quoted_string(field.trim())),
+        update_catalog_address: fields
+            .get(16)
+            .and_then(|field| parse_1c_quoted_string(field.trim())),
+        common_settings_storage: parse_configuration_root_reference_slot(
+            &fields,
+            22,
+            object_refs,
+            "SettingsStorage.",
+        ),
+        reports_user_settings_storage: parse_configuration_root_reference_slot(
+            &fields,
+            23,
+            object_refs,
+            "SettingsStorage.",
+        ),
+        reports_variants_storage: parse_configuration_root_reference_slot(
+            &fields,
+            24,
+            object_refs,
+            "SettingsStorage.",
+        ),
+        form_data_settings_storage: parse_configuration_root_reference_slot(
+            &fields,
+            25,
+            object_refs,
+            "SettingsStorage.",
+        ),
+        default_report_form: None,
+        default_report_variant_form: None,
+        default_report_settings_form: None,
+        default_search_form: None,
+        used_mobile_application_functionalities: Vec::new(),
+        used_mobile_application_permission_messages: Vec::new(),
+        allowed_incoming_share_request_types: Vec::new(),
+        // See the evidence above `configuration_extension_compatibility_mode`:
+        // on the genuine `{68,` shape `CompatibilityMode` mirrors that same
+        // field 26 read (proven on three corpora -- ERP УХ's
+        // `Web_Service.cf` and `MDM_Management.cf`, both field 43 = `80307`
+        // against native `Version8_3_27`, and sitec's
+        // `МодульWebОбмена_ERP25.cf`, field 43 = `80501` against the same
+        // native `Version8_3_27` -- none matching their own field 43 under
+        // `configuration_compatibility_mode_xml`'s formula); on the shorter
+        // `{67,` shape (SSL/БСП 3.1.12.297) field 43 is independently read
+        // instead, since there it does hold this record's own faithful
+        // value (`80324` matching native `Version8_3_24` directly).
+        compatibility_mode,
+        configuration_properties_evidenced_default_block: None,
+    })
+}
+
+pub(super) fn parse_configuration_default_roles(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(fields) = split_1c_braced_fields(field, 0) else {
+        return Vec::new();
+    };
+    let Some(count) = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+
+    fields
+        .iter()
+        .skip(2)
+        .take(count)
+        .filter_map(|field| parse_design_time_reference(field, object_refs))
+        .filter(|reference| reference.starts_with("Role."))
+        .collect()
+}
+
+pub(super) fn parse_configuration_default_roles_from_root(
+    text: &str,
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    let raw_fields = split_1c_braced_fields(fields.get(39)?.trim(), 0)?;
+    if raw_fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = raw_fields.get(1)?.trim().parse::<usize>().ok()?;
+    if raw_fields.len() != count.checked_add(2)? {
+        return None;
+    }
+
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_references = BTreeSet::new();
+    let mut roles = Vec::with_capacity(count);
+    for raw_role in raw_fields.iter().skip(2) {
+        let role_fields = split_1c_braced_fields(raw_role.trim(), 0)?;
+        if role_fields.len() != 3
+            || parse_1c_quoted_string(role_fields.first()?.trim()).as_deref() != Some("#")
+            || role_fields.get(1)?.trim() != METADATA_OBJECT_REF_TYPE_UUID
+        {
+            return None;
+        }
+        let target_fields = split_1c_braced_fields(role_fields.get(2)?.trim(), 0)?;
+        if target_fields.len() != 2 || target_fields.first()?.trim() != "1" {
+            return None;
+        }
+        let role_uuid = parse_non_zero_uuid(target_fields.get(1)?.trim())?;
+        if !seen_uuids.insert(role_uuid.clone()) {
+            return None;
+        }
+        let reference = object_refs.get(&role_uuid)?;
+        let (kind, name) = reference.split_once('.')?;
+        if kind != "Role" || name.is_empty() || name.contains('.') {
+            return None;
+        }
+        if !seen_references.insert(reference.clone()) {
+            return None;
+        }
+        roles.push(reference.clone());
+    }
+    Some(roles)
+}
+
+pub(super) fn parse_configuration_localized_properties_from_root(
+    text: &str,
+    uuid: &str,
+) -> Option<ConfigurationLocalizedProperties> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    Some(ConfigurationLocalizedProperties {
+        // WMS5's `МодульWebОбмена_ERP25.cf` proves the pairing: field 4
+        // carries the longer, multi-line "for these configurations: - ..."
+        // text, and native `Configuration.xml` renders that one under
+        // `<DetailedInformation>`, not `<BriefInformation>` -- the two were
+        // swapped here (field 5 is the short one-line text, matching
+        // `<BriefInformation>`'s native content byte for byte).
+        detailed_information: parse_configuration_localized_property_field(fields.get(4)?)?,
+        brief_information: parse_configuration_localized_property_field(fields.get(5)?)?,
+        copyright: parse_configuration_localized_property_field(fields.get(6)?)?,
+        vendor_information_address: parse_configuration_localized_property_field(fields.get(7)?)?,
+        configuration_information_address: parse_configuration_localized_property_field(
+            fields.get(8)?,
+        )?,
+    })
+}
+
+fn parse_configuration_localized_property_field(field: &str) -> Option<Vec<(String, String)>> {
+    let raw_fields = split_1c_braced_fields(field.trim(), 0)?;
+    let count = raw_fields.first()?.trim().parse::<usize>().ok()?;
+    let expected_len = count.checked_mul(2)?.checked_add(1)?;
+    if raw_fields.len() != expected_len {
+        return None;
+    }
+
+    let mut seen_languages = BTreeSet::new();
+    let mut values = Vec::with_capacity(count);
+    for pair in raw_fields[1..].chunks_exact(2) {
+        let language = parse_exact_1c_quoted_string(pair.first()?.trim())?;
+        if !seen_languages.insert(language.clone()) {
+            return None;
+        }
+        let content = parse_exact_1c_quoted_string(pair.get(1)?.trim())?;
+        values.push((language, content));
+    }
+    Some(values)
+}
+
+fn parse_exact_1c_quoted_string(field: &str) -> Option<String> {
+    let field = field.trim();
+    let (value, consumed) = parse_1c_quoted_string_with_len(field)?;
+    (consumed == field.len()).then_some(value)
+}
+
+/// The Configuration root's own `<Properties>` tuple, normalized to the
+/// canonical `{68,...}` (61-field) shape `parse_configuration_properties_from_text`
+/// addresses by fixed index, plus whether the record was genuinely that
+/// shape to begin with (`true`) rather than a short `{67,...}` one this
+/// function normalized (`false`) -- some of that shape's field coordinates
+/// (see `parse_configuration_properties_from_text`) are proven only for the
+/// real `{68,...}` record.
+///
+/// `configuration_root_property_fields` (the uuid-anchored sibling reader)
+/// already proves the second shape: `{67,...}` at 60 fields, evidenced by
+/// SSL/БСП 3.1.12.297 (`ssl`, `sslbase`, both 3.1.12.297). Structurally, every
+/// one of its 60 members lines up field-class-for-field-class (group for
+/// group, quoted for quoted, uuid for uuid, scalar for scalar) against the
+/// evidenced `{68,...}` reference's first 60 members, with no reordering --
+/// only the reference's own trailing 61st member is missing, a tail
+/// truncation like every other short item-record revision this codebase
+/// normalizes. That 61st member's value is not a guess: the sibling reader's
+/// own `("68", 61) if fields.get(60)?.trim() == "1"` acceptance arm already
+/// proves every corpus using the `{68,...}` shape carries literal `"1"`
+/// there, so restoring it for the short `{67,...}` shape reproduces the one
+/// value every other evidenced corpus already has. Before this normalization,
+/// the blind `{68,` search below found nothing at all in an SSL/БСП corpus,
+/// dropping name_prefix/default_run_mode/script_variant/vendor/version/
+/// update_catalog_address/the four settings storages/default_style/
+/// default_language whole -- most of `Configuration.xml`'s remaining diff on
+/// both `ssl` and `sslbase`.
+pub(super) fn configuration_root_fields(text: &str) -> Option<(Vec<&str>, bool)> {
+    // Every edition's tuple, the older prefixes included, read in the 68
+    // shape: the members keep their meaning, field 26 is CompatibilityMode in
+    // each (1cv8_en.cf `{67,…}`: 26 = 80321, 43 = 80324, native
+    // Version8_3_21; MONITOR-TRIAL-2.cf `{59,…}`: 26 = 80314, Version8_3_14).
+    if let Some(fields) = configuration_root_tuple_in_envelope(text)
+        && let Some(normalized) = normalize_short_configuration_root_property_fields(fields)
+        && normalized.len() == 61
+        && normalized.first().map(|field| field.trim()) == Some("68")
+    {
+        return Some((normalized, true));
+    }
+    if let Some(start) = text.find("{68,") {
+        return Some((split_1c_braced_fields(text, start)?, true));
+    }
+    // Platform 8.5 writes the tuple as `{76,...}` of 77 members: the genuine
+    // `{68,...}` 61 member for member (8.5.1.1150 BSP 3.2.1.356 against its
+    // 8.3.27 3.1.11.466 predecessor: every shared member equal except the
+    // version, copyright, compatibility and mobile-functionality values the
+    // release itself changed) plus 16 appended. Read as the 68 shape.
+    if !text.contains("{67,")
+        && let Some(start) = text.find("{76,")
+    {
+        let fields = split_1c_braced_fields(text, start)?;
+        if fields.len() == 77 {
+            let mut normalized = Vec::with_capacity(61);
+            normalized.push("68");
+            normalized.extend(fields[1..61].iter().copied());
+            return Some((normalized, true));
+        }
+    }
+    let start = text.find("{67,")?;
+    let fields = split_1c_braced_fields(text, start)?;
+    Some((
+        normalize_short_configuration_root_property_fields(fields)?,
+        false,
+    ))
+}
+
+/// Rewrite a short `{67,...}` (60-field) Configuration `<Properties>` tuple
+/// into its canonical `{68,...}` (61-field) shape, or return it unchanged if
+/// it is already that shape (or some other one neither reader here has
+/// evidence for). See `configuration_root_fields` for the evidence this
+/// normalization rests on. The leading member is rewritten to `68` too: the
+/// evidenced-default-block comparator (`configuration_properties_evidence.rs`)
+/// requires every one of its `unproven_tuple_fields()` -- index 0 among them
+/// -- to be byte-identical with the reference's, and the reference's own
+/// index 0 is `"68"`.
+fn normalize_short_configuration_root_property_fields(fields: Vec<&str>) -> Option<Vec<&str>> {
+    // Platform 8.5's `{76,...}` of 77 members is the `{68,...}` of 61 plus 16
+    // appended (see `configuration_root_fields`).
+    if fields.first()?.trim() == "76" && fields.len() == 77 {
+        let mut normalized = Vec::with_capacity(61);
+        normalized.push("68");
+        normalized.extend(fields[1..61].iter().copied());
+        return Some(normalized);
+    }
+    // An older tuple is a prefix of the 68 one; the members it does not store
+    // read as the all-default reference's. Evidence (8.3.27.2214): Src/1Cv8.cf
+    // (`{66,…}`, 59 members) dumps to the same Configuration.xml as the same
+    // configuration saved by 8.5; MONITOR-TRIAL-2.cf (`{59,…}`, 53) against
+    // its own native XML loaded back and saved (`{68,…}`): every shared member
+    // equal but the root header and two tables the reader does not compare,
+    // members 53..60 exactly the reference's. 1cv8_en.cf and БСП 3.1 are
+    // `{67,…}` of 60.
+    let Some(version) = fields
+        .first()
+        .and_then(|field| field.trim().parse::<u32>().ok())
+    else {
+        return Some(fields);
+    };
+    if !(OLDEST_READ_ROOT_TUPLE_VERSION..68).contains(&version)
+        || !(OLDEST_READ_ROOT_TUPLE_FIELDS..61).contains(&fields.len())
+    {
+        return Some(fields);
+    }
+    let tail = super::configuration_properties_evidence::evidenced_default_reference_fields_from(
+        fields.len(),
+    );
+    let mut normalized = Vec::with_capacity(61);
+    normalized.push("68");
+    normalized.extend(fields[1..].iter().copied());
+    normalized.extend(tail.iter().copied());
+    (normalized.len() == 61).then_some(normalized)
+}
+
+/// The oldest root tuple read: version 52 of 46 members (a real
+/// configuration in 8.3.9 mode, container version 216; its Configuration.xml
+/// matches the platform's dump but for the IntegrationService id the platform
+/// draws on every load). The same prefix reading holds there: the fixture
+/// `old_roots/v52` -- a platform-built root cut to 46 members, its header and
+/// section identities in the older spelling (`upgrade.rs`) and the flag table
+/// of field 40 in its version 13 -- is loaded by 8.3.27.2214 and dumped to
+/// the original's Configuration.xml byte for byte. Older ones are refused.
+const OLDEST_READ_ROOT_TUPLE_VERSION: u32 = 52;
+const OLDEST_READ_ROOT_TUPLE_FIELDS: usize = 46;
+
+/// The root's `<Properties>` tuple, located through the root record's own
+/// envelope (`{2,{uuid},N,{<class>,{1,{<tuple>}}},…}`) rather than by
+/// searching for its version marker, which differs by edition.
+fn configuration_root_tuple_in_envelope(text: &str) -> Option<Vec<&str>> {
+    let envelope = parse_configuration_root_envelope(text)?;
+    let first_section = envelope.sections.first()?.trim();
+    let contained_fields = split_1c_braced_fields(first_section, 0)?;
+    if contained_fields.len() != 2 {
+        return None;
+    }
+    let payload_fields = split_1c_braced_fields(contained_fields.get(1)?.trim(), 0)?;
+    if payload_fields.first().map(|field| field.trim()) != Some("1") {
+        return None;
+    }
+    split_1c_braced_fields(payload_fields.get(1)?.trim(), 0)
+}
+
+const CONFIGURATION_USE_PURPOSE_TYPE_UUID: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
+
+pub(super) fn parse_configuration_use_purposes(
+    text: &str,
+    uuid: &str,
+) -> Option<Vec<&'static str>> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    let raw_fields = split_1c_braced_fields(fields.get(33)?.trim(), 0)?;
+    let count_token = raw_fields.first()?.trim();
+    let count = count_token.parse::<usize>().ok()?;
+    // Declared collection counts use canonical unsigned decimal spelling.
+    if count_token != count.to_string() {
+        return None;
+    }
+    if count == 0 {
+        // Only the validated native Properties owner admits the compiler's
+        // empty collection, never a partial SQL tuple or a nested decoy.
+        let layout = parse_configuration_root_layout(text, uuid)?;
+        return (raw_fields.len() == 1
+            && layout.contained_objects.first().is_some_and(|owner| {
+                owner.class_id.eq_ignore_ascii_case(
+                    ibcmd_metadata_model::metadata_model::root::MODULE_GROUP_CLASS_ID,
+                )
+            }))
+        .then(Vec::new);
+    }
+    if raw_fields.len() != 2 || raw_fields.first()?.trim() != "1" {
+        return None;
+    }
+    let purpose_fields = split_1c_braced_fields(raw_fields.get(1)?.trim(), 0)?;
+    if purpose_fields.len() != 3
+        || parse_1c_quoted_string(purpose_fields.first()?.trim()).as_deref() != Some("#")
+        || purpose_fields.get(1)?.trim() != CONFIGURATION_USE_PURPOSE_TYPE_UUID
+        || purpose_fields.get(2)?.trim() != "1"
+    {
+        return None;
+    }
+    Some(vec!["PlatformApplication"])
+}
+
+/// The OS permissions a `<app:permissionMessage>` can explain.
+///
+/// A separate vocabulary from the functionality table above -- the same name
+/// carries a different id in each (`Camera` is functionality 18 and
+/// permission 12) -- so nothing here is inferred from that one. These seven
+/// are read straight off Документооборот КОРП 3.0.21.3, the only
+/// configuration on the stand whose block carries messages at all: its
+/// record's seven ids line up one-to-one, in order, with the seven
+/// `<app:permission>` names its native `Configuration.xml` prints. Any other
+/// id fails closed.
+const CONFIGURATION_MOBILE_APPLICATION_PERMISSIONS: [(u32, &str); 7] = [
+    (0, "Biometrics"),
+    (12, "Camera"),
+    (13, "Microphone"),
+    (14, "MusicLibrary"),
+    (15, "PictureAndVideoLibraries"),
+    (16, "AudioPlaybackAndVibration"),
+    (20, "PostNotifications"),
+];
+
+fn configuration_mobile_application_permission_name(id: u32) -> Option<&'static str> {
+    CONFIGURATION_MOBILE_APPLICATION_PERMISSIONS
+        .iter()
+        .find_map(|(candidate, name)| (*candidate == id).then_some(*name))
+}
+
+pub(super) fn parse_configuration_used_mobile_application_functionalities(
+    text: &str,
+    uuid: &str,
+    source_version: &str,
+) -> Option<(
+    Vec<ConfigurationMobileApplicationFunctionality>,
+    Vec<ConfigurationMobileApplicationPermissionMessage>,
+)> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    let raw_fields = split_1c_braced_fields(fields.get(53)?.trim(), 0)?;
+    let table_version = raw_fields.first()?.trim();
+    // Version `0` is the table of the oldest roots (ISL 2.8, `{63,...}`), the
+    // same pair run as version `1`.
+    if !matches!(table_version, "0" | "1" | "2") {
+        return None;
+    }
+    let count = raw_fields.get(1)?.trim().parse::<usize>().ok()?;
+    // The pair table is followed by one scalar, and that scalar can in turn
+    // be followed by a counted list of permission messages -- Документооборот
+    // КОРП 3.0.21.3 writes seven, every other configuration on the stand
+    // writes the scalar `0` and stops. Demanding the table end right after
+    // the scalar dropped the whole block for the one that does not.
+    let tail = raw_fields.get(count.checked_add(2)?..)?;
+    let trailing_field = *tail.first()?;
+    let permission_messages = if tail.len() == 1 {
+        Vec::new()
+    } else {
+        parse_configuration_mobile_application_permission_messages(tail)?
+    };
+    // An older table may skip ids: ERP WE 2.5 declares 29 pairs, ids `0..=27`
+    // and then `33`, and the platform prints every functionality of the full
+    // table, the ones the record does not carry as unused.
+    if matches!(table_version, "0" | "1")
+        && matches!(source_version, "2.20" | "2.21")
+        && tail.len() == 1
+        && trailing_field.trim() == "0"
+    {
+        let mut flags = BTreeMap::new();
+        for field in raw_fields.iter().skip(2).take(count) {
+            let pair = split_1c_braced_fields(field.trim(), 0)?;
+            if pair.len() != 2 {
+                return None;
+            }
+            let id = pair.first()?.trim().parse::<u32>().ok()?;
+            let flag = parse_1c_bool_flag(pair.get(1)?.trim())?;
+            if flags.insert(id, flag).is_some() {
+                return None;
+            }
+        }
+        let sequential = flags.keys().copied().eq(0..count as u32);
+        if !sequential {
+            if flags.keys().any(|id| {
+                !CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+                    .iter()
+                    .any(|(known, _)| known == id)
+            }) {
+                return None;
+            }
+            let functionalities = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+                .iter()
+                .map(|(id, name)| ConfigurationMobileApplicationFunctionality {
+                    name,
+                    use_functionality: flags.get(id).copied().unwrap_or(false),
+                })
+                .collect();
+            return Some((functionalities, permission_messages));
+        }
+    }
+    let mut functionalities = Vec::with_capacity(38);
+    for ((expected_id, name), field) in CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+        .iter()
+        .take(count)
+        .zip(raw_fields.iter().skip(2).take(count))
+    {
+        let pair = split_1c_braced_fields(field.trim(), 0)?;
+        if pair.len() != 2 || pair.first()?.trim().parse::<u32>().ok()? != *expected_id {
+            return None;
+        }
+        functionalities.push(ConfigurationMobileApplicationFunctionality {
+            name,
+            use_functionality: parse_1c_bool_flag(pair.get(1)?.trim())?,
+        });
+    }
+
+    // The record's own declared count decides how the table's last entry is
+    // spelled; the dialect only decides whether that entry is printed. A
+    // record that spells all `full` entries as pairs is complete as it
+    // stands, and the shorter one carries its last entry in the trailing
+    // scalar instead.
+    //
+    // The `2.20`+`full` arm is the one this table was missing: every
+    // 8.3.27.2214 configuration retained here -- all nine bundled evidence
+    // corpora and «1С:Управление торговлей 11.5.27.75» -- declares 38, spells
+    // the 38 ids of the table above in order, and its flags decode to that
+    // configuration's own `<UsedMobileApplicationFunctionalities>` block
+    // value for value; every one of them is exported at `2.20`, where the old
+    // table demanded 37 and so dropped the block outright.
+    let full = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES.len();
+    match (source_version, count) {
+        // The 2.17 dialect prints no `TextToSpeech` at all, so the shorter
+        // record's trailing scalar is read for its shape and dropped. No
+        // corpus shows how a full-length record maps onto that dialect.
+        ("2.17", n) if n + 1 == full => {
+            parse_1c_bool_flag(trailing_field.trim())?;
+        }
+        // Both current XML editions print TextToSpeech. Its stored flag is
+        // the shorter record's tail, independently of the reading edition.
+        (dialect, n)
+            if n + 1 == full
+                && ibcmd_schema::configuration_mobile::source_functionalities(Some(dialect))
+                    .is_some_and(|roster| roster.len() == full) =>
+        {
+            functionalities.push(ConfigurationMobileApplicationFunctionality {
+                name: CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES[full - 1].1,
+                use_functionality: parse_1c_bool_flag(trailing_field.trim())?,
+            })
+        }
+        ("2.20" | "2.21", n) if n == full => {}
+        // The version-1 table of an older root stops earlier and ends in a
+        // `0` (Src/1Cv8.cf, `{66,…}`: 33 pairs); the platform prints the
+        // functionalities it lacks as unused -- the same Configuration.xml as
+        // the same configuration saved by 8.5 with all 38 pairs.
+        ("2.20" | "2.21", n)
+            if matches!(table_version, "0" | "1")
+                && n + 1 < full
+                && tail.len() == 1
+                && trailing_field.trim() == "0" =>
+        {
+            functionalities.extend(
+                CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES[n..]
+                    .iter()
+                    .map(|(_, name)| ConfigurationMobileApplicationFunctionality {
+                        name,
+                        use_functionality: false,
+                    }),
+            );
+        }
+        _ => return None,
+    }
+    // The shorter record spends its trailing scalar on the last
+    // functionality's flag, so it has nowhere left to declare messages. Only
+    // the full-length shape is observed carrying them.
+    if !permission_messages.is_empty() && count != full {
+        return None;
+    }
+    Some((functionalities, permission_messages))
+}
+
+/// Platform serialization id of `app:AllowedIncomingShareRequestType`, the
+/// only member type the list holds. It is a platform type id, not an identity
+/// of any object of the information base being decoded.
+const CONFIGURATION_ALLOWED_INCOMING_SHARE_REQUEST_TYPE_UUID: &str =
+    "f251d17e-94e0-4f9b-974e-d642cf9cb6e4";
+
+/// `<AllowedIncomingShareRequestTypes>`, read from the tuple field the schema
+/// policy names: a declared count followed by that many typed members, each
+/// `{"#",<type uuid>,{0,<mime>,<uti>,<ext>,<processing variant>,<is custom>}}`.
+///
+/// Evidence, «1С:ERP. Управление холдингом 3.2.12.6» -- the one configuration
+/// of the stand whose element is not self-closed: the field declares 4 members
+/// spelling, in order, `ext="txt"`, `uti="public.plain-text"`,
+/// `mime="application/txt"` and `mime="text/plain"`, which is exactly the
+/// order and content of the four `<v8:Value>` elements the platform writes.
+/// The other seven configurations hold the empty list `{0}` and print
+/// `<AllowedIncomingShareRequestTypes/>`.
+///
+/// The member payload's leading `0` is a shape discriminator; no corpus shows
+/// another value, so anything else fails closed rather than being read as if
+/// it meant the same layout.
+pub(super) fn parse_configuration_allowed_incoming_share_request_types(
+    text: &str,
+    uuid: &str,
+) -> Option<Vec<ConfigurationAllowedIncomingShareRequestType>> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    let raw = fields
+        .get(policy.allowed_incoming_share_request_types_tuple_field())?
+        .trim();
+    let members = split_1c_braced_fields(raw, 0)?;
+    let count = members.first()?.trim().parse::<usize>().ok()?;
+    if members.len() != count.checked_add(1)? {
+        return None;
+    }
+    let mut types = Vec::with_capacity(count);
+    for member in members.iter().skip(1) {
+        let typed = split_1c_braced_fields(member.trim(), 0)?;
+        if typed.len() != 3
+            || typed.first()?.trim() != r##""#""##
+            || !typed
+                .get(1)?
+                .trim()
+                .eq_ignore_ascii_case(CONFIGURATION_ALLOWED_INCOMING_SHARE_REQUEST_TYPE_UUID)
+        {
+            return None;
+        }
+        let payload = split_1c_braced_fields(typed.get(2)?.trim(), 0)?;
+        if payload.len() != 6 || payload.first()?.trim() != "0" {
+            return None;
+        }
+        let processing_variant = payload.get(4)?.trim();
+        if !information_register_decimal_is_valid(processing_variant) {
+            return None;
+        }
+        types.push(ConfigurationAllowedIncomingShareRequestType {
+            mime: parse_1c_quoted_string(payload.get(1)?.trim())?,
+            uti: parse_1c_quoted_string(payload.get(2)?.trim())?,
+            ext: parse_1c_quoted_string(payload.get(3)?.trim())?,
+            processing_variant: processing_variant.to_string(),
+            is_custom: information_register_bool(payload.get(5)?)?,
+        });
+    }
+    Some(types)
+}
+
+/// `<count>, {<permission id>, <localized description>} …`, the tail of a
+/// full-length mobile-functionalities table.
+fn parse_configuration_mobile_application_permission_messages(
+    tail: &[&str],
+) -> Option<Vec<ConfigurationMobileApplicationPermissionMessage>> {
+    let count = tail.first()?.trim().parse::<usize>().ok()?;
+    if tail.len() != count.checked_add(1)? {
+        return None;
+    }
+    let mut messages = Vec::with_capacity(count);
+    let mut seen = BTreeSet::new();
+    for field in tail.iter().skip(1) {
+        let entry = split_1c_braced_fields(field.trim(), 0)?;
+        if entry.len() != 2 {
+            return None;
+        }
+        let id = entry.first()?.trim().parse::<u32>().ok()?;
+        if !seen.insert(id) {
+            return None;
+        }
+        messages.push(ConfigurationMobileApplicationPermissionMessage {
+            permission: configuration_mobile_application_permission_name(id)?,
+            description: parse_1c_synonyms(entry.get(1)?.trim()),
+        });
+    }
+    Some(messages)
+}
+
+fn configuration_root_stored_property_fields<'a>(
+    text: &'a str,
+    uuid: &str,
+) -> Option<Vec<&'a str>> {
+    parse_configuration_root_layout(text, uuid)?;
+    let envelope = parse_configuration_root_envelope(text)?;
+    // Both footer variants reach this 60/61/77-length tuple shape and feed
+    // `configuration_properties_evidenced_default_block_policy`'s "matches
+    // the evidenced all-default reference outside six proven bytes" claim.
+    // WMS5's `МодульWebОбмена_ERP25.cf` (Bare footer) proved that claim can
+    // hold for Bare data too, once genuinely new evidence is accounted for:
+    // its `InterfaceCompatibilityMode` byte (`'3'`) was a not-yet-seen enum
+    // member (now mapped to `Taxi`, matching its native `Configuration.xml`),
+    // and once that was fixed, every other verbatim-compared field matched
+    // the reference exactly. So the earlier Checksummed-only restriction was
+    // evidence the *policy* wasn't ready yet, not evidence the footer
+    // variant itself mattered -- `envelope.footer` needs no check here
+    // beyond what `parse_configuration_root_layout` already required.
+    let first_section = envelope.sections.first()?.trim();
+    let contained_fields = split_1c_braced_fields(first_section, 0)?;
+    if contained_fields.len() != 2 {
+        return None;
+    }
+    let payload_fields = split_1c_braced_fields(contained_fields.get(1)?.trim(), 0)?;
+    if payload_fields.first().map(|field| field.trim()) != Some("1") {
+        return None;
+    }
+    let fields = split_1c_braced_fields(payload_fields.get(1)?.trim(), 0)?;
+    let mut object_ids = configuration_contained_object_ids(first_section).into_iter();
+    let object_id = object_ids.next()?;
+    if object_ids.next().is_some() {
+        return None;
+    }
+    if !is_configuration_root_property_header(fields.get(1)?.trim(), &object_id) {
+        return None;
+    }
+    Some(fields)
+}
+
+/// Exact V76 interface pair from the validated Configuration owner, never a
+/// nested textual `{76,` hit or the normalized 61-field projection.
+/// Err commits the recognized V76 family to an addressed publication refusal.
+pub(super) fn configuration_v76_interface_mode(
+    text: &str,
+    uuid: &str,
+) -> Result<Option<ibcmd_schema::configuration_root::V76InterfaceCompatibility>, &'static str> {
+    let Some(fields) = configuration_root_stored_property_fields(text, uuid) else {
+        return Ok(None);
+    };
+    if fields.first().map(|field| field.trim()) != Some("76") {
+        return Ok(None);
+    }
+    // A partial SQL/per-field root may have the same tuple tag and header,
+    // but its arbitrary section class does not own native Properties. Keep
+    // that existing dialect out of this native pair/profile authority.
+    let Some(layout) = parse_configuration_root_layout(text, uuid) else {
+        return Ok(None);
+    };
+    if !layout.contained_objects.first().is_some_and(|owner| {
+        owner
+            .class_id
+            .eq_ignore_ascii_case(ibcmd_metadata_model::metadata_model::root::MODULE_GROUP_CLASS_ID)
+    }) {
+        return Ok(None);
+    }
+    if fields.len() != 77 {
+        return Err("invalid_v76_tuple_arity");
+    }
+    let digit = |field: &str| {
+        let bytes = field.trim().as_bytes();
+        match bytes {
+            [digit @ b'0'..=b'9'] => Some(*digit - b'0'),
+            _ => None,
+        }
+    };
+    let first = digit(fields[38]).ok_or("invalid_v76_interface_scalar")?;
+    let second = digit(fields[62]).ok_or("invalid_v76_interface_scalar")?;
+    ibcmd_schema::configuration_root::V76InterfaceCompatibility::from_stored_codes(first, second)
+        .map(Some)
+        .ok_or("unknown_v76_interface_pair")
+}
+
+fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
+    let fields = configuration_root_stored_property_fields(text, uuid)?;
+    // Normalize the older and the 8.5 shapes to the canonical `{68,...}` one
+    // (see `normalize_short_configuration_root_property_fields` for the
+    // evidence) so `parse_configuration_properties_evidenced_default_block`'s
+    // exact-arity check against the 61-field evidenced reference sees this
+    // corpus's real shape instead of always refusing it as
+    // `UnexpectedTupleArity`.
+    // A genuine 68 tuple is still required to end in `1`, as before.
+    let genuine_68 = fields.first()?.trim() == "68";
+    let normalized = normalize_short_configuration_root_property_fields(fields)?;
+    (normalized.len() == 61
+        && normalized.first()?.trim() == "68"
+        && (!genuine_68 || normalized.get(60)?.trim() == "1"))
+        .then_some(normalized)
+}
+
+fn is_configuration_root_property_header(field: &str, object_id: &str) -> bool {
+    let Some(wrapper) = split_1c_braced_fields(field, 0) else {
+        return false;
+    };
+    if wrapper.len() != 2 || wrapper.first().map(|field| field.trim()) != Some("0") {
+        return false;
+    }
+    let Some(header) = wrapper
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return false;
+    };
+    // Same short-wrapper omission `parse_information_register_owner_header`
+    // (`0575505`) and `innermost_metadata_object_fields_around_header`
+    // (this pass) document for this exact generic
+    // `{1,0,<uuid>},Name,Synonym,Comment,0,0,NilUuid,0` header shape: the
+    // platform drops the trailing default `0` (and the wrapper's own
+    // leading count from `3` to `2`) whenever the Configuration root's own
+    // header leaves that slot at default. One object per config, so a
+    // small blast radius, but a total-parse failure if hit (the whole
+    // Configuration.xml's default roles/use-purposes/localized properties
+    // read depends on this header resolving).
+    // After the comment: `0` (the configuration's own, not adopted), a count
+    // of `(property uuid, state)` pairs, the nil uuid. MONITOR-TRIAL-2.cf's
+    // root counts two (its command interfaces, state 3) under a `{2,…}`
+    // header; 8.3.27.2214 prints no trace of them for a configuration (its
+    // native Configuration.xml, and the root it saves back is `…,0,0,<nil>,0`).
+    let Some(pairs) = header
+        .get(6)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return false;
+    };
+    let Some(nil_at) = pairs.checked_mul(2).and_then(|len| len.checked_add(7)) else {
+        return false;
+    };
+    let header_has_trailing_default = match header.len().checked_sub(nil_at) {
+        Some(2) => true,
+        Some(1) => false,
+        _ => return false,
+    };
+    let pairs_are_states = (0..pairs).all(|index| {
+        header
+            .get(7 + 2 * index)
+            .is_some_and(|field| parse_non_zero_uuid(field.trim()).is_some())
+            && header
+                .get(8 + 2 * index)
+                .is_some_and(|field| matches!(field.trim(), "2" | "3"))
+    });
+    if header.first().map(|field| field.trim())
+        != Some(if header_has_trailing_default {
+            "3"
+        } else {
+            "2"
+        })
+        || header
+            .get(2)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .is_none()
+        || !is_configuration_root_synonym_field(header.get(3).copied())
+        || header
+            .get(4)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .is_none()
+        || header.get(5).map(|field| field.trim()) != Some("0")
+        || !pairs_are_states
+        || header.get(nil_at).map(|field| field.trim())
+            != Some("00000000-0000-0000-0000-000000000000")
+        || (header_has_trailing_default
+            && header.get(nil_at + 1).map(|field| field.trim()) != Some("0"))
+    {
+        return false;
+    }
+    let Some(identity) = header
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return false;
+    };
+    identity.len() == 3
+        && identity.first().map(|field| field.trim()) == Some("1")
+        && identity.get(1).map(|field| field.trim()) == Some("0")
+        && identity.get(2).map(|field| field.trim()) == Some(object_id)
+}
+
+fn is_configuration_root_synonym_field(field: Option<&str>) -> bool {
+    let Some(fields) = field.and_then(|field| split_1c_braced_fields(field.trim(), 0)) else {
+        return false;
+    };
+    let Some(count) = fields
+        .first()
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return false;
+    };
+    let Some(expected_len) = count.checked_mul(2).and_then(|value| value.checked_add(1)) else {
+        return false;
+    };
+    fields.len() == expected_len
+        && fields
+            .iter()
+            .skip(1)
+            .all(|field| parse_1c_quoted_string(field.trim()).is_some())
+}
+
+const CONFIGURATION_CONTAINED_OBJECT_COUNT: usize = 7;
+
+/// The evidenced Configuration root envelope shared by every root consumer:
+/// `{2,{Identity},N,<section 1>...<section N>,{footer}}` — a flat field list
+/// whose declared section count must match the actual slots exactly (see
+/// `docs/evidence/configuration-body-8.3.27.md` and the retained CF corpora
+/// under `tests/fixtures/native-evidence/8.3.27.2214`). This parser is the
+/// single source of truth for the outer root shape; consumers layer their own
+/// stricter requirements (section count, footer variant) on top of it instead
+/// of re-deriving the slot arithmetic.
+struct ConfigurationRootEnvelope<'a> {
+    identity: String,
+    sections: Vec<&'a str>,
+    footer: ConfigurationRootFooter,
+}
+
+fn parse_configuration_root_envelope(text: &str) -> Option<ConfigurationRootEnvelope<'_>> {
+    let root = split_1c_braced_fields(text.trim_start(), 0)?;
+    if root.first()?.trim() != "2" {
+        return None;
+    }
+    let identity_fields = split_1c_braced_fields(root.get(1)?.trim(), 0)?;
+    if identity_fields.len() != 1 {
+        return None;
+    }
+    let identity = parse_non_zero_uuid(identity_fields.first()?.trim())?;
+    let section_count = root.get(2)?.trim().parse::<usize>().ok()?;
+    if section_count == 0 || section_count.checked_add(4)? != root.len() {
+        return None;
+    }
+    let footer = classify_configuration_root_footer(root.last()?.trim())?;
+    Some(ConfigurationRootEnvelope {
+        identity,
+        sections: root[3..3 + section_count].to_vec(),
+        footer,
+    })
+}
+
+/// The configuration root record `uuid` (its layout reads).
+pub(super) fn is_configuration_root_row(text: &str, uuid: &str) -> bool {
+    parse_configuration_root_layout(text, uuid).is_some()
+}
+
+fn parse_configuration_root_layout(text: &str, uuid: &str) -> Option<ConfigurationRootLayout> {
+    let envelope = parse_configuration_root_envelope(text)?;
+    // Both evidenced footer variants carry the identical
+    // `{ClassId,{1,{payload}}}` section shape the loop below decodes.
+    // Confirmed against ERP УХ's `Web_Service.cf` and WMS5's
+    // `МодульWebОбмена_ERP25.cf`: both carry a `{{0,"",""}}` (Bare) root
+    // footer, and both native reference trees still emit the full
+    // `InternalInfo`/`ChildObjects` shape for their Configuration.xml --
+    // requiring `Checksummed` here silently dropped ~2/3 of Configuration.xml
+    // (no InternalInfo, no ChildObjects, ~15 Properties fields) for every
+    // configuration whose root record happens to carry the Bare footer.
+    // Any *other* footer shape already fails closed inside
+    // `classify_configuration_root_footer`, which built this envelope.
+    if envelope.identity != uuid
+        || !(CONFIGURATION_CONTAINED_OBJECT_COUNT - 1..=CONFIGURATION_CONTAINED_OBJECT_COUNT)
+            .contains(&envelope.sections.len())
+        || !matches!(
+            envelope.footer,
+            ConfigurationRootFooter::Bare | ConfigurationRootFooter::Checksummed
+        )
+    {
+        return None;
+    }
+
+    let mut contained_objects = Vec::with_capacity(envelope.sections.len());
+    let mut child_families = Vec::new();
+    for field in &envelope.sections {
+        let contained_fields = split_1c_braced_fields(field.trim(), 0)?;
+        if contained_fields.len() != 2 {
+            return None;
+        }
+        let class_id = parse_non_zero_uuid(contained_fields.first()?.trim())?;
+        let object_ids = configuration_contained_object_ids(field);
+        if object_ids.len() != 1 {
+            return None;
+        }
+        let object_id = object_ids.into_iter().next()?;
+        let families = configuration_family_sequence(contained_fields.get(1)?.trim(), &object_id)?;
+        contained_objects.push(ConfigurationContainedObject {
+            class_id,
+            object_id,
+        });
+        child_families.extend(families);
+    }
+    // A root saved before a class existed stores fewer sections (MONITOR-
+    // TRIAL-2.cf: six, no IntegrationService). 8.3.27.2214 prints the missing
+    // one anyway, under an ObjectId it draws afresh on every load (1a3c6800-…,
+    // then bcdb59fc-… for the same file) -- no export can match it; this one
+    // derives it from the configuration so repeated exports agree.
+    let stored = contained_objects
+        .iter()
+        .map(|object| object.class_id.as_str())
+        .collect::<Vec<_>>();
+    if stored.len() < CONFIGURATION_CONTAINED_OBJECT_COUNT
+        && !CONFIGURATION_CONTAINED_OBJECT_CLASSES.starts_with(&stored)
+    {
+        return None;
+    }
+    for class_id in CONFIGURATION_CONTAINED_OBJECT_CLASSES
+        .get(stored.len()..)
+        .unwrap_or_default()
+    {
+        contained_objects.push(ConfigurationContainedObject {
+            class_id: (*class_id).to_owned(),
+            object_id: derived_uuid(&format!("{uuid}/{class_id}")),
+        });
+    }
+
+    Some(ConfigurationRootLayout {
+        contained_objects,
+        child_families,
+    })
+}
+
+/// The root's contained objects by class, in the order every 7-section root
+/// stores them (`compiler::root::CONFIGURATION_SECTIONS`).
+const CONFIGURATION_CONTAINED_OBJECT_CLASSES: [&str; CONFIGURATION_CONTAINED_OBJECT_COUNT] = [
+    "9cd510cd-abfc-11d4-9434-004095e12fc7",
+    "9fcd25a0-4822-11d4-9414-008048da11f9",
+    "e3687481-0a87-462c-a166-9f34594f9bba",
+    "9de14907-ec23-4a07-96f0-85521cb6b53b",
+    "51f2d5d8-ea4d-4064-8892-82951750031e",
+    "e68182ea-4237-4383-967f-90c1e3370bc7",
+    "fb282519-d103-4dd3-bc12-cb271d631dfc",
+];
+
+/// A name-based (SHA-1, version 5 layout) uuid of `seed`.
+fn derived_uuid(seed: &str) -> String {
+    use sha1::{Digest, Sha1};
+    let digest = Sha1::digest(seed.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).hyphenated().to_string()
+}
+
+/// The two evidenced Configuration root-control tails.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConfigurationRootFooter {
+    /// `{{0,"",""}}` — the db-resident tail recorded for the 8.3.27.1989
+    /// cohort (`docs/evidence/configuration-body-8.3.27.md`) and emitted by
+    /// the clean-room bootstrap writer (`compiler::root`).
+    Bare,
+    /// `{{1,"",""},{checksum}}` — a `{1,"",""}` marker followed by a signed
+    /// 32-bit body checksum, e.g. `{{1,"",""},{-1648891888}}` (see
+    /// `tests/fixtures/native-evidence/8.3.27.2214/dcs-area-style-item-uuid`,
+    /// confirmed identically across all 19 retained CF corpora). The checksum
+    /// value itself is opaque and is not interpreted or re-derived here.
+    Checksummed,
+}
+
+fn classify_configuration_root_footer(field: &str) -> Option<ConfigurationRootFooter> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    let marker = split_1c_braced_fields(fields.first()?.trim(), 0)?;
+    // A root signed by its vendor spells the two strings of the bare footer
+    // as a public key and a signature (1C:ЗУП 3.1.18, `{{0,"MIIB…","MC0C…"}}`);
+    // it is the same bare footer otherwise.
+    if marker.len() == 3
+        && fields.len() == 1
+        && marker.first().map(|value| value.trim()) == Some("0")
+        && marker[1..].iter().all(|field| {
+            parse_1c_quoted_string(field.trim()).is_some_and(|value| !value.is_empty())
+        })
+    {
+        return Some(ConfigurationRootFooter::Bare);
+    }
+    let marker_tail_valid = marker.len() == 3
+        && marker
+            .get(1)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .is_some_and(|value| value.is_empty())
+        && marker
+            .get(2)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .is_some_and(|value| value.is_empty());
+    if !marker_tail_valid {
+        return None;
+    }
+    match (marker.first()?.trim(), fields.len()) {
+        ("0", 1) => Some(ConfigurationRootFooter::Bare),
+        ("1", 2) => {
+            let checksum = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+            (checksum.len() == 1
+                && checksum
+                    .first()
+                    .is_some_and(|value| value.trim().parse::<i32>().is_ok()))
+            .then_some(ConfigurationRootFooter::Checksummed)
+        }
+        _ => None,
+    }
+}
+
+fn configuration_contained_object_ids(text: &str) -> Vec<String> {
+    const MARKER: &str = "{1,0,";
+
+    let mut object_ids = Vec::new();
+    let mut search_start = 0;
+    while let Some(relative_start) = text[search_start..].find(MARKER) {
+        let marker_start = search_start + relative_start;
+        search_start = marker_start + 1;
+        let Some(fields) = split_1c_braced_fields(text, marker_start) else {
+            continue;
+        };
+        if fields.len() != 3
+            || fields.first().map(|field| field.trim()) != Some("1")
+            || fields.get(1).map(|field| field.trim()) != Some("0")
+        {
+            continue;
+        }
+        if let Some(object_id) = fields
+            .get(2)
+            .and_then(|field| parse_non_zero_uuid(field.trim()))
+        {
+            object_ids.push(object_id);
+        }
+    }
+    object_ids
+}
+
+fn configuration_family_sequence(text: &str, object_id: &str) -> Option<Vec<Vec<String>>> {
+    let mut candidates = Vec::new();
+    collect_configuration_family_sequences(text, object_id, 0, &mut candidates);
+    let minimum_depth = candidates.iter().map(|(depth, _)| *depth).min()?;
+    let mut nearest = candidates
+        .into_iter()
+        .filter(|(depth, _)| *depth == minimum_depth)
+        .map(|(_, families)| families);
+    let families = nearest.next()?;
+    nearest.next().is_none().then_some(families)
+}
+
+fn collect_configuration_family_sequences(
+    text: &str,
+    object_id: &str,
+    depth: usize,
+    candidates: &mut Vec<(usize, Vec<Vec<String>>)>,
+) {
+    let Some(fields) = split_1c_braced_fields(text, 0) else {
+        return;
+    };
+    let initial_candidate_count = candidates.len();
+
+    for count_index in 1..fields.len() {
+        let Some(family_count) = fields
+            .get(count_index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if family_count == 0 || fields.len() != count_index + family_count + 1 {
+            continue;
+        }
+        if !fields[..count_index].iter().any(|field| {
+            configuration_contained_object_ids(field)
+                .iter()
+                .any(|candidate| candidate == object_id)
+        }) {
+            continue;
+        }
+
+        let mut families = Vec::with_capacity(family_count);
+        let mut valid = true;
+        for family in fields.iter().skip(count_index + 1) {
+            let Some(children) = parse_configuration_family(family.trim()) else {
+                valid = false;
+                break;
+            };
+            families.push(children);
+        }
+        if valid {
+            candidates.push((depth, families));
+        }
+    }
+
+    if candidates.len() != initial_candidate_count {
+        return;
+    }
+
+    for field in &fields {
+        let field = field.trim();
+        if field.starts_with('{') {
+            collect_configuration_family_sequences(field, object_id, depth + 1, candidates);
+        }
+    }
+}
+
+fn parse_configuration_family(text: &str) -> Option<Vec<String>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    parse_non_zero_uuid(fields.first()?.trim())?;
+    let child_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != child_count + 2 {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(2)
+        .map(|field| parse_non_zero_uuid(field.trim()))
+        .collect()
+}
+
+fn resolve_configuration_root_child_objects(
+    layout: &ConfigurationRootLayout,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<ConfigurationRootChildObject>> {
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_kinds = BTreeSet::new();
+    let mut groups = Vec::new();
+
+    for family in &layout.child_families {
+        if family.is_empty() {
+            continue;
+        }
+        let mut family_kind = None;
+        let mut names = Vec::with_capacity(family.len());
+        for uuid in family {
+            if !seen_uuids.insert(uuid.as_str()) {
+                return None;
+            }
+            let reference = object_refs.get(uuid)?;
+            let (kind, name) = reference.split_once('.')?;
+            if name.is_empty() || name.contains('.') {
+                return None;
+            }
+            let (order, kind) = configuration_root_child_kind(kind)?;
+            if family_kind.is_some_and(|(_, candidate)| candidate != kind) {
+                return None;
+            }
+            family_kind = Some((order, kind));
+            names.push(name.to_string());
+        }
+        let (order, kind) = family_kind?;
+        if !seen_kinds.insert(kind) {
+            return None;
+        }
+        groups.push((order, kind, names));
+    }
+
+    groups.sort_by_key(|(order, _, _)| *order);
+    Some(
+        groups
+            .into_iter()
+            .flat_map(|(_, kind, names)| {
+                names
+                    .into_iter()
+                    .map(move |name| ConfigurationRootChildObject { kind, name })
+            })
+            .collect(),
+    )
+}
+
+fn configuration_root_child_kind(kind: &str) -> Option<(usize, &'static str)> {
+    ibcmd_schema::configuration_root::child_xml_kind(kind)
+}
+
+pub(super) fn parse_configuration_localized_property(
+    fields: &[&str],
+    index: usize,
+) -> Vec<(String, String)> {
+    fields
+        .get(index)
+        .map(|field| parse_1c_synonyms(field))
+        .unwrap_or_default()
+}
+
+pub(super) fn parse_configuration_root_reference(
+    fields: &[&str],
+    index: usize,
+    object_refs: &BTreeMap<String, String>,
+    expected_prefix: &str,
+) -> Option<String> {
+    parse_configuration_root_reference_slot(fields, index, object_refs, expected_prefix)?.value
+}
+
+pub(super) fn parse_configuration_root_reference_slot(
+    fields: &[&str],
+    index: usize,
+    object_refs: &BTreeMap<String, String>,
+    expected_prefix: &str,
+) -> Option<ConfigurationRootReference> {
+    let field = fields.get(index)?.trim();
+    if field == "00000000-0000-0000-0000-000000000000" {
+        return Some(ConfigurationRootReference { value: None });
+    }
+    let uuid = parse_non_zero_uuid(field)?;
+    let reference = object_refs.get(&uuid)?;
+    reference
+        .starts_with(expected_prefix)
+        .then(|| ConfigurationRootReference {
+            value: Some(reference.clone()),
+        })
+}
+
+pub(super) fn configuration_default_run_mode_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("OrdinaryApplication"),
+        "1" => Some("ManagedApplication"),
+        _ => None,
+    }
+}
+
+pub(super) fn configuration_script_variant_xml(value: &str) -> Option<&'static str> {
+    ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::from_record_code(value)
+        .map(ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::metadata_name)
+}
+
+/// The highest packed platform-version value this reader has direct
+/// evidence for: `80327` = `Version8_3_27`, this platform's own build
+/// (`ibcmd` 8.3.27.2214). WMS5's `МодульWebОбмена_ERP25.cf` carries `80501`
+/// at the `CompatibilityMode` coordinate (tuple field 43) while its native
+/// `Configuration.xml` prints `Version8_3_27` -- the same value this
+/// platform's own version formats to, not `Version8_5_1`. A config cannot
+/// prove compatibility with a platform edition newer than the one reading
+/// it, so a value above this ceiling is evidence of a still-unproven
+/// spelling (e.g. a not-yet-observed clamping/rounding rule), not proof
+/// that the naive `major*10000+minor*100+patch` unpacking is the right
+/// reading for it. Fail closed rather than print the arithmetic guess.
+const MAX_EVIDENCED_PACKED_PLATFORM_VERSION: u32 = 80327;
+
+/// Platform 8.5.1, the edition that writes the `{76,...}` configuration
+/// tuple and reads it back.
+const PACKED_PLATFORM_VERSION_8_5_1: u32 = 80501;
+
+pub(super) fn configuration_compatibility_mode_xml(value: &str) -> Option<String> {
+    configuration_compatibility_mode_xml_under(value, MAX_EVIDENCED_PACKED_PLATFORM_VERSION)
+}
+
+/// As `configuration_compatibility_mode_xml`, by the edition that writes the
+/// XML: 8.5 prints `80501` as `Version8_5_1`, where 8.3.27 clamps it.
+pub(super) fn configuration_compatibility_mode_xml_for(
+    value: &str,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<String> {
+    let ceiling = if source_version == InfobaseConfigSourceVersion::V2_21 {
+        PACKED_PLATFORM_VERSION_8_5_1
+    } else {
+        MAX_EVIDENCED_PACKED_PLATFORM_VERSION
+    };
+    configuration_compatibility_mode_xml_under(value, ceiling)
+}
+
+fn configuration_compatibility_mode_xml_under(value: &str, ceiling: u32) -> Option<String> {
+    if let Some(value) = parse_1c_quoted_string(value) {
+        return if value.is_empty() { None } else { Some(value) };
+    }
+    let version = value.parse::<u32>().ok()?;
+    if version < 80000 || version > ceiling {
+        return None;
+    }
+    Some(format!(
+        "Version{}_{}_{}",
+        version / 10000,
+        (version / 100) % 100,
+        version % 100
+    ))
+}
+
+/// The first compatibility mode whose forms declare the data-composition
+/// schema namespace on their root. 8.3.27.2214 writes `xmlns:dcssch` on
+/// `<Form>` from `Version8_3_19` on and leaves it out below: an extension's
+/// common form under `ConfigurationExtensionCompatibilityMode` 8.3.11 … 8.3.18
+/// without it, 8.3.19 … 8.3.26 with it; a configuration's under
+/// `CompatibilityMode` 8.2.16, 8.3.8, 8.3.10 without, 8.3.19 and 8.3.27 with
+/// (its `ConfigurationExtensionCompatibilityMode` plays no part).
+const FORM_DCS_SCHEMA_NAMESPACE_FROM: (u32, u32, u32) = (8, 3, 19);
+
+/// Whether forms written under `compatibility_mode` declare `xmlns:dcssch` on
+/// their root. With nothing read -- an external object, an unknown spelling --
+/// the platform writes under its own edition, which declares it.
+pub(super) fn forms_declare_dcs_schema_namespace(compatibility_mode: Option<&str>) -> bool {
+    let Some(version) = compatibility_mode.and_then(|mode| mode.strip_prefix("Version")) else {
+        return true;
+    };
+    let mut parts = version.split('_').map(str::parse::<u32>);
+    let (Some(Ok(major)), Some(Ok(minor))) = (parts.next(), parts.next()) else {
+        return true;
+    };
+    let patch = match parts.next() {
+        None => 0,
+        Some(Ok(patch)) => patch,
+        Some(Err(_)) => return true,
+    };
+    (major, minor, patch) >= FORM_DCS_SCHEMA_NAMESPACE_FROM
+}
+
+// The compatibility-mode rules of the form writer are the `ibcmd-form-body`
+// crate's (`FormParseContext` holds a `FormCompatibility`); the readers of
+// the mode off the rows follow.
+pub(super) use ibcmd_form_body::{
+    FormCompatibility, compatibility_mode_spells_any_ref, forms_mark_no_main_table_default_picture,
+    forms_write_usual_group_behavior,
+};
+
+/// The compatibility mode the configuration (or extension) among `rows` runs
+/// in: its `CompatibilityMode`, or the extension compatibility where that is
+/// the only one read.
+pub(super) fn configuration_compatibility_mode_from_texts(
+    rows: &[MetadataTextRow],
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<String> {
+    rows.iter()
+        .filter(|row| parse_configuration_header_uuid(&row.text).is_some())
+        .find_map(|row| {
+            let properties = parse_configuration_properties_from_text(
+                &row.text,
+                &BTreeMap::new(),
+                source_version,
+            )?;
+            properties
+                .compatibility_mode
+                .or(properties.configuration_extension_compatibility_mode)
+        })
+}
+
+/// The form rules of the rows' configuration or extension. The two rules read
+/// different modes of an extension: the explicit `Usual` group behavior does
+/// not follow its own compatibility mode (fixture `group_behavior_extension`:
+/// 8.3.14 still writes it; a real extension at 8.3.9 agrees), while the
+/// `~List.DefaultPicture` mark does (a real extension at 8.3.10 leaves it
+/// unmarked, as a configuration below 8.3.19 does).
+pub(super) fn form_compatibility_from_texts(
+    rows: &[MetadataTextRow],
+    source_version: InfobaseConfigSourceVersion,
+) -> FormCompatibility {
+    let own_mode = rows.iter().find_map(|row| {
+        let header_uuid = parse_configuration_header_uuid(&row.text)?;
+        if extension_root_row(&row.text, &header_uuid) {
+            return None;
+        }
+        parse_configuration_properties_from_text(&row.text, &BTreeMap::new(), source_version)?
+            .compatibility_mode
+    });
+    let any_mode = configuration_compatibility_mode_from_texts(rows, source_version);
+    FormCompatibility {
+        usual_group_behavior: forms_write_usual_group_behavior(own_mode.as_deref()),
+        no_main_table_default_picture_marked: forms_mark_no_main_table_default_picture(
+            any_mode.as_deref(),
+        ),
+    }
+}
+
+struct ConfigurationChildObject {
+    tag: &'static str,
+    header: MetadataHeader,
+}
+
+fn parse_configuration_child_objects(
+    text: &str,
+    uuid: &str,
+    header_uuid: &str,
+) -> Vec<ConfigurationChildObject> {
+    nested_headers_with_offsets_from_text(text, uuid, |_| true)
+        .into_iter()
+        .filter_map(|(header, marker_start)| {
+            if header.uuid == header_uuid {
+                return None;
+            }
+            configuration_child_object_tag(text, marker_start, &header.uuid)
+                .map(|tag| ConfigurationChildObject { tag, header })
+        })
+        .collect()
+}
+
+pub(super) fn configuration_child_object_tag(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+) -> Option<&'static str> {
+    let mut search_end = marker_start;
+    let mut tag = None;
+    while let Some(start) = text[..search_end].rfind('{') {
+        search_end = start;
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        if marker_start >= end {
+            continue;
+        }
+        let object_text = &text[start..end];
+        if object_text.contains("{68,") {
+            continue;
+        }
+        let Some(fields) = split_1c_braced_fields(object_text, 0) else {
+            continue;
+        };
+        let Some(code) = fields
+            .first()
+            .and_then(|field| field.trim().parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if let Some((kind, _)) = metadata_source_for_object_text(code, object_text, child_uuid) {
+            if matches!(kind, "CommonForm" | "CommonTemplate") {
+                return None;
+            }
+            tag = Some(kind);
+        }
+    }
+    tag
+}
+
+#[allow(dead_code)]
+pub(super) fn build_command_interface_reference_index(
+    rows: &[ConfigRow],
+) -> BTreeMap<String, String> {
+    let metadata_texts = build_metadata_text_rows(rows);
+    build_command_interface_reference_index_from_texts(&metadata_texts)
+}
+
+pub(super) fn build_command_interface_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, String> {
+    let row_entries = parallel::install(|| {
+        rows.par_iter()
+            .enumerate()
+            .map(|(index, row)| (index, command_interface_reference_entries_from_text(row)))
+            .collect::<Vec<_>>()
+    })
+    .unwrap_or_else(|_| {
+        rows.iter()
+            .enumerate()
+            .map(|(index, row)| (index, command_interface_reference_entries_from_text(row)))
+            .collect::<Vec<_>>()
+    });
+    let mut index = BTreeMap::new();
+    for (_, entries) in row_entries {
+        for (uuid, reference) in entries {
+            index.insert(uuid, reference);
+        }
+    }
+    index
+}
+
+pub(super) fn command_interface_reference_entries_from_text(
+    row: &MetadataTextRow,
+) -> Vec<(String, String)> {
+    let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+        return Vec::new();
+    };
+    let mut entries = Vec::new();
+    if kind == "CommonCommand" {
+        entries.push((
+            row.file_name.clone(),
+            format!("CommonCommand.{}", header.name),
+        ));
+    }
+    entries.extend(
+        nested_command_headers_for_owner_from_text(kind, &row.text, &row.file_name)
+            .into_iter()
+            .map(|command| {
+                (
+                    command.uuid,
+                    format!("{}.{}.Command.{}", kind, header.name, command.name),
+                )
+            }),
+    );
+    entries
+}
+
+#[allow(dead_code)]
+pub(super) fn parse_metadata_command_reference_blob(
+    blob: &[u8],
+    uuid: &str,
+) -> Option<(String, MetadataHeader, String)> {
+    let inflated = inflate_raw_deflate(blob).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    let text = text.trim_start_matches('\u{feff}').to_string();
+    let object_code = parse_metadata_object_code(&text)?;
+    let kind = if object_code == 12 {
+        "CommonModule"
+    } else {
+        metadata_source_for_text(object_code, &text, uuid)?.0
+    };
+    let header = parse_metadata_header_from_text(&text, uuid)?;
+    Some((kind.to_string(), header, text))
+}
+
+#[cfg(test)]
+mod mobile_short_table_tests {
+    use super::*;
+    use ibcmd_metadata_model::metadata_model::{
+        DescriptorContext,
+        brace::{Brace, parse_row, serialize},
+        compile_descriptor,
+    };
+
+    const ROOT_UUID: &str = "10000000-0000-4000-8000-000000000435";
+
+    fn compiled_root(enabled: &[u32]) -> Brace {
+        // Same complete cleanroom section envelope as the public package
+        // tests. The actual production compiler, not a hand-written tuple,
+        // selects compatibility 8.3.24's V67/37-pair physical representation.
+        let info = [
+            "9cd510cd-abfc-11d4-9434-004095e12fc7",
+            "9fcd25a0-4822-11d4-9414-008048da11f9",
+            "e3687481-0a87-462c-a166-9f34594f9bba",
+            "9de14907-ec23-4a07-96f0-85521cb6b53b",
+            "51f2d5d8-ea4d-4064-8892-82951750031e",
+            "e68182ea-4237-4383-967f-90c1e3370bc7",
+            "fb282519-d103-4dd3-bc12-cb271d631dfc",
+        ].iter().enumerate().map(|(index, class)| format!(
+            "<xr:ContainedObject><xr:ClassId>{class}</xr:ClassId><xr:ObjectId>20000000-0000-4000-8000-{:012}</xr:ObjectId></xr:ContainedObject>", index+1
+        )).collect::<String>();
+        let flags = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES.iter().map(|(id,name)| format!(
+            "<app:functionality><app:functionality>{name}</app:functionality><app:use>{}</app:use></app:functionality>", enabled.contains(id)
+        )).collect::<String>();
+        let source = format!(
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" version=\"2.20\"><Configuration uuid=\"{ROOT_UUID}\"><InternalInfo>{info}</InternalInfo><Properties><Name>OwnShortMobile</Name><Synonym/><Comment/><DefaultRunMode>ManagedApplication</DefaultRunMode><ScriptVariant>Russian</ScriptVariant><CompatibilityMode>Version8_3_24</CompatibilityMode><UsedMobileApplicationFunctionalities>{flags}</UsedMobileApplicationFunctionalities></Properties><ChildObjects/></Configuration></MetaDataObject>"
+        );
+        let root = Path::new(".");
+        let path = root.join("Configuration.xml");
+        let files = [(
+            path.clone(),
+            std::sync::Arc::new(source.as_bytes().to_vec()),
+        )];
+        let context = DescriptorContext::with_files(root, "2.20", &files).unwrap();
+        parse_row(&compile_descriptor("Configuration", &path, source.as_bytes(), &context).unwrap())
+            .unwrap()
+    }
+
+    fn table(row: &mut Brace) -> &mut Vec<Brace> {
+        row.as_list_mut().unwrap()[3].as_list_mut().unwrap()[1]
+            .as_list_mut()
+            .unwrap()[1]
+            .as_list_mut()
+            .unwrap()[53]
+            .as_list_mut()
+            .unwrap()
+    }
+
+    #[test]
+    fn compiled_short_mobile_root_keeps_tail_flag_and_full_roster_both_xml_editions() {
+        let all = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        for enabled in [vec![], vec![1, 18, 35, 41], all] {
+            let mut row = compiled_root(&enabled);
+            let tuple = row.at(&[3, 1, 1]).unwrap().as_list().unwrap();
+            assert_eq!(tuple[0].as_atom(), Some("67"));
+            assert_eq!(tuple.len(), 60);
+            let own = table(&mut row);
+            assert_eq!(own[0].as_atom(), Some("2"));
+            assert_eq!(own[1].as_atom(), Some("37"));
+            assert_eq!(own.len(), 40);
+            assert_eq!(
+                own[39].as_atom(),
+                Some(if enabled.contains(&41) { "1" } else { "0" })
+            );
+            let text = serialize(&row);
+            for (dialect, version) in [
+                ("2.20", InfobaseConfigSourceVersion::V2_20),
+                ("2.21", InfobaseConfigSourceVersion::V2_21),
+            ] {
+                let (actual, messages) =
+                    parse_configuration_used_mobile_application_functionalities(
+                        &text, ROOT_UUID, dialect,
+                    )
+                    .unwrap();
+                assert!(messages.is_empty());
+                let expected = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+                    .iter()
+                    .map(|(id, name)| (*name, enabled.contains(id)))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    actual
+                        .iter()
+                        .map(|item| (item.name, item.use_functionality))
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                let xml =
+                    extract_configuration_source_xml(&text, ROOT_UUID, &BTreeMap::new(), version)
+                        .unwrap();
+                let document = ibcmd_xml::XmlReader::from_slice(xml.as_bytes()).unwrap();
+                assert_eq!(
+                    ibcmd_xml::metadata::parse_configuration_mobile_functionalities(&document)
+                        .unwrap(),
+                    Some(enabled.clone())
+                );
+                assert_eq!(xml.matches("<app:functionality>").count(), 76);
+            }
+            let (older, _) = parse_configuration_used_mobile_application_functionalities(
+                &text, ROOT_UUID, "2.17",
+            )
+            .unwrap();
+            assert_eq!(older.len(), 37);
+            assert!(older.iter().all(|item| item.name != "TextToSpeech"));
+        }
+    }
+
+    #[test]
+    fn compiled_short_mobile_root_rejects_malformed_counts_ids_flags_and_messages() {
+        let original = compiled_root(&[41]);
+        for case in 0..10 {
+            let mut row = original.clone();
+            let own = table(&mut row);
+            match case {
+                0 => own[0] = Brace::num(9),
+                1 => own[1] = Brace::num(36),
+                2 => own[1] = Brace::num(38),
+                3 => own[39] = Brace::num(2),
+                4 => own[2].as_list_mut().unwrap()[1] = Brace::num(2),
+                5 => own.swap(2, 3),
+                6 => own[3] = own[2].clone(),
+                7 => own[2].as_list_mut().unwrap()[0] = Brace::num(999),
+                8 => {
+                    own.remove(3);
+                }
+                9 => {
+                    own.push(Brace::List(vec![
+                        Brace::num(22),
+                        Brace::List(vec![Brace::num(0)]),
+                    ]));
+                }
+                _ => unreachable!(),
+            }
+            for dialect in ["2.20", "2.21"] {
+                assert!(
+                    parse_configuration_used_mobile_application_functionalities(
+                        &serialize(&row),
+                        ROOT_UUID,
+                        dialect
+                    )
+                    .is_none(),
+                    "{dialect}: malformed case{case}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod command_collection_lookup_tests {
+    use super::*;
+
+    #[test]
+    fn owner_specific_lookup_matches_the_broad_lookup_for_every_family() {
+        let kinds = [
+            "DataProcessor",
+            "Catalog",
+            "Document",
+            "InformationRegister",
+            "Report",
+            "DocumentJournal",
+            "ExchangePlan",
+            "BusinessProcess",
+            "Task",
+            "ChartOfAccounts",
+            "FilterCriterion",
+            "ChartOfCharacteristicTypes",
+            "AccountingRegister",
+            "AccumulationRegister",
+        ];
+
+        for (index, (kind, marker)) in kinds
+            .into_iter()
+            .zip(COMMAND_COLLECTION_LIST_MARKERS)
+            .enumerate()
+        {
+            let text = format!("prefix{marker}1,child}}suffix");
+            let offset = text.find("child").unwrap();
+            assert!(is_offset_inside_command_collection(&text, offset));
+            assert!(is_offset_inside_owner_command_collection(
+                kind, &text, offset
+            ));
+            assert!(!is_offset_inside_owner_command_collection(
+                kinds[(index + 1) % kinds.len()],
+                &text,
+                offset,
+            ));
+            assert!(is_offset_inside_owner_command_collection(
+                "UnknownOwnerFamily",
+                &text,
+                offset,
+            ));
+        }
+    }
+}
