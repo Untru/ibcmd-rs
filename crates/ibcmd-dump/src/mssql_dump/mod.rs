@@ -11782,6 +11782,9 @@ struct ConstantProperties {
     choice_folders_and_items: &'static str,
     quick_choice: &'static str,
     data_history: &'static str,
+    choice_form: Option<String>,
+    update_data_history_immediately_after_write: bool,
+    execute_after_write_data_history_version_processing: bool,
 }
 
 struct ChoiceParameter {
@@ -34133,6 +34136,13 @@ fn parse_constant_properties_from_text(
         choice_folders_and_items,
         quick_choice,
         data_history,
+        choice_form: parse_catalog_form_ref(constant_detail_fields.get(11).copied(), form_refs),
+        update_data_history_immediately_after_write: parse_1c_bool_flag(
+            constant_fields.get(15)?.trim(),
+        )?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_flag(
+            constant_fields.get(16)?.trim(),
+        )?,
     })
 }
 
@@ -42838,6 +42848,27 @@ fn format_constant_source_xml(
         constant.data_lock_control_mode,
         constant.data_history
     ));
+    insert = insert.replace(
+        "<ChoiceForm/>",
+        &match &constant.choice_form {
+            Some(form) => format!("<ChoiceForm>{form}</ChoiceForm>"),
+            None => "<ChoiceForm/>".to_string(),
+        },
+    );
+    insert = insert.replace(
+        "<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>",
+        &format!(
+            "<UpdateDataHistoryImmediatelyAfterWrite>{}</UpdateDataHistoryImmediatelyAfterWrite>",
+            xml_bool(constant.update_data_history_immediately_after_write)
+        ),
+    );
+    insert = insert.replace(
+        "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>",
+        &format!(
+            "<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>",
+            xml_bool(constant.execute_after_write_data_history_version_processing)
+        ),
+    );
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);

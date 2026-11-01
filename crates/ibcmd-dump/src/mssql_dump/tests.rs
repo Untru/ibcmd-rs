@@ -31482,6 +31482,9 @@ fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperti
         choice_folders_and_items: "Items",
         quick_choice: "Auto",
         data_history: "DontUse",
+        choice_form: None,
+        update_data_history_immediately_after_write: false,
+        execute_after_write_data_history_version_processing: false,
     }
 }
 
