@@ -54,6 +54,9 @@ jobs:
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          # Only master writes caches; pull requests restore master's.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -72,6 +75,9 @@ jobs:
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          # Only master writes caches; pull requests restore master's.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Check legacy root targets with explicit platform oracle
         run: cargo check --locked -p ibcmd-rs --all-targets --features platform-oracle

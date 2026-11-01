@@ -24,6 +24,9 @@ jobs:
         with:
           toolchain: '1.95.0'
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Only master writes caches; pull requests restore master's.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -59,17 +62,27 @@ jobs:
           xvfb-run -a npm run test:tree-host
           xvfb-run -a npm run test:source-host
         working-directory: editors/vscode
+      # A pull request packages the debug binary the cargo test step above
+      # built (same sources, --no-default-features) and runs the installed
+      # extension against it; pushes and manual runs package the release
+      # binary. Standalone Release packages the published VSIX itself.
       - name: Build Windows platform VSIX
         if: runner.os == 'Windows'
         shell: pwsh
         working-directory: editors/vscode
+        env:
+          VSIX_PROFILE: ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
         run: |
-          cargo build --locked --release --no-default-features --manifest-path ../../Cargo.toml
-          if ($LASTEXITCODE -ne 0) { throw 'Binary build failed' }
+          if ($env:VSIX_PROFILE -eq 'release') {
+            cargo build --locked --release --no-default-features --manifest-path ../../Cargo.toml
+            if ($LASTEXITCODE -ne 0) { throw 'Binary build failed' }
+          }
+          $binary = "../../target/$env:VSIX_PROFILE/ibcmd-rs.exe"
+          "packaging the $env:VSIX_PROFILE binary $binary"
           $env:SOURCE_DATE_EPOCH = git log -1 --format=%ct
-          python scripts/package.py --target win32-x64 --binary ../../target/release/ibcmd-rs.exe --out ../../target/vsix/ibcmd-rs-win32-x64.vsix
+          python scripts/package.py --target win32-x64 --binary $binary --out ../../target/vsix/ibcmd-rs-win32-x64.vsix
           if ($LASTEXITCODE -ne 0) { throw 'VSIX packaging failed' }
-          python scripts/package.py --target win32-x64 --binary ../../target/release/ibcmd-rs.exe --out ../../target/vsix/repeated.vsix
+          python scripts/package.py --target win32-x64 --binary $binary --out ../../target/vsix/repeated.vsix
           if ($LASTEXITCODE -ne 0) { throw 'Repeated VSIX packaging failed' }
           if ((Get-FileHash ../../target/vsix/ibcmd-rs-win32-x64.vsix).Hash -ne (Get-FileHash ../../target/vsix/repeated.vsix).Hash) { throw 'Non-reproducible VSIX' }
       - name: Install packaged Windows extension in clean editor and verify offline tree
@@ -86,7 +99,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always() && runner.os == 'Windows'
         with:
-          name: vscode-win32-x64
+          # A pull request's VSIX carries a debug binary: named apart.
+          name: vscode-win32-x64${{ github.event_name == 'pull_request' && '-debug' || '' }}
           path: |
             target/vsix/ibcmd-rs-win32-x64.vsix
             target/vsix/ibcmd-rs-win32-x64.vsix.sha256

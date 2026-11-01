@@ -21,8 +21,11 @@ env:
   OPENSPEC_TELEMETRY: "0"
   RUST_VERSION: "1.95.0"
   # Test builds keep line tables only: full debug info made the debug
-  # executable ~700 MB and linking dominated the test steps.
+  # executable ~700 MB and linking dominated the test steps. Backtraces keep
+  # file and line. The runners build from scratch, so incremental state is
+  # only written, never reused (dtolnay/rust-toolchain sets the same).
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   spec:
@@ -84,6 +87,10 @@ jobs:
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          # Only master writes caches: pull requests restore master's, and
+          # their own copies would push master's out of the 10 GB quota.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked
@@ -109,22 +116,32 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # pr_release: builds and audits the release binary on pull
+          # requests too; the other entries do so on pushes and manual runs.
           - name: Linux
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             binary: target/release/ibcmd-rs
+            debug_binary: target/debug/ibcmd-rs
+            pr_release: true
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: target/release/ibcmd-rs.exe
+            debug_binary: target/debug/ibcmd-rs.exe
+            pr_release: false
           - name: Linux ARM64
             os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             binary: target/release/ibcmd-rs
+            debug_binary: target/debug/ibcmd-rs
+            pr_release: false
           - name: macOS ARM64
             os: macos-15
             target: aarch64-apple-darwin
             binary: target/release/ibcmd-rs
+            debug_binary: target/debug/ibcmd-rs
+            pr_release: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -132,6 +149,26 @@ jobs:
           submodules: true
           # The base of a pull request, for the lane selection below.
           fetch-depth: 0
+
+      # Runner speed differs by host: the same job takes ~23 or ~40 min on
+      # windows-latest. The hardware line explains a slow run.
+      - name: Describe the runner
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if ($IsWindows) {
+            $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+            "cpu: $($cpu.Name.Trim()); logical processors: $([Environment]::ProcessorCount)"
+            "memory: $([math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)) GB"
+            $defender = Get-MpComputerStatus -ErrorAction SilentlyContinue
+            if ($defender) { "defender real-time protection: $($defender.RealTimeProtectionEnabled)" }
+          } elseif ($IsMacOS) {
+            "cpu: $(sysctl -n machdep.cpu.brand_string); logical processors: $([Environment]::ProcessorCount)"
+          } else {
+            "$((lscpu | Select-String -Pattern '^Model name' | Select-Object -First 1).Line); logical processors: $([Environment]::ProcessorCount)"
+          }
+          Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null -and ($_.Used + $_.Free) -gt 0 } |
+            ForEach-Object { "drive $($_.Name): $([math]::Round($_.Free / 1GB)) GB free" }
 
       - name: Select a physical temporary directory
         shell: pwsh
@@ -142,14 +179,36 @@ jobs:
             "$name=$physicalTemp" >> $env:GITHUB_ENV
           }
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A pull request runs only the lanes its changed files can affect
+      # (scripts/ci_scope.py); pushes and manual runs run every lane. The
+      # job itself always runs, so the required checks always report.
+      - name: Select the lanes this change needs
+        id: scope
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            python scripts/ci_scope.py --base "origin/${{ github.base_ref }}" ${{ matrix.pr_release && '--pr-release' || '' }} | tee -a "$GITHUB_OUTPUT"
+          else
+            python scripts/ci_scope.py --all | tee -a "$GITHUB_OUTPUT"
+          fi
+
       - name: Enforce EDT-derived corpus governance
         shell: pwsh
         run: |
           ./tools/validate-edt-corpus.ps1 -RepositoryRoot . -SelfTest
           ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
 
+      # PowerShell 7 above runs the same validator on every target. Windows
+      # PowerShell 5.1 takes ~4 min on a slow runner, so a pull request runs
+      # it when the validator, its test, the corpus or this workflow change
+      # (the `powershell` lane); every push to master runs it.
       - name: Test EDT corpus governance under Windows PowerShell
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.scope.outputs.powershell == 'true'
         shell: powershell
         run: |
           $pester = Get-Module -ListAvailable Pester |
@@ -179,24 +238,6 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Install Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      # A pull request runs only the lanes its changed files can affect
-      # (scripts/ci_scope.py); pushes and manual runs run every lane. The
-      # job itself always runs, so the required checks always report.
-      - name: Select the lanes this change needs
-        id: scope
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = pull_request ]; then
-            python scripts/ci_scope.py --base "origin/${{ github.base_ref }}" | tee -a "$GITHUB_OUTPUT"
-          else
-            python scripts/ci_scope.py --all | tee -a "$GITHUB_OUTPUT"
-          fi
-
       - name: Test installed-EDT oracle guards without the platform
         shell: pwsh
         run: |
@@ -223,6 +264,10 @@ jobs:
         with:
           # Native dependency objects must not cross runner ABI boundaries.
           key: abi-v1-${{ matrix.os }}-${{ matrix.target }}
+          # Only master writes caches: pull requests restore master's (an
+          # exact key unless they change a manifest), and their own copies
+          # would push master's out of the 10 GB quota.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       - name: Fetch locked dependencies
         if: steps.scope.outputs.rust == 'true'
@@ -296,33 +341,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+      # The release binary and the checks below that need it: on a pull
+      # request only where the matrix entry sets pr_release (Linux), on
+      # pushes and manual runs everywhere (the `release` lane).
       - name: Build the release-shaped binary offline
-        if: steps.scope.outputs.rust == 'true'
+        if: steps.scope.outputs.release == 'true'
         env:
           CARGO_NET_OFFLINE: "true"
         run: cargo build --locked --release --no-default-features
 
       - name: Verify Ubuntu 22.04 GLIBC compatibility
-        if: steps.scope.outputs.rust == 'true' && runner.os == 'Linux'
+        if: steps.scope.outputs.release == 'true' && runner.os == 'Linux'
         run: python scripts/audit_linux_abi.py --binary ${{ matrix.binary }} --target ${{ matrix.target }} --output target/offline-evidence/${{ matrix.target }}.abi.json
 
+      # Without the release build, on the debug binary the root integration
+      # suites built from the same sources and features (--no-default-features).
       - name: Verify native micro-corpus parity offline
         if: steps.scope.outputs.rust == 'true'
         shell: pwsh
-        run: ./tools/verify-native-evidence.ps1 -RepositoryRoot . -BinaryPath ${{ matrix.binary }}
+        run: ./tools/verify-native-evidence.ps1 -RepositoryRoot . -BinaryPath ${{ steps.scope.outputs.release == 'true' && matrix.binary || matrix.debug_binary }}
 
       - name: Generate deterministic runtime SBOM
-        if: steps.scope.outputs.rust == 'true'
+        if: steps.scope.outputs.release == 'true'
         env:
           CARGO_NET_OFFLINE: "true"
         run: python scripts/generate_sbom.py --manifest-path Cargo.toml --output target/offline-evidence/${{ matrix.target }}.sbom.cdx.json --target ${{ matrix.target }}
 
       - name: Audit clean-environment release boundary
-        if: steps.scope.outputs.rust == 'true'
+        if: steps.scope.outputs.release == 'true'
         run: python scripts/audit_release.py --binary ${{ matrix.binary }} --sbom target/offline-evidence/${{ matrix.target }}.sbom.cdx.json
 
       - name: Package and audit the exact tested binary
-        if: steps.scope.outputs.rust == 'true'
+        if: steps.scope.outputs.release == 'true'
         shell: pwsh
         env:
           CARGO_NET_OFFLINE: "true"
@@ -337,7 +387,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Packaged release audit failed' }
 
       - name: Upload evidence
-        if: steps.scope.outputs.rust == 'true'
+        if: steps.scope.outputs.release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: offline-evidence-${{ matrix.target }}
