@@ -30904,12 +30904,12 @@ fn parse_business_process_properties_from_text(
         generated_types,
         characteristics,
         use_standard_commands: information_register_bool(fields.get(2)?)?,
-        edit_type: match fields.get(16)?.trim() {
+        edit_type: match fields.get(21)?.trim() {
             "1" => "InDialog",
             _ => return None,
         },
         input_by_string,
-        create_on_input: metadata_create_on_input_xml(fields.get(19)?.trim())?,
+        create_on_input: metadata_create_on_input_xml(fields.get(42)?.trim())?,
         search_string_mode_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
         full_text_search_on_input_by_string,
@@ -30950,30 +30950,31 @@ fn parse_business_process_properties_from_text(
             form_refs,
         )?,
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(45)?.trim())?,
-        number_type: match fields.get(17)?.trim() {
-            "0" => "String",
+        number_type: match fields.get(16)?.trim() {
+            "0" => "Number",
+            "1" => "String",
             _ => return None,
         },
         number_length: parse_exchange_plan_u32(fields.get(18)?)?,
         number_allowed_length: parse_business_process_number_allowed_length(fields)?,
-        check_unique: information_register_bool(fields.get(20)?)?,
+        check_unique: information_register_bool(fields.get(19)?)?,
         standard_attributes: parse_business_process_standard_attributes(
             fields.get(30)?,
             type_index,
             metadata_object_refs,
         )?,
-        autonumbering: information_register_bool(fields.get(21)?)?,
+        autonumbering: information_register_bool(fields.get(20)?)?,
         based_on: parse_business_process_based_on(fields.get(15)?, object_refs)?,
-        number_periodicity: match fields.get(31)?.trim() {
-            "1" => "Nonperiodical",
+        number_periodicity: match fields.get(17)?.trim() {
+            "0" => "Nonperiodical",
             _ => return None,
         },
         task: parse_owner_optional_reference(fields.get(25)?, object_refs, "Task.")?,
-        create_task_in_privileged_mode: information_register_bool(fields.get(29)?)?,
+        create_task_in_privileged_mode: information_register_bool(fields.get(31)?)?,
         data_lock_fields,
         data_lock_control_mode: parse_business_process_data_lock_control_mode(fields)?,
         include_help_in_contents: information_register_bool(fields.get(26)?)?,
-        full_text_search: register_child_full_text_search_xml(fields.get(42)?.trim())?,
+        full_text_search: register_child_full_text_search_xml(fields.get(29)?.trim())?,
         object_presentation: parse_information_register_owner_localized_value(fields.get(35)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
             fields.get(36)?,
@@ -31714,8 +31715,8 @@ fn parse_task_properties_from_text(
         },
         number_length: parse_exchange_plan_u32(fields.get(19)?)?,
         number_allowed_length: parse_task_number_allowed_length_slot(fields.get(43)?)?.xml_value(),
-        check_unique: information_register_bool(fields.get(21)?)?,
-        autonumbering: information_register_bool(fields.get(23)?)?,
+        check_unique: information_register_bool(fields.get(20)?)?,
+        autonumbering: information_register_bool(fields.get(21)?)?,
         task_number_auto_prefix: task_number_auto_prefix.xml_value(),
         description_length: parse_exchange_plan_u32(fields.get(22)?)?,
         addressing,
@@ -31732,14 +31733,17 @@ fn parse_task_properties_from_text(
             metadata_object_refs,
         )?,
         default_presentation: match fields.get(27)?.trim() {
+            "0" => "AsNumber",
             "1" => "AsDescription",
             _ => return None,
         },
-        // No corpus slot varies with EditType across the five cross-edition
-        // captures; it is a fixed structural constant for Task objects, the
-        // same way the encoder validates it (`require_enum_value(..,
-        // "EditType", "InDialog")`) without ever writing a field for it.
-        edit_type: "InDialog",
+        // Slot 23 carries `<EditType>`: one task of the corpus writes
+        // `InList` and stores `0`, the rest write `InDialog` and store `1`.
+        edit_type: match fields.get(23)?.trim() {
+            "0" => "InList",
+            "1" => "InDialog",
+            _ => return None,
+        },
         input_by_string,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,

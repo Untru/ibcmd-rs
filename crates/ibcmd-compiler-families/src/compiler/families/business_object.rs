@@ -1669,16 +1669,12 @@ fn build_business_process(
     fields[2] = bool_token(object, "UseStandardCommands")?;
     put_generated_pairs(&mut fields, &[3, 5, 7, 9, 11, 13], &generated);
     fields[15] = metadata_reference_collection(object, "BasedOn", indexes)?;
-    fields[16] = token("1");
+    fields[16] = enum_code(object, "NumberType", &[("Number", "0"), ("String", "1")])?;
     fields[17] = token("0");
     fields[18] = token(u32_property(object, "NumberLength")?.to_string());
-    fields[19] = enum_code(
-        object,
-        "CreateOnInput",
-        &[("Auto", "0"), ("DontUse", "1"), ("Use", "2")],
-    )?;
-    fields[20] = bool_token(object, "CheckUnique")?;
-    fields[21] = bool_token(object, "Autonumbering")?;
+    fields[19] = bool_token(object, "CheckUnique")?;
+    fields[20] = bool_token(object, "Autonumbering")?;
+    fields[21] = token("1");
     for (slot, name) in (22..=24).zip(["DefaultObjectForm", "DefaultListForm", "DefaultChoiceForm"])
     {
         fields[slot] = optional_owned_reference(object, name, &children.forms, indexes)?;
@@ -1706,9 +1702,9 @@ fn build_business_process(
             ("AutomaticAndManaged", "2"),
         ],
     )?;
-    fields[29] = bool_token(object, "CreateTaskInPrivilegedMode")?;
+    fields[29] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[30] = standard_attributes(&["-9", "-8", "-7", "-5", "-4", "-3", "-2"])?;
-    fields[31] = token("1");
+    fields[31] = bool_token(object, "CreateTaskInPrivilegedMode")?;
     for (slot, name) in (32..=34).zip([
         "AuxiliaryObjectForm",
         "AuxiliaryListForm",
@@ -1731,7 +1727,11 @@ fn build_business_process(
         &[("Fixed", "0"), ("Variable", "1")],
     )?;
     fields[41] = list(vec![token("0"), list(vec![token("0")])]);
-    fields[42] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[42] = enum_code(
+        object,
+        "CreateOnInput",
+        &[("Auto", "0"), ("DontUse", "1"), ("Use", "2")],
+    )?;
     fields[43] = field_reference_collection(
         object,
         "DataLockFields",
@@ -1807,15 +1807,16 @@ fn build_task(
     }
     fields[18] = enum_code(object, "NumberType", &[("Number", "0"), ("String", "1")])?;
     fields[19] = token(u32_property(object, "NumberLength")?.to_string());
-    fields[20] = enum_code(
+    fields[20] = bool_token(object, "CheckUnique")?;
+    fields[21] = bool_token(object, "Autonumbering")?;
+    fields[22] = token(u32_property(object, "DescriptionLength")?.to_string());
+    fields[23] = token("1");
+    fields[24] = bool_token(object, "IncludeHelpInContents")?;
+    fields[43] = enum_code(
         object,
         "NumberAllowedLength",
         &[("Variable", "0"), ("Fixed", "1")],
     )?;
-    fields[21] = bool_token(object, "CheckUnique")?;
-    fields[22] = token(u32_property(object, "DescriptionLength")?.to_string());
-    fields[23] = bool_token(object, "Autonumbering")?;
-    fields[24] = token("1");
     fields[25] = addressing.clone();
     fields[26] = optional_owned_member_reference(
         object,
