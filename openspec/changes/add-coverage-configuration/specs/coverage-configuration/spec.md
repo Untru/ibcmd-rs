@@ -108,6 +108,34 @@ built.
 - **WHEN** one of those sets is proven again with new variants
 - **THEN** the offline check fails and names `tools/coverage/combine.py` until the combined configuration is rebuilt
 
+### Requirement: The writers' round trip holds the combined sets
+
+An offline test SHALL write the native XML of every all-in-one set (each
+platform's combined configuration, the combined extension and the combined
+external files) with ibcmd-rs through `cf bootstrap` and, for configurations,
+through an import into an empty platform-made file infobase, export it back
+and compare each variant's files with the native ones. A set the route
+refuses as a whole SHALL be held to the exact list of files it refuses, and
+every variant that does not come back SHALL be listed with its reason in
+`tests/fixtures/coverage/round-trip.json`.
+
+#### Scenario: A writer change breaks a variant that round-trips
+
+- **GIVEN** a variant of a combined set that is not listed as a gap
+- **WHEN** ibcmd-rs writes it so that its export differs from the native file
+- **THEN** the test fails and names the route, the set, the variant and the first differing file
+
+#### Scenario: A writer refuses one more file
+
+- **GIVEN** a combined set the route refuses with a listed set of files
+- **WHEN** the writer refuses a file outside that list
+- **THEN** the test fails and names the file and the writer's reason
+
+#### Scenario: A gap is fixed
+
+- **WHEN** a listed gap or refused file comes back equal
+- **THEN** the test passes and reports the entry so that it can leave the list
+
 ### Requirement: A mismatch on a typical configuration becomes a coverage variant first
 
 A difference between native and ibcmd-rs output found on a typical
