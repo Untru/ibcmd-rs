@@ -12079,6 +12079,20 @@ struct CommonAttributePropertyDetails {
     /// (`УдалитьПараметрыУчетаФИ`), with no third shape. No common attribute of
     /// UT, Документооборот or БСП demo carries one at all.
     tooltip: Vec<(String, String)>,
+    password_mode: bool,
+    format: Vec<(String, String)>,
+    edit_format: Vec<(String, String)>,
+    mark_negatives: bool,
+    mask: String,
+    multi_line: bool,
+    extended_edit: bool,
+    min_value: CommonAttributeFillValue,
+    max_value: CommonAttributeFillValue,
+    fill_from_filling_value: bool,
+    choice_folders_and_items: &'static str,
+    quick_choice: &'static str,
+    create_on_input: &'static str,
+    choice_history_on_input: &'static str,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -34775,18 +34789,73 @@ fn parse_common_attribute_property_details(
         .get(1)
         .and_then(|field| split_1c_braced_fields(field, 0))
         .unwrap_or_default();
+    let boolean = |index: usize| -> Option<bool> {
+        let value = typed_fields.get(index)?.trim();
+        let flag = |text: &str| match text {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        };
+        flag(value).or_else(|| {
+            let inner = split_1c_braced_fields(value, 0)?;
+            flag(inner.first()?.trim())
+        })
+    };
+    let bound = |index: usize| -> Option<CommonAttributeFillValue> {
+        Some(
+            match parse_information_register_bound(typed_fields.get(index)?)? {
+                None => CommonAttributeFillValue::Nil,
+                Some(value) => CommonAttributeFillValue::String(value),
+            },
+        )
+    };
+    let localized = |index: usize| {
+        typed_fields
+            .get(index)
+            .map(|field| parse_1c_synonyms(field))
+            .unwrap_or_default()
+    };
     let fill_value = typed_fields
         .get(19)
         .and_then(|field| parse_common_attribute_fill_value(field));
-    let fill_checking = metadata_fill_checking_xml(typed_fields.get(20).copied());
-    let tooltip = typed_fields
-        .get(4)
-        .map(|field| parse_1c_synonyms(field))
-        .unwrap_or_default();
-    (fields.len() > 3 || fill_value.is_some()).then_some(CommonAttributePropertyDetails {
+    let fill_checking = metadata_fill_checking_xml(typed_fields.get(13).copied());
+    let tooltip = localized(4);
+    Some(CommonAttributePropertyDetails {
         fill_value,
         fill_checking,
         tooltip,
+        password_mode: boolean(2).unwrap_or(false),
+        format: localized(3),
+        edit_format: localized(18),
+        mark_negatives: boolean(5).unwrap_or(false),
+        mask: typed_fields
+            .get(6)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .unwrap_or_default(),
+        multi_line: boolean(7).unwrap_or(false),
+        extended_edit: boolean(17).unwrap_or(false),
+        min_value: bound(8).unwrap_or(CommonAttributeFillValue::Nil),
+        max_value: bound(9).unwrap_or(CommonAttributeFillValue::Nil),
+        fill_from_filling_value: boolean(20).unwrap_or(false),
+        choice_folders_and_items: match typed_fields.get(10).map(|field| field.trim()) {
+            Some("1") => "Folders",
+            Some("2") => "FoldersAndItems",
+            _ => "Items",
+        },
+        quick_choice: match typed_fields.get(12).map(|field| field.trim()) {
+            Some("0") => "DontUse",
+            Some("1") => "Use",
+            _ => "Auto",
+        },
+        create_on_input: match typed_fields.get(21).map(|field| field.trim()) {
+            Some("1") => "DontUse",
+            Some("2") => "Use",
+            _ => "Auto",
+        },
+        choice_history_on_input: match typed_fields.get(22).map(|field| field.trim()) {
+            Some("1") => "DontUse",
+            _ => "Auto",
+        },
     })
 }
 
@@ -42868,56 +42937,89 @@ fn format_common_attribute_source_xml(
 fn format_common_attribute_property_details_xml(
     details: &CommonAttributePropertyDetails,
 ) -> String {
-    let mut xml = "\t\t\t<PasswordMode>false</PasswordMode>\r\n\
-\t\t\t<Format/>\r\n\
-\t\t\t<EditFormat/>\r\n"
-        .to_string();
-    push_localized_property(&mut xml, "\t\t\t", "ToolTip", &details.tooltip);
-    xml.push_str(
-        "\t\t\t<MarkNegatives>false</MarkNegatives>\r\n\
-\t\t\t<Mask/>\r\n\
-\t\t\t<MultiLine>false</MultiLine>\r\n\
-\t\t\t<ExtendedEdit>false</ExtendedEdit>\r\n\
-\t\t\t<MinValue xsi:nil=\"true\"/>\r\n\
-\t\t\t<MaxValue xsi:nil=\"true\"/>\r\n\
-\t\t\t<FillFromFillingValue>false</FillFromFillingValue>\r\n\
-\t\t\t",
+    let mut xml = format!(
+        "\t\t\t<PasswordMode>{}</PasswordMode>\r\n",
+        xml_bool(details.password_mode)
     );
+    if details.format.is_empty() {
+        xml.push_str("\t\t\t<Format/>\r\n");
+    } else {
+        push_localized_property(&mut xml, "\t\t\t", "Format", &details.format);
+    }
+    if details.edit_format.is_empty() {
+        xml.push_str("\t\t\t<EditFormat/>\r\n");
+    } else {
+        push_localized_property(&mut xml, "\t\t\t", "EditFormat", &details.edit_format);
+    }
+    push_localized_property(&mut xml, "\t\t\t", "ToolTip", &details.tooltip);
+    xml.push_str(&format!(
+        "\t\t\t<MarkNegatives>{}</MarkNegatives>\r\n",
+        xml_bool(details.mark_negatives)
+    ));
+    if details.mask.is_empty() {
+        xml.push_str("\t\t\t<Mask/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t<Mask>{}</Mask>\r\n",
+            escape_xml_element_text(&details.mask)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t<MultiLine>{}</MultiLine>\r\n\
+\t\t\t<ExtendedEdit>{}</ExtendedEdit>\r\n\
+\t\t\t{}\r\n\
+\t\t\t{}\r\n\
+\t\t\t<FillFromFillingValue>{}</FillFromFillingValue>\r\n\
+\t\t\t",
+        xml_bool(details.multi_line),
+        xml_bool(details.extended_edit),
+        format_common_attribute_bound_xml("MinValue", &details.min_value),
+        format_common_attribute_bound_xml("MaxValue", &details.max_value),
+        xml_bool(details.fill_from_filling_value),
+    ));
     if let Some(fill_value) = &details.fill_value {
         xml.push_str(&format_common_attribute_fill_value_xml(fill_value));
         xml.push_str("\r\n\t\t\t");
     }
     xml.push_str(&format!(
         "<FillChecking>{}</FillChecking>\r\n\
-\t\t\t<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>\r\n\
+\t\t\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n\
 \t\t\t<ChoiceParameterLinks/>\r\n\
 \t\t\t<ChoiceParameters/>\r\n\
-\t\t\t<QuickChoice>Auto</QuickChoice>\r\n\
-\t\t\t<CreateOnInput>Auto</CreateOnInput>\r\n\
+\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
+\t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
 \t\t\t<ChoiceForm/>\r\n\
 \t\t\t<LinkByType/>\r\n\
-\t\t\t<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>\r\n",
-        details.fill_checking
+\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n",
+        details.fill_checking,
+        details.choice_folders_and_items,
+        details.quick_choice,
+        details.create_on_input,
+        details.choice_history_on_input,
     ));
     xml
 }
 
 fn format_common_attribute_fill_value_xml(value: &CommonAttributeFillValue) -> String {
+    format_common_attribute_bound_xml("FillValue", value)
+}
+
+fn format_common_attribute_bound_xml(tag: &str, value: &CommonAttributeFillValue) -> String {
     match value {
-        CommonAttributeFillValue::Nil => "<FillValue xsi:nil=\"true\"/>".to_string(),
+        CommonAttributeFillValue::Nil => format!("<{tag} xsi:nil=\"true\"/>"),
         CommonAttributeFillValue::Boolean(value) => format!(
-            "<FillValue xsi:type=\"xs:boolean\">{}</FillValue>",
+            "<{tag} xsi:type=\"xs:boolean\">{}</{tag}>",
             xml_bool(*value)
         ),
         CommonAttributeFillValue::Decimal(value) => format!(
-            "<FillValue xsi:type=\"xs:decimal\">{}</FillValue>",
+            "<{tag} xsi:type=\"xs:decimal\">{}</{tag}>",
             escape_xml_element_text(value)
         ),
         CommonAttributeFillValue::String(value) if value.is_empty() => {
-            "<FillValue xsi:type=\"xs:string\"/>".to_string()
+            format!("<{tag} xsi:type=\"xs:string\"/>")
         }
         CommonAttributeFillValue::String(value) => format!(
-            "<FillValue xsi:type=\"xs:string\">{}</FillValue>",
+            "<{tag} xsi:type=\"xs:string\">{}</{tag}>",
             escape_xml_element_text(value)
         ),
     }

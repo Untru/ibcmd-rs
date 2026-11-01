@@ -32181,12 +32181,12 @@ fn extracts_common_attribute_fill_checking_from_native_property_tail() {
 {0},
 {0},0,"",0,
 {"U"},
-{"U"},0,@ZERO_UUID@,2,0,
+{"U"},0,@ZERO_UUID@,2,1,
 {5006,0},
 {3,0,0},
 {0,0},0,
 {0},
-{"S",""},1,0,0},
+{"S",""},0,0,0},
 {0,0}},0}"#
         .replace("@UUID@", uuid)
         .replace("@ZERO_UUID@", zero_uuid);
