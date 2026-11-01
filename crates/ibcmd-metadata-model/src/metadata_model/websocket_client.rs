@@ -6,7 +6,7 @@ use ibcmd_schema::websocket_client::WebSocketClientLayout as Layout;
 use super::brace::Brace;
 use super::common::Header;
 use super::export::values::{bool_text, header, header_elements};
-use super::export::{Build, ObjectNames, atom, el, item, leaf, list, number, string, xml_text};
+use super::export::{Build, ObjectNames, atom, el, item, leaf, list, string, xml_text};
 use super::xml::Element;
 use super::{ObjectXml, native_text, parse_bool};
 use ibcmd_restructure::brace_list;
@@ -22,7 +22,7 @@ pub struct WebSocketClient {
     pub headers: Vec<(String, String)>,
     pub use_os_proxy: bool,
     pub use_os_authentication: bool,
-    pub timeout: i64,
+    pub timeout: u64,
 }
 
 impl WebSocketClient {
@@ -215,7 +215,7 @@ impl WebSocketClient {
                 Brace::list(headers),
                 Brace::flag(self.use_os_proxy),
                 Brace::flag(self.use_os_authentication),
-                Brace::num(self.timeout),
+                Brace::atom(self.timeout),
                 Brace::flag(self.auto_connect)
             ],
             Brace::num(0)
@@ -291,7 +291,7 @@ impl WebSocketClient {
                 headers: pairs,
                 use_os_proxy: boolean(Layout::OS_PROXY)?,
                 use_os_authentication: boolean(Layout::OS_AUTHENTICATION)?,
-                timeout: number(&fields[Layout::TIMEOUT])?,
+                timeout: atom(&fields[Layout::TIMEOUT])?.parse::<u64>()?,
             })
         })()
         .context("WebSocketClient descriptor")

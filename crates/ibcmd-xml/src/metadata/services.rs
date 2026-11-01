@@ -343,7 +343,7 @@ struct HttpServiceProjection {
     comment: String,
     root_url: String,
     reuse_sessions: String,
-    session_max_age: u32,
+    session_max_age: u64,
     urls: Vec<HttpUrlProjection>,
 }
 
@@ -382,7 +382,7 @@ struct WebServiceProjection {
     package_namespaces: Vec<String>,
     descriptor_file_name: String,
     reuse_sessions: String,
-    session_max_age: u32,
+    session_max_age: u64,
     operations: Vec<WebOperationProjection>,
 }
 
@@ -593,7 +593,10 @@ fn decode_http_service(
             CanonicalValue::text(canonical_text(&projection.root_url)?),
         ),
         ("ReuseSessions", enum_value(&projection.reuse_sessions)?),
-        ("SessionMaxAge", integer_value(projection.session_max_age)?),
+        (
+            "SessionMaxAge",
+            integer_value_u64(projection.session_max_age)?,
+        ),
     ] {
         root_parts.properties.push(canonical_field(name, value)?);
     }
@@ -733,7 +736,10 @@ fn decode_web_service(
             CanonicalValue::text(canonical_text(&projection.descriptor_file_name)?),
         ),
         ("ReuseSessions", enum_value(&projection.reuse_sessions)?),
-        ("SessionMaxAge", integer_value(projection.session_max_age)?),
+        (
+            "SessionMaxAge",
+            integer_value_u64(projection.session_max_age)?,
+        ),
     ] {
         root_parts.properties.push(canonical_field(name, value)?);
     }
@@ -1061,6 +1067,14 @@ fn enum_value(value: &str) -> Result<CanonicalValue, MetadataDecodeError> {
 }
 
 fn integer_value(value: u32) -> Result<CanonicalValue, MetadataDecodeError> {
+    CanonicalInteger::new(&value.to_string())
+        .map(CanonicalValue::integer)
+        .map_err(|error| MetadataDecodeError::Core(error.to_string()))
+}
+
+/// The same canonical integer for a field the platform stores as a 64-bit
+/// word (`SessionMaxAge`).
+fn integer_value_u64(value: u64) -> Result<CanonicalValue, MetadataDecodeError> {
     CanonicalInteger::new(&value.to_string())
         .map(CanonicalValue::integer)
         .map_err(|error| MetadataDecodeError::Core(error.to_string()))
@@ -1394,7 +1408,7 @@ fn project_http_service(
         comment: required_text(properties, "Comment", expected, &uris)?,
         root_url,
         reuse_sessions,
-        session_max_age: required_u32(properties, "SessionMaxAge", expected, &uris)?,
+        session_max_age: required_u64(properties, "SessionMaxAge", expected, &uris)?,
         urls,
     })
 }
@@ -1577,7 +1591,7 @@ fn project_web_service(
         package_namespaces,
         descriptor_file_name,
         reuse_sessions,
-        session_max_age: required_u32(properties, "SessionMaxAge", expected, &uris)?,
+        session_max_age: required_u64(properties, "SessionMaxAge", expected, &uris)?,
         operations,
     })
 }
@@ -2515,6 +2529,25 @@ fn required_u32(
         ))
 }
 
+/// `SessionMaxAge` is a 64-bit word: the platform writes the unsigned
+/// spelling (`18446744073709551615` for a stored `-1`) and reads it back, so a
+/// value outside `u32` is in-domain here.
+fn required_u64(
+    parent: &XmlElement,
+    local: &'static str,
+    namespace: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<u64, MetadataDecodeError> {
+    let value = required_text(parent, local, namespace, uris)?;
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|parsed| parsed.to_string() == value)
+        .ok_or(MetadataDecodeError::InvalidEnvelope(
+            "integer is not canonical u64",
+        ))
+}
+
 fn encode_scheduled_job(
     envelope: &MetadataEnvelope,
     target: &ProfileId,
@@ -3210,6 +3243,31 @@ mod tests {
         .into_bytes()
     }
 
+    #[test]
+    fn web_service_session_max_age_accepts_the_full_64_bit_word() {
+        // The platform stores `SessionMaxAge` as a 64-bit word and writes the
+        // unsigned spelling: `18446744073709551615` is a stored `-1`. It reads
+        // that text back on import, so the decoder must accept it.
+        let mut registry = MetadataRegistry::default();
+        register_web_service_codec(&mut registry).unwrap();
+        for version in ["2.20", "2.21"] {
+            let fixture = String::from_utf8(web_fixture(version, "Managed", "xr:MDObjectRef", ""))
+                .unwrap()
+                .replace(
+                    "<SessionMaxAge>20</SessionMaxAge>",
+                    "<SessionMaxAge>18446744073709551615</SessionMaxAge>",
+                );
+            let document = XmlReader::from_slice(fixture.as_bytes()).unwrap();
+            registry
+                .decode(
+                    &FamilyId::parse(WEB_SERVICE_FAMILY).unwrap(),
+                    &document,
+                    profile(version),
+                    ObjectPath::root(),
+                )
+                .expect("the platform's own SessionMaxAge spelling is in domain");
+        }
+    }
     #[test]
     fn web_service_tree_packages_and_types_are_typed_and_roundtrip() {
         let mut registry = MetadataRegistry::default();
