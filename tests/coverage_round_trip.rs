@@ -114,22 +114,19 @@ fn ibcmd_rs(args: &[&std::ffi::OsStr]) -> Output {
 
 /// A writer's message as the expectations spell it: a path under the corpus
 /// is written from the set's `native/` with `/`, whatever the runner's
-/// checkout path and separator.
+/// checkout path and separator. The writers' messages hold no other `\`, so
+/// every one is read as a separator: a Windows path may mix both (the root
+/// joins `tests/fixtures/1c-fixtures` to the manifest directory, and a path
+/// rebuilt by components spells `\` throughout).
 fn normalized(text: &str) -> String {
-    let root = coverage_root();
-    let mut text = text.to_owned();
-    for spelling in [
-        root.to_string_lossy().into_owned(),
-        root.to_string_lossy().replace('\\', "/"),
-    ] {
-        text = text.replace(&spelling, "<coverage>");
-    }
+    let root = coverage_root().to_string_lossy().replace('\\', "/");
+    let mut text = text.replace('\\', "/").replace(&root, "<coverage>");
     let mut out = String::new();
     while let Some(start) = text.find("<coverage>") {
         out.push_str(&text[..start]);
         let rest = &text[start + "<coverage>".len()..];
         let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-        let path = rest[..end].replace('\\', "/");
+        let path = rest[..end].to_owned();
         // `<coverage>/<set>/native/<file>` names `<file>` of the set.
         out.push_str(
             path.split_once("/native/")
@@ -845,4 +842,14 @@ fn refusals_are_split_into_the_files_they_name() {
         "A/B.xml not written by the platform"
     );
     assert_eq!(gap_detail(&Verdict::Refused, None), "refused: *");
+    // Either separator, or a mix of both, names the same corpus file.
+    let root = coverage_root().to_string_lossy().replace('\\', "/");
+    for spelling in [root.clone(), root.replace('/', "\\")] {
+        assert_eq!(
+            normalized(&format!(
+                "failed to compile {spelling}/8.5.1.1529/corpus-x/native/CommonForms/F/Ext/Form.xml: no"
+            )),
+            "failed to compile CommonForms/F/Ext/Form.xml: no"
+        );
+    }
 }

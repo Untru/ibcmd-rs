@@ -114,12 +114,13 @@ An offline test SHALL write the native XML of every all-in-one set (each
 platform's combined configuration, the combined extension and the combined
 external files) with ibcmd-rs through `cf bootstrap` and, for configurations,
 through an import into an empty platform-made file infobase, export it back
-and compare each variant's files with the native ones. When a route refuses a
-combined configuration as a whole, the test SHALL run that route on the class
-sets the configuration was built from, so that output is compared wherever
-the writers can write it. A refused set SHALL be held to the exact files it
-refuses and the writer's reason for each, and every variant that does not
-come back SHALL be listed, with how it fails and its issue, in
+and compare each variant's files with the native ones. When `cf bootstrap`
+refuses a combined configuration as a whole, the test SHALL run `cf bootstrap`
+on the class sets the configuration was built from, so that output is
+compared wherever the writers can write it. A refused set SHALL be held to
+the exact files it refuses and the writer's reason for each, and every
+variant that does not come back SHALL be listed, with how it fails and its
+issue, in
 `tests/fixtures/coverage/round-trip.json`.
 
 #### Scenario: A writer change breaks a variant that round-trips
