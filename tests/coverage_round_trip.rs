@@ -1,12 +1,9 @@
-//! Offline round trips of the combined coverage configurations through
-//! ibcmd-rs's own writers (#674).
+//! Offline round trips of the coverage corpus through ibcmd-rs's own writers
+//! (#674).
 //!
 //! `coverage_corpus` reads the platform's `.cf` of each set. This suite starts
-//! from the platform's XML of the corpus's all-in-one sets instead (the
-//! `combined` configuration of each platform build, the `combined` extension
-//! and the `combined-epf`/`combined-erf` external files), writes it with
-//! ibcmd-rs into a store, reads it back and compares the result with that XML,
-//! variant by variant:
+//! from the platform's XML instead, writes it with ibcmd-rs into a store,
+//! reads it back and compares the result with that XML, variant by variant:
 //!
 //! - `xml-cf-xml`: `cf bootstrap` of `native/` into a `.cf` (`.cfe`, `.epf`,
 //!   `.erf`), then `cf export`;
@@ -15,16 +12,21 @@
 //!   (`tests/fixtures/file-infobase/empty.1CD.gz`), then
 //!   `infobase config export --db-path` (configurations only).
 //!
-//! The class sets are left out on purpose: of the lines that the round
-//! trips of every set reach and nothing else in the suite does, these sets
-//! reach 98 % in a ninth of the run time (`docs/test-audit.md`).
+//! It starts from the corpus's all-in-one sets: each build's `combined`
+//! configuration, the `combined` extension and the `combined-epf` and
+//! `combined-erf` external files. A route that refuses a combined
+//! configuration as a whole is then, through `cf bootstrap`, run on the class
+//! sets it was built from, so that the writers' output is still compared
+//! wherever they can write it; a class set that a written combined
+//! configuration holds is not run again.
 //!
 //! Every variant must come back byte for byte, except the known gaps listed
-//! with their reason in `tests/fixtures/coverage/round-trip.json`. A route
-//! that refuses a set as a whole names the files it cannot write; those
-//! files are listed under `refused` and no other file may join them. A
-//! variant that differs or is refused is listed under `gaps`. A listed entry
-//! that comes back is reported, not failed, so it can leave the list.
+//! with their issue in `tests/fixtures/coverage/round-trip.json`. A set the
+//! route refuses as a whole is held to the files it names and to the
+//! writer's reason for each (`refused`); a variant that does not come back is
+//! held to how it fails: the first file that differs or is missing, or the
+//! first file the writer refused (`gaps`). A listed entry that comes back is
+//! reported, not failed, so that it can leave the list.
 
 use std::{
     collections::BTreeMap,
@@ -46,6 +48,9 @@ use crate::coverage_corpus::{TempDirectory, Verdict, compare, coverage_sets, rea
 mod coverage_paths;
 
 const EXPECTATIONS: &str = "round-trip.json";
+
+/// The last line of every refused `infobase config import`.
+const IMPORT_FAILED: &str = "Импорт конфигурации из XML завершен с ошибкой";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Route {
@@ -70,7 +75,8 @@ enum Outcome {
     /// The route refused the whole set: each file it named, with the first
     /// message for it.
     Refused(BTreeMap<String, String>),
-    /// A verdict per variant; a refused variant carries its message.
+    /// A verdict per variant; a refused variant carries the first file the
+    /// writer named.
     Compared(BTreeMap<String, (Verdict, Option<String>)>),
 }
 
@@ -106,8 +112,10 @@ fn ibcmd_rs(args: &[&std::ffi::OsStr]) -> Output {
         .expect("run ibcmd-rs")
 }
 
-/// A file name as the corpus writes it, without the runner's path to it.
-fn corpus_relative(text: &str) -> String {
+/// A writer's message as the expectations spell it: a path under the corpus
+/// is written from the set's `native/` with `/`, whatever the runner's
+/// checkout path and separator.
+fn normalized(text: &str) -> String {
     let root = coverage_root();
     let mut text = text.to_owned();
     for spelling in [
@@ -116,14 +124,28 @@ fn corpus_relative(text: &str) -> String {
     ] {
         text = text.replace(&spelling, "<coverage>");
     }
-    text
+    let mut out = String::new();
+    while let Some(start) = text.find("<coverage>") {
+        out.push_str(&text[..start]);
+        let rest = &text[start + "<coverage>".len()..];
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let path = rest[..end].replace('\\', "/");
+        // `<coverage>/<set>/native/<file>` names `<file>` of the set.
+        out.push_str(
+            path.split_once("/native/")
+                .map_or(path.as_str(), |(_, file)| file),
+        );
+        text = rest[end..].to_owned();
+    }
+    out + &text
 }
 
 /// The files a refusing command names. `cf bootstrap` reports them in the
 /// `message` of its JSON report, `infobase config import` on its `[ERROR]`
 /// lines: one line per rejected row, `<file> <part>: <reason>`, under a
-/// header line that ends with `:`. A refusal that names no file is kept
-/// whole under `*`.
+/// header line that ends with `:`. Any other line (but the import's closing
+/// line) is kept under `*`, so a refusal of a new kind is never hidden
+/// behind the files a known one names.
 fn refused_files(output: &Output) -> BTreeMap<String, String> {
     let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let report = [text(&output.stdout), text(&output.stderr)]
@@ -152,12 +174,12 @@ fn refused_files(output: &Output) -> BTreeMap<String, String> {
             let reason = line.split_once(": ").unwrap().1;
             files
                 .entry(file.to_owned())
-                .or_insert_with(|| corpus_relative(reason));
-        } else {
-            unnamed.push(corpus_relative(line));
+                .or_insert_with(|| normalized(reason));
+        } else if line != IMPORT_FAILED {
+            unnamed.push(normalized(line));
         }
     }
-    if files.is_empty() {
+    if !unnamed.is_empty() || files.is_empty() {
         files.insert("*".to_owned(), unnamed.join(" / "));
     }
     files
@@ -347,16 +369,7 @@ fn measure(set: &Path, manifest: &Value, route: Route, work: &Path) -> Option<Ou
                         None,
                     )
                 }
-                Err(files) => (
-                    Verdict::Refused,
-                    Some(
-                        files
-                            .iter()
-                            .map(|(file, reason)| format!("{file}: {reason}"))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    ),
-                ),
+                Err(files) => (Verdict::Refused, files.keys().next().cloned()),
             };
             verdicts.insert(name, verdict);
         }
@@ -394,13 +407,9 @@ fn measure(set: &Path, manifest: &Value, route: Route, work: &Path) -> Option<Ou
     Some(Outcome::Compared(verdicts))
 }
 
-/// Every (route, set) pair, measured on as many threads as the machine has:
+/// Every (route, set) job, measured on as many threads as the machine has:
 /// each runs ibcmd-rs as child processes in a scratch directory of its own.
-fn measure_all(sets: &[(PathBuf, Value)]) -> BTreeMap<(Route, String), Outcome> {
-    let jobs: Vec<(Route, &(PathBuf, Value))> = Route::ALL
-        .iter()
-        .flat_map(|route| sets.iter().map(move |set| (*route, set)))
-        .collect();
+fn measure_all(jobs: &[(Route, PathBuf, Value)]) -> BTreeMap<(Route, String), Outcome> {
     let next = AtomicUsize::new(0);
     let results = Mutex::new(BTreeMap::new());
     let threads = std::thread::available_parallelism()
@@ -410,7 +419,7 @@ fn measure_all(sets: &[(PathBuf, Value)]) -> BTreeMap<(Route, String), Outcome> 
     std::thread::scope(|scope| {
         for _ in 0..threads {
             scope.spawn(|| {
-                while let Some((route, (set, manifest))) =
+                while let Some((route, set, manifest)) =
                     jobs.get(next.fetch_add(1, Ordering::Relaxed))
                 {
                     let temp = TempDirectory::new();
@@ -427,6 +436,72 @@ fn measure_all(sets: &[(PathBuf, Value)]) -> BTreeMap<(Route, String), Outcome> 
     results.into_inner().unwrap()
 }
 
+fn job(route: Route, set: PathBuf) -> (Route, PathBuf, Value) {
+    let manifest = serde_json::from_slice(&fs::read(set.join("manifest.json")).unwrap()).unwrap();
+    (route, set, manifest)
+}
+
+/// `a/b/../c` as `a/c`: a combined set names the sets of another build
+/// through `..`.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// The sets a combined configuration was built from.
+fn sources(set: &Path, manifest: &Value) -> Vec<PathBuf> {
+    manifest["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|source| lexical(&set.parent().unwrap().join(source["path"].as_str().unwrap())))
+        .collect()
+}
+
+/// The jobs of the sets a refused combined configuration was built from: the
+/// writers are still compared on every class set they can write. Only
+/// `cf bootstrap` takes this fallback. The file infobase import compiles the
+/// same rows with the same base-free compiler: measured on the corpus, its
+/// class sets would bring 7 more lines under comparison for 67 s more
+/// processor time (`docs/test-audit.md`). A set that is also part of a combined
+/// configuration the route writes is compared there already.
+fn fallback_jobs(
+    measured: &BTreeMap<(Route, String), Outcome>,
+    jobs: &[(Route, PathBuf, Value)],
+) -> Vec<(Route, PathBuf, Value)> {
+    let combined = |refused: bool| {
+        jobs.iter()
+            .filter(move |(route, set, manifest)| {
+                *route == Route::CfBootstrap
+                    && manifest["kind"] == "combined"
+                    && matches!(
+                        measured.get(&(*route, set_key(set))),
+                        Some(Outcome::Refused(_))
+                    ) == refused
+            })
+            .flat_map(|(route, set, manifest)| {
+                sources(set, manifest)
+                    .into_iter()
+                    .map(|source| (*route, source))
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let written = combined(false);
+    combined(true)
+        .into_iter()
+        .filter(|job| !written.contains(job))
+        .map(|(route, set)| job(route, set))
+        .collect()
+}
+
 fn listed(expectation: Option<&Value>, field: &str) -> BTreeMap<String, String> {
     expectation
         .and_then(|value| value[field].as_object())
@@ -437,6 +512,29 @@ fn listed(expectation: Option<&Value>, field: &str) -> BTreeMap<String, String> 
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// How a variant fails to come back, as its expectation spells it: the first
+/// file that differs, is not written or is written only by ibcmd-rs, or the
+/// first file the writer refused (`*` when it named none).
+fn gap_detail(verdict: &Verdict, refused: Option<&str>) -> String {
+    match verdict {
+        Verdict::Different(first) => match first.rsplit_once(" (") {
+            Some((path, "not written)")) => format!("{path} not written"),
+            Some((path, "not written by the platform)")) => {
+                format!("{path} not written by the platform")
+            }
+            Some((path, _)) => format!("{path} differs"),
+            None => first.clone(),
+        },
+        _ => format!("refused: {}", refused.unwrap_or("*")),
+    }
+}
+
+/// The part of a listed reason after its issue references
+/// (`#598: <detail>`, `no issue yet: <detail>`).
+fn listed_detail(reason: &str) -> &str {
+    reason.split_once(": ").map_or(reason, |(_, detail)| detail)
 }
 
 /// The failures of `measured` against `expected`, and the report lines.
@@ -466,10 +564,17 @@ fn check(
                         files.len()
                     ));
                     for (file, reason) in files {
-                        if !listed_refused.contains_key(file) {
-                            failures.push(format!(
+                        match listed_refused.get(file) {
+                            None => failures.push(format!(
                                 "{route_key} {key}: {file} is refused and not listed: {reason}"
-                            ));
+                            )),
+                            Some(listed) if listed_detail(listed) != reason => {
+                                failures.push(format!(
+                                    "{route_key} {key}: {file} is refused for another reason: {reason} (listed: {})",
+                                    listed_detail(listed)
+                                ))
+                            }
+                            Some(_) => {}
                         }
                     }
                     for (file, reason) in &listed_refused {
@@ -482,10 +587,11 @@ fn check(
                 }
                 Outcome::Compared(verdicts) => {
                     if !listed_refused.is_empty() {
+                        // Its variants are compared all the same: one that
+                        // does not come back fails until it is listed.
                         report.push(format!(
-                            "{route_key} {key}: listed as refused but now round-trips; list its gaps instead"
+                            "{route_key} {key}: no longer refused (replace refused with its gaps)"
                         ));
-                        continue;
                     }
                     for (variant, (verdict, message)) in verdicts {
                         if *verdict == Verdict::PlatformRefused {
@@ -500,15 +606,20 @@ fn check(
                                     "{route_key} {key}: newly equal (remove from gaps): {variant} ({reason})"
                                 ));
                             }
-                            (_, Some(_)) => gaps += 1,
-                            (verdict, None) => {
-                                let detail = match verdict {
-                                    Verdict::Different(first) => first.clone(),
-                                    _ => message.clone().unwrap_or_default(),
-                                };
-                                failures.push(format!(
-                                    "{route_key} {key}: {variant} does not round-trip: {detail}"
-                                ));
+                            (verdict, listed) => {
+                                let detail = gap_detail(verdict, message.as_deref());
+                                match listed {
+                                    None => failures.push(format!(
+                                        "{route_key} {key}: {variant} does not round-trip: {detail}"
+                                    )),
+                                    Some(reason) if listed_detail(reason) != detail => {
+                                        failures.push(format!(
+                                            "{route_key} {key}: {variant} does not round-trip another way: {detail} (listed: {})",
+                                            listed_detail(reason)
+                                        ))
+                                    }
+                                    Some(_) => gaps += 1,
+                                }
                             }
                         }
                     }
@@ -525,7 +636,7 @@ fn check(
         for key in expected_sets.keys() {
             if !measured.contains_key(&(route, key.clone())) {
                 failures.push(format!(
-                    "{route_key}: {key} is listed but is no combined set of this route"
+                    "{route_key}: {key} is listed but was not measured on this route"
                 ));
             }
         }
@@ -537,21 +648,18 @@ fn check(
 }
 
 #[test]
-fn combined_coverage_sets_round_trip_through_ibcmd_rs_writers() {
-    let sets: Vec<(PathBuf, Value)> = coverage_sets()
+fn coverage_sets_round_trip_through_ibcmd_rs_writers() {
+    let jobs: Vec<(Route, PathBuf, Value)> = coverage_sets()
         .into_iter()
-        .map(|set| {
-            let manifest =
-                serde_json::from_slice(&fs::read(set.join("manifest.json")).unwrap()).unwrap();
-            (set, manifest)
-        })
-        .filter(|(set, manifest)| is_combined(set, manifest))
+        .flat_map(|set| Route::ALL.map(|route| job(route, set.clone())))
+        .filter(|(_, set, manifest)| is_combined(set, manifest))
         .collect();
     assert!(
-        !sets.is_empty(),
+        !jobs.is_empty(),
         "no combined coverage set in the pinned corpus"
     );
-    let measured = measure_all(&sets);
+    let mut measured = measure_all(&jobs);
+    measured.extend(measure_all(&fallback_jobs(&measured, &jobs)));
     let expected = serde_json::from_slice(
         &fs::read(
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -577,42 +685,72 @@ fn combined_coverage_sets_round_trip_through_ibcmd_rs_writers() {
 #[test]
 fn round_trip_expectations_fail_on_regressions_and_report_fixes() {
     let equal = |name: &str| (name.to_owned(), (Verdict::Equal, None));
+    let different = |name: &str, first: &str| {
+        (
+            name.to_owned(),
+            (Verdict::Different(first.to_owned()), None),
+        )
+    };
+    let refused = |files: &[(&str, &str)]| {
+        Outcome::Refused(
+            files
+                .iter()
+                .map(|(file, reason)| (file.to_string(), reason.to_string()))
+                .collect(),
+        )
+    };
     let measured = BTreeMap::from([
         (
             (Route::CfBootstrap, "p/a".to_owned()),
             Outcome::Compared(BTreeMap::from([
                 equal("Same"),
                 equal("Fixed"),
+                different("Broken", "Broken.xml (1 bytes, native 2)"),
+                different("Known", "Known/Form.xml (3 bytes, native 4)"),
+                different("Moved", "Moved.xml (not written)"),
                 (
-                    "Broken".to_owned(),
-                    (
-                        Verdict::Different("Broken.xml (1 bytes, native 2)".into()),
-                        None,
-                    ),
+                    "Crashed".to_owned(),
+                    (Verdict::Refused, Some("*".to_owned())),
                 ),
                 ("Skipped".to_owned(), (Verdict::PlatformRefused, None)),
             ])),
         ),
         (
             (Route::CfBootstrap, "p/b".to_owned()),
-            Outcome::Refused(BTreeMap::from([
-                ("Known.xml".to_owned(), "listed".to_owned()),
-                ("New.xml".to_owned(), "a new refusal".to_owned()),
+            refused(&[
+                ("Known.xml", "listed"),
+                ("Changed.xml", "a new message"),
+                ("New.xml", "a new refusal"),
+            ]),
+        ),
+        (
+            (Route::CfBootstrap, "p/d".to_owned()),
+            Outcome::Compared(BTreeMap::from([
+                equal("Healed"),
+                different("Still", "Still.xml (5 bytes, native 6)"),
             ])),
         ),
         (
             (Route::FileInfobase, "p/a".to_owned()),
-            Outcome::Refused(BTreeMap::from([(
-                "*".to_owned(),
-                "import failed".to_owned(),
-            )])),
+            refused(&[("*", "import failed")]),
         ),
     ]);
     let expected = serde_json::json!({
         "xml-cf-xml": {
-            "p/a": {"gaps": {"Fixed": "#1", "Gone": "#2"}},
-            "p/b": {"refused": {"Known.xml": "#3", "Healed.xml": "#4"}},
-            "p/c": {"refused": {"*": "#5"}}
+            "p/a": {"gaps": {
+                "Fixed": "#1: Fixed.xml differs",
+                "Gone": "#2: Gone.xml differs",
+                "Known": "#3: Known/Form.xml differs",
+                "Moved": "#4: Moved.xml differs",
+                "Crashed": "#5: refused: Crashed.xml"
+            }},
+            "p/b": {"refused": {
+                "Known.xml": "#6: listed",
+                "Changed.xml": "#7: the old message",
+                "Healed.xml": "#8: gone"
+            }},
+            "p/c": {"refused": {"*": "#9: anything"}},
+            "p/d": {"refused": {"Still.xml": "#10: still refused"}}
         },
         "xml-file-infobase-xml": {}
     });
@@ -620,19 +758,27 @@ fn round_trip_expectations_fail_on_regressions_and_report_fixes() {
     assert_eq!(
         failures,
         [
-            "xml-cf-xml p/a: Broken does not round-trip: Broken.xml (1 bytes, native 2)",
+            "xml-cf-xml p/a: Broken does not round-trip: Broken.xml differs",
+            "xml-cf-xml p/a: Crashed does not round-trip another way: refused: * (listed: refused: Crashed.xml)",
+            "xml-cf-xml p/a: Moved does not round-trip another way: Moved.xml not written (listed: Moved.xml differs)",
             "xml-cf-xml p/a: gaps name Gone, which the set does not have",
+            "xml-cf-xml p/b: Changed.xml is refused for another reason: a new message (listed: the old message)",
             "xml-cf-xml p/b: New.xml is refused and not listed: a new refusal",
-            "xml-cf-xml: p/c is listed but is no combined set of this route",
+            "xml-cf-xml p/d: Still does not round-trip: Still.xml differs",
+            "xml-cf-xml: p/c is listed but was not measured on this route",
             "xml-file-infobase-xml p/a: * is refused and not listed: import failed",
         ]
     );
     for line in [
-        "xml-cf-xml p/a: newly equal (remove from gaps): Fixed (#1)",
-        "xml-cf-xml p/b: no longer refused (remove from refused): Healed.xml (#4)",
-        "xml-cf-xml: sets 2, refused 1; variants compared 3, equal 2, listed gaps 0",
+        "xml-cf-xml p/a: newly equal (remove from gaps): Fixed (#1: Fixed.xml differs)",
+        "xml-cf-xml p/b: no longer refused (remove from refused): Healed.xml (#8: gone)",
+        "xml-cf-xml p/d: no longer refused (replace refused with its gaps)",
+        "xml-cf-xml: sets 3, refused 1; variants compared 8, equal 3, listed gaps 1",
     ] {
-        assert!(report.iter().any(|reported| reported == line), "{line}");
+        assert!(
+            report.iter().any(|reported| reported == line),
+            "{line}\n{report:#?}"
+        );
     }
 }
 
@@ -647,22 +793,56 @@ fn refusals_are_split_into_the_files_they_name() {
         stdout: stdout.as_bytes().to_vec(),
         stderr: stderr.as_bytes().to_vec(),
     };
-    let bootstrap = serde_json::json!({"errors": [{"message":
-        "2 rows of the tree cannot be compiled without a base:\nA/B.xml descriptor 1: first\nA/B.xml kind body 2: second\nConfiguration.xml kind body : third"}]});
+    let template = coverage_root()
+        .join("8.5.1.1150")
+        .join("combined")
+        .join("native")
+        .join("CommonTemplates")
+        .join("T.xml");
+    let bootstrap = serde_json::json!({"errors": [{"message": format!(
+        "2 rows of the tree cannot be compiled without a base:\nA/B.xml descriptor 1: first\nA/B.xml kind body 2: second\nConfiguration.xml kind body : failed to pack {} here",
+        template.display()
+    )}]});
     assert_eq!(
         refused_files(&output(&bootstrap.to_string(), "")),
         BTreeMap::from([
             ("A/B.xml".to_owned(), "first".to_owned()),
-            ("Configuration.xml".to_owned(), "third".to_owned()),
+            (
+                "Configuration.xml".to_owned(),
+                "failed to pack CommonTemplates/T.xml here".to_owned()
+            ),
         ])
     );
-    let import = "[INFO] start\n[ERROR] 1 rows of the tree cannot be compiled without a base:\n[ERROR] C/D.xml descriptor 3: fourth\n[ERROR] Импорт конфигурации из XML завершен с ошибкой\n";
+    let import = format!(
+        "[INFO] start\n[ERROR] 1 rows of the tree cannot be compiled without a base:\n[ERROR] C/D.xml descriptor 3: fourth\n[ERROR] {IMPORT_FAILED}\n"
+    );
     assert_eq!(
-        refused_files(&output("", import)),
+        refused_files(&output("", &import)),
         BTreeMap::from([("C/D.xml".to_owned(), "fourth".to_owned())])
+    );
+    // A line that names no file is kept beside the files of a known refusal.
+    assert_eq!(
+        refused_files(&output(
+            "",
+            &format!(
+                "[ERROR] C/D.xml descriptor 3: fourth\n[ERROR] disk full\n[ERROR] {IMPORT_FAILED}\n"
+            )
+        )),
+        BTreeMap::from([
+            ("*".to_owned(), "disk full".to_owned()),
+            ("C/D.xml".to_owned(), "fourth".to_owned()),
+        ])
     );
     assert_eq!(
         refused_files(&output("", "[ERROR] disk full\n")),
         BTreeMap::from([("*".to_owned(), "disk full".to_owned())])
     );
+    assert_eq!(
+        gap_detail(
+            &Verdict::Different("A/B.xml (not written by the platform)".into()),
+            None
+        ),
+        "A/B.xml not written by the platform"
+    );
+    assert_eq!(gap_detail(&Verdict::Refused, None), "refused: *");
 }
