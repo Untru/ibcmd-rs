@@ -16,3 +16,4 @@
 - [ ] 10. Импорт `mdclass` из EDT, пространство `declared`.
 - [ ] 11. Слой старых форматов.
 - [ ] 12. Процесс ужимания расхождений типовых конфигураций в варианты наборов.
+- [x] 13. `tests/coverage_round_trip.rs`: обратный путь сводных наборов через писатели ibcmd-rs (XML → CF → XML, XML → файловая база → XML), известные расхождения с issue в `tests/fixtures/coverage/round-trip.json`; аудит тестов в `docs/test-audit.md` (#674).

@@ -196,5 +196,11 @@ changed/missing/extra fixture bytes and orphaned local baseline references.
 `cargo xtask ci` runs it plus native generator tests from the pinned corpus.
 Converter equality baselines remain under `tests/fixtures/coverage`; source-probe
 diagnostics remain in `tests/fixtures/coverage-records/source-probe-expectations.json`.
+`tests/coverage_round_trip.rs` writes the native XML of the corpus's
+all-in-one sets back with ibcmd-rs (`cf bootstrap`, and an import into the
+empty file infobase of `tests/fixtures/file-infobase`) and compares the
+export with it; its known gaps, each with its issue, are in
+`tests/fixtures/coverage/round-trip.json`. The test-suite audit behind it is
+`docs/test-audit.md`.
 Update the public corpus first, then its gitlink and converter code in a PR.
 Changing the corpus does not authorize removing an existing passing expectation.
