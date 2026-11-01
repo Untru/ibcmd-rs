@@ -13094,11 +13094,11 @@ fn writes_graphical_scheme_template_body_to_ext_template_xml() {
     // The `template_type_code` slot (the "5" below) is deliberately a value
     // `template_type_from_code` does not map (`refs.rs`'s only mapped codes
     // are 0/1/3/4/6/7/9): this test is about body-content sniffing picking
-    // `GraphicalSchema` for the brace-tuple body, which only runs when the
-    // header carries no recognized type hint.
+    // The brace-tuple body is written as `GraphicalSchema`, which is the
+    // type the stored code states outright.
     let template_metadata = deflate_for_test(
         format!(
-            "{{1,\r\n{{2,5,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Scheme\",{{1,\"en\",\"Scheme\"}},\"\"}}\r\n,0}}\r\n}}"
+            "{{1,\r\n{{2,8,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Scheme\",{{1,\"en\",\"Scheme\"}},\"\"}}\r\n,0}}\r\n}}"
         )
         .as_bytes(),
     );

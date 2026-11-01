@@ -3272,8 +3272,10 @@ pub(super) fn template_type_from_code(code: u32) -> Option<&'static str> {
     match code {
         0 => Some("SpreadsheetDocument"),
         1 => Some("BinaryData"),
+        2 => Some("ActiveDocument"),
         3 => Some("HTMLDocument"),
         4 => Some("TextDocument"),
+        5 => Some("GeographicalSchema"),
         6 => Some("DataCompositionSchema"),
         7 => Some("DataCompositionAppearanceTemplate"),
         // Confirmed on real ERP УХ 3.2.12.6 raw metadata via `cf extract` on
