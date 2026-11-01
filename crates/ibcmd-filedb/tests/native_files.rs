@@ -296,21 +296,12 @@ fn bounded_write_cancels_snapshot_and_copy_without_publication() {
     )
     .unwrap();
     cancelled.store(true, Ordering::SeqCst);
-    #[cfg(unix)]
     assert!(
         session
             .snapshot()
             .unwrap_err()
             .to_string()
             .contains("budget cancelled")
-    );
-    #[cfg(not(unix))]
-    assert!(
-        session
-            .snapshot()
-            .unwrap_err()
-            .to_string()
-            .contains("not supported on this OS")
     );
     assert!(
         session
