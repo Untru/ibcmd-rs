@@ -1782,7 +1782,6 @@ fn build_task(
     }
     let generated = generated_pairs(object, &["Object", "Ref", "Selection", "List", "Manager"])?;
     require_enum_value(object, "TaskNumberAutoPrefix", "BusinessProcessNumber")?;
-    require_enum_value(object, "DefaultPresentation", "AsDescription")?;
     require_enum_value(object, "EditType", "InDialog")?;
     require_enum_value(object, "CreateOnInput", "DontUse")?;
     require_enum_value(object, "DataHistory", "DontUse")?;
@@ -1828,7 +1827,13 @@ fn build_task(
     if token_is_nil(&addressing) && !children.addressing_attributes.is_empty() {
         return invalid_model(uuid, "Task addressing attributes exist without Addressing");
     }
-    fields[27] = token("1");
+    // A Task has no code, so its first presentation is `AsNumber` (`0`); the
+    // platform writes `1` for `AsDescription`.
+    fields[27] = enum_code(
+        object,
+        "DefaultPresentation",
+        &[("AsNumber", "0"), ("AsDescription", "1")],
+    )?;
     fields[28] =
         field_reference_collection(object, "InputByString", BusinessObjectFamily::Task, indexes)?;
     fields[29] =
