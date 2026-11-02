@@ -134,6 +134,11 @@ impl WritePaths {
         }
         Ok(())
     }
+    #[cfg(windows)]
+    pub(crate) fn snapshot_identity(&self, path: &Path, file: &File) -> Result<[u8; 12]> {
+        self.custody.snapshot_identity(path, file)
+    }
+
     #[allow(unsafe_code)]
     pub(crate) fn hard_link(&self, source: &Path, target: &Path) -> std::io::Result<()> {
         #[cfg(unix)]
