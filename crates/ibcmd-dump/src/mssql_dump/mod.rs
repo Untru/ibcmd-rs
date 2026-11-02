@@ -25516,16 +25516,9 @@ fn parse_chart_of_accounts_properties(
     )?;
 
     let input_modes = parse_catalog_input_modes(fields.get(52)?)?;
-    // Field 27 is `"1"` on every chart of accounts on record, the chart of an
-    // extension included. Field 49 is `"1"` on all of them and used to be read
-    // as `<DataLockControlMode>`, whose carrier is field 36. Both are kept as
-    // validated constants so an unobserved value fails closed. (Field 24, once
-    // the constant here, carries `<AutoOrderByCode>` below; it was `"1"` on the
-    // four charts of the ordinary corpora and is `"0"` on the one of an
-    // extension.)
-    if fields.get(27)?.trim() != "1" || fields.get(49)?.trim() != "1" {
-        return None;
-    }
+    // Slots 27 and 49 are `EditType` and `CreateOnInput` and are read as
+    // properties below; the old fixed-`1` gate refused every chart that
+    // separated either of them.
     Some(ChartOfAccountsProperties {
         generated_types,
         use_standard_commands: parse_1c_bool_field(Some(fields.get(16)?))?,
@@ -25581,13 +25574,14 @@ fn parse_chart_of_accounts_properties(
             CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
         )?,
         predefined_data_update: parse_chart_predefined_data_update(fields.get(51)?)?,
-        edit_type: parse_chart_edit_type(fields.get(31)?)?,
+        edit_type: information_register_edit_type_xml(fields.get(27)?)?,
         quick_choice: parse_1c_bool_field(Some(fields.get(32)?))?,
-        // No chart of accounts of the stand separates `<ChoiceMode>`: all
-        // four export `BothWays`. Field 36, against which this used to be
-        // pinned, carries `<DataLockControlMode>` and refused the two charts
-        // that lock automatically.
-        choice_mode: "BothWays",
+        choice_mode: match fields.get(31)?.trim() {
+            "0" => "FromForm",
+            "1" => "QuickChoice",
+            "2" => "BothWays",
+            _ => return None,
+        },
         input_by_string: parse_chart_input_by_string(
             fields.get(33)?,
             "ChartOfAccounts",
@@ -25598,10 +25592,12 @@ fn parse_chart_of_accounts_properties(
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
         choice_data_get_mode_on_input_by_string: input_modes.2,
-        // No chart of accounts of the stand separates `<CreateOnInput>`: all
-        // four export `DontUse`. Field 35, against which this used to be
-        // pinned, carries `<CodeSeries>`.
-        create_on_input: "DontUse",
+        create_on_input: match fields.get(49)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            "2" => "Use",
+            _ => return None,
+        },
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(53)?.trim())?,
         default_object_form: parse_strict_chart_owned_form_ref(
             fields.get(28)?,
@@ -25866,16 +25862,12 @@ fn parse_chart_of_calculation_types_properties(
     }
 
     let input_modes = parse_catalog_input_modes(fields.get(58)?)?;
-    // Fields 27 and 55 are `1` on every chart of calculation types of the stand
-    // and used to be read as `<CodeAllowedLength>` and `<DataLockControlMode>`,
-    // whose separating carriers are fields 53 and 41. Both are kept as
-    // validated constants so an unobserved value fails closed.
-    if fields.get(35)?.trim() != "1" || fields.get(55)?.trim() != "1" {
-        return None;
-    }
+    // Slots 35 and 55 are `UseStandardCommands` and `CreateOnInput` and are
+    // read as properties below; the old fixed-`1` gate refused every chart
+    // that separated either of them.
     Some(ChartOfCalculationTypesProperties {
         generated_types,
-        use_standard_commands: parse_1c_bool_field(Some(fields.get(24)?))?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(35)?))?,
         code_length: parse_signed_length(fields.get(25)?)?,
         description_length: parse_signed_length(fields.get(30)?)?,
         code_type: match fields.get(26)?.trim() {
@@ -25897,16 +25889,14 @@ fn parse_chart_of_calculation_types_properties(
             "1" => "AsDescription",
             _ => return None,
         },
-        edit_type: parse_chart_edit_type(fields.get(38)?)?,
-        // No chart of calculation types of the stand separates `<QuickChoice>`:
-        // all three export `false`. Field 37, against which this used to be
-        // read, carries `<IncludeHelpInContents>` and is `1` on the two charts
-        // that include help.
-        quick_choice: false,
-        // No chart of calculation types of the stand separates `<ChoiceMode>`:
-        // all three export `BothWays`. Field 41, against which this used to be
-        // pinned, carries `<DataLockControlMode>` below.
-        choice_mode: "BothWays",
+        edit_type: information_register_edit_type_xml(fields.get(24)?)?,
+        quick_choice: parse_1c_bool_field(Some(fields.get(39)?))?,
+        choice_mode: match fields.get(38)?.trim() {
+            "0" => "FromForm",
+            "1" => "QuickChoice",
+            "2" => "BothWays",
+            _ => return None,
+        },
         input_by_string: parse_chart_input_by_string(
             fields.get(40)?,
             "ChartOfCalculationTypes",
@@ -25921,7 +25911,12 @@ fn parse_chart_of_calculation_types_properties(
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
         choice_data_get_mode_on_input_by_string: input_modes.2,
-        create_on_input: (fields.get(39)?.trim() == "0").then_some("DontUse")?,
+        create_on_input: match fields.get(55)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            "2" => "Use",
+            _ => return None,
+        },
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(59)?.trim())?,
         default_object_form: parse_strict_chart_owned_form_ref(
             fields.get(32)?,
@@ -26179,13 +26174,6 @@ fn parse_chart_predefined_data_update(value: &str) -> Option<&'static str> {
         "0" => Some("Auto"),
         "1" => Some("AutoUpdate"),
         "2" => Some("DontAutoUpdate"),
-        _ => None,
-    }
-}
-
-fn parse_chart_edit_type(value: &str) -> Option<&'static str> {
-    match value.trim() {
-        "2" => Some("InDialog"),
         _ => None,
     }
 }
