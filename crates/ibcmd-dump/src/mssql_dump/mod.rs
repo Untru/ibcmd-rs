@@ -10777,6 +10777,9 @@ struct ChartOfCharacteristicTypesProperties {
     choice_mode: &'static str,
     quick_choice: bool,
     input_by_string: Vec<String>,
+    search_string_mode_on_input_by_string: &'static str,
+    full_text_search_on_input_by_string: &'static str,
+    choice_data_get_mode_on_input_by_string: &'static str,
     create_on_input: &'static str,
     choice_history_on_input: &'static str,
     default_object_form: Option<String>,
@@ -26841,25 +26844,13 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     if !cct_characteristics_preconditions(fields) {
         return None;
     }
-    let input_modes = split_information_register_braced_fields(fields.get(54)?)?;
-    if input_modes
-        .as_slice()
-        .iter()
-        .map(|field| field.trim())
-        .collect::<Vec<_>>()
-        != ["1", "2", "0"]
-    {
-        return None;
-    }
+    let (
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+    ) = parse_owner_input_modes(fields.get(54)?)?;
 
     let code_length = fields.get(21)?.trim().parse::<i32>().ok()?;
-    // Field 24 is `"1"` on every characteristic-type plan of the stand. It used
-    // to be read as `<CodeSeries>`, which distinguished nothing; kept as a
-    // validated constant so an unobserved value fails closed instead of being
-    // read as something it has never been.
-    if fields.get(24)?.trim() != "1" {
-        return None;
-    }
     Some(ChartOfCharacteristicTypesProperties {
         generated_types,
         use_standard_commands: parse_1c_bool_field(Some(fields.get(14)?))?,
@@ -26891,12 +26882,11 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         code_series: cct_code_series_xml(fields.get(35)?.trim())?,
         check_unique: parse_1c_bool_field(Some(fields.get(34)?))?,
         autonumbering: parse_1c_bool_field(Some(fields.get(22)?))?,
-        // `<DefaultPresentation>` has no separating carrier on this family:
-        // all 47 characteristic-type plans of the stand write
-        // `AsDescription`. It used to be pinned against field 25, which
-        // actually carries `<EditType>` and refused the three plans that do
-        // not edit in a dialog.
-        default_presentation: "AsDescription",
+        default_presentation: match fields.get(24)?.trim() {
+            "0" => "AsCode",
+            "1" => "AsDescription",
+            _ => return None,
+        },
         standard_attributes: parse_cct_standard_attributes(
             fields.get(38)?,
             &header.name,
@@ -26924,17 +26914,22 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         // `ВидыСубконтоКорпоративные`) writes `FromForm` with `"0"`.
         choice_mode: match fields.get(31)?.trim() {
             "0" => "FromForm",
+            "1" => "QuickChoice",
             "2" => "BothWays",
             _ => return None,
         },
         quick_choice: parse_1c_bool_field(Some(fields.get(32)?))?,
         input_by_string: parse_cct_input_by_string(fields.get(33)?, &header.name)?,
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
         // `<CreateOnInput>` rides field 51: 46 plans of the stand write
         // `DontUse` with `"1"` and one (`uh`
         // `ОперацииФинансовыхИнструментов`) writes `Use` with `"2"`. Field 51
         // used to be required to be `"1"` as a fixed marker in front of the
         // data-lock mode, which refused that one plan whole.
         create_on_input: match fields.get(51)?.trim() {
+            "0" => "Auto",
             "1" => "DontUse",
             "2" => "Use",
             _ => return None,
@@ -27065,7 +27060,7 @@ fn cct_characteristics_preconditions(fields: &[&str]) -> bool {
             .is_some_and(|value| cct_data_lock_fields_are_empty(value))
         && fields
             .get(36)
-            .is_some_and(|value| owner_graph::CctPhysicalSchema::binary_flag(value.trim()))
+            .is_some_and(|value| matches!(value.trim(), "0" | "1" | "2"))
 }
 
 fn cct_data_lock_fields_are_empty(value: &str) -> bool {
@@ -39227,11 +39222,15 @@ fn format_chart_of_characteristic_types_source_xml(
     push_catalog_input_by_string_xml(&mut properties, &chart.input_by_string);
     properties.push_str(&format!(
         "\t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
-\t\t\t<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>\r\n\
-\t\t\t<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>\r\n\
-\t\t\t<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>\r\n\
+\t\t\t<SearchStringModeOnInputByString>{}</SearchStringModeOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>{}</ChoiceDataGetModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>{}</FullTextSearchOnInputByString>\r\n\
 \t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n",
-        chart.create_on_input, chart.choice_history_on_input,
+        chart.create_on_input,
+        chart.search_string_mode_on_input_by_string,
+        chart.choice_data_get_mode_on_input_by_string,
+        chart.full_text_search_on_input_by_string,
+        chart.choice_history_on_input,
     ));
     for (name, value) in [
         ("DefaultObjectForm", chart.default_object_form.as_deref()),
