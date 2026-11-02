@@ -42806,11 +42806,16 @@ fn format_constant_bound_xml(name: &str, value: Option<&str>) -> String {
     match value {
         Some(value) if split_typed_bound(value).is_some() => {
             let (xsi_type, text) = split_typed_bound(value).unwrap_or_default();
-            format!(
-                "<{name} xsi:type=\"{xsi_type}\">{}</{name}>",
-                escape_xml_element_text(text)
-            )
+            if text.is_empty() {
+                format!("<{name} xsi:type=\"{xsi_type}\"/>")
+            } else {
+                format!(
+                    "<{name} xsi:type=\"{xsi_type}\">{}</{name}>",
+                    escape_xml_element_text(text)
+                )
+            }
         }
+        Some("") => format!("<{name} xsi:type=\"xs:string\"/>"),
         Some(value) => format!(
             "<{name} xsi:type=\"xs:string\">{}</{name}>",
             escape_xml_element_text(value)
@@ -43163,10 +43168,16 @@ fn format_common_attribute_bound_xml(tag: &str, value: &CommonAttributeFillValue
         CommonAttributeFillValue::String(value) if value.is_empty() => {
             format!("<{tag} xsi:type=\"xs:string\"/>")
         }
-        CommonAttributeFillValue::String(value) => format!(
-            "<{tag} xsi:type=\"xs:string\">{}</{tag}>",
-            escape_xml_element_text(value)
-        ),
+        CommonAttributeFillValue::String(value) => {
+            if value.is_empty() {
+                format!("<{tag} xsi:type=\"xs:string\"/>")
+            } else {
+                format!(
+                    "<{tag} xsi:type=\"xs:string\">{}</{tag}>",
+                    escape_xml_element_text(value)
+                )
+            }
+        }
     }
 }
 
