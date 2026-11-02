@@ -926,6 +926,12 @@ fn extract_form_body_xml_from_body_detailed_single(
             &mut commands,
         );
     }
+    if let Some(owner_reference) = context.form_owner_reference
+        && let Some((kind, _)) = owner_reference.split_once('.')
+        && let Some(pairs) = form_dynamic_list_std_attribute_pairs(kind)
+    {
+        translate_form_standard_attribute_data_paths(&mut child_items, pairs);
+    }
     let started = Instant::now();
     let xml = match format_form_body_open_xml_with_dcs_profiles(
         &properties,
@@ -8318,6 +8324,43 @@ pub fn form_dynamic_list_std_attribute_pairs(
         "CalculationRegister" => Some(&CALCULATION_REGISTER),
         "DocumentJournal" => Some(&DOCUMENT_JOURNAL),
         _ => None,
+    }
+}
+
+/// The platform writes a standard attribute of the form's owner by its
+/// canonical (English) name; a stored item name is localized. A dynamic-list
+/// twin marker is not written for such an attribute either: the primary name
+/// alone is what the platform spells.
+fn translate_form_standard_attribute_data_paths(
+    items: &mut [FormChildItem],
+    pairs: &[(&str, &str)],
+) {
+    for item in items {
+        let translated = item.data_path.as_deref().and_then(|path| {
+            if let Some(body) = path.strip_prefix('~')
+                && let Some((primary, secondary)) = body.split_once('~')
+                && primary.rsplit_once('.').map(|(prefix, _)| prefix)
+                    == secondary.rsplit_once('.').map(|(prefix, _)| prefix)
+                && primary
+                    .rsplit_once('.')
+                    .map(|(_, terminal)| terminal)
+                    .is_some_and(|terminal| pairs.iter().any(|(_, english)| *english == terminal))
+            {
+                return Some(primary.to_string());
+            }
+            let rest = path.strip_prefix("Объект.")?;
+            if rest.contains('.') {
+                return None;
+            }
+            pairs
+                .iter()
+                .find(|(russian, _)| *russian == rest)
+                .map(|(_, english)| format!("Объект.{english}"))
+        });
+        if let Some(translated) = translated {
+            item.data_path = Some(translated);
+        }
+        translate_form_standard_attribute_data_paths(&mut item.child_items, pairs);
     }
 }
 
