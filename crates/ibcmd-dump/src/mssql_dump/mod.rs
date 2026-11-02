@@ -10693,6 +10693,8 @@ struct ChartOfAccountsProperties {
     auxiliary_choice_form: Option<String>,
     auto_order_by_code: bool,
     order_length: i32,
+    based_on: Vec<String>,
+    data_lock_fields: Vec<String>,
     data_lock_control_mode: &'static str,
     full_text_search: &'static str,
     data_history: &'static str,
@@ -25375,8 +25377,6 @@ fn parse_chart_of_accounts_properties(
     if metadata_header_field_index(fields, &header.uuid) != Some(15)
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
-        || !cct_pair_is(fields.get(18)?, "0", "0")
-        || !cct_data_lock_fields_are_empty(fields.get(50)?)
     {
         return None;
     }
@@ -25528,6 +25528,29 @@ fn parse_chart_of_accounts_properties(
     )?;
 
     let input_modes = parse_catalog_input_modes(fields.get(52)?)?;
+    let attribute_references = child_objects
+        .iter()
+        .filter(|child| child.tag == "Attribute")
+        .map(|child| {
+            format!(
+                "ChartOfAccounts.{}.Attribute.{}",
+                header.name, child.header.name
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let based_on = parse_document_reference_collection(
+        fields.get(18)?,
+        object_refs,
+        &METADATA_BASED_ON_PREFIXES,
+    )?;
+    let data_lock_fields = parse_chart_field_references(
+        fields.get(50)?,
+        "ChartOfAccounts",
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[("-7", "Code"), ("-8", "Description")],
+    )?;
     // Slots 27 and 49 are `EditType` and `CreateOnInput` and are read as
     // properties below; the old fixed-`1` gate refused every chart that
     // separated either of them.
@@ -25659,6 +25682,8 @@ fn parse_chart_of_accounts_properties(
         // `"1"`). Field 34 is `<CheckUnique>` and is `"0"` on two of the four.
         auto_order_by_code: parse_1c_bool_field(Some(fields.get(24)?))?,
         order_length: parse_signed_length(fields.get(25)?)?,
+        based_on,
+        data_lock_fields,
         // `<DataLockControlMode>` rides field 36 with the shared 0/1/2 encoding:
         // `uh` `МСФО` and `Хозрасчетный` write `"0"`/`Automatic`, `ssl`
         // `_ДемоОсновной` and `uh` `Международный` write `"1"`/`Managed`.
@@ -32262,6 +32287,41 @@ fn parse_task_field_references(
                         .iter()
                         .find(|(candidate, _)| marker.trim() == *candidate)?;
                     format!("Task.{owner_name}.StandardAttribute.{name}")
+                }
+                [kind, uuid] if kind.trim() == "0" => {
+                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
+                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+                    attribute_references
+                        .contains(&reference)
+                        .then_some(reference)?
+                }
+                _ => return None,
+            };
+            seen.insert(reference.to_ascii_lowercase())
+                .then_some(reference)
+        })
+        .collect()
+}
+
+fn parse_chart_field_references(
+    value: &str,
+    family: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    attribute_references: &BTreeSet<String>,
+    standard_attributes: &[(&str, &str)],
+) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    parse_exchange_plan_field_ref_collection(value)?
+        .into_iter()
+        .map(|value| {
+            let payload = parse_exchange_plan_field_ref_payload(value)?;
+            let reference = match payload.as_slice() {
+                [marker] => {
+                    let (_, name) = standard_attributes
+                        .iter()
+                        .find(|(candidate, _)| marker.trim() == *candidate)?;
+                    format!("{family}.{owner_name}.StandardAttribute.{name}")
                 }
                 [kind, uuid] if kind.trim() == "0" => {
                     let uuid = parse_information_register_non_zero_uuid(uuid)?;
@@ -38960,6 +39020,17 @@ fn format_chart_of_accounts_source_xml(
         &chart.extended_list_presentation,
     );
     push_localized_property(&mut properties, "\t\t\t", "Explanation", &chart.explanation);
+    let mut based_on_xml = String::new();
+    push_task_based_on_xml(&mut based_on_xml, &chart.based_on);
+    let mut data_lock_fields_xml = String::new();
+    push_exchange_plan_field_collection_xml(
+        &mut data_lock_fields_xml,
+        "DataLockFields",
+        &chart.data_lock_fields,
+    );
+    let properties = properties
+        .replace("\t\t\t<BasedOn/>\r\n", &based_on_xml)
+        .replace("\t\t\t<DataLockFields/>\r\n", &data_lock_fields_xml);
     if let Some(index) = xml.find("\t\t</Properties>") {
         xml.insert_str(index, &properties);
     }
