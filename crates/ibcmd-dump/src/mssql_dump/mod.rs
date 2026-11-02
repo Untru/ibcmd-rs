@@ -30824,7 +30824,7 @@ fn parse_business_process_properties_from_text(
         &header.name,
         object_refs,
         &attribute_references,
-        &[("-8", "HeadTask")],
+        &[("-8", "HeadTask"), ("-2", "Number")],
     ) {
         Ok(references) => references,
         Err(diagnostic) => {
@@ -30897,7 +30897,9 @@ fn parse_business_process_properties_from_text(
         characteristics,
         use_standard_commands: parse_1c_bool_field(Some(fields.get(2)?))?,
         edit_type: match fields.get(21)?.trim() {
+            "0" => "InList",
             "1" => "InDialog",
+            "2" => "BothWays",
             _ => return None,
         },
         input_by_string,
@@ -30959,6 +30961,10 @@ fn parse_business_process_properties_from_text(
         based_on: parse_business_process_based_on(fields.get(15)?, object_refs)?,
         number_periodicity: match fields.get(17)?.trim() {
             "0" => "Nonperiodical",
+            "1" => "Year",
+            "2" => "Quarter",
+            "3" => "Month",
+            "4" => "Day",
             _ => return None,
         },
         task: parse_owner_optional_reference(fields.get(25)?, object_refs, "Task.")?,
@@ -31608,7 +31614,7 @@ fn parse_task_properties_from_text(
         &header.name,
         object_refs,
         &attribute_references,
-        &[("-7", "BusinessProcess")],
+        &[("-7", "BusinessProcess"), ("-2", "Number")],
     )?;
 
     let default_object_form =
@@ -32205,9 +32211,10 @@ fn parse_task_based_on(value: &str, object_refs: &BTreeMap<String, String>) -> O
             }
             let uuid = parse_information_register_non_zero_uuid(payload.get(1)?)?;
             let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
-            let name = reference.strip_prefix("BusinessProcess.")?;
-            (!name.is_empty() && !name.contains('.') && seen.insert(reference.to_ascii_lowercase()))
-                .then_some(reference)
+            let valid = reference.matches('.').count() == 1
+                && !reference.starts_with('.')
+                && !reference.ends_with('.');
+            (valid && seen.insert(reference.to_ascii_lowercase())).then_some(reference)
         })
         .collect()
 }
