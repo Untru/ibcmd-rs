@@ -10796,6 +10796,8 @@ struct ChartOfCharacteristicTypesProperties {
     auxiliary_list_form: Option<String>,
     auxiliary_choice_form: Option<String>,
     auxiliary_folder_choice_form: Option<String>,
+    based_on: Vec<String>,
+    data_lock_fields: Vec<String>,
     data_lock_control_mode: &'static str,
     full_text_search: &'static str,
     object_presentation: Vec<(String, String)>,
@@ -26916,6 +26918,29 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     ) = parse_owner_input_modes(fields.get(54)?)?;
 
     let code_length = fields.get(21)?.trim().parse::<i32>().ok()?;
+    let attribute_references = child_metadata_objects
+        .iter()
+        .filter(|child| child.tag == "Attribute")
+        .map(|child| {
+            format!(
+                "ChartOfCharacteristicTypes.{}.Attribute.{}",
+                header.name, child.header.name
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let based_on = parse_document_reference_collection(
+        fields.get(15)?,
+        object_refs,
+        &METADATA_BASED_ON_PREFIXES,
+    )?;
+    let data_lock_fields = parse_chart_field_references(
+        fields.get(52)?,
+        "ChartOfCharacteristicTypes",
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[("-9", "Description"), ("-8", "Code")],
+    )?;
     Some(ChartOfCharacteristicTypesProperties {
         generated_types,
         use_standard_commands: parse_1c_bool_field(Some(fields.get(14)?))?,
@@ -27068,6 +27093,8 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         // encoding (8.3.27.2214 CorpusCharacteristics = 0/Automatic,
         // 1C:УТ 11.5.27.75 charts = 1/Managed, 2/AutomaticAndManaged).
         // Slot 51 is not part of it: it carries `<CreateOnInput>` above.
+        based_on,
+        data_lock_fields,
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(36)?)?,
         full_text_search: match fields.get(37)?.trim() {
             "0" => "DontUse",
@@ -27111,27 +27138,10 @@ fn cct_pair_is(value: &str, first: &str, second: &str) -> bool {
     })
 }
 
-fn cct_pair_matches(value: &str, predicate: fn(&str, &str) -> bool) -> bool {
-    split_information_register_braced_fields(value)
-        .is_some_and(|fields| fields.len() == 2 && predicate(fields[0].trim(), fields[1].trim()))
-}
-
 fn cct_characteristics_preconditions(fields: &[&str]) -> bool {
     fields
-        .get(15)
-        .is_some_and(|value| cct_pair_matches(value, owner_graph::CctPhysicalSchema::zero_pair))
-        && fields
-            .get(52)
-            .is_some_and(|value| cct_data_lock_fields_are_empty(value))
-        && fields
-            .get(36)
-            .is_some_and(|value| matches!(value.trim(), "0" | "1" | "2"))
-}
-
-fn cct_data_lock_fields_are_empty(value: &str) -> bool {
-    split_information_register_braced_fields(value).is_some_and(|fields| {
-        fields.len() == 2 && fields[0].trim() == "1" && cct_pair_is(fields[1], "0", "0")
-    })
+        .get(36)
+        .is_some_and(|value| matches!(value.trim(), "0" | "1" | "2"))
 }
 
 fn parse_cct_characteristic_ext_values(
@@ -39436,6 +39446,17 @@ fn format_chart_of_characteristic_types_source_xml(
         xml_bool(chart.update_data_history_immediately_after_write),
         xml_bool(chart.execute_after_write_data_history_version_processing),
     ));
+    let mut based_on_xml = String::new();
+    push_task_based_on_xml(&mut based_on_xml, &chart.based_on);
+    let mut data_lock_fields_xml = String::new();
+    push_exchange_plan_field_collection_xml(
+        &mut data_lock_fields_xml,
+        "DataLockFields",
+        &chart.data_lock_fields,
+    );
+    let properties = properties
+        .replace("\t\t\t<BasedOn/>\r\n", &based_on_xml)
+        .replace("\t\t\t<DataLockFields/>\r\n", &data_lock_fields_xml);
     insert_metadata_properties_xml(&mut xml, &properties);
 
     let mut children = if chart.child_metadata_objects.is_empty() && chart.child_forms.is_empty() {

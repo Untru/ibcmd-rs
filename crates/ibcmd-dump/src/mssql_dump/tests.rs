@@ -51048,15 +51048,15 @@ fn characteristics_slot_matrix_covers_every_owner_family_that_declares_the_prope
 }
 
 #[test]
-fn characteristics_cct_preconditions_preserve_exact_zero_pair_and_binary_lexemes() {
+fn characteristics_cct_preconditions_preserve_binary_lexemes() {
     let mut fields = vec![""; 59];
-    fields[15] = "{0,0}";
     fields[36] = "0";
-    fields[52] = "{1,{0,0}}";
     assert!(cct_characteristics_preconditions(&fields));
     fields[36] = "1";
     assert!(cct_characteristics_preconditions(&fields));
-    for valid in [" 0 ", "1 "] {
+    fields[36] = "2";
+    assert!(cct_characteristics_preconditions(&fields));
+    for valid in [" 0 ", "1 ", "2 "] {
         fields[36] = valid;
         assert!(
             cct_characteristics_preconditions(&fields),
@@ -51064,24 +51064,9 @@ fn characteristics_cct_preconditions_preserve_exact_zero_pair_and_binary_lexemes
         );
     }
 
-    for invalid in ["00", "01"] {
+    for invalid in ["00", "01", "3"] {
         fields[36] = invalid;
         assert!(!cct_characteristics_preconditions(&fields));
-    }
-    fields[36] = "0";
-    for valid in ["{ 0 ,0 }", "{0, 0}"] {
-        fields[15] = valid;
-        assert!(
-            cct_characteristics_preconditions(&fields),
-            "rejected baseline-compatible padded pair {valid:?}"
-        );
-    }
-    for invalid in ["{1,1}", "{00,0}", "{0,00}", "{0}", "{0,0,0}", "0,0", "{0,0"] {
-        fields[15] = invalid;
-        assert!(
-            !cct_characteristics_preconditions(&fields),
-            "accepted invalid pair {invalid:?}"
-        );
     }
 }
 
