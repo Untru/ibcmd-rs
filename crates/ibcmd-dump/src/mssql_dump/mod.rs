@@ -36584,6 +36584,49 @@ fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<Style
     }
     let style_kind = fields.get(1)?.trim().parse::<u8>().ok()?;
     let value = fields.get(2)?;
+    // A style item's value carries its own class, and that class -- not the
+    // record's kind field -- names the type: a colour, a font and a border are
+    // three different classes.
+    // The record's kind names the item type, while the value carries its own
+    // class: a font or border item may still hold a colour payload, which the
+    // platform writes as such.
+    let item_type = match style_kind {
+        0 => "Color",
+        1 => "Font",
+        2 => "Border",
+        _ => return None,
+    };
+    let value_fields = split_1c_braced_fields(value, 0)?;
+    if value_fields
+        .first()
+        .map(|field| field.trim().trim_matches('"'))
+        == Some("#")
+    {
+        match value_fields.get(1).map(|field| field.trim()) {
+            Some("9cd510c7-abfc-11d4-9434-004095e12fc7") => {
+                return Some(StyleItemProperties {
+                    item_type,
+                    value_xml: format!(
+                        "<Value xsi:type=\"v8ui:Color\">{}</Value>",
+                        escape_xml_text(&parse_style_color_value(value)?)
+                    ),
+                });
+            }
+            Some("9cd510c8-abfc-11d4-9434-004095e12fc7") => {
+                return Some(StyleItemProperties {
+                    item_type,
+                    value_xml: parse_style_font_value_xml(value),
+                });
+            }
+            Some("4d10ca00-111a-4d43-9c96-92cd773716de") => {
+                return Some(StyleItemProperties {
+                    item_type,
+                    value_xml: parse_style_border_value_xml(value)?,
+                });
+            }
+            _ => {}
+        }
+    }
     match style_kind {
         0 => Some(StyleItemProperties {
             item_type: "Color",
