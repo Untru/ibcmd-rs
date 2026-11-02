@@ -42405,8 +42405,70 @@ fn format_common_command_parameter_type_xml_with_indent(
             "{indent}\t<v8:{tag_name}{namespace_attr}>{}</v8:{tag_name}>\r\n",
             escape_xml_text(&metadata_type_xml_name(&value_type))
         ));
+        push_metadata_type_qualifiers_xml(xml, &format!("{indent}\t"), &value_type);
     }
     xml.push_str(&format!("{indent}</CommandParameterType>\r\n"));
+}
+
+/// The qualifier block a primitive type carries after its `<v8:Type>` line.
+fn push_metadata_type_qualifiers_xml(
+    xml: &mut String,
+    indent: &str,
+    value_type: &ConstantValueType,
+) {
+    match value_type {
+        ConstantValueType::String {
+            length,
+            allowed_length_flag,
+        } => {
+            let allowed_length = if length.is_some() {
+                string_allowed_length_xml(*allowed_length_flag)
+            } else {
+                "Variable"
+            };
+            xml.push_str(&format!(
+                "{indent}<v8:StringQualifiers>\r\n\
+{indent}\t<v8:Length>{}</v8:Length>\r\n\
+{indent}\t<v8:AllowedLength>{allowed_length}</v8:AllowedLength>\r\n\
+{indent}</v8:StringQualifiers>\r\n",
+                length.unwrap_or(0)
+            ));
+        }
+        ConstantValueType::Number {
+            digits,
+            fraction_digits,
+            allowed_sign_flag,
+        } => {
+            xml.push_str(&format!(
+                "{indent}<v8:NumberQualifiers>\r\n\
+{indent}\t<v8:Digits>{digits}</v8:Digits>\r\n\
+{indent}\t<v8:FractionDigits>{fraction_digits}</v8:FractionDigits>\r\n\
+{indent}\t<v8:AllowedSign>{}</v8:AllowedSign>\r\n\
+{indent}</v8:NumberQualifiers>\r\n",
+                number_allowed_sign_xml(*allowed_sign_flag)
+            ));
+        }
+        ConstantValueType::BinaryData {
+            length,
+            allowed_length_flag,
+        } => {
+            xml.push_str(&format!(
+                "{indent}<v8:BinaryDataQualifiers>\r\n\
+{indent}\t<v8:Length>{length}</v8:Length>\r\n\
+{indent}\t<v8:AllowedLength>{}</v8:AllowedLength>\r\n\
+{indent}</v8:BinaryDataQualifiers>\r\n",
+                string_allowed_length_xml(*allowed_length_flag)
+            ));
+        }
+        ConstantValueType::DateTime { date_fractions } => {
+            xml.push_str(&format!(
+                "{indent}<v8:DateQualifiers>\r\n\
+{indent}\t<v8:DateFractions>{date_fractions}</v8:DateFractions>\r\n\
+{indent}</v8:DateQualifiers>\r\n"
+            ));
+        }
+        _ => {}
+    }
 }
 
 fn format_bot_source_xml(
