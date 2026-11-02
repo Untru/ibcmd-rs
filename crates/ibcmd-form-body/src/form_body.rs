@@ -8233,7 +8233,7 @@ pub fn form_dynamic_list_std_attribute_pairs(
         ("Наименование", "Description"),
         ("ПериодДействияБазовый", "ActionPeriodIsBasic"),
     ];
-    const EXCHANGE_PLAN: [(&str, &str); 10] = [
+    const EXCHANGE_PLAN: [(&str, &str); 11] = [
         ("Ссылка", "Ref"),
         ("ПометкаУдаления", "DeletionMark"),
         ("Предопределенный", "Predefined"),
@@ -8244,6 +8244,7 @@ pub fn form_dynamic_list_std_attribute_pairs(
         ("НомерОтправленного", "SentNo"),
         ("НомерПринятого", "ReceivedNo"),
         ("ЭтотУзел", "ThisNode"),
+        ("ДатаОбмена", "ExchangeDate"),
     ];
     const BUSINESS_PROCESS: [(&str, &str); 8] = [
         ("Ссылка", "Ref"),
