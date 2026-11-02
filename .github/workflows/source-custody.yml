@@ -1,0 +1,62 @@
+name: Source custody controls
+
+on:
+  pull_request:
+    paths:
+      - 'src/mssql_source_change/**'
+      - 'src/mssql_source_change.rs'
+      - 'openspec/changes/enforce-windows-source-custody/**'
+      - 'tools/run-source-custody-ci.py'
+      - '.github/workflows/source-custody.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-custody-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  paired-controls:
+    if: github.event.pull_request.head.repo.full_name == 'Jimmo910/ibcmd-rs' && github.event.pull_request.head.ref == 'agent/issue-382-windows-source-custody'
+    name: Source custody (${{ matrix.mode }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            mode: paired-windows
+          - os: ubuntu-latest
+            mode: unix-low-fd
+    env:
+      CARGO_BUILD_JOBS: '1'
+      IBCMD_TEST_KEEP_FIXTURES: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+      - name: Verify outcome classifier
+        run: python tools/run-source-custody-ci.py self-test
+      - name: Execute immutable controls
+        run: python tools/run-source-custody-ci.py ${{ matrix.mode }}
+      - name: Retain exact receipts and owned fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-custody-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/source-custody-evidence-${{ matrix.mode }}
+            ${{ runner.temp }}/source-custody-head-guard-*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
