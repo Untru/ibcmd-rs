@@ -24233,7 +24233,7 @@ fn extracts_exact_exchange_plan_owner_properties_atomically_and_in_native_order(
     let invalid_slots = [
         (13, "2"),
         (14, "not-a-uuid"),
-        (15, "-1"),
+        (15, "not-a-length"),
         (16, "1"),
         (17, "bad"),
         (18, "2"),
@@ -42708,10 +42708,22 @@ fn keeps_non_exact_code56_arities_on_legacy_as_description() {
 
 #[test]
 fn rejects_malformed_exact_code56_description_length_atomically() {
-    for malformed in ["", "value", "-1", "4294967296", "{0}"] {
+    for malformed in ["", "value", "4294967296", "{0}"] {
         let fixture =
             catalog_default_presentation_fixture("56", 61, malformed, "MalformedDescriptionLength");
         assert!(fixture.extract().is_none(), "accepted slot 19: {malformed}");
+    }
+}
+
+#[test]
+fn accepts_signed_exact_code56_description_length() {
+    for length in ["-1", "-2147483648"] {
+        let xml = catalog_default_presentation_xml("56", 61, length, "SignedDescriptionLength")
+            .expect("signed description length");
+        assert!(
+            xml.contains(&format!("<DescriptionLength>{length}</DescriptionLength>")),
+            "{xml}"
+        );
     }
 }
 

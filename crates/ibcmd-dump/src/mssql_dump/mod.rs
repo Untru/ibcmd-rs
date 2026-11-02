@@ -10674,8 +10674,8 @@ struct ChartOfAccountsProperties {
     ext_dimension_types: String,
     max_ext_dimension_count: u32,
     code_mask: String,
-    code_length: u32,
-    description_length: u32,
+    code_length: i32,
+    description_length: i32,
     code_series: &'static str,
     check_unique: bool,
     default_presentation: &'static str,
@@ -10700,7 +10700,7 @@ struct ChartOfAccountsProperties {
     auxiliary_list_form: Option<String>,
     auxiliary_choice_form: Option<String>,
     auto_order_by_code: bool,
-    order_length: u32,
+    order_length: i32,
     data_lock_control_mode: &'static str,
     full_text_search: &'static str,
     data_history: &'static str,
@@ -10720,8 +10720,8 @@ struct ChartOfAccountsProperties {
 struct ChartOfCalculationTypesProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
-    code_length: u32,
-    description_length: u32,
+    code_length: i32,
+    description_length: i32,
     code_type: &'static str,
     code_allowed_length: &'static str,
     default_presentation: &'static str,
@@ -10771,9 +10771,9 @@ struct ChartOfCharacteristicTypesProperties {
     value_types: Vec<ConstantValueType>,
     hierarchical: bool,
     folders_on_top: bool,
-    code_length: u32,
+    code_length: i32,
     code_allowed_length: &'static str,
-    description_length: u32,
+    description_length: i32,
     code_series: &'static str,
     check_unique: bool,
     autonumbering: bool,
@@ -10850,9 +10850,9 @@ struct ExchangePlanProperties {
     this_node: String,
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
-    code_length: u32,
+    code_length: i32,
     code_allowed_length: &'static str,
-    description_length: u32,
+    description_length: i32,
     default_presentation: &'static str,
     edit_type: &'static str,
     quick_choice: bool,
@@ -11267,13 +11267,13 @@ struct CatalogProperties {
     hierarchical: bool,
     hierarchy_type: &'static str,
     limit_level_count: bool,
-    level_count: u32,
+    level_count: i32,
     folders_on_top: bool,
     owners: Option<Vec<String>>,
     subordination_use: Option<&'static str>,
     use_standard_commands: bool,
-    code_length: u32,
-    description_length: u32,
+    code_length: i32,
+    description_length: i32,
     code_type: Option<&'static str>,
     code_allowed_length: Option<&'static str>,
     code_series: Option<&'static str>,
@@ -11480,7 +11480,7 @@ struct TaskProperties {
     check_unique: bool,
     autonumbering: bool,
     task_number_auto_prefix: &'static str,
-    description_length: u32,
+    description_length: i32,
     addressing: Option<String>,
     main_addressing_attribute: Option<String>,
     current_performer: Option<String>,
@@ -14993,6 +14993,13 @@ fn parse_exchange_plan_u32(value: &str) -> Option<u32> {
     u32::try_from(parse_information_register_usize(value)?).ok()
 }
 
+/// The length slots (CodeLength, DescriptionLength, OrderLength,
+/// LevelCount) are signed words: the platform stores and writes -1 and
+/// the saturated 2^31 (as -2147483648) verbatim.
+fn parse_signed_length(value: &str) -> Option<i32> {
+    value.trim().parse::<i32>().ok()
+}
+
 fn parse_exchange_plan_owned_form_ref(
     value: &str,
     owner_name: &str,
@@ -15205,13 +15212,13 @@ fn parse_exchange_plan_properties_from_text(
         this_node: parse_information_register_non_zero_uuid(fields.get(11)?)?,
         generated_types: parse_exchange_plan_generated_types(&fields, &header.name)?,
         use_standard_commands: information_register_bool(fields.get(13)?)?,
-        code_length: parse_exchange_plan_u32(fields.get(15)?)?,
+        code_length: parse_signed_length(fields.get(15)?)?,
         code_allowed_length: match fields.get(39)?.trim() {
             "0" => "Fixed",
             "1" => "Variable",
             _ => return None,
         },
-        description_length: parse_exchange_plan_u32(fields.get(17)?)?,
+        description_length: parse_signed_length(fields.get(17)?)?,
         default_presentation: "AsDescription",
         edit_type: "InDialog",
         quick_choice: information_register_bool(fields.get(23)?)?,
@@ -25554,8 +25561,8 @@ fn parse_chart_of_accounts_properties(
         },
         max_ext_dimension_count: parse_exchange_plan_u32(fields.get(20)?)?,
         code_mask: parse_information_register_quoted_string(fields.get(21)?)?,
-        code_length: parse_exchange_plan_u32(fields.get(22)?)?,
-        description_length: parse_exchange_plan_u32(fields.get(23)?)?,
+        code_length: parse_signed_length(fields.get(22)?)?,
+        description_length: parse_signed_length(fields.get(23)?)?,
         // `<CodeSeries>` rides field 35: `ssl` `_ДемоОсновной` writes `"1"`
         // and exports `WithinSubordination`, and the three `uh` charts write
         // `"0"` and export `WholeChartOfAccounts`.
@@ -25659,7 +25666,7 @@ fn parse_chart_of_accounts_properties(
         // extension (whose field 27, the constant validated above, stays
         // `"1"`). Field 34 is `<CheckUnique>` and is `"0"` on two of the four.
         auto_order_by_code: information_register_bool(fields.get(24)?)?,
-        order_length: parse_exchange_plan_u32(fields.get(25)?)?,
+        order_length: parse_signed_length(fields.get(25)?)?,
         // `<DataLockControlMode>` rides field 36 with the shared 0/1/2 encoding:
         // `uh` `МСФО` and `Хозрасчетный` write `"0"`/`Automatic`, `ssl`
         // `_ДемоОсновной` and `uh` `Международный` write `"1"`/`Managed`.
@@ -25885,8 +25892,8 @@ fn parse_chart_of_calculation_types_properties(
     Some(ChartOfCalculationTypesProperties {
         generated_types,
         use_standard_commands: information_register_bool(fields.get(24)?)?,
-        code_length: parse_exchange_plan_u32(fields.get(25)?)?,
-        description_length: parse_exchange_plan_u32(fields.get(30)?)?,
+        code_length: parse_signed_length(fields.get(25)?)?,
+        description_length: parse_signed_length(fields.get(30)?)?,
         code_type: match fields.get(26)?.trim() {
             "0" => "Number",
             "1" => "String",
@@ -26881,7 +26888,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         return None;
     }
 
-    let code_length = fields.get(21)?.trim().parse::<u32>().ok()?;
+    let code_length = fields.get(21)?.trim().parse::<i32>().ok()?;
     // Field 24 is `"1"` on every characteristic-type plan of the stand. It used
     // to be read as `<CodeSeries>`, which distinguished nothing; kept as a
     // validated constant so an unobserved value fails closed instead of being
@@ -26908,7 +26915,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             "1" => "Variable",
             _ => return None,
         },
-        description_length: fields.get(23)?.trim().parse::<u32>().ok()?,
+        description_length: fields.get(23)?.trim().parse::<i32>().ok()?,
         // `<CodeSeries>` rides owner field 35, not field 24. Field 24 is `"1"`
         // on all 47 characteristic-type plans of the stand and so distinguishes
         // nothing; field 35 is `"1"` on exactly the one plan that writes
@@ -28310,15 +28317,15 @@ fn parse_strict_catalog_properties_from_text(
             fields.get(CATALOG_OWNER_FIELD_HIERARCHY_TYPE)?,
         )?,
         limit_level_count: information_register_bool(fields.get(38)?)?,
-        level_count: parse_exchange_plan_u32(fields.get(10)?)?,
+        level_count: parse_signed_length(fields.get(10)?)?,
         folders_on_top: information_register_bool(fields.get(13)?)?,
         owners: Some(owners),
         subordination_use: Some(catalog_subordination_use_xml(parse_exchange_plan_u32(
             fields.get(39)?,
         )?)?),
         use_standard_commands: information_register_bool(fields.get(31)?)?,
-        code_length: parse_exchange_plan_u32(fields.get(CATALOG_OWNER_FIELD_CODE_LENGTH)?)?,
-        description_length: parse_exchange_plan_u32(
+        code_length: parse_signed_length(fields.get(CATALOG_OWNER_FIELD_CODE_LENGTH)?)?,
+        description_length: parse_signed_length(
             fields.get(CATALOG_OWNER_FIELD_DESCRIPTION_LENGTH)?,
         )?,
         code_type: Some(catalog_code_type_xml(parse_exchange_plan_u32(
@@ -31744,7 +31751,7 @@ fn parse_task_properties_from_text(
         check_unique: information_register_bool(fields.get(20)?)?,
         autonumbering: information_register_bool(fields.get(21)?)?,
         task_number_auto_prefix: task_number_auto_prefix.xml_value(),
-        description_length: parse_exchange_plan_u32(fields.get(22)?)?,
+        description_length: parse_signed_length(fields.get(22)?)?,
         addressing,
         main_addressing_attribute,
         current_performer: parse_owner_optional_reference(
