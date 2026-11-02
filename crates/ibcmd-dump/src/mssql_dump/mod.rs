@@ -15104,7 +15104,7 @@ fn parse_exchange_plan_input_by_string(value: &str, owner_name: &str) -> Option<
         .collect::<Vec<_>>();
     matches!(
         suffixes.as_slice(),
-        ["Description", "Code"] | ["Code", "Description"] | ["Description"]
+        ["Description", "Code"] | ["Code", "Description"] | ["Description"] | ["Code"]
     )
     .then_some(fields)
 }
@@ -15154,15 +15154,6 @@ fn exchange_plan_characteristics_is_empty(value: &str) -> bool {
     })
 }
 
-fn exchange_plan_choice_data_get_mode_is_direct(value: &str) -> bool {
-    split_information_register_braced_fields(value).is_some_and(|fields| {
-        fields.len() == 3
-            && fields[0].trim() == "1"
-            && fields[1].trim() == "2"
-            && fields[2].trim() == "0"
-    })
-}
-
 fn parse_exchange_plan_properties_from_text(
     text: &str,
     uuid: &str,
@@ -15173,19 +15164,16 @@ fn parse_exchange_plan_properties_from_text(
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = parse_exchange_plan_owner_fields(text, &header)?;
     if fields.get(16)?.trim() != "0"
-        || fields.get(21)?.trim() != "1"
-        || fields.get(22)?.trim() != "2"
-        || fields.get(25)?.trim() != "1"
         || !exchange_plan_characteristics_is_empty(fields.get(40)?)
-        || fields.get(41)?.trim() != "1"
-        || !exchange_plan_choice_data_get_mode_is_direct(fields.get(43)?)
-        || fields.get(46)?.trim() != "0"
-        || fields.get(47)?.trim() != "0"
-        || fields.get(48)?.trim() != "0"
         || fields.get(49)?.trim() != "0"
     {
         return None;
     }
+    let (
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+    ) = parse_owner_input_modes(fields.get(43)?)?;
 
     let (child_objects, emit_empty_child_objects) = parse_exchange_plan_child_objects(
         text,
@@ -15207,14 +15195,28 @@ fn parse_exchange_plan_properties_from_text(
             _ => return None,
         },
         description_length: parse_signed_length(fields.get(17)?)?,
-        default_presentation: "AsDescription",
-        edit_type: "InDialog",
+        default_presentation: match fields.get(25)?.trim() {
+            "0" => "AsCode",
+            "1" => "AsDescription",
+            _ => return None,
+        },
+        edit_type: match fields.get(21)?.trim() {
+            "0" => "InList",
+            "1" => "InDialog",
+            "2" => "BothWays",
+            _ => return None,
+        },
         quick_choice: parse_1c_bool_field(Some(fields.get(23)?))?,
-        choice_mode: "BothWays",
+        choice_mode: match fields.get(22)?.trim() {
+            "0" => "FromForm",
+            "1" => "QuickChoice",
+            "2" => "BothWays",
+            _ => return None,
+        },
         input_by_string: parse_exchange_plan_input_by_string(fields.get(27)?, &header.name)?,
-        search_string_mode_on_input_by_string: "Begin",
-        full_text_search_on_input_by_string: "DontUse",
-        choice_data_get_mode_on_input_by_string: "Directly",
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
         default_object_form: parse_exchange_plan_owned_form_ref(
             fields.get(14)?,
             &header.name,
@@ -15249,7 +15251,12 @@ fn parse_exchange_plan_properties_from_text(
         based_on: parse_exchange_plan_based_on(fields.get(24)?, object_refs)?,
         distributed_infobase: parse_1c_bool_field(Some(fields.get(26)?))?,
         include_configuration_extensions: parse_1c_bool_field(Some(fields.get(45)?))?,
-        create_on_input: "DontUse",
+        create_on_input: match fields.get(41)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            "2" => "Use",
+            _ => return None,
+        },
         choice_history_on_input: match fields.get(44)?.trim() {
             "0" => "Auto",
             "1" => "DontUse",
@@ -15276,9 +15283,11 @@ fn parse_exchange_plan_properties_from_text(
             fields.get(37)?,
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(38)?)?,
-        data_history: "DontUse",
-        update_data_history_immediately_after_write: false,
-        execute_after_write_data_history_version_processing: false,
+        data_history: metadata_data_history_xml(fields.get(46)?.trim())?,
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(47)?))?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_field(Some(
+            fields.get(48)?,
+        ))?,
         child_objects,
         emit_empty_child_objects,
     })
