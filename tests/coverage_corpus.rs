@@ -25,10 +25,10 @@ use sha2::{Digest, Sha256};
 
 const DUMP_INFO: &str = "ConfigDumpInfo.xml";
 
-struct TempDirectory(PathBuf);
+pub(crate) struct TempDirectory(pub(crate) PathBuf);
 
 impl TempDirectory {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
         let nonce = format!(
             "{}-{}",
@@ -51,11 +51,11 @@ impl Drop for TempDirectory {
     }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn decode_base64(source: &[u8]) -> Vec<u8> {
+pub(crate) fn decode_base64(source: &[u8]) -> Vec<u8> {
     let mut output = Vec::new();
     let (mut buffer, mut bits) = (0_u32, 0_u8);
     for &byte in source {
@@ -81,14 +81,14 @@ fn decode_base64(source: &[u8]) -> Vec<u8> {
 
 /// File names as the platform composes them: `й`/`ё` may come decomposed from
 /// some file systems.
-fn compose(path: &str) -> String {
+pub(crate) fn compose(path: &str) -> String {
     path.replace("и\u{306}", "й")
         .replace("И\u{306}", "Й")
         .replace("е\u{308}", "ё")
         .replace("Е\u{308}", "Ё")
 }
 
-fn read_tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
+pub(crate) fn read_tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
     fn visit(root: &Path, current: &Path, files: &mut BTreeMap<String, Vec<u8>>) {
         for entry in fs::read_dir(current).unwrap() {
             let path = entry.unwrap().path();
@@ -144,7 +144,7 @@ fn inputs_digest(set: &Path) -> String {
 
 /// Every directory under the pinned corpus with a `manifest.json`:
 /// `<platform>/<class>/`, `<platform>/external/<set>/`, `<platform>/extensions/<set>/`.
-fn coverage_sets() -> Vec<PathBuf> {
+pub(crate) fn coverage_sets() -> Vec<PathBuf> {
     fn visit(dir: &Path, sets: &mut Vec<PathBuf>) {
         if dir.join("manifest.json").is_file() {
             sets.push(dir.to_path_buf());
@@ -164,7 +164,7 @@ fn coverage_sets() -> Vec<PathBuf> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Verdict {
+pub(crate) enum Verdict {
     Equal,
     Different(String),
     Refused,
@@ -177,14 +177,14 @@ struct Measured {
 }
 
 #[derive(Debug)]
-struct Exported {
-    files: BTreeMap<String, Vec<u8>>,
-    refusal: Option<String>,
+pub(crate) struct Exported {
+    pub(crate) files: BTreeMap<String, Vec<u8>>,
+    pub(crate) refusal: Option<String>,
 }
 
 /// Exports `file` with ibcmd-rs into `out`; the tree, or the command's last
 /// stderr line when it refuses.
-fn cf_export(file: &Path, out: &Path, source_version: &str) -> Result<Exported, String> {
+pub(crate) fn cf_export(file: &Path, out: &Path, source_version: &str) -> Result<Exported, String> {
     let export = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
         .args(["cf", "export"])
         .arg(file)
@@ -256,7 +256,7 @@ fn export_result(
 
 /// The verdict of one variant: its native files against ours, plus any file
 /// we write for it that the platform does not.
-fn compare(
+pub(crate) fn compare(
     variant: &Value,
     native: &BTreeMap<String, Vec<u8>>,
     ours: &BTreeMap<String, Vec<u8>>,

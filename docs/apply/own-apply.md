@@ -930,7 +930,7 @@ restructurings and have none):
 `--allow-restructure s1` (`ConfigApplyOptions::allow_restructure`) picks the restructure track's S1 gate in `structural_gate()`
 (`restructure::s1::S1Gate`, wired on `feat/0.4` by track ddl; the gate also judges the stage's `deleted` row of removed attributes:
 `StructuralGate::judges_deleted_row`, `StructurePhase::consumed_staged_rows`). **The script tests of the seam** (all in
-`cargo test --lib mssql_config_apply`):
+`cargo test -p ibcmd-config-apply mssql_config_apply`):
 
 | What #397 asks | Test |
 |---|---|

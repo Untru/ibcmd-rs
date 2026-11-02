@@ -22,22 +22,35 @@ pub mod file_import;
 mod file_infobase;
 pub mod form_matrix;
 pub mod form_provenance;
+#[expect(
+    unused_imports,
+    reason = "the root keeps the path; its one reader, the exporter, names the crate"
+)]
 pub(crate) use ibcmd_form_schema as form_schema;
 pub(crate) mod import_plan;
 pub mod infobase;
 #[cfg(feature = "platform-oracle")]
 pub mod infobase_oracle;
-pub mod legacy_version;
+// The historical XML selector and its version axes, moved to
+// `ibcmd-platform-spec`; callers keep `crate::legacy_version::…`.
+pub use ibcmd_platform_spec::legacy_version;
 pub mod load;
 pub mod metadata_model;
 // `brace_list!`, which `metadata_model::brace` exported at the crate root.
 pub use ibcmd_metadata_model::brace_list;
-pub(crate) mod metadata_owner_graph;
+// The owner schema facts, moved to the dump readers' crate; callers keep
+// `crate::metadata_owner_graph::…`.
+#[expect(
+    unused_imports,
+    reason = "the root keeps the path; its one reader, the exporter, names the crate"
+)]
+pub(crate) use ibcmd_dump_readers::metadata_owner_graph;
 pub mod module_blob;
 pub mod mssql;
 pub mod mssql_apply;
 pub(crate) use ibcmd_mssql_live::mssql_artifact;
 pub mod mssql_config_apply;
+mod mssql_config_apply_command;
 pub mod mssql_dump;
 pub mod mssql_effective_row;
 pub mod mssql_extension_activation;
@@ -67,7 +80,17 @@ pub mod probe;
 pub mod profile;
 pub mod profile_registry;
 pub mod restructure;
-pub(crate) mod runtime_evidence_schema;
+// The journal schema of the database calls, moved to `ibcmd-sql`; callers
+// keep `crate::runtime_evidence_schema::…`.
+// `dump_sources` (`platform-oracle`) reads it too.
+#[cfg_attr(
+    not(feature = "platform-oracle"),
+    expect(
+        unused_imports,
+        reason = "the root keeps the path; its one reader, the exporter, names the crate"
+    )
+)]
+pub(crate) use ibcmd_sql::runtime_evidence_schema;
 pub mod server;
 pub mod settings;
 pub mod source;

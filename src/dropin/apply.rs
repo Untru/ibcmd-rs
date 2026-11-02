@@ -302,7 +302,12 @@ pub fn apply_options(
     database: &str,
     profile: MssqlNativePlatformProfile,
 ) -> ConfigApplyOptions {
-    let mut options = ConfigApplyOptions::new(database, profile);
+    let mut options = ConfigApplyOptions::new(
+        database,
+        profile,
+        crate::restructure::extensions::read_adoptions,
+        &crate::mssql_dump::StoredActivationRows,
+    );
     options.exclusivity = match request.exclusivity {
         ExclusivityMode::Sql => Exclusivity::SqlSessions,
         ExclusivityMode::Assumed => Exclusivity::Assumed,

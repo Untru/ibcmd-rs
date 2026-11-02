@@ -1,0 +1,23 @@
+[package]
+name = "ibcmd-mssql-extensions"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Configuration extensions in an MSSQL infobase: the transactional staging of an extension's rows into ConfigCASSave with its configinfo manifest"
+
+[dependencies]
+# The `configinfo` manifest is stored raw-deflated.
+flate2 = "1.1"
+# The base64 of the manifest's descriptor and digests.
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+# The storage image's entry and size limits.
+ibcmd-core = { path = "../ibcmd-core" }
+# The database clients and the `--sqlcmd` tools the stage runs through.
+ibcmd-sql = { path = "../ibcmd-sql" }
+# The configinfo manifest's digests of the packed rows.
+sha1 = "0.10"
+uuid = "1.19"
+
+[lints.rust]
+unsafe_code = "forbid"

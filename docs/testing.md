@@ -31,6 +31,19 @@ integration suites (`tests/*.rs`, `tests/support/`) and `tests/scripts/` skip
 the root library. Pushes to master and manual runs run every lane. Root
 examples are compiled by the `platform-oracle` lane below.
 
+A pull request builds the release binary and audits it (GLIBC, SBOM,
+release boundary, packaging) on Linux x86_64 only; Windows, Linux ARM64 and
+macOS check native micro-corpus parity on the debug binary of the
+integration suites instead (the same sources with `--no-default-features`,
+plus the dev-dependencies' `test-fixtures` hooks, inert unless a test sets
+them). Windows PowerShell 5.1 validates the EDT corpus on a pull request
+only when `tools/validate-edt-corpus.ps1`, its Pester test, its self-test
+fixtures (`tests/fixtures/schema-governance/`), the corpus
+(`crates/ibcmd-schema/data/`) or `offline-e2e.yml` changes; PowerShell 7
+validates it on every target. Pushes to master build and audit the release
+binary on all four targets and run Windows PowerShell 5.1 on Windows. Only
+master writes the Cargo caches; a pull request restores master's.
+
 The research probes and the live MSSQL tests below are behind features and
 not part of the gate. `.github/workflows/ci.yml` also compiles the root
 package with `platform-oracle` on Windows:
@@ -127,7 +140,11 @@ class with:
 
 ```text
 cargo test --locked -p ibcmd-rs --features research-corpus-tests --lib -- --ignored --nocapture
+cargo test --locked -p ibcmd-dump --features research-corpus-tests --lib -- --ignored --nocapture
 ```
+
+The exporter's own probes live in `ibcmd-dump`; the root's feature forwards
+to the crate's, and the root keeps the ones that read root code.
 
 The `--ignored` selector is intentional: enabling the feature alone must not
 also run the 179 known legacy failures. Some diagnostics still return early
@@ -161,8 +178,10 @@ disposable `tempdb` tables described in that module:
 cargo test --locked -p ibcmd-sql --features mssql-live-tests sql::mssql::live_tests:: -- --nocapture
 ```
 
-The root's `mssql-live-tests` feature forwards to the crate; the ignored
-root blob comparisons above remain in `ibcmd-rs`.
+The root's `mssql-live-tests` feature forwards to the crate and to
+`ibcmd-dump`, whose ignored live test of the storage generation overlay reads
+a lab database named by `IBCMD_RS_DYNGEN_DB`; the ignored root blob
+comparisons above remain in `ibcmd-rs`.
 
 ## Public Coverage corpus
 
@@ -177,5 +196,11 @@ changed/missing/extra fixture bytes and orphaned local baseline references.
 `cargo xtask ci` runs it plus native generator tests from the pinned corpus.
 Converter equality baselines remain under `tests/fixtures/coverage`; source-probe
 diagnostics remain in `tests/fixtures/coverage-records/source-probe-expectations.json`.
+`tests/coverage_round_trip.rs` writes the native XML of the corpus's
+all-in-one sets back with ibcmd-rs (`cf bootstrap`, and an import into the
+empty file infobase of `tests/fixtures/file-infobase`) and compares the
+export with it; its known gaps, each with its issue, are in
+`tests/fixtures/coverage/round-trip.json`. The test-suite audit behind it is
+`docs/test-audit.md`.
 Update the public corpus first, then its gitlink and converter code in a PR.
 Changing the corpus does not authorize removing an existing passing expectation.

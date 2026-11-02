@@ -15,6 +15,11 @@
 
 pub use ibcmd_metadata_model::metadata_model::*;
 
+// Read only by the exporter, which names the crate; it still hides the item from the glob.
+#[expect(
+    unused_imports,
+    reason = "the re-export hides a widened item from the public glob"
+)]
 pub(crate) use ibcmd_metadata_model::metadata_model::{external_data_source_children, interface};
 
 pub(crate) mod external_data_source;
@@ -22,6 +27,10 @@ pub(crate) mod external_data_source;
 /// The platform's standard pictures, the `ibcmd-1c-vocab` crate's table,
 /// under the path the crate's readers and writers name them by.
 pub mod standard_pictures {
+    #[expect(
+        unused_imports,
+        reason = "the root keeps the path; its one reader, the exporter, names the crate"
+    )]
     pub(crate) use ibcmd_metadata_model::metadata_model::standard_pictures::{
         standard_picture_name, standard_picture_uuid,
     };
@@ -31,13 +40,26 @@ pub mod standard_pictures {
 pub mod objects {
     pub use ibcmd_metadata_model::metadata_model::objects::*;
 
+    // Read only by the own apply (`ibcmd-config-apply`); it still hides the item from the glob.
+    #[expect(
+        unused_imports,
+        reason = "the re-export hides a widened item from the public glob"
+    )]
     pub(crate) use ibcmd_metadata_model::metadata_model::objects::owned_body_classes;
     pub(crate) use ibcmd_restructure::descriptor::{layout, standard_markers};
 
     /// The parts every reference object composes.
     pub(crate) mod parts {
+        #[expect(
+            unused_imports,
+            reason = "the root keeps the path; its one reader, the exporter, names the crate"
+        )]
         pub(crate) use ibcmd_metadata_model::metadata_model::objects::parts::Compat;
         #[cfg(test)]
+        #[expect(
+            unused_imports,
+            reason = "the root keeps the path; its one reader, the exporter, names the crate"
+        )]
         pub(crate) use ibcmd_metadata_model::metadata_model::objects::parts::compatibility;
         pub(crate) use ibcmd_restructure::descriptor::Slot;
     }
@@ -65,6 +87,10 @@ pub mod simple {
 
     /// Their export direction.
     pub(crate) mod export {
+        #[expect(
+            unused_imports,
+            reason = "the root keeps the path; its one reader, the exporter, names the crate"
+        )]
         pub(crate) use ibcmd_metadata_model::metadata_model::simple::export::use_standard_commands;
     }
 }
@@ -73,6 +99,11 @@ pub mod simple {
 pub mod common {
     pub use ibcmd_metadata_model::metadata_model::common::*;
 
+    // Read only by the exporter, which names the crate; it still hides the item from the glob.
+    #[expect(
+        unused_imports,
+        reason = "the re-export hides a widened item from the public glob"
+    )]
     pub(crate) use ibcmd_metadata_model::metadata_model::common::{
         MAIN_SERVER_UNAVAILABLE_BEHAVIORS, PARAMETER_USE_MODES, REPRESENTATIONS,
     };
@@ -86,6 +117,11 @@ pub mod root {
     pub mod export {
         pub use ibcmd_metadata_model::metadata_model::root::export::*;
 
+        // Read only by the exporter, which names the crate; it still hides the item from the glob.
+        #[expect(
+            unused_imports,
+            reason = "the re-export hides a widened item from the public glob"
+        )]
         pub(crate) use ibcmd_metadata_model::metadata_model::root::export::{
             root_configuration_uuid, stored_shape,
         };
@@ -110,11 +146,20 @@ pub mod export {
     pub mod names {
         pub use ibcmd_metadata_model::metadata_model::export::names::*;
 
+        // Read only by the own apply (`ibcmd-config-apply`); it still hides the item from the glob.
+        #[expect(
+            unused_imports,
+            reason = "the re-export hides a widened item from the public glob"
+        )]
         pub(crate) use ibcmd_metadata_model::metadata_model::export::names::root_class_kinds;
     }
 
     /// The value writers the families share.
     pub mod values {
+        #[expect(
+            unused_imports,
+            reason = "the root keeps the path; its one reader, the exporter, names the crate"
+        )]
         pub(crate) use ibcmd_metadata_model::metadata_model::export::values::UnsupportedDescriptorValue;
     }
 }

@@ -50,6 +50,10 @@ use crate::module_blob::{
 use crate::source_listing;
 use crate::sql::SqlExec;
 
+// The `deleted` row lives below both the stage and the export, which compares
+// a file infobase's stored one with it.
+pub(crate) use ibcmd_module_blob::deleted_row;
+
 /// The row that lists what an import removes (`docs/import/patch-mode.md`,
 /// section 7).
 pub(super) const DELETED_ROW: &str = "deleted";
@@ -479,20 +483,6 @@ pub(super) fn dynamic_update_rows(sql: &SqlExec, database: &str) -> Result<Vec<S
     let mut names = names.into_iter().map(|row| row.name).collect::<Vec<_>>();
     names.sort_by_key(|name| name.to_lowercase());
     Ok(names)
-}
-
-/// The `deleted` row of the platform's import: a BOM, the number of names,
-/// then each name in quotes followed by `0` (the flag of a Config row), raw
-/// deflate.
-pub(crate) fn deleted_row(names: &[String]) -> Result<Vec<u8>> {
-    let mut text = format!("\u{feff}{}", names.len());
-    for name in names {
-        if name.contains('"') {
-            bail!("a row name with a quote cannot be listed in the deleted row: {name}");
-        }
-        text.push_str(&format!(",\"{name}\",0"));
-    }
-    deflate_raw(text.as_bytes())
 }
 
 /// The `versions` row without the entries of `names`, its count lowered.
