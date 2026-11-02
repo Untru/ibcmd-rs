@@ -46491,11 +46491,15 @@ fn parses_web_service_header_with_real_short_header_wrapper() {
 #[test]
 fn rejects_web_service_non_decimal_and_overflowing_counts() {
     let usize_overflow = format!("{}0", usize::MAX);
-    let u32_overflow = format!("{}0", u32::MAX);
+    let u64_overflow = format!("{}0", u64::MAX);
     assert!(parse_web_service_usize("+1").is_none());
     assert!(parse_web_service_usize(&usize_overflow).is_none());
-    assert!(parse_web_service_u32("+20").is_none());
-    assert!(parse_web_service_u32(&u32_overflow).is_none());
+    assert!(parse_web_service_u64("+20").is_none());
+    assert!(parse_web_service_u64(&u64_overflow).is_none());
+    assert_eq!(
+        parse_web_service_u64("18446744073709551615"),
+        Some(u64::MAX)
+    );
     assert!(parse_web_service_localized_value(&format!("{{{usize_overflow}}}")).is_none());
     assert!(
         parse_web_service_operations(

@@ -11862,7 +11862,7 @@ struct WebServiceProperties {
     xdto_packages: Vec<WebServiceXdtoPackage>,
     descriptor_file_name: String,
     reuse_sessions: &'static str,
-    session_max_age: u32,
+    session_max_age: u64,
     operations: Vec<WebServiceOperationProperties>,
 }
 
@@ -11901,7 +11901,7 @@ struct WebServiceXdtoType {
 struct HttpServiceProperties {
     root_url: String,
     reuse_sessions: &'static str,
-    session_max_age: u32,
+    session_max_age: u64,
     url_templates: Vec<HttpServiceUrlTemplateProperties>,
 }
 
@@ -35299,7 +35299,7 @@ fn parse_web_service_properties_from_text(
         xdto_packages,
         descriptor_file_name: parse_web_service_nonempty_quoted_string(fields.get(4)?)?,
         reuse_sessions: parse_web_service_reuse_sessions(fields.get(6)?)?,
-        session_max_age: parse_web_service_u32(fields.get(7)?)?,
+        session_max_age: parse_web_service_u64(fields.get(7)?)?,
         operations: parse_web_service_operations(root.get(3)?, &mut seen_uuids)?,
     })
 }
@@ -35573,7 +35573,7 @@ fn parse_web_service_usize(value: &str) -> Option<usize> {
     value.parse().ok()
 }
 
-fn parse_web_service_u32(value: &str) -> Option<u32> {
+fn parse_web_service_u64(value: &str) -> Option<u64> {
     let value = value.trim();
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
@@ -35672,7 +35672,7 @@ fn parse_http_service_properties_from_text(
         .unwrap_or("DontUse");
     let session_max_age = fields
         .get(4)
-        .and_then(|field| field.trim().parse::<u32>().ok())
+        .and_then(|field| field.trim().parse::<u64>().ok())
         .unwrap_or(20);
     Some(HttpServiceProperties {
         root_url,
