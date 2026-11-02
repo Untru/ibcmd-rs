@@ -534,7 +534,7 @@ fn gap_detail(verdict: &Verdict, refused: Option<&str>) -> String {
 }
 
 /// The part of a listed reason after its issue references
-/// (`#598: <detail>`, `no issue yet: <detail>`).
+/// (`#598: <detail>`, `#545 #627: <detail>`).
 fn listed_detail(reason: &str) -> &str {
     reason.split_once(": ").map_or(reason, |(_, detail)| detail)
 }
