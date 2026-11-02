@@ -11550,6 +11550,8 @@ struct SettingsStorageProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     default_save_form: Option<String>,
     default_load_form: Option<String>,
+    auxiliary_save_form: Option<String>,
+    auxiliary_load_form: Option<String>,
 }
 
 enum FilterCriterionProperties {
@@ -32561,11 +32563,6 @@ fn parse_settings_storage_properties_from_text(
 
     let manager_type_id = parse_information_register_non_zero_uuid(fields.get(2)?)?;
     let manager_value_id = parse_information_register_non_zero_uuid(fields.get(3)?)?;
-    if !settings_storage_uuid_is_zero(fields.get(6)?)
-        || !settings_storage_uuid_is_zero(fields.get(7)?)
-    {
-        return None;
-    }
 
     if !parse_settings_storage_collection(root_fields.get(3)?, METADATA_TEMPLATE_COLLECTION_UUID)?
         .is_empty()
@@ -32588,6 +32585,18 @@ fn parse_settings_storage_properties_from_text(
         &header.name,
         form_refs,
     )?;
+    let auxiliary_load_form = parse_settings_storage_default_form_ref(
+        fields.get(6)?,
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let auxiliary_save_form = parse_settings_storage_default_form_ref(
+        fields.get(7)?,
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
 
     Some(SettingsStorageProperties {
         generated_types: vec![GeneratedTypeEntry {
@@ -32598,6 +32607,8 @@ fn parse_settings_storage_properties_from_text(
         }],
         default_save_form,
         default_load_form,
+        auxiliary_save_form,
+        auxiliary_load_form,
     })
 }
 
@@ -40599,8 +40610,18 @@ fn format_settings_storage_source_xml(
             "DefaultLoadForm",
             settings_storage.default_load_form.as_deref(),
         );
-        properties.push_str("\t\t\t<AuxiliarySaveForm/>\r\n");
-        properties.push_str("\t\t\t<AuxiliaryLoadForm/>\r\n");
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "AuxiliarySaveForm",
+            settings_storage.auxiliary_save_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "AuxiliaryLoadForm",
+            settings_storage.auxiliary_load_form.as_deref(),
+        );
         xml.insert_str(index, &properties);
     }
     // A settings storage always declares the element, self-closed when it
