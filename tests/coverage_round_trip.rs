@@ -534,7 +534,7 @@ fn gap_detail(verdict: &Verdict, refused: Option<&str>) -> String {
 }
 
 /// The part of a listed reason after its issue references
-/// (`#598: <detail>`, `no issue yet: <detail>`).
+/// (`#598: <detail>`, `#545 #627: <detail>`).
 fn listed_detail(reason: &str) -> &str {
     reason.split_once(": ").map_or(reason, |(_, detail)| detail)
 }
@@ -649,6 +649,56 @@ fn check(
     (failures, report)
 }
 
+fn expectations() -> Value {
+    serde_json::from_slice(
+        &fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("fixtures")
+                .join("coverage")
+                .join(EXPECTATIONS),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+/// Every known gap is owned by an issue: its reason starts with the issue
+/// references (`#598: …`, `#545 #627: …`).
+#[test]
+fn every_listed_gap_names_its_issue() {
+    let names_issues = |reason: &str| {
+        reason.split_once(": ").is_some_and(|(issues, _)| {
+            issues.split(' ').all(|issue| {
+                issue.strip_prefix('#').is_some_and(|number| {
+                    !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())
+                })
+            })
+        })
+    };
+    let expected = expectations();
+    let mut unowned = Vec::new();
+    for route in Route::ALL {
+        for (set, entries) in expected[route.key()].as_object().unwrap() {
+            for field in ["refused", "gaps"] {
+                for (name, reason) in listed(Some(entries), field) {
+                    if !names_issues(&reason) {
+                        unowned.push(format!("{} {set} {field} {name}: {reason}", route.key()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        unowned.is_empty(),
+        "known gaps without an issue:\n{}",
+        unowned.join("\n")
+    );
+    assert!(names_issues("#545 #627: Catalogs/A.xml differs"));
+    assert!(!names_issues("no issue yet: Catalogs/A.xml differs"));
+    assert!(!names_issues("#: Catalogs/A.xml differs"));
+}
+
 #[test]
 fn coverage_sets_round_trip_through_ibcmd_rs_writers() {
     let jobs: Vec<(Route, PathBuf, Value)> = coverage_sets()
@@ -662,18 +712,7 @@ fn coverage_sets_round_trip_through_ibcmd_rs_writers() {
     );
     let mut measured = measure_all(&jobs);
     measured.extend(measure_all(&fallback_jobs(&measured, &jobs)));
-    let expected = serde_json::from_slice(
-        &fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests")
-                .join("fixtures")
-                .join("coverage")
-                .join(EXPECTATIONS),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let (failures, report) = check(&measured, &expected);
+    let (failures, report) = check(&measured, &expectations());
     for line in &report {
         println!("{line}");
     }

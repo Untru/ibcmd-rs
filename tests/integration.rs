@@ -50,7 +50,6 @@ mod closed_modules;
 mod compatibility_matrix;
 mod configuration_properties;
 mod conversion_cli;
-mod coverage_checkout;
 mod coverage_corpus;
 mod coverage_extension_envelope;
 mod coverage_fixture_features;
