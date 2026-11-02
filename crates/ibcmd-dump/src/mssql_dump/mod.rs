@@ -37096,8 +37096,10 @@ fn parse_style_color_value(value: &str) -> Option<String> {
             let blue = (color >> 16) & 0xff;
             Some(format!("#{red:02X}{green:02X}{blue:02X}"))
         }
+        // The system palette is stored as variant 1; variant 3 also names
+        // system colours in older records.
+        1 | 3 => style_system_color_name(code).map(ToOwned::to_owned),
         2 => style_web_color_name(code).map(ToOwned::to_owned),
-        3 => style_system_color_name(code).map(ToOwned::to_owned),
         // The automatic colour names no value: the platform writes `auto`.
         4 => Some("auto".to_owned()),
         _ => None,
