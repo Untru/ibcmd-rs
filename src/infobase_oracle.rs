@@ -183,6 +183,7 @@ pub fn roundtrip_config(
         None
     } else {
         Some(export_config(&InfobaseConfigExportArgs {
+            chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
             db_path: None,
             settings: args.settings.clone(),
             native_config: None,
@@ -374,6 +375,7 @@ pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSwee
 
     if args.source_dir.is_none() {
         export_config(&InfobaseConfigExportArgs {
+            chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
             db_path: None,
             settings: args.settings.clone(),
             native_config: None,

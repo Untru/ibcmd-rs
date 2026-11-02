@@ -162,6 +162,12 @@ ibcmd infobase config export --dbms=MSSQLServer --db-server=sql01 ^
 Свои параметры утилиты:
 - `--platform` — версия платформы, см. ниже;
 - `--report <файл>` — подробный отчёт в JSON;
+- у полной выгрузки конфигурации `--chart-series-names stored|russian|english` —
+  явное представление автоматически создаваемых подписей диаграмм. По умолчанию
+  `stored` сохраняет записанный текст; `russian` выбирает `Сводная`, `english` —
+  `Pivot`. Пользовательские подписи, язык BSL и ScriptVariant не переводятся.
+  Это выбор представления, а не определение настроек штатной 1С; режимы
+  `russian`/`english` не совмещаются с `--base`, `--sync` или `--extension`;
 - `--sqlcmd <путь>` — работать через `sqlcmd` и `bcp`, как версия 0.2 (у
   применения не поддерживается);
 - у применения ещё `--exclusivity`, `--recovery-backup` и `--i-have-a-backup`,

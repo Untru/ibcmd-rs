@@ -920,6 +920,7 @@ mod tests {
         ));
         let _scratch = crate::test_scratch::TestScratch::adopt(&out);
         let result = crate::mssql_dump::dump_config(&MssqlDumpConfigArgs {
+            chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
             sqlcmd: None,
             bcp_executable: None,
             runtime_journal: None,

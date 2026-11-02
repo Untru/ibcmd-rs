@@ -27,11 +27,11 @@ pub(crate) use ibcmd_dump::mssql_dump::{
     fetch_config_part0_rows, fetch_config_row_whole, fetch_extension_activation_rows,
     fetch_main_activation_rows, file_db_rows_from_reader, file_extension_base_provider,
     file_infobase_config, file_infobase_effective, help_link_marker_is_anchor,
-    help_standard_picture_negative_index, read_config_dump_info_with_sql, rewrite_help_links,
-    role_rights_xml_from_blob, root_family_folder, trace_form_body_with_context,
-    try_extract_moxel_spreadsheet_xml_with_generated_types, unpack_form_body_module_text,
-    with_database_table, with_file_db_table, with_main_database_table, with_memory_rows_table,
-    with_rows_dir_table, write_source_xml_file,
+    help_standard_picture_negative_index, native_module_file_bytes, read_config_dump_info_with_sql,
+    rewrite_help_links, role_rights_xml_from_blob, root_family_folder,
+    trace_form_body_with_context, try_extract_moxel_spreadsheet_xml_with_generated_types,
+    unpack_form_body_module_text, with_database_table, with_file_db_table,
+    with_main_database_table, with_memory_rows_table, with_rows_dir_table, write_source_xml_file,
 };
 
 // The exporter's crate-visible re-exports of other crates' items, from their
@@ -217,5 +217,51 @@ mod dump_config_tests {
         let error = format!("{:#}", super::dump_config(&args).unwrap_err());
         assert!(!error.contains("--object is selected by"), "{error}");
         assert!(error.contains(&rows.display().to_string()), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod chart_series_name_scope_tests {
+    use clap::Parser;
+
+    #[test]
+    fn nonstored_chart_labels_refuse_without_xml_before_journal_or_database_reads() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "ibcmd-rs",
+            "mssql-dump-config",
+            "--database",
+            "unused",
+            "--output-dir",
+            "unused-output",
+            "--chart-series-names=russian",
+        ])
+        .unwrap();
+        let crate::cli::Commands::MssqlDumpConfig(args) = cli.command else {
+            panic!("wrong command");
+        };
+        let error = super::dump_config(&args).unwrap_err().to_string();
+        assert!(error.contains("requires --extract-metadata-xml"), "{error}");
+    }
+
+    #[test]
+    fn nonstored_chart_labels_refuse_incremental_before_journal_or_database_reads() {
+        for option in ["--base=previous.xml", "--sync"] {
+            let cli = crate::cli::Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "unused",
+                "--output-dir",
+                "unused-output",
+                "--chart-series-names=english",
+                option,
+            ])
+            .unwrap();
+            let crate::cli::Commands::MssqlDumpConfig(args) = cli.command else {
+                panic!("wrong command");
+            };
+            let error = super::dump_config(&args).unwrap_err().to_string();
+            assert!(error.contains("--chart-series-names"), "{error}");
+        }
     }
 }

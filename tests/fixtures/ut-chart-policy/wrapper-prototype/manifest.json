@@ -1,0 +1,101 @@
+{
+  "status": "UNMEASURED_NOT_NATIVE_ACCEPTED",
+  "scope": "source_input_only_no_expected_output",
+  "prototype_case": "changed-0_scales-0_real-0",
+  "configuration_uuid": "30000000-0000-4000-8000-000000000001",
+  "common_template_uuid": "30000000-0000-4000-8000-000000000002",
+  "sources": [
+    {
+      "path": "tests/fixtures/bootstrap/8.3.27.1989/xcf-2.20/minimal/Configuration.xml",
+      "sha256": "0d28aa2c0b6d208bd0da5ba2908d29413b0408bfd9a965731ea76e029ebff13c"
+    },
+    {
+      "path": "tests/fixtures/bootstrap/8.3.27.1989/xcf-2.20/minimal/CommonModules/Portable.xml",
+      "sha256": "0d11c02ec2ba7dc8cc971c9a46373efbffa7d3b76dab5e2aa40733360b46a88f"
+    },
+    {
+      "path": "tests/fixtures/bootstrap/8.3.27.1989/xcf-2.20/minimal/CommonModules/Portable/Ext/Module.bsl",
+      "sha256": "d3cd8b58a211268e6d2267ef08b52b8952b462783ab9526ee98f70a694d98654"
+    },
+    {
+      "path": "tests/fixtures/external/test_processor/expected/\u0422\u0435\u0441\u0442\u041e\u0431\u0440\u0430\u0431\u043e\u0442\u043a\u0430/Templates/\u041c\u0430\u043a\u0435\u0442/Ext/Template.xml",
+      "sha256": "9d4dd08bdd30ee70b97a014b10973fa3d69b0c0877cea99ea81b640cf7deceab"
+    },
+    {
+      "path": "tests/fixtures/native-evidence/8.3.27.2214/moxel-chart-series-count-zero/native/empty-no-extended-scales-object.xml",
+      "sha256": "5ce3f968df903898e27acfb4e1dacbda9a7fb754926e9883ef86c9f700bf0b99"
+    }
+  ],
+  "generator_sha256": "ced9cda0ddb3af9dfd66340fd09ff17d516c2ebd881532d52d0114273b4c2d02",
+  "files": {
+    "Configuration.xml": {
+      "bytes": 2124,
+      "sha256": "c0f1d5b9ee5d107e4516dba1cad795f2fe37d2f40e12197ef0377e5a01adc4bb"
+    },
+    "CommonModules/Portable.xml": {
+      "bytes": 713,
+      "sha256": "0d11c02ec2ba7dc8cc971c9a46373efbffa7d3b76dab5e2aa40733360b46a88f"
+    },
+    "CommonModules/Portable/Ext/Module.bsl": {
+      "bytes": 38,
+      "sha256": "d3cd8b58a211268e6d2267ef08b52b8952b462783ab9526ee98f70a694d98654"
+    },
+    "CommonTemplates/ChartPolicySeed.xml": {
+      "bytes": 369,
+      "sha256": "41151b2323941aaf41d2a5a1e1cbb15a4d8fbbe4c6e130e45f97971ce218a4da"
+    },
+    "CommonTemplates/ChartPolicySeed/Ext/Template.xml": {
+      "bytes": 10688,
+      "sha256": "4cbcca2ca9bd3813440a1ef1920e8df79c590d30de1bfe7df8ca20fc0285d6b4"
+    }
+  },
+  "offline_checks": [
+    "metadata names, kind, version and child registration",
+    "spreadsheet XML namespace inheritance and chart xsi:type",
+    "one drawing and valid format pool reference",
+    "real-series count and subtree consistency",
+    "unchanged approved automatic-name control",
+    "InternalInfo seven exact section classes, distinct noncolliding synthetic identities, reviewed two-insertion Configuration change"
+  ],
+  "not_checked": [
+    "candidate compilation",
+    "native import or compile",
+    "native readback of source levels",
+    "native name policy",
+    "exact byte or inventory parity"
+  ],
+  "chart_rendering": "Pinned public multiline fragment; only unrelated localized title replaced with ChartSeedTitle. Same baseline semantic case as generator; not generator one-line serialization. Prototype source input uses consistent LF line endings; historical native files and parity comparison are unchanged.",
+  "configuration_internal_info": {
+    "status": "independently_reviewed_static_source_only_not_candidate_or_native_accepted",
+    "rule": "Exactly seven fixed configuration-section ClassId identities, one per section. ObjectId values are independent synthetic UUIDs in a disjoint400-prefix; no generated types or additional fields.",
+    "original_configuration_sha256": "85116e1507cfc8e210a7897daf7ce636ffcc1ed0ca3d56802c35ac2bcaeca7f1",
+    "reviewed_configuration_sha256": "c0f1d5b9ee5d107e4516dba1cad795f2fe37d2f40e12197ef0377e5a01adc4bb",
+    "lineage": [
+      {
+        "path": "src/metadata_model/root.rs",
+        "sha256": "76eb0ee3ca2823faaac85bdeaa0f2167b5ddf09e968953e4439713697970313a",
+        "rule": "contained_objects requires InternalInfo; configuration requires every SECTIONS ClassId"
+      },
+      {
+        "path": "src/compiler/root.rs",
+        "sha256": "7894ca74a0dd20ecd55bbd612d785bf2eb6b7c0a52fe0ac97aee060c071e42ff",
+        "rule": "CONFIGURATION_SECTIONS fixed seven-class mapping"
+      },
+      {
+        "path": "src/metadata_model/root_export.rs",
+        "sha256": "9381b2f00f800a941f87eac41074b75bb3ec3a574952c1827eae95c1dc43dd47",
+        "rule": "exports InternalInfo ClassId/ObjectId pairs"
+      },
+      {
+        "path": "tests/cf_bootstrap_package_intent.rs",
+        "sha256": "1d5ee438ce893ab7df82b8246ce92c40ae73dd7945f59fa7fea05b6e3e5d8dd0",
+        "rule": "configuration() clean-room independent ObjectId per fixed section"
+      },
+      {
+        "path": "tests/fixtures/file-infobase/empty-xml-8.3.27/Configuration.xml",
+        "sha256": "62d0b58eba7663a0b02f5f3c6961f4b219a79ab7ea1be4f794ba165111883096",
+        "rule": "Public native empty XML2.20 independently carries the same seven classes"
+      }
+    ]
+  }
+}

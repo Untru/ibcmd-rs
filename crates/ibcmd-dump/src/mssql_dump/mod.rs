@@ -1054,9 +1054,12 @@ pub use file_infobase::{
 };
 pub use postgres_infobase::PostgresExportSnapshot;
 mod form;
-// The form body reader is the `ibcmd-form-body` crate's; `mssql_dump` reaches
-// its items by their old names and paths through this import.
-use ibcmd_form_body::form_body;
+mod form_body;
+pub use form_body::{
+    FormFieldMapObservationError, FormFieldMapObservationReport,
+    MAX_FORM_OBSERVER_COMPRESSED_BYTES, observe_form_field_map_blob,
+    observe_form_field_map_blob_with_context,
+};
 mod form_body_entry;
 mod form_extension;
 #[cfg(test)]
@@ -1163,7 +1166,7 @@ use forms::*;
 use metadata::*;
 use moxel_entry::*;
 #[doc(hidden)]
-pub use output_writer::FileSink;
+pub use output_writer::{FileSink, native_module_file_bytes};
 use output_writer::{MssqlDumpTimingReportOutputExt, OutputWriter};
 use refs::*;
 use role_rights::*;
@@ -1232,12 +1235,13 @@ pub fn extract_standalone_metadata_source_xml(
     )
     .map(|extracted| (extracted.relative_path, extracted.xml))
 }
-pub use moxel_entry::try_extract_moxel_spreadsheet_xml;
+pub use moxel_entry::{MoxelChartSeriesAutomaticName, try_extract_moxel_spreadsheet_xml};
 #[doc(hidden)]
 pub use moxel_entry::{
     extract_inflated_moxel_spreadsheet_xml_with_line_trace, extract_moxel_spreadsheet_xml,
     extract_moxel_spreadsheet_xml_with_line_trace,
     try_extract_moxel_spreadsheet_xml_with_generated_types,
+    try_extract_moxel_spreadsheet_xml_with_generated_types_and_policy,
 };
 #[doc(hidden)]
 pub use source_assets::write_source_xml_file;
@@ -2440,6 +2444,18 @@ fn dump_config_with_options(
     editor_writer_scope: Option<bool>,
     requested_descriptor: Option<&str>,
 ) -> Result<MssqlDumpConfigReport> {
+    if args.chart_series_names != MoxelChartSeriesAutomaticName::Stored
+        && (args.base.is_some() || args.sync)
+    {
+        bail!(
+            "--chart-series-names=russian|english requires a full export without --base or --sync"
+        );
+    }
+    if args.chart_series_names != MoxelChartSeriesAutomaticName::Stored
+        && !args.extract_metadata_xml
+    {
+        bail!("--chart-series-names=russian|english requires --extract-metadata-xml");
+    }
     if !args.objects.is_empty() && hooks.select_objects.is_none() {
         bail!(
             "--object is selected by the caller's reader of the stored objects, and this export \
@@ -2769,6 +2785,7 @@ fn dump_config_inner(
             args.extract_module_text,
             args.extract_metadata_xml,
             source_version,
+            args.chart_series_names,
             args.collect_all_source_asset_diagnostics,
             model_export::requested(args.model_export, args.legacy_export),
             hooks.sink.clone(),
@@ -3025,6 +3042,7 @@ pub fn export_staged_state(
             true,
             true,
             source_version,
+            MoxelChartSeriesAutomaticName::Stored,
             false,
             model_export::requested(false, false),
             Some(sink),
@@ -3761,6 +3779,7 @@ struct DumpRowContext<'a> {
     output: &'a OutputWriter,
     table: &'a str,
     source_version: InfobaseConfigSourceVersion,
+    chart_series_names: MoxelChartSeriesAutomaticName,
     write_binary_rows: bool,
     inflate: bool,
     extract_module_text: bool,
@@ -4499,6 +4518,7 @@ fn dump_table_rows_with_options_mode(
         output_dir,
         table,
         source_version,
+        chart_series_names: MoxelChartSeriesAutomaticName::Stored,
         write_binary_rows,
         inflate,
         extract_module_text,
@@ -4815,6 +4835,7 @@ fn dump_table_rows_streamed(
     extract_module_text: bool,
     extract_metadata_xml: bool,
     source_version: InfobaseConfigSourceVersion,
+    chart_series_names: MoxelChartSeriesAutomaticName,
     collect_all_source_asset_diagnostics: bool,
     model_export: bool,
     sink: Option<Arc<dyn FileSink>>,
@@ -6256,6 +6277,7 @@ fn dump_table_rows_streamed(
         output_dir,
         table,
         source_version,
+        chart_series_names,
         write_binary_rows,
         inflate,
         extract_module_text,
@@ -7661,7 +7683,7 @@ fn dump_table_row_bytes(
                         }
                         context
                             .output
-                            .write(&path, text)
+                            .write_module(&path, text, !context.write_binary_rows)
                             .with_context(|| format!("failed to write {}", path.display()))?;
                         module_text_rows = 1;
                         timings.module_text_cpu_ms += elapsed_ms(started);

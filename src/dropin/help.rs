@@ -122,6 +122,12 @@ pub fn infobase_help(program: &str) -> String {
                     ibcmd, должен быть пустым или отсутствовать (кроме
                     выгрузки с --base или --sync)
 
+                --chart-series-names=<stored|russian|english>
+                    Язык только автоматически созданных подписей диаграмм.
+                    По умолчанию stored: хранимое написание. Пользовательские
+                    подписи сохраняются. russian/english требуют полной
+                    выгрузки без --base, --sync и --extension.
+
                 --ignore-unresolved-refs
                     Принимается для совместимости
 

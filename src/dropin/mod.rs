@@ -352,6 +352,7 @@ pub fn sql_server_name(value: &str) -> String {
 pub fn export_args(request: &ExportRequest) -> InfobaseConfigExportArgs {
     let common = &request.common;
     InfobaseConfigExportArgs {
+        chart_series_names: request.chart_series_names,
         settings: common.settings.clone(),
         native_config: common.native_config.clone(),
         format: None,
@@ -917,6 +918,7 @@ mod tests {
     #[test]
     fn requests_become_the_library_arguments() {
         let export = ExportRequest {
+            chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
             common: Common {
                 dbms: Some("MSSQLServer".to_string()),
                 db_server: Some("sql01".to_string()),

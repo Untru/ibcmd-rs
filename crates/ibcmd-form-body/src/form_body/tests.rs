@@ -26385,6 +26385,522 @@ fn encode_base64_for_test(bytes: &[u8]) -> String {
     output
 }
 
+#[cfg(test)]
+mod reference_alias_tests {
+    use super::*;
+
+    fn deletion_mark_control_paths(arm: &str) -> (Vec<String>, String, String) {
+        deletion_mark_control_paths_with_bindings(arm, &[])
+    }
+
+    fn deletion_mark_control_paths_with_bindings(
+        arm: &str,
+        bindings: &[(&str, &str)],
+    ) -> (Vec<String>, String, String) {
+        deletion_mark_control_paths_with_field_sources(arm, bindings, None)
+    }
+
+    fn deletion_mark_control_paths_with_field_sources(
+        arm: &str,
+        bindings: &[(&str, &str)],
+        server_state: Option<&str>,
+    ) -> (Vec<String>, String, String) {
+        let query = match arm {
+            "A" | "F" => "ВЫБРАТЬ T.Ссылка КАК Ссылка ИЗ Справочник.CorpusList КАК T",
+            "B" | "E" => "ВЫБРАТЬ T.Ссылка КАК OwnedRef ИЗ Справочник.CorpusList КАК T",
+            "C" => {
+                "ВЫБРАТЬ T.Ссылка КАК OwnedRef, T.ПометкаУдаления КАК ПометкаУдаления ИЗ Справочник.CorpusList КАК T"
+            }
+            "D" => "ВЫБРАТЬ 1 КАК Marker ИЗ Справочник.CorpusList КАК T",
+            _ => panic!("unknown public arm"),
+        };
+        let refs = BTreeMap::from([(
+            "a4d6ccbb-a666-4217-ad1a-174221faba2b".into(),
+            "Catalog.CorpusList".into(),
+        )]);
+        let declarations = declarations_for_script(if arm == "E" { "0" } else { "1" }, &refs);
+        let mut properties = vec![
+            r#""ManualQuery",{"B",1}"#.to_string(),
+            format!(r#""QueryText",{{"S","{query}"}}"#),
+            r#""AutoFillAvailableFields",{"B",1}"#.to_string(),
+        ];
+        for (suffix, id, name, twin) in [
+            (
+                0,
+                3,
+                if arm == "F" {
+                    "Description"
+                } else {
+                    "Наименование"
+                },
+                None,
+            ),
+            (1, 4, "Code", Some("Код")),
+            (2, 9, "SortKey", None),
+            (3, 13, "Ref", Some("Ссылка")),
+            (
+                4,
+                14,
+                if arm == "F" {
+                    "ПометкаУдаления"
+                } else {
+                    "DeletionMark"
+                },
+                None,
+            ),
+        ] {
+            properties.push(format!(r#""FieldsMapItemId{suffix}",{{"N",{id}}}"#));
+            properties.push(format!(r#""FieldsMapItemName{suffix}",{{"S","{name}"}}"#));
+            if let Some(twin) = twin {
+                properties.push(format!(
+                    r#""FieldsMapItemSecondaryName{suffix}",{{"S","{twin}"}}"#
+                ));
+            }
+        }
+        for (path, name) in bindings {
+            properties.push(format!(r#""Field",{{"{path}","{name}"}}"#));
+        }
+        properties.push(r#""ReqMapFieldId0",{"N",3}"#.into());
+        properties.push(r#""ReqMapFieldId1",{"N",14}"#.into());
+        let bag = format!("{{0,{},{}}}", properties.len(), properties.join(","));
+        let mut settings = parse_form_dynamic_list_settings(&bag, &refs).unwrap();
+        settings.main_table = Some("Catalog.CorpusList".into());
+        settings.server_state_xml = server_state.map(str::to_string);
+        let facts = FormDynamicListFieldFacts::read(
+            &bag,
+            Some(&settings),
+            &refs,
+            Some(&declarations),
+            None,
+        )
+        .unwrap();
+        let mut paths = facts.use_always("Список", Some(&settings));
+        paths.sort(); // unchanged production final attribute ordering, line4990
+        let owners = BTreeMap::from([(
+            "26".into(),
+            FormAttributeMetadataOwner {
+                name: "Список".into(),
+                type_references: vec!["cfg:DynamicList".into()],
+                exact_single_type_reference: Some("cfg:DynamicList".into()),
+                has_dynamic_list_settings: true,
+                main_table: Some("Catalog.CorpusList".into()),
+                manual_query: true,
+                additional_columns: vec![],
+            },
+        )]);
+        let mut bindings = FormOwnerScopedBindingIndexes::default();
+        bindings.dynamic_list_attribute_ids.insert("26".into());
+        for (id, name) in &facts.field_names {
+            bindings.attribute_columns.insert(
+                FormAttributeColumnKey {
+                    attribute_id: "26".into(),
+                    column_id: id.clone(),
+                },
+                Some(name.clone()),
+            );
+        }
+        for id in facts.unresolvable_item_ids() {
+            bindings
+                .unresolvable_columns
+                .insert(FormAttributeColumnKey {
+                    attribute_id: "26".into(),
+                    column_id: id,
+                });
+        }
+        for (id, name) in facts.field_item_twins() {
+            bindings.column_twins.insert(
+                FormAttributeColumnKey {
+                    attribute_id: "26".into(),
+                    column_id: id,
+                },
+                name,
+            );
+        }
+        let path = |id| match resolve_form_attribute_column_data_path(
+            &format!("{{2,{{26}},{{{id}}}}}"),
+            &owners,
+            &bindings,
+        ) {
+            FormOwnerScopedDataPath::Resolved(path) => path,
+            _ => panic!("public column must remain explicitly bound"),
+        };
+        (paths, path(4), path(13))
+    }
+
+    // Native 8.3.27.2342 A-F: DeletionMark is the target of this correction.
+    // A/D deliberately preserve the existing, separate Description behavior;
+    // Code/Ref assertions below freeze unrelated production output, not parity.
+    // Full observations: public-form-six-arm-comparison-001, SHA48b28c51…dbde08.
+    #[test]
+    fn implicit_deletion_mark_matches_native_six_arm_controls() {
+        for arm in ["A", "B", "C", "D", "E", "F"] {
+            let (paths, code, reference) = deletion_mark_control_paths(arm);
+            let expected = match arm {
+                "A" | "D" => vec!["Список.DeletionMark", "Список.Наименование"],
+                "B" | "E" => vec!["~Список.Наименование", "Список.DeletionMark"],
+                "C" => vec!["~Список.DeletionMark", "~Список.Наименование"],
+                "F" => vec!["~Список.Description", "Список.DeletionMark"],
+                _ => unreachable!(),
+            };
+            assert_eq!(paths, expected, "DeletionMark native control {arm}");
+            assert_eq!(
+                code,
+                if matches!(arm, "B" | "C") {
+                    "~Список.Code~Список.Код"
+                } else {
+                    "Список.Code"
+                },
+                "unrelated Code behavior {arm}"
+            );
+            assert_eq!(
+                reference,
+                if matches!(arm, "B" | "C") {
+                    "~Список.Ref~Список.Ссылка"
+                } else {
+                    "Список.Ref"
+                },
+                "unrelated Ref behavior {arm}"
+            );
+        }
+    }
+
+    #[test]
+    fn implicit_deletion_mark_preserves_unique_declared_output_spelling() {
+        // The retained UT groups carry a direct ordinary RU -> RU Field
+        // declaration; public F has only a remembered map with that name.
+        let undeclared = deletion_mark_control_paths("F");
+        let declared = deletion_mark_control_paths_with_bindings(
+            "F",
+            &[("ПометкаУдаления", "ПометкаУдаления")],
+        );
+        assert_eq!(
+            declared.0,
+            vec!["~Список.Description", "Список.ПометкаУдаления"]
+        );
+        assert_eq!(
+            undeclared.0,
+            vec!["~Список.Description", "Список.DeletionMark"]
+        );
+        assert_eq!((&declared.1, &declared.2), (&undeclared.1, &undeclared.2));
+        for bindings in [
+            vec![("Description", "Description")],
+            vec![("ПометкаУдаления", "DeletionMark")],
+            vec![("Ref.ПометкаУдаления", "Ref.ПометкаУдаления")],
+            vec![
+                ("ПометкаУдаления", "ПометкаУдаления"),
+                ("ПометкаУдаления", "DeletionMark"),
+            ],
+            vec![
+                ("ПометкаУдаления", "ПометкаУдаления"),
+                ("ПометкаУдаления", "ПометкаУдаления"),
+            ],
+            vec![
+                ("ПометкаУдаления", "ПометкаУдаления"),
+                ("пометкаудаления", "пометкаудаления"),
+            ],
+        ] {
+            assert_eq!(
+                deletion_mark_control_paths_with_bindings("F", &bindings),
+                undeclared,
+                "a renamed, dotted or ambiguous binding cannot select the spelling"
+            );
+        }
+        // A declaration cannot make an explicitly projected-away name available.
+        assert_eq!(
+            deletion_mark_control_paths_with_bindings(
+                "C",
+                &[("ПометкаУдаления", "ПометкаУдаления")],
+            ),
+            deletion_mark_control_paths("C")
+        );
+    }
+
+    #[test]
+    fn implicit_deletion_mark_uses_only_emitted_server_state_bindings() {
+        let declaration = r#"<Field xsi:type="dcssch:DataSetFieldField"><dcssch:dataPath>ПометкаУдаления</dcssch:dataPath><dcssch:field>ПометкаУдаления</dcssch:field></Field>"#;
+        let declared = deletion_mark_control_paths_with_field_sources(
+            "F",
+            &[("ПометкаУдаления", "DeletionMark")],
+            Some(declaration),
+        );
+        assert_eq!(
+            declared.0,
+            vec!["~Список.Description", "Список.ПометкаУдаления"]
+        );
+        let undeclared = deletion_mark_control_paths("F");
+        assert_eq!((&declared.1, &declared.2), (&undeclared.1, &undeclared.2));
+        for fragment in [
+            "<Parameter/>",
+            &format!("<Container>{declaration}</Container>"),
+            &format!("{declaration}{declaration}"),
+            &declaration.replace("DataSetFieldField", "CalculatedField"),
+        ] {
+            assert_eq!(
+                deletion_mark_control_paths_with_field_sources(
+                    "F",
+                    &[("ПометкаУдаления", "ПометкаУдаления")],
+                    Some(fragment),
+                ),
+                undeclared,
+                "the emitted fragment replaces the bag; only a unique ordinary direct binding counts"
+            );
+        }
+        assert_eq!(
+            deletion_mark_control_paths_with_field_sources("C", &[], Some(declaration)),
+            deletion_mark_control_paths("C"),
+        );
+    }
+
+    #[test]
+    fn implicit_deletion_mark_cannot_unshadow_a_later_map_entry() {
+        let refs = BTreeMap::from([(
+            "a4d6ccbb-a666-4217-ad1a-174221faba2b".into(),
+            "Catalog.CorpusList".into(),
+        )]);
+        let declarations = declarations_for_script("1", &refs);
+        let bag = r#"{0,7,"ManualQuery",{"B",1},"QueryText",{"S","SELECT 1 AS Marker FROM Catalog.CorpusList AS T"},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","ПометкаУдаления"},"FieldsMapItemId1",{"N",2},"FieldsMapItemName1",{"S","ПометкаУдаления"},"ReqMapFieldId0",{"N",2}}"#;
+        let mut settings = parse_form_dynamic_list_settings(bag, &refs).unwrap();
+        settings.main_table = Some("Catalog.CorpusList".into());
+        let facts =
+            FormDynamicListFieldFacts::read(bag, Some(&settings), &refs, Some(&declarations), None)
+                .unwrap();
+        assert!(facts.shadowed_item_ids.contains("2"));
+        assert_eq!(
+            facts.use_always("List", Some(&settings)),
+            ["~List.ПометкаУдаления"]
+        );
+
+        // Explicit aliases keep the existing casefold spelling in DataPath.
+        let bag = r#"{0,5,"ManualQuery",{"B",1},"QueryText",{"S","SELECT T.ПометкаУдаления AS DeletionMark FROM Catalog.CorpusList AS T"},"FieldsMapItemId0",{"N",14},"FieldsMapItemName0",{"S","deletionmark"},"ReqMapFieldId0",{"N",14}}"#;
+        let mut settings = parse_form_dynamic_list_settings(bag, &refs).unwrap();
+        settings.main_table = Some("Catalog.CorpusList".into());
+        let facts =
+            FormDynamicListFieldFacts::read(bag, Some(&settings), &refs, Some(&declarations), None)
+                .unwrap();
+        let owners = BTreeMap::from([(
+            "26".into(),
+            FormAttributeMetadataOwner {
+                name: "List".into(),
+                type_references: vec!["cfg:DynamicList".into()],
+                exact_single_type_reference: Some("cfg:DynamicList".into()),
+                has_dynamic_list_settings: true,
+                main_table: Some("Catalog.CorpusList".into()),
+                manual_query: true,
+                additional_columns: vec![],
+            },
+        )]);
+        let key = FormAttributeColumnKey {
+            attribute_id: "26".into(),
+            column_id: "14".into(),
+        };
+        let mut bindings = FormOwnerScopedBindingIndexes::default();
+        bindings.dynamic_list_attribute_ids.insert("26".into());
+        bindings
+            .attribute_columns
+            .insert(key.clone(), Some("deletionmark".into()));
+        bindings
+            .column_twins
+            .insert(key, facts.field_item_twins().remove("14").unwrap());
+        assert!(
+            matches!(resolve_form_attribute_column_data_path("{2,{26},{14}}", &owners, &bindings),
+            FormOwnerScopedDataPath::Resolved(path) if path == "List.DeletionMark")
+        );
+    }
+
+    #[test]
+    fn implicit_deletion_mark_requires_an_unambiguous_main_source() {
+        let declarations = declarations_for_script("1", &BTreeMap::new());
+        fn parse(query: &str) -> FormDynamicListQuerySelection {
+            parse_form_dynamic_list_query_selection(query).unwrap()
+        }
+        let other = parse(
+            "SELECT X.ПометкаУдаления AS OtherMark FROM Catalog.CorpusList AS T LEFT JOIN Catalog.Other AS X ON T.Ссылка = X.Ссылка",
+        );
+        let names = form_dynamic_list_deletion_mark_names(
+            "Catalog.CorpusList",
+            &other,
+            Some(&declarations),
+        )
+        .unwrap();
+        assert!(names.implicit.contains("DeletionMark"));
+        for member in ["ПометкаУдаления", "DeletionMark"] {
+            let selected = parse(&format!(
+                "SELECT T.{member} AS SelectedMark FROM Catalog.CorpusList AS T"
+            ));
+            let names = form_dynamic_list_deletion_mark_names(
+                "Catalog.CorpusList",
+                &selected,
+                Some(&declarations),
+            )
+            .unwrap();
+            assert!(names.implicit.is_empty());
+            assert!(names.lexical.contains("SelectedMark"));
+        }
+        for query in [
+            "SELECT T.Ref AS SelectedRef FROM Catalog.CorpusList AS T JOIN Catalog.CorpusList AS U ON T.Ref = U.Ref",
+            "SELECT T.* FROM Catalog.CorpusList AS T",
+            "SELECT 1 AS DeletionMark FROM Catalog.CorpusList AS T",
+        ] {
+            assert!(
+                form_dynamic_list_deletion_mark_names(
+                    "Catalog.CorpusList",
+                    &parse(query),
+                    Some(&declarations)
+                )
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn renamed_reference_removes_auto_fields_in_both_script_variants() {
+        for (script_code, reference, description) in
+            [("0", "Ref", "Description"), ("1", "Ссылка", "Наименование")]
+        {
+            let declarations = declarations_for_script(script_code, &BTreeMap::new());
+            assert_eq!(declarations.english_script(), script_code == "0");
+            let query = format!("SELECT P.{reference} AS SelectedRef FROM Catalog.Products AS P");
+            let selected = parse_form_dynamic_list_query_selection(&query).unwrap();
+            let fields = form_dynamic_list_main_table_auto_fields(
+                "Catalog.Products",
+                &selected,
+                &BTreeMap::new(),
+                Some(&declarations),
+                None,
+            )
+            .unwrap();
+            assert!(fields.is_empty());
+
+            let query = format!("SELECT P.{reference} AS {reference} FROM Catalog.Products AS P");
+            let selected = parse_form_dynamic_list_query_selection(&query).unwrap();
+            let fields = form_dynamic_list_main_table_auto_fields(
+                "Catalog.Products",
+                &selected,
+                &BTreeMap::new(),
+                Some(&declarations),
+                None,
+            )
+            .unwrap();
+            assert!(fields.contains(reference));
+            assert!(fields.contains(description));
+        }
+    }
+
+    fn declarations_for_script(
+        script_code: &str,
+        object_refs: &BTreeMap<String, String>,
+    ) -> MetadataFieldDeclarationIndex {
+        // These fixtures have only a root ScriptVariant and two-segment
+        // references: no child headers or declared metadata fields.
+        let mut index = MetadataFieldDeclarationIndex::default();
+        index.english_script = matches!(
+            ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::from_record_code(
+                script_code.trim()
+            ),
+            Some(ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::English)
+        );
+        for reference in object_refs
+            .values()
+            .filter(|value| value.split('.').count() == 2)
+        {
+            index.declared_tables.insert(reference.to_lowercase());
+            index.data_fields.insert(reference.clone(), BTreeSet::new());
+        }
+        index
+    }
+
+    // Production-policy discriminators, not native golden expectations. Each
+    // synthetic input changes one source of the available-field universe.
+    // Actual UT XML facts are still needed to select a correction.
+    fn deletion_mark_paths(
+        script_code: &str,
+        auto_fill: Option<bool>,
+        calculated_path: Option<&str>,
+        secondary_name: Option<&str>,
+    ) -> Vec<String> {
+        let object_refs = BTreeMap::from([(
+            "22222222-2222-4222-8222-222222222222".to_string(),
+            "Catalog.Test".to_string(),
+        )]);
+        let declarations = declarations_for_script(script_code, &object_refs);
+        let auto_fill_property = auto_fill.map_or_else(String::new, |value| {
+            format!(r#","AutoFillAvailableFields",{{"B",{}}}"#, u8::from(value))
+        });
+        let secondary_property = secondary_name.map_or_else(String::new, |name| {
+            format!(r#","FieldsMapItemSecondaryName0",{{"S","{name}"}}"#)
+        });
+        let property_count =
+            5 + usize::from(auto_fill.is_some()) + usize::from(secondary_name.is_some());
+        let bag = format!(
+            r#"{{0,{property_count},"ManualQuery",{{"B",1}},"QueryText",{{"S","SELECT 1 AS Marker FROM Catalog.Test AS T"}},"FieldsMapItemId0",{{"N",10}},"FieldsMapItemName0",{{"S","DeletionMark"}},"ReqMapFieldId0",{{"N",10}}{auto_fill_property}{secondary_property}}}"#
+        );
+        let mut settings = parse_form_dynamic_list_settings(&bag, &object_refs).unwrap();
+        settings.main_table = Some("Catalog.Test".into());
+        settings.server_state_xml = calculated_path.map(|path| {
+            format!(
+                r#"<ServerState xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema"><CalculatedField><dcssch:dataPath>{path}</dcssch:dataPath></CalculatedField></ServerState>"#
+            )
+        });
+        let facts = FormDynamicListFieldFacts::read(
+            &bag,
+            Some(&settings),
+            &object_refs,
+            Some(&declarations),
+            None,
+        )
+        .unwrap();
+        assert!(facts.universe.is_some());
+        facts.use_always("List", Some(&settings))
+    }
+
+    #[test]
+    fn use_always_auto_fill_controls_implicit_deletion_mark() {
+        for auto_fill in [None, Some(true)] {
+            assert_eq!(
+                deletion_mark_paths("0", auto_fill, None, None),
+                ["List.DeletionMark"],
+            );
+            assert_eq!(
+                deletion_mark_paths("1", auto_fill, None, None),
+                ["List.DeletionMark"],
+            );
+        }
+        for script_code in ["0", "1"] {
+            assert_eq!(
+                deletion_mark_paths(script_code, Some(false), None, None),
+                ["~List.DeletionMark"],
+            );
+        }
+    }
+
+    #[test]
+    fn use_always_calculated_membership_is_distinct_from_leaf_name_similarity() {
+        for path in ["DeletionMark", "dElEtIoNmArK"] {
+            assert_eq!(
+                deletion_mark_paths("1", Some(false), Some(path), None),
+                ["List.DeletionMark"],
+            );
+        }
+        for path in ["Other.DeletionMark", "Unrelated"] {
+            assert_eq!(
+                deletion_mark_paths("1", Some(false), Some(path), None),
+                ["~List.DeletionMark"],
+            );
+        }
+    }
+
+    #[test]
+    fn use_always_localized_twin_requires_real_universe_membership() {
+        assert_eq!(
+            deletion_mark_paths("1", None, None, Some("ПометкаУдаления")),
+            ["List.DeletionMark"],
+        );
+        assert_eq!(
+            deletion_mark_paths("1", Some(false), None, Some("ПометкаУдаления")),
+            ["~List.DeletionMark~List.ПометкаУдаления"],
+        );
+    }
+}
 #[test]
 fn tooltip_representation_production_has_no_corpus_literals() {
     let production = include_str!("../form_body.rs");

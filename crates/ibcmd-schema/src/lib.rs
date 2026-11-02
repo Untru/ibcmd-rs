@@ -18769,6 +18769,29 @@ pub mod metadata_storage_facts {
 /// Shared metadata child record shapes and standard-field registries.
 /// The SQL adapter owns byte parsing; these facts also serve metadata writers.
 pub mod metadata_child_storage_facts {
+    /// Implicit DynamicList system fields whose canonical output identity is
+    /// independent of the query's lexical projection. Other standard fields
+    /// retain their existing adapter policy until their behavior is evidenced.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum DynamicListImplicitStandardField {
+        DeletionMark,
+    }
+
+    impl DynamicListImplicitStandardField {
+        pub fn from_canonical_name(name: &str) -> Option<Self> {
+            match name {
+                "DeletionMark" => Some(Self::DeletionMark),
+                _ => None,
+            }
+        }
+
+        pub const fn canonical_name(self) -> &'static str {
+            match self {
+                Self::DeletionMark => "DeletionMark",
+            }
+        }
+    }
+
     /// Catalog root standard attributes, shared by row encoding and index decoding.
     pub const CATALOG_STANDARD_FIELDS: &[(&str, i64)] = &[
         ("PredefinedDataName", -13),
@@ -18889,6 +18912,27 @@ pub mod metadata_child_storage_facts {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn dynamic_list_implicit_classification_is_exact_and_keeps_unproved_fields_unclassified() {
+            let field = DynamicListImplicitStandardField::from_canonical_name("DeletionMark")
+                .expect("evidenced implicit field");
+            assert_eq!(field, DynamicListImplicitStandardField::DeletionMark);
+            assert_eq!(field.canonical_name(), "DeletionMark");
+            for name in [
+                "",
+                "deletionmark",
+                "ПометкаУдаления",
+                "Ref",
+                "Code",
+                "Description",
+            ] {
+                assert_eq!(
+                    DynamicListImplicitStandardField::from_canonical_name(name),
+                    None
+                );
+            }
+        }
 
         #[test]
         fn index_standard_codes_remain_owner_specific_and_closed() {

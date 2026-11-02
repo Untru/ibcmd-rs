@@ -224,6 +224,7 @@ fn apply_source_change_inner(
     } else {
         let report = crate::mssql_dump::dump_config_with_sql(
             &MssqlDumpConfigArgs {
+                chart_series_names: crate::mssql_dump::MoxelChartSeriesAutomaticName::Stored,
                 rows_dir: None,
                 file_infobase: None,
                 postgres: None,

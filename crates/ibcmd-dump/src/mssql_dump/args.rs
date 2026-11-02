@@ -146,6 +146,10 @@ pub struct MssqlDumpConfigArgs {
     /// Try to reconstruct minimal source XML for recognized metadata blobs.
     #[arg(long)]
     pub extract_metadata_xml: bool,
+    /// Generated chart series labels; user-edited labels are preserved.
+    #[arg(long, value_enum, default_value = "stored")]
+    pub chart_series_names: super::MoxelChartSeriesAutomaticName,
+
     /// Fail a full Config export when any expected root metadata XML is absent.
     #[arg(
         long,

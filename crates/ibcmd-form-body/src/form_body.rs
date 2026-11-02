@@ -1461,10 +1461,9 @@ pub struct FormAttribute {
     /// the following member. This is narrower than the top-level list
     /// universe, which intentionally knows nothing about valid dereferences.
     pub invalid_nested_field_item_ids: BTreeSet<String>,
-    /// The localized twin the field map remembers beside a field's own name,
-    /// for the ids that carry one and spell it differently. A marked path names
-    /// both, exactly as `<UseAlways>` already writes them.
-    pub field_item_twins: BTreeMap<String, String>,
+    /// A remembered localized twin, or the proven canonical output name of
+    /// an implicit system field. Only remembered twins produce doubled marked paths.
+    pub field_item_twins: BTreeMap<String, FormFieldItemName>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -4551,6 +4550,42 @@ pub(super) fn form_item_picture_file_name(property_name: &str, content: &[u8]) -
     format!("{property_name}.{extension}")
 }
 
+/// Raw records and declared count from the existing Attributes header. Callers
+/// that only observe settings need not execute DCS or other attribute decoders.
+#[doc(hidden)]
+pub struct RawFormAttributeRecords<'a> {
+    declared_count: usize,
+    records: Vec<&'a str>,
+}
+impl<'a> RawFormAttributeRecords<'a> {
+    pub fn declared_count(&self) -> usize {
+        self.declared_count
+    }
+    pub fn records(&self) -> &[&'a str] {
+        &self.records
+    }
+    pub fn into_records(self) -> Vec<&'a str> {
+        self.records
+    }
+}
+#[doc(hidden)]
+pub fn form_body_attribute_records(trailing: &[String]) -> Option<RawFormAttributeRecords<'_>> {
+    let fields = trailing
+        .first()
+        .and_then(|field| split_1c_braced_fields(field, 0))?;
+    if fields.first().map(|field| field.trim()) != Some("4") {
+        return None;
+    }
+    let declared_count = fields
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+        .unwrap_or(usize::MAX);
+    Some(RawFormAttributeRecords {
+        declared_count,
+        records: fields.into_iter().skip(2).take(declared_count).collect(),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn extract_form_body_attributes_with_dcs_type_index(
     trailing: &[String],
@@ -4562,23 +4597,11 @@ fn extract_form_body_attributes_with_dcs_type_index(
     foreign_types: Option<&BTreeSet<String>>,
     extension_export: bool,
 ) -> Vec<FormAttribute> {
-    let Some(fields) = trailing
-        .first()
-        .and_then(|field| split_1c_braced_fields(field, 0))
-    else {
+    let Some(raw) = form_body_attribute_records(trailing) else {
         return Vec::new();
     };
-    if fields.first().map(|field| field.trim()) != Some("4") {
-        return Vec::new();
-    }
-    let attribute_count = fields
-        .get(1)
-        .and_then(|field| field.trim().parse::<usize>().ok())
-        .unwrap_or(usize::MAX);
-    fields
-        .iter()
-        .skip(2)
-        .take(attribute_count)
+    raw.records
+        .into_iter()
         .filter_map(|field| {
             parse_form_attribute_with_dcs_type_index(
                 field,
@@ -4778,6 +4801,42 @@ fn form_attribute_record_head(field: &str) -> Option<(Vec<&str>, &str, String)> 
     Some((fields, id, name))
 }
 
+#[doc(hidden)]
+pub struct RawFormAttributeView<'a> {
+    fields: Vec<&'a str>,
+    id: &'a str,
+    name: String,
+    pattern: Option<&'a str>,
+    settings_bag: Option<&'a str>,
+}
+impl<'a> RawFormAttributeView<'a> {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn pattern(&self) -> Option<&'a str> {
+        self.pattern
+    }
+    pub fn settings_bag(&self) -> Option<&'a str> {
+        self.settings_bag
+    }
+    pub fn into_name(self) -> String {
+        self.name
+    }
+}
+#[doc(hidden)]
+pub fn form_attribute_raw_view(field: &str) -> Option<RawFormAttributeView<'_>> {
+    let (fields, id, name) = form_attribute_record_head(field)?;
+    let pattern = fields.get(5).copied();
+    let settings_bag = fields.get(14).copied();
+    Some(RawFormAttributeView {
+        fields,
+        id,
+        name,
+        pattern,
+        settings_bag,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn parse_form_attribute_with_dcs_type_index(
     field: &str,
@@ -4789,7 +4848,13 @@ fn parse_form_attribute_with_dcs_type_index(
     foreign_types: Option<&BTreeSet<String>>,
     extension_export: bool,
 ) -> Option<FormAttribute> {
-    let (fields, id, name) = form_attribute_record_head(field)?;
+    let RawFormAttributeView {
+        fields,
+        id,
+        name,
+        pattern,
+        settings_bag,
+    } = form_attribute_raw_view(field)?;
     let title = fields
         .get(4)
         .map(|field| parse_form_localized_strings(field))
@@ -4801,12 +4866,10 @@ fn parse_form_attribute_with_dcs_type_index(
     // `<v8:Type>ent:AccountingRecordType</v8:Type>` for each, while the plain
     // index -- which carries only the configuration's own generated types --
     // could not name the identifier and refused the whole tuple.
-    let parsed_value_types = fields.get(5).and_then(|field| {
+    let parsed_value_types = pattern.and_then(|field| {
         parse_form_attribute_column_type_pattern(field, type_index, extension_export)
     });
-    let exact_single_type_uuid = fields
-        .get(5)
-        .and_then(|field| parse_form_exact_single_type_uuid(field));
+    let exact_single_type_uuid = pattern.and_then(parse_form_exact_single_type_uuid);
     let explicit_empty_type = parsed_value_types
         .as_ref()
         .is_some_and(|value_types| value_types.is_empty());
@@ -4867,14 +4930,14 @@ fn parse_form_attribute_with_dcs_type_index(
         .get(15 + column_count)
         .map(|field| parse_form_reference_list(field, object_refs))
         .unwrap_or_default();
-    let settings = fields.get(14).and_then(|field| {
+    let settings = settings_bag.and_then(|field| {
         parse_form_dynamic_list_settings_with_dcs_type_index(field, object_refs, dcs_type_index)
     });
     let settings = settings.map(normalize_form_dynamic_list_settings);
-    let spreadsheet_document_settings = fields.get(14).and_then(|field| {
+    let spreadsheet_document_settings = settings_bag.and_then(|field| {
         parse_form_spreadsheet_document_settings(field, &value_types, object_refs)
     });
-    let design_time_settings = fields.get(14).and_then(|field| {
+    let design_time_settings = settings_bag.and_then(|field| {
         parse_form_chart_settings_xml(field, &value_types, object_refs, 3)
             .or_else(|| parse_form_gantt_chart_settings_xml(field, &value_types, object_refs, 3))
             .or_else(|| parse_form_flowchart_settings_xml(field, &value_types, object_refs, 3))
@@ -4897,7 +4960,7 @@ fn parse_form_attribute_with_dcs_type_index(
     // The list-settings bag is read once for every reader below: its field
     // map, localized twins, shadowed ids and resolvable-field universe are the
     // same facts each of them used to derive again from the same text.
-    let list_facts = fields.get(14).and_then(|field| {
+    let list_facts = settings_bag.and_then(|field| {
         FormDynamicListFieldFacts::read(
             field,
             settings.as_ref(),
@@ -4906,7 +4969,7 @@ fn parse_form_attribute_with_dcs_type_index(
             object_ref_index,
         )
     });
-    if fields.get(14).is_some() {
+    if settings_bag.is_some() {
         let dynamic_list_use_always = list_facts
             .as_ref()
             .map(|facts| facts.use_always(&name, settings.as_ref()))
@@ -4984,7 +5047,8 @@ fn parse_form_attribute_with_dcs_type_index(
     })
 }
 
-fn parse_form_exact_single_type_uuid(field: &str) -> Option<String> {
+#[doc(hidden)]
+pub fn parse_form_exact_single_type_uuid(field: &str) -> Option<String> {
     let pattern = split_1c_braced_fields(field.trim(), 0)?;
     if pattern.len() != 2 || pattern.first()?.trim() != r#""Pattern""# {
         return None;
@@ -5822,7 +5886,7 @@ pub(super) fn parse_form_attribute_additional_columns_group(
                 let [prefix, register_uuid] = member.as_slice() else {
                     return None;
                 };
-                if prefix.trim() != "0" {
+                if !ibcmd_form_schema::form_record_has_zero_marker(prefix) {
                     return None;
                 }
                 let register_uuid = parse_non_zero_uuid(register_uuid.trim())?;
@@ -6162,7 +6226,12 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
             .map(|(value, _)| value)
             .unwrap_or_default();
         match key.as_str() {
-            "QueryText" => query_text = parse_form_setting_string(window[1]),
+            property
+                if ibcmd_form_schema::FormDynamicListQueryProperty::classify(property)
+                    == ibcmd_form_schema::FormDynamicListQueryProperty::QueryText =>
+            {
+                query_text = parse_form_setting_string(window[1])
+            }
             "MainTable" => main_table = parse_form_main_table_ref(window[1], object_refs),
             "MainTableCategory" => main_table_category = parse_form_setting_number(window[1]),
             "Field" => {
@@ -6179,7 +6248,10 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
             }
             "KeyType" => key_type = parse_form_dynamic_list_key_type(window[1]),
             "KeyFields" => key_fields = parse_form_dynamic_list_key_fields(window[1]),
-            "ManualQuery" => {
+            property
+                if ibcmd_form_schema::FormDynamicListQueryProperty::classify(property)
+                    == ibcmd_form_schema::FormDynamicListQueryProperty::ManualQuery =>
+            {
                 manual_query_explicit = true;
                 manual_query = parse_form_setting_bool(window[1]).unwrap_or(false);
             }
@@ -6382,7 +6454,8 @@ pub(super) fn parse_form_dynamic_list_field_pair(
     })
 }
 
-pub(super) fn parse_form_setting_scalar_string(field: &str) -> Option<String> {
+#[doc(hidden)]
+pub fn parse_form_setting_scalar_string(field: &str) -> Option<String> {
     parse_1c_quoted_string_with_len(field.trim())
         .map(|(value, _)| value)
         .or_else(|| parse_form_setting_string(field))
@@ -6446,6 +6519,13 @@ pub(super) fn parse_form_attribute_use_always(
         .unwrap_or_default()
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+#[doc(hidden)]
+pub enum FormFieldItemName {
+    RememberedTwin(String),
+    ResolvedName(String),
+}
+
 /// What a dynamic list's settings bag says about the list's fields, read once
 /// per attribute: every reader of the attribute asks the same questions of
 /// the same text.
@@ -6456,8 +6536,12 @@ struct FormDynamicListFieldFacts<'s> {
     /// The same map with the list's own fields added where it is silent.
     field_names_with_settings: BTreeMap<String, String>,
     secondary_names: BTreeMap<String, String>,
+    /// Unique ordinary self-bindings choose spelling only after availability
+    /// is independently established; remembered map entries do not declare it.
+    declared_output_spellings: BTreeSet<String>,
     shadowed_item_ids: BTreeSet<String>,
     universe: Option<BTreeSet<String>>,
+    deletion_mark_names: Option<FormDynamicListDeletionMarkNames>,
     /// Lower-case spellings of the universe, each with its spellings in
     /// universe order: names are matched case-insensitively.
     universe_by_lowercase: HashMap<String, Vec<String>>,
@@ -6487,13 +6571,23 @@ impl<'s> FormDynamicListFieldFacts<'s> {
         let secondary_names =
             parse_form_dynamic_list_field_secondary_name_by_item_id(&settings_fields);
         let shadowed_item_ids = parse_form_dynamic_list_shadowed_field_item_ids(&settings_fields);
-        let universe = form_dynamic_list_use_always_universe(
+        let built = form_dynamic_list_use_always_universe(
             settings,
             &settings_fields,
             object_refs,
             declarations,
             object_ref_index,
         );
+        let (universe, deletion_mark_names) = match built {
+            Some(built) => (Some(built.names), built.handled),
+            None => (None, None),
+        };
+        let declared_output_spellings = deletion_mark_names
+            .as_ref()
+            .filter(|names| !names.implicit.is_empty())
+            .and(settings)
+            .map(form_dynamic_list_declared_output_spellings)
+            .unwrap_or_default();
         let mut universe_by_lowercase = HashMap::<String, Vec<String>>::new();
         for name in universe.iter().flatten() {
             universe_by_lowercase
@@ -6506,8 +6600,10 @@ impl<'s> FormDynamicListFieldFacts<'s> {
             field_names,
             field_names_with_settings,
             secondary_names,
+            declared_output_spellings,
             shadowed_item_ids,
             universe,
+            deletion_mark_names,
             universe_by_lowercase,
         })
     }
@@ -6515,15 +6611,55 @@ impl<'s> FormDynamicListFieldFacts<'s> {
     /// Whether a remembered name (or its twin) is a field of the list, and no
     /// earlier entry of the map claimed that name already: the set form of
     /// `form_dynamic_list_field_name_is_resolvable`.
+    fn resolved_name(
+        &self,
+        item_id: &str,
+        field_name: &str,
+        secondary: Option<&str>,
+    ) -> Option<String> {
+        if self.shadowed_item_ids.contains(item_id) {
+            return None;
+        }
+        let primary = field_name.to_lowercase();
+        if let Some(handled) = &self.deletion_mark_names
+            && let Some(canonical) = handled.aliases.get(&primary)
+        {
+            // Explicit result aliases and stored twins keep their old output
+            // spelling. Only the implicit system field supplies a canonical name.
+            if std::iter::once(field_name).chain(secondary).any(|name| {
+                handled.lexical.iter().any(|candidate| {
+                    form_data_path_name_eq_ignore_case(candidate, name)
+                        && self
+                            .universe
+                            .as_ref()
+                            .is_some_and(|universe| universe.contains(candidate))
+                })
+            }) {
+                return Some(field_name.to_string());
+            }
+            return (handled.implicit.contains(canonical)
+                && self
+                    .universe
+                    .as_ref()
+                    .is_some_and(|universe| universe.contains(canonical)))
+            .then(|| {
+                if self.declared_output_spellings.contains(field_name) {
+                    field_name.to_string()
+                } else {
+                    canonical.clone()
+                }
+            });
+        }
+        (self.universe_by_lowercase.contains_key(&primary)
+            || secondary.is_some_and(|name| {
+                self.universe_by_lowercase
+                    .contains_key(&name.to_lowercase())
+            }))
+        .then(|| field_name.to_string())
+    }
+
     fn resolves(&self, item_id: &str, field_name: &str, secondary: Option<&str>) -> bool {
-        !self.shadowed_item_ids.contains(item_id)
-            && (self
-                .universe_by_lowercase
-                .contains_key(&field_name.to_lowercase())
-                || secondary.is_some_and(|secondary| {
-                    self.universe_by_lowercase
-                        .contains_key(&secondary.to_lowercase())
-                }))
+        self.resolved_name(item_id, field_name, secondary).is_some()
     }
 
     /// The list's `<UseAlways>` entries, in required order, without repeats.
@@ -6548,7 +6684,7 @@ impl<'s> FormDynamicListFieldFacts<'s> {
                 main_table,
                 settings.is_some_and(|settings| settings.manual_query),
                 self.universe.is_some(),
-                |item_id, field_name, secondary| self.resolves(item_id, field_name, secondary),
+                |item_id, field_name, secondary| self.resolved_name(item_id, field_name, secondary),
             ) else {
                 continue;
             };
@@ -6603,12 +6739,17 @@ impl<'s> FormDynamicListFieldFacts<'s> {
 
     /// The localized twin of each field-map id, overridden by the universe's
     /// own spelling where that differs only in case.
-    fn field_item_twins(&self) -> BTreeMap<String, String> {
+    fn field_item_twins(&self) -> BTreeMap<String, FormFieldItemName> {
         let mut twins = self
             .secondary_names
             .iter()
             .filter(|(item_id, secondary)| self.field_names.get(*item_id) != Some(*secondary))
-            .map(|(item_id, secondary)| (item_id.clone(), secondary.clone()))
+            .map(|(item_id, secondary)| {
+                (
+                    item_id.clone(),
+                    FormFieldItemName::RememberedTwin(secondary.clone()),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         if self.universe.is_some() {
             for (item_id, field_name) in &self.field_names {
@@ -6619,7 +6760,24 @@ impl<'s> FormDynamicListFieldFacts<'s> {
                         spellings.iter().find(|candidate| *candidate != field_name)
                     })
                 {
-                    twins.insert(item_id.clone(), canonical.clone());
+                    twins.insert(
+                        item_id.clone(),
+                        FormFieldItemName::RememberedTwin(canonical.clone()),
+                    );
+                }
+            }
+        }
+        if let Some(handled) = &self.deletion_mark_names {
+            for (item_id, name) in &self.field_names {
+                if handled.aliases.contains_key(&name.to_lowercase())
+                    && let Some(winner) = self.resolved_name(
+                        item_id,
+                        name,
+                        self.secondary_names.get(item_id).map(String::as_str),
+                    )
+                    && winner.as_str() != name.as_str()
+                {
+                    twins.insert(item_id.clone(), FormFieldItemName::ResolvedName(winner));
                 }
             }
         }
@@ -6627,7 +6785,38 @@ impl<'s> FormDynamicListFieldFacts<'s> {
     }
 }
 
-pub(super) fn parse_form_dynamic_list_field_name_by_item_id(
+/// Ordinary direct declarations can preserve a field's spelling without
+/// making that field available. Read the same branch the writer emits;
+/// ServerState replaces the parsed bag declarations rather than augmenting them.
+fn form_dynamic_list_declared_output_spellings(
+    settings: &FormDynamicListSettings,
+) -> BTreeSet<String> {
+    let fields = match &settings.server_state_xml {
+        Some(fragment) => {
+            ibcmd_xml::dcs::form_dynamic_list_direct_field_bindings(fragment).unwrap_or_default()
+        }
+        None => settings
+            .explicit_fields
+            .iter()
+            .map(|field| (field.data_path.clone(), field.field.clone()))
+            .collect(),
+    };
+    let mut counts = BTreeMap::<String, (usize, usize)>::new();
+    for (path, name) in &fields {
+        counts.entry(path.to_lowercase()).or_default().0 += 1;
+        counts.entry(name.to_lowercase()).or_default().1 += 1;
+    }
+    fields
+        .into_iter()
+        .filter(|(path, name)| {
+            path == name && !name.contains('.') && counts.get(&name.to_lowercase()) == Some(&(1, 1))
+        })
+        .map(|(_, name)| name)
+        .collect()
+}
+
+#[doc(hidden)]
+pub fn parse_form_dynamic_list_field_name_by_item_id(
     settings_fields: &[&str],
 ) -> BTreeMap<String, String> {
     parse_form_dynamic_list_field_map_items(settings_fields)
@@ -6651,7 +6840,8 @@ pub(super) fn parse_form_dynamic_list_field_name_by_item_id(
 /// names a standard attribute no document has. Nine records in ERP УХ 3.2.12.6
 /// write the doubled spelling, and every one of them is a remembered pair whose
 /// two names are both unresolvable.
-pub(super) fn parse_form_dynamic_list_field_secondary_name_by_item_id(
+#[doc(hidden)]
+pub fn parse_form_dynamic_list_field_secondary_name_by_item_id(
     settings_fields: &[&str],
 ) -> BTreeMap<String, String> {
     let mut item_id_by_suffix = BTreeMap::<String, String>::new();
@@ -6952,7 +7142,7 @@ fn form_object_settings_composer_use_always_path(components: &[Vec<&str>]) -> Op
     let [marker, uuid] = head.as_slice() else {
         return None;
     };
-    if marker.trim() != "0"
+    if !ibcmd_form_schema::form_record_has_zero_marker(marker)
         || !uuid
             .trim()
             .eq_ignore_ascii_case(FORM_OBJECT_SETTINGS_COMPOSER_MEMBER_UUID)
@@ -7096,7 +7286,8 @@ fn form_use_always_numeric_path(attribute_id: &str, parts: &[Vec<&str>]) -> Opti
 /// The order is the map's own suffix numbering. In both observations the map is
 /// stored with ascending item ids, so the suffix order and the id order name
 /// the same first entry; nothing here distinguishes them.
-pub(super) fn parse_form_dynamic_list_shadowed_field_item_ids(
+#[doc(hidden)]
+pub fn parse_form_dynamic_list_shadowed_field_item_ids(
     settings_fields: &[&str],
 ) -> BTreeSet<String> {
     let mut field_name_by_suffix = BTreeMap::<String, String>::new();
@@ -7140,7 +7331,8 @@ pub(super) fn parse_form_dynamic_list_shadowed_field_item_ids(
     shadowed
 }
 
-pub(super) fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]) -> Vec<String> {
+#[doc(hidden)]
+pub fn parse_form_dynamic_list_required_item_ids(settings_fields: &[&str]) -> Vec<String> {
     let mut parsed = Vec::new();
     for window in settings_fields.windows(2) {
         let key = parse_1c_quoted_string_with_len(window[0].trim())
@@ -7203,7 +7395,7 @@ fn form_dynamic_list_use_always_field_name(
     main_table: Option<&str>,
     manual_query: bool,
     has_universe: bool,
-    resolves: impl Fn(&str, &str, Option<&str>) -> bool,
+    resolves: impl Fn(&str, &str, Option<&str>) -> Option<String>,
 ) -> Option<String> {
     let has_main_table = main_table.is_some();
     match item_id {
@@ -7219,8 +7411,8 @@ fn form_dynamic_list_use_always_field_name(
         "-1" => None,
         _ => field_name_by_item_id.get(item_id).map(|field_name| {
             let secondary = secondary_name_by_item_id.get(item_id);
-            let unresolvable =
-                has_universe && !resolves(item_id, field_name, secondary.map(String::as_str));
+            let resolved = resolves(item_id, field_name, secondary.map(String::as_str));
+            let unresolvable = has_universe && resolved.is_none();
             if unresolvable {
                 // A marked field keeps only its last segment: no `~` field of
                 // the stand spells a dotted path, and ЛИМС КОРП
@@ -7236,7 +7428,10 @@ fn form_dynamic_list_use_always_field_name(
                     _ => format!("~{attribute_name}.{field_name}"),
                 }
             } else {
-                format!("{attribute_name}.{field_name}")
+                format!(
+                    "{attribute_name}.{}",
+                    resolved.as_deref().unwrap_or(field_name)
+                )
             }
         }),
     }
@@ -7263,7 +7458,8 @@ pub(super) fn form_dynamic_list_field_name_is_resolvable(
         })
 }
 
-fn form_data_path_name_eq_ignore_case(left: &str, right: &str) -> bool {
+#[doc(hidden)]
+pub fn form_data_path_name_eq_ignore_case(left: &str, right: &str) -> bool {
     left == right || left.to_lowercase() == right.to_lowercase()
 }
 
@@ -7467,8 +7663,8 @@ fn form_dynamic_list_query_nested_group_columns(query_text: &str) -> BTreeSet<St
 /// * `ManualQuery=1` with `AutoFillAvailableFields` unset or true: the result
 ///   column names of the query's final `SELECT` batch, plus the main table's
 ///   standard attributes and register dimensions the platform re-adds on its
-///   own — each under the Russian spelling only, and each unless the query
-///   already selects that main-table field under a different alias.
+///   own. The implicit DeletionMark uses its canonical English identity;
+///   the remaining legacy contribution retains its prior naming/key policy.
 /// * `ManualQuery=1` with `AutoFillAvailableFields=false`: only the names the
 ///   query's `{ВЫБРАТЬ ...}` extension lists.
 /// * In every mode: the `dataPath` of each `CalculatedField` the list's
@@ -7477,14 +7673,28 @@ fn form_dynamic_list_query_nested_group_columns(query_text: &str) -> BTreeSet<St
 /// A `*` selection item is read where the query itself says what it stands
 /// for -- see [`form_dynamic_list_star_source_fields`]; where it does not, and
 /// on an unparseable input, the universe is a refusal (`None`).
-pub(super) fn form_dynamic_list_use_always_universe(
+#[derive(Default)]
+struct FormDynamicListUniverse {
+    names: BTreeSet<String>,
+    handled: Option<FormDynamicListDeletionMarkNames>,
+}
+
+#[derive(Default)]
+struct FormDynamicListDeletionMarkNames {
+    aliases: BTreeMap<String, String>,
+    implicit: BTreeSet<String>,
+    lexical: BTreeSet<String>,
+}
+
+fn form_dynamic_list_use_always_universe(
     settings: Option<&FormDynamicListSettings>,
     settings_fields: &[&str],
     object_refs: &BTreeMap<String, String>,
     declarations: Option<&MetadataFieldDeclarationIndex>,
     object_ref_index: Option<&FormObjectRefIndex<'_>>,
-) -> Option<BTreeSet<String>> {
+) -> Option<FormDynamicListUniverse> {
     let settings = settings?;
+    let mut handled = None;
     let mut universe;
     let mut undeclared_selected = BTreeSet::<String>::new();
     if settings.manual_query {
@@ -7528,13 +7738,27 @@ pub(super) fn form_dynamic_list_use_always_universe(
                     )?);
                 }
                 if let Some(main_table) = settings.main_table.as_deref() {
-                    universe.extend(form_dynamic_list_main_table_auto_fields(
+                    let mut automatic = form_dynamic_list_main_table_auto_fields(
                         main_table,
                         &selection,
                         object_refs,
                         declarations,
                         object_ref_index,
-                    )?);
+                    )?;
+                    if selection.stars.is_empty()
+                        && let Some(contribution) = form_dynamic_list_deletion_mark_names(
+                            main_table,
+                            &selection,
+                            declarations,
+                        )
+                    {
+                        automatic.retain(|name| {
+                            !contribution.aliases.contains_key(&name.to_lowercase())
+                        });
+                        universe.extend(contribution.implicit.iter().cloned());
+                        handled = Some(contribution);
+                    }
+                    universe.extend(automatic);
                 }
             }
         }
@@ -7610,14 +7834,19 @@ pub(super) fn form_dynamic_list_use_always_universe(
         universe.remove(name);
     }
     if let Some(server_state_xml) = &settings.server_state_xml {
-        universe.extend(form_dynamic_list_calculated_field_data_paths(
-            server_state_xml,
-        ));
+        let calculated = form_dynamic_list_calculated_field_data_paths(server_state_xml);
+        if let Some(handled) = &mut handled {
+            handled.lexical.extend(calculated.iter().cloned());
+        }
+        universe.extend(calculated);
     }
     if let (Some(main_table), Some(declarations)) = (settings.main_table.as_deref(), declarations) {
         universe.retain(|field| !declarations.field_uses_password_mode(main_table, field));
     }
-    Some(universe)
+    Some(FormDynamicListUniverse {
+        names: universe,
+        handled,
+    })
 }
 
 /// Whether a plain field selected from a final-scope metadata source is not a
@@ -8327,6 +8556,82 @@ const FORM_DYNAMIC_LIST_REGISTER_KINDS: &[&str] = &[
     "CalculationRegister",
 ];
 
+/// The implicit DeletionMark system field is independent of the selected Ref
+/// alias and script language. A main-source projection of that physical field
+/// replaces its implicit identity with the lexical result alias (native A-F,
+/// 8.3.27.2342). Unbound sources and stars retain the legacy policy.
+fn form_dynamic_list_deletion_mark_names(
+    main_table: &str,
+    selection: &FormDynamicListQuerySelection,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> Option<FormDynamicListDeletionMarkNames> {
+    if main_table.matches('.').count() != 1 || !selection.stars.is_empty() {
+        return None;
+    }
+    let (kind, _) = main_table.split_once('.')?;
+    let pairs = form_dynamic_list_std_attribute_pairs(kind)?;
+    let matching = selection
+        .sources
+        .iter()
+        .filter(|(reference, _)| {
+            reference
+                .as_deref()
+                .is_some_and(|reference| form_data_path_name_eq_ignore_case(reference, main_table))
+        })
+        .collect::<Vec<_>>();
+    if matching.len() != 1 {
+        return None;
+    }
+    let alias = matching[0].1.as_deref()?;
+    if selection
+        .sources
+        .iter()
+        .filter(|(_, candidate)| {
+            candidate
+                .as_deref()
+                .is_some_and(|candidate| form_data_path_name_eq_ignore_case(candidate, alias))
+        })
+        .count()
+        != 1
+    {
+        return None;
+    }
+    let mut result = FormDynamicListDeletionMarkNames {
+        lexical: selection.aliases.clone(),
+        ..Default::default()
+    };
+    for (ru, en) in form_dynamic_list_declared_std_attribute_pairs(pairs, main_table, declarations)
+    {
+        let Some(field) = ibcmd_schema::metadata_child_storage_facts::DynamicListImplicitStandardField::from_canonical_name(en) else {
+            continue;
+        };
+        let en = field.canonical_name();
+        let projected = selection.paths.keys().any(|(source, field)| {
+            form_data_path_name_eq_ignore_case(source, alias)
+                && (form_data_path_name_eq_ignore_case(field, ru)
+                    || form_data_path_name_eq_ignore_case(field, en))
+        });
+        // A different expression can already own this result name. Its
+        // physical identity is unproved, so preserve the existing behavior.
+        if !projected
+            && selection
+                .aliases
+                .iter()
+                .any(|name| form_data_path_name_eq_ignore_case(name, en))
+        {
+            return None;
+        }
+        result.aliases.insert(ru.to_lowercase(), en.to_string());
+        result.aliases.insert(en.to_lowercase(), en.to_string());
+        if !projected {
+            result.implicit.insert(en.to_string());
+        }
+    }
+    (!result.aliases.is_empty()).then_some(result)
+}
+
+/// Legacy contribution for unrelated standard fields and register dimensions.
+/// The narrower implicit DeletionMark contribution is handled separately.
 /// Main-table fields the platform adds to a manual query's available-field
 /// list on its own: the standard attributes of the family, plus dimensions
 /// for a register — each unless the query already selects that very
@@ -8442,6 +8747,42 @@ pub struct FormDynamicListQuerySelection {
     /// `(source alias, field) -> result column name` for every plain
     /// two-segment selection path.
     pub(super) paths: BTreeMap<(String, String), String>,
+    /// Diagnostic projection only: preserve repeated plain paths without
+    /// changing the established map or any resolver consumer.
+    pub(super) plain_path_occurrences: Vec<(String, String, String)>,
+    /// Selection expressions not represented by a plain path or supported star.
+    pub(super) unclassified_selection_expression_count: usize,
+}
+
+impl FormDynamicListQuerySelection {
+    #[doc(hidden)]
+    pub fn aliases(&self) -> &BTreeSet<String> {
+        &self.aliases
+    }
+    #[doc(hidden)]
+    pub fn stars(&self) -> &Vec<Option<String>> {
+        &self.stars
+    }
+    #[doc(hidden)]
+    pub fn extension(&self) -> &Option<BTreeSet<String>> {
+        &self.extension
+    }
+    #[doc(hidden)]
+    pub fn sources(&self) -> &Vec<(Option<String>, Option<String>)> {
+        &self.sources
+    }
+    #[doc(hidden)]
+    pub fn paths(&self) -> &BTreeMap<(String, String), String> {
+        &self.paths
+    }
+    #[doc(hidden)]
+    pub fn plain_path_occurrences(&self) -> &Vec<(String, String, String)> {
+        &self.plain_path_occurrences
+    }
+    #[doc(hidden)]
+    pub fn unclassified_selection_expression_count(&self) -> usize {
+        self.unclassified_selection_expression_count
+    }
 }
 
 fn is_1c_query_ident(token: &str) -> bool {
@@ -8515,7 +8856,8 @@ const Q_LITERAL: &[&str] = &[
 
 /// Tokenizes 1C query text: string literals (with `""` escapes), `//` comments
 /// dropped, identifiers, numbers, `&Parameter` as one token, and punctuation.
-fn tokenize_1c_query(text: &str) -> Vec<String> {
+#[doc(hidden)]
+pub fn tokenize_1c_query(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut tokens = Vec::new();
     let mut i = 0;
@@ -8659,9 +9001,11 @@ fn is_1c_query_temp_batch(tokens: &[String]) -> bool {
 fn query_batch_declares_selection(tokens: &[String]) -> bool {
     let mut depth = 0i64;
     for token in tokens {
-        match token.as_str() {
-            "(" | "{" => depth += 1,
-            ")" | "}" => depth -= 1,
+        match ibcmd_form_schema::FormQueryLexeme::classify(token) {
+            ibcmd_form_schema::FormQueryLexeme::OpenParenthesis
+            | ibcmd_form_schema::FormQueryLexeme::OpenBrace => depth += 1,
+            ibcmd_form_schema::FormQueryLexeme::CloseParenthesis
+            | ibcmd_form_schema::FormQueryLexeme::CloseBrace => depth -= 1,
             _ if depth == 0 && is_1c_query_keyword(token, Q_SELECT) => return true,
             _ => {}
         }
@@ -8878,6 +9222,20 @@ fn form_query_source_reference(source: &[String]) -> Option<String> {
 pub fn parse_form_dynamic_list_query_selection(
     query_text: &str,
 ) -> Option<FormDynamicListQuerySelection> {
+    parse_form_dynamic_list_query_selection_projected(query_text, false)
+}
+
+#[doc(hidden)]
+pub fn parse_form_dynamic_list_query_selection_diagnostic(
+    query_text: &str,
+) -> Option<FormDynamicListQuerySelection> {
+    parse_form_dynamic_list_query_selection_projected(query_text, true)
+}
+
+fn parse_form_dynamic_list_query_selection_projected(
+    query_text: &str,
+    diagnostic_projection: bool,
+) -> Option<FormDynamicListQuerySelection> {
     let tokens = tokenize_1c_query(query_text);
     let batches = split_1c_query_batches(&tokens);
     let batch = batches
@@ -8993,6 +9351,9 @@ pub fn parse_form_dynamic_list_query_selection(
                     && is_1c_query_ident(&item[2]) =>
             {
                 selection.aliases.insert(item[2].clone());
+                if diagnostic_projection {
+                    selection.unclassified_selection_expression_count += 1;
+                }
             }
             Some(alias) if alias == "*" => {
                 let qualifier = (item.len() == 3 && item[1] == "." && is_1c_query_ident(&item[0]))
@@ -9012,11 +9373,21 @@ pub fn parse_form_dynamic_list_query_selection(
                     && is_1c_query_ident(&expression[0])
                     && is_1c_query_ident(&expression[2])
                 {
+                    if diagnostic_projection {
+                        selection.plain_path_occurrences.push((
+                            expression[0].clone(),
+                            expression[2].clone(),
+                            alias.clone(),
+                        ));
+                    }
                     selection
                         .paths
                         .insert((expression[0].clone(), expression[2].clone()), alias);
+                } else if diagnostic_projection {
+                    selection.unclassified_selection_expression_count += 1;
                 }
             }
+            None if diagnostic_projection => selection.unclassified_selection_expression_count += 1,
             None => {}
         }
     }
@@ -9107,7 +9478,8 @@ pub fn parse_form_dynamic_list_query_selection(
     Some(selection)
 }
 
-pub(super) fn collect_form_dynamic_list_field_map_item(
+#[doc(hidden)]
+pub fn collect_form_dynamic_list_field_map_item(
     key_field: &str,
     value_field: &str,
     field_name_by_suffix: &mut BTreeMap<String, String>,
@@ -9145,7 +9517,8 @@ pub(super) fn dedupe_form_dynamic_list_fields(fields: &mut Vec<FormDynamicListFi
     });
 }
 
-pub(super) fn parse_form_setting_string(field: &str) -> Option<String> {
+#[doc(hidden)]
+pub fn parse_form_setting_string(field: &str) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.first().map(|value| value.trim()) != Some("\"S\"") {
         return None;
@@ -9153,7 +9526,8 @@ pub(super) fn parse_form_setting_string(field: &str) -> Option<String> {
     parse_1c_quoted_string_with_len(fields.get(1)?.trim()).map(|(value, _)| value)
 }
 
-pub(super) fn parse_form_setting_bool(field: &str) -> Option<bool> {
+#[doc(hidden)]
+pub fn parse_form_setting_bool(field: &str) -> Option<bool> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.first().map(|value| value.trim()) != Some("\"B\"") {
         return None;
@@ -11023,6 +11397,12 @@ struct FormAttributePlatformColumn {
 
 // Platform-owned columns of built-in value types, independent of infobase metadata.
 const FORM_DYNAMIC_LIST_TYPE_UUID: &str = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
+
+/// Read-only type identity used by bounded root diagnostics.
+#[doc(hidden)]
+pub fn form_dynamic_list_type_uuid() -> &'static str {
+    FORM_DYNAMIC_LIST_TYPE_UUID
+}
 const FORM_VALUE_LIST_TYPE_UUID: &str = "4772b3b4-f4a3-49c0-a1a5-8cb5961511a3";
 /// `ValueListItem.Value` is addressed by column id `0`, unlike every other
 /// platform column of the built-in value types. Evidence: UT 11.5.27.75
@@ -11364,7 +11744,7 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     invalid_nested_columns: BTreeSet<FormAttributeColumnKey>,
     /// The localized twin the field map remembers beside a column's own name.
     /// A marked path names both, the same pair `<UseAlways>` writes.
-    column_twins: BTreeMap<FormAttributeColumnKey, String>,
+    column_twins: BTreeMap<FormAttributeColumnKey, FormFieldItemName>,
     /// Attribute ids whose single declared type is a catalogue the
     /// configuration declares no `<Owners>` member for. Such a catalogue has no
     /// `Owner` standard attribute, so a terminal that names one is a name the
@@ -27189,11 +27569,15 @@ fn resolve_form_attribute_column_data_path(
     // written `~Список.РегистрационныйНомерЕРУЗ`, while the same field name
     // under a list that does resolve it is written without the marker.
     if !owner_scoped_bindings.unresolvable_columns.contains(&key) {
-        let source_name = owner_scoped_bindings
-            .column_twins
-            .get(&key)
-            .filter(|candidate| form_data_path_name_eq_ignore_case(candidate, column_name))
-            .unwrap_or(column_name);
+        let source_name = match owner_scoped_bindings.column_twins.get(&key) {
+            Some(FormFieldItemName::ResolvedName(name)) => name,
+            Some(FormFieldItemName::RememberedTwin(name))
+                if form_data_path_name_eq_ignore_case(name, column_name) =>
+            {
+                name
+            }
+            _ => column_name,
+        };
         return FormOwnerScopedDataPath::Resolved(format!("{}.{}", attribute.name, source_name));
     }
     // A marked field the map remembers a localized twin for is written under
@@ -27207,10 +27591,12 @@ fn resolve_form_attribute_column_data_path(
     // nine `<Field>` values that carry two names, every one of them the same
     // shape read through the use-always route.
     match owner_scoped_bindings.column_twins.get(&key) {
-        Some(twin) if twin != column_name => FormOwnerScopedDataPath::Resolved(format!(
-            "~{0}.{1}~{0}.{twin}",
-            attribute.name, column_name
-        )),
+        Some(FormFieldItemName::RememberedTwin(twin)) if twin != column_name => {
+            FormOwnerScopedDataPath::Resolved(format!(
+                "~{0}.{1}~{0}.{twin}",
+                attribute.name, column_name
+            ))
+        }
         _ => FormOwnerScopedDataPath::Resolved(format!("~{}.{}", attribute.name, column_name)),
     }
 }
