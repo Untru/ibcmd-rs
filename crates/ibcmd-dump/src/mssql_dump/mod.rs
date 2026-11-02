@@ -27926,7 +27926,13 @@ const CATALOG_OWNER_FIELD_HIERARCHY_TYPE: usize = 36;
 const CATALOG_OWNER_FIELD_HIERARCHICAL: usize = 37;
 
 /// Metadata kinds a catalog's `<Owners>` collection may name.
-const CATALOG_OWNER_REFERENCE_PREFIXES: &[&str] = &["Catalog.", "ChartOfCharacteristicTypes."];
+const CATALOG_OWNER_REFERENCE_PREFIXES: &[&str] = &[
+    "Catalog.",
+    "ChartOfCharacteristicTypes.",
+    "ChartOfAccounts.",
+    "ChartOfCalculationTypes.",
+    "ExchangePlan.",
+];
 
 fn catalog_hierarchy_type_xml(value: &str) -> Option<&'static str> {
     match value.trim() {
