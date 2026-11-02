@@ -37098,6 +37098,8 @@ fn parse_style_color_value(value: &str) -> Option<String> {
         }
         2 => style_web_color_name(code).map(ToOwned::to_owned),
         3 => style_system_color_name(code).map(ToOwned::to_owned),
+        // The automatic colour names no value: the platform writes `auto`.
+        4 => Some("auto".to_owned()),
         _ => None,
     }
 }
@@ -37111,13 +37113,36 @@ fn parse_style_border_value_xml(value: &str) -> Option<String> {
     if border_fields.first()?.trim() != "3" {
         return None;
     }
+    // A border either names a standard style item or carries its own style and
+    // width; the second field says which.
+    if border_fields.get(1)?.trim() == "1" {
+        let reference = split_1c_braced_fields(border_fields.get(2)?, 0)?;
+        let code = reference.first()?.trim().parse::<i32>().ok()?;
+        let (_, name) = standard_style_item_for_code(code)?;
+        return Some(format!(
+            "<Value xsi:type=\"v8ui:Border\" ref=\"style:{name}\"/>"
+        ));
+    }
     let style = match border_fields.get(3)?.trim() {
         "0" => "WithoutBorder",
         "1" => "Single",
+        "2" => "Embossed",
+        "3" => "Indented",
+        "4" => "Underline",
+        "5" => "DoubleUnderline",
+        "6" => "Rounded",
+        "7" => "Overline",
+        "200" => "Double",
         _ => return None,
     };
+    // The width that follows the style in the record is the one the platform
+    // writes; a border with no visible line still carries it.
+    let width = border_fields.get(4)?.trim();
+    if width.is_empty() || !width.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
     Some(format!(
-        "<Value xsi:type=\"v8ui:Border\" width=\"1\">\r\n\
+        "<Value xsi:type=\"v8ui:Border\" width=\"{width}\">\r\n\
 \t\t\t\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n\
 \t\t\t</Value>"
     ))
@@ -37230,6 +37255,9 @@ fn parse_style_font_value_xml(value: &str) -> String {
         if kind == "1" {
             kind_xml = "WindowsFont";
             attrs.push(("ref", "sys:DefaultGUIFont".to_string()));
+        } else if kind == "3" {
+            // The automatic font names nothing: the platform writes the kind alone.
+            kind_xml = "AutoFont";
         } else {
             kind_xml = "StyleItem";
             let raw = font_fields.get(3).copied().unwrap_or("{0}");
