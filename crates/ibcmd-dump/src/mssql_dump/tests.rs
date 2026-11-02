@@ -35036,7 +35036,7 @@ fn rejects_malformed_strict_filter_criterion_root_owner_and_scalar_slots() {
             replace_filter_criterion_test_value(
                 &fixture.raw,
                 ",{0},{0},{0}},2,",
-                ",{1,\"en\",\"List\"},{0},{0}},2,",
+                ",{1,\"en\"},{0},{0}},2,",
             ),
         ),
         (

@@ -11562,7 +11562,7 @@ struct SettingsStorageProperties {
 
 enum FilterCriterionProperties {
     LegacyMinimal,
-    StrictFull(FilterCriterionFullProperties),
+    StrictFull(Box<FilterCriterionFullProperties>),
 }
 
 struct FilterCriterionFullProperties {
@@ -11572,6 +11572,9 @@ struct FilterCriterionFullProperties {
     content: Vec<String>,
     default_form: Option<String>,
     auxiliary_form: Option<String>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
     child_forms: Vec<String>,
     child_commands: Vec<MetadataChildCommand>,
 }
@@ -43584,27 +43587,24 @@ fn parse_filter_criterion_properties_from_text(
             )
         })?;
 
-    for index in [10usize, 11, 12] {
-        let fields = owner_fields
-            .get(index)
-            .and_then(|value| split_information_register_braced_fields(value))
-            .ok_or_else(|| {
-                FilterCriterionDecodeError::new(
-                    FilterCriterionDecodeStage::Owner,
-                    FilterCriterionDecodeReason::Shape,
-                )
-            })?;
-        if fields.len() != 1
-            || !fields
-                .first()
-                .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::zero(value.trim()))
-        {
-            return Err(FilterCriterionDecodeError::new(
-                FilterCriterionDecodeStage::Owner,
-                FilterCriterionDecodeReason::Shape,
-            ));
-        }
-    }
+    let owner_shape = || {
+        FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Owner,
+            FilterCriterionDecodeReason::Shape,
+        )
+    };
+    let list_presentation = owner_fields
+        .get(10)
+        .and_then(|value| parse_information_register_owner_localized_value(value))
+        .ok_or_else(owner_shape)?;
+    let extended_list_presentation = owner_fields
+        .get(11)
+        .and_then(|value| parse_information_register_owner_localized_value(value))
+        .ok_or_else(owner_shape)?;
+    let explanation = owner_fields
+        .get(12)
+        .and_then(|value| parse_information_register_owner_localized_value(value))
+        .ok_or_else(owner_shape)?;
 
     let form_items = parse_filter_criterion_child_collection(
         root_fields.get(3).ok_or_else(|| {
@@ -43666,7 +43666,7 @@ fn parse_filter_criterion_properties_from_text(
         object_refs,
     )?;
 
-    Ok(Some(FilterCriterionProperties::StrictFull(
+    Ok(Some(FilterCriterionProperties::StrictFull(Box::new(
         FilterCriterionFullProperties {
             generated_types: vec![
                 GeneratedTypeEntry {
@@ -43687,10 +43687,13 @@ fn parse_filter_criterion_properties_from_text(
             content,
             default_form,
             auxiliary_form,
+            list_presentation,
+            extended_list_presentation,
+            explanation,
             child_forms,
             child_commands,
         },
-    )))
+    ))))
 }
 
 /// One owned-child collection of a filter criterion's record tail.
@@ -44497,10 +44500,23 @@ fn format_filter_criterion_source_xml(
         "AuxiliaryForm",
         &properties.auxiliary_form,
     );
-    insert.push_str(
-        "\t\t\t<ListPresentation/>\r\n\
-\t\t\t<ExtendedListPresentation/>\r\n\
-\t\t\t<Explanation/>\r\n",
+    push_localized_property(
+        &mut insert,
+        "\t\t\t",
+        "ListPresentation",
+        &properties.list_presentation,
+    );
+    push_localized_property(
+        &mut insert,
+        "\t\t\t",
+        "ExtendedListPresentation",
+        &properties.extended_list_presentation,
+    );
+    push_localized_property(
+        &mut insert,
+        "\t\t\t",
+        "Explanation",
+        &properties.explanation,
     );
     insert_metadata_properties_xml(&mut xml, &insert);
     let mut child_objects = String::new();
