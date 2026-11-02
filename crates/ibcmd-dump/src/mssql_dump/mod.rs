@@ -124,11 +124,11 @@ mod characteristics {
         BUSINESS_PROCESS_STANDARD_ATTRIBUTES, CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES,
         CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES, DOCUMENT_CHARACTERISTIC_TYPE_UUID,
         DOCUMENT_STANDARD_ATTRIBUTES, TASK_STANDARD_ATTRIBUTES, dangling_value_design_time_ref,
-        information_register_bool, information_register_uuid_is_zero,
-        information_register_uuid_matches, parse_information_register_design_time_ref,
-        parse_information_register_design_time_ref_ids, parse_information_register_non_zero_uuid,
-        parse_information_register_quoted_string, parse_information_register_usize,
-        resolve_exchange_plan_index_reference, split_information_register_braced_fields,
+        information_register_uuid_is_zero, information_register_uuid_matches, parse_1c_bool_field,
+        parse_information_register_design_time_ref, parse_information_register_design_time_ref_ids,
+        parse_information_register_non_zero_uuid, parse_information_register_quoted_string,
+        parse_information_register_usize, resolve_exchange_plan_index_reference,
+        split_information_register_braced_fields,
     };
     pub(super) use crate::metadata_owner_graph::CharacteristicsFieldRole as CharacteristicRole;
     use crate::metadata_owner_graph::{
@@ -878,7 +878,7 @@ mod characteristics {
                 Ok(CharacteristicFilterValue::Undefined)
             }
             Some(CharacteristicsTagKind::Boolean) if fields.len() == 2 => {
-                information_register_bool(fields[1])
+                parse_1c_bool_field(Some(fields[1]))
                     .map(CharacteristicFilterValue::Boolean)
                     .ok_or_else(|| unsupported_filter(family, item_index, None))
             }
@@ -6920,10 +6920,10 @@ fn is_direct_code14_form_metadata_text(text: &str, uuid: &str) -> bool {
         fields.first().map(|field| field.trim()),
         fields.len(),
     ) && metadata_header_field_index(&fields, uuid) == Some(1)
-        && information_register_bool(fields[2]).is_some()
-        && information_register_bool(fields[3]).is_some()
+        && parse_1c_bool_field(Some(fields[2])).is_some()
+        && parse_1c_bool_field(Some(fields[3])).is_some()
         && direct_form_application_purposes_are_valid(fields[4])
-        && (fields.len() == 5 || information_register_bool(fields[5]).is_some())
+        && (fields.len() == 5 || parse_1c_bool_field(Some(fields[5])).is_some())
 }
 
 fn direct_form_application_purposes_are_valid(value: &str) -> bool {
@@ -8126,7 +8126,7 @@ fn parse_flowchart_scheme(
         return None;
     }
     let back_color = parse_flowchart_color(fields.get(1)?, object_refs)?;
-    let grid_enabled = parse_flowchart_flag(fields.get(2)?)?;
+    let grid_enabled = parse_1c_bool_field(Some(fields.get(2)?))?;
     let grid_horizontal_step = parse_flowchart_number(fields.get(3)?)?;
     let grid_vertical_step = parse_flowchart_number(fields.get(4)?)?;
     let draw_grid_mode = match fields.get(5)?.trim() {
@@ -8187,14 +8187,6 @@ fn parse_flowchart_number(value: &str) -> Option<String> {
         .then(|| value.to_string())
 }
 
-fn parse_flowchart_flag(value: &str) -> Option<bool> {
-    match value.trim() {
-        "0" => Some(false),
-        "1" => Some(true),
-        _ => None,
-    }
-}
-
 /// A flowchart colour is the control-colour value the form reader decodes;
 /// the unset shape `{3,4,{0}}`, which a form writes as no element, is the
 /// scheme's `auto`.
@@ -8244,7 +8236,7 @@ fn parse_flowchart_item(
             {
                 to.item = names.get(to_id)?.clone();
             }
-            properties.decorative_line = parse_flowchart_flag(fields.get(5)?)?;
+            properties.decorative_line = parse_1c_bool_field(Some(fields.get(5)?))?;
             ("ConnectionLine", properties)
         }
         "2" => {
@@ -8285,7 +8277,7 @@ fn parse_flowchart_item(
             if fields.len() != 8 {
                 return None;
             }
-            properties.group = parse_flowchart_flag(fields.get(4)?)?;
+            properties.group = parse_1c_bool_field(Some(fields.get(4)?))?;
             properties.explanation = fields.get(3).and_then(|value| parse_1c_string(value));
             properties.task_description = fields.get(7).and_then(|value| parse_1c_string(value));
             properties.has_addressing_attributes = true;
@@ -8490,8 +8482,8 @@ fn parse_flowchart_item_style(
             _ => return None,
         },
         z_order: parse_flowchart_number(fields.get(9)?)?,
-        hyperlink: parse_flowchart_flag(fields.get(10)?)?,
-        transparent: parse_flowchart_flag(fields.get(11)?)?,
+        hyperlink: parse_1c_bool_field(Some(fields.get(10)?))?,
+        transparent: parse_1c_bool_field(Some(fields.get(11)?))?,
     })
 }
 
@@ -8542,7 +8534,7 @@ fn parse_flowchart_picture(text: &str) -> Option<FlowchartPicture> {
             }
             Some(FlowchartPicture::Ref {
                 reference: standard_picture_name(payload.get(1)?.trim())?,
-                load_transparent: parse_flowchart_flag(fields.get(6)?)?,
+                load_transparent: parse_1c_bool_field(Some(fields.get(6)?))?,
             })
         }
         "3" => {
@@ -8567,7 +8559,7 @@ fn parse_flowchart_picture(text: &str) -> Option<FlowchartPicture> {
             Some(FlowchartPicture::Embedded {
                 file_name: format!("Picture.{}", flowchart_picture_extension(&data)?),
                 data,
-                load_transparent: parse_flowchart_flag(fields.get(6)?)?,
+                load_transparent: parse_1c_bool_field(Some(fields.get(6)?))?,
             })
         }
         _ => None,
@@ -8612,7 +8604,7 @@ fn parse_flowchart_line_record(text: &str) -> Option<FlowchartLineRecord> {
             _ => return None,
         },
         width: parse_flowchart_number(fields.get(4)?)?,
-        gap: parse_flowchart_flag(fields.get(5)?)?,
+        gap: parse_1c_bool_field(Some(fields.get(5)?))?,
     })
 }
 
@@ -10292,7 +10284,7 @@ fn parse_information_register_child_command_properties_from_fields(
         group: Some(group),
         command_parameter_types,
         parameter_use_mode,
-        modifies_data: information_register_bool(fields.get(10)?)?,
+        modifies_data: parse_1c_bool_field(Some(fields.get(10)?))?,
         on_main_server_unavailable_behavior: "Auto",
     })
 }
@@ -10313,7 +10305,7 @@ fn parse_information_register_command_picture_descriptor(
         return None;
     }
 
-    let load_transparent = information_register_bool(fields.get(6)?)?;
+    let load_transparent = parse_1c_bool_field(Some(fields.get(6)?))?;
     let reference = split_1c_braced_fields(fields.get(2)?, 0)?;
     match fields.get(1)?.trim() {
         "0" if reference.len() == 1 && reference.first()?.trim() == "0" && load_transparent => {
@@ -15211,7 +15203,7 @@ fn parse_exchange_plan_properties_from_text(
     Some(ExchangePlanProperties {
         this_node: parse_information_register_non_zero_uuid(fields.get(11)?)?,
         generated_types: parse_exchange_plan_generated_types(&fields, &header.name)?,
-        use_standard_commands: information_register_bool(fields.get(13)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(13)?))?,
         code_length: parse_signed_length(fields.get(15)?)?,
         code_allowed_length: match fields.get(39)?.trim() {
             "0" => "Fixed",
@@ -15221,7 +15213,7 @@ fn parse_exchange_plan_properties_from_text(
         description_length: parse_signed_length(fields.get(17)?)?,
         default_presentation: "AsDescription",
         edit_type: "InDialog",
-        quick_choice: information_register_bool(fields.get(23)?)?,
+        quick_choice: parse_1c_bool_field(Some(fields.get(23)?))?,
         choice_mode: "BothWays",
         input_by_string: parse_exchange_plan_input_by_string(fields.get(27)?, &header.name)?,
         search_string_mode_on_input_by_string: "Begin",
@@ -15259,15 +15251,15 @@ fn parse_exchange_plan_properties_from_text(
         )?,
         standard_attributes: parse_exchange_plan_standard_attributes(fields.get(30)?)?,
         based_on: parse_exchange_plan_based_on(fields.get(24)?, object_refs)?,
-        distributed_infobase: information_register_bool(fields.get(26)?)?,
-        include_configuration_extensions: information_register_bool(fields.get(45)?)?,
+        distributed_infobase: parse_1c_bool_field(Some(fields.get(26)?))?,
+        include_configuration_extensions: parse_1c_bool_field(Some(fields.get(45)?))?,
         create_on_input: "DontUse",
         choice_history_on_input: match fields.get(44)?.trim() {
             "0" => "Auto",
             "1" => "DontUse",
             _ => return None,
         },
-        include_help_in_contents: information_register_bool(fields.get(18)?)?,
+        include_help_in_contents: parse_1c_bool_field(Some(fields.get(18)?))?,
         data_lock_fields: parse_exchange_plan_data_lock_fields(
             fields.get(42)?,
             &header.name,
@@ -17520,7 +17512,7 @@ fn parse_information_register_standard_attribute_bool(value: &str) -> Option<boo
     if fields.len() != 2 || fields.first()?.trim() != r#""B""# {
         return None;
     }
-    information_register_bool(fields.get(1)?)
+    parse_1c_bool_field(Some(fields.get(1)?))
 }
 
 fn information_register_standard_attribute_nil_is_valid(value: &str) -> bool {
@@ -17618,7 +17610,7 @@ fn parse_information_register_standard_attribute_fill_value(
     }
     match (name, fields.first()?.trim(), fields.len()) {
         ("Active", r#""B""#, 2) => {
-            information_register_bool(fields.get(1)?).map(MetadataChildFillValue::Boolean)
+            parse_1c_bool_field(Some(fields.get(1)?)).map(MetadataChildFillValue::Boolean)
         }
         ("LineNumber", r#""N""#, 2) if fields.get(1)?.trim() == "0" => {
             Some(MetadataChildFillValue::Decimal("0".to_string()))
@@ -18101,8 +18093,8 @@ fn parse_information_register_owner_properties(
         periodicity,
         write_mode: information_register_write_mode_xml(fields.get(5)?)?,
         edit_type: information_register_edit_type_xml(fields.get(6)?)?,
-        use_standard_commands: information_register_bool(fields.get(7)?)?,
-        include_help_in_contents: information_register_bool(fields.get(8)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(7)?))?,
+        include_help_in_contents: parse_1c_bool_field(Some(fields.get(8)?))?,
         // A non-periodical register exports `<MainFilterOnPeriod>false` even
         // when the stored flag is set: there is no period to filter on.
         // Perepis of 4 074 information registers of the stand -- the flag and
@@ -18113,7 +18105,7 @@ fn parse_information_register_owner_properties(
         // A recorder-subordinate register exports `false` too, whatever the
         // flag (fixture `main_filter`: stored set, dumped false by
         // 8.3.27.2214; a real extension, nine such registers).
-        main_filter_on_period: information_register_bool(fields.get(9)?)?
+        main_filter_on_period: parse_1c_bool_field(Some(fields.get(9)?))?
             && periodicity != "Nonperiodical"
             && information_register_write_mode_xml(fields.get(5)?)? != "RecorderSubordinate",
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(10)?)?,
@@ -18138,13 +18130,13 @@ fn parse_information_register_owner_properties(
             fields.get(18)?,
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(19)?)?,
-        enable_totals_slice_last: information_register_bool(fields.get(20)?)?,
-        enable_totals_slice_first: information_register_bool(fields.get(21)?)?,
+        enable_totals_slice_last: parse_1c_bool_field(Some(fields.get(20)?))?,
+        enable_totals_slice_first: parse_1c_bool_field(Some(fields.get(21)?))?,
         data_history: metadata_data_history_xml(fields.get(22)?.trim())?,
-        update_data_history_immediately_after_write: information_register_bool(fields.get(23)?)?,
-        execute_after_write_data_history_version_processing: information_register_bool(
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(23)?))?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_field(Some(
             fields.get(24)?,
-        )?,
+        ))?,
     })
 }
 
@@ -21736,12 +21728,12 @@ fn parse_accumulation_calculation_register_child_payload_from_fields(
         ("AccumulationRegister", "8", 6) => (
             "Dimension",
             RegisterMetadataChildProperties {
-                deny_incomplete_values: Some(information_register_bool(fields.get(2)?)?),
+                deny_incomplete_values: Some(parse_1c_bool_field(Some(fields.get(2)?))?),
                 base_dimension: None,
                 schedule_link: None,
                 indexing: Some(metadata_attribute_indexing_xml(fields.get(3)?.trim())?),
                 full_text_search: register_child_full_text_search_xml(fields.get(4)?.trim())?,
-                use_in_totals: Some(information_register_bool(fields.get(5)?)?),
+                use_in_totals: Some(parse_1c_bool_field(Some(fields.get(5)?))?),
             },
         ),
         ("CalculationRegister", "4", 3) => (
@@ -21807,8 +21799,8 @@ fn parse_accumulation_calculation_register_child_payload_from_fields(
             (
                 "Dimension",
                 RegisterMetadataChildProperties {
-                    deny_incomplete_values: Some(information_register_bool(fields.get(2)?)?),
-                    base_dimension: Some(information_register_bool(fields.get(3)?)?),
+                    deny_incomplete_values: Some(parse_1c_bool_field(Some(fields.get(2)?))?),
+                    base_dimension: Some(parse_1c_bool_field(Some(fields.get(3)?))?),
                     schedule_link: Some(schedule_link),
                     indexing: Some(metadata_attribute_indexing_xml(fields.get(5)?.trim())?),
                     full_text_search: register_child_full_text_search_xml(fields.get(6)?.trim())?,
@@ -22076,19 +22068,19 @@ fn parse_information_register_child_payload_from_fields(
             properties.data_history = information_register_data_history(fields.get(4)?);
         }
         ("9", 8) => {
-            properties.master = Some(information_register_bool(fields.get(2)?)?);
-            properties.deny_incomplete_values = Some(information_register_bool(fields.get(3)?)?);
+            properties.master = Some(parse_1c_bool_field(Some(fields.get(2)?))?);
+            properties.deny_incomplete_values = Some(parse_1c_bool_field(Some(fields.get(3)?))?);
             properties.indexing = information_register_indexing(fields.get(4)?);
-            properties.main_filter = Some(information_register_bool(fields.get(5)?)?);
+            properties.main_filter = Some(parse_1c_bool_field(Some(fields.get(5)?))?);
             properties.full_text_search = information_register_full_text_search(fields.get(6)?);
             properties.data_history = information_register_data_history(fields.get(7)?);
             properties.type_reduction_mode = Some("TransformValues");
         }
         ("10", 9) => {
-            properties.master = Some(information_register_bool(fields.get(2)?)?);
-            properties.deny_incomplete_values = Some(information_register_bool(fields.get(3)?)?);
+            properties.master = Some(parse_1c_bool_field(Some(fields.get(2)?))?);
+            properties.deny_incomplete_values = Some(parse_1c_bool_field(Some(fields.get(3)?))?);
             properties.indexing = information_register_indexing(fields.get(4)?);
-            properties.main_filter = Some(information_register_bool(fields.get(5)?)?);
+            properties.main_filter = Some(parse_1c_bool_field(Some(fields.get(5)?))?);
             properties.full_text_search = information_register_full_text_search(fields.get(6)?);
             properties.data_history = information_register_data_history(fields.get(7)?);
             properties.type_reduction_mode = Some(match fields.get(8)?.trim() {
@@ -22360,17 +22352,17 @@ fn parse_information_register_common_child_properties(
         preserve_raw_data_paths,
     )?;
     Some(MetadataChildProperties {
-        password_mode: information_register_bool(fields.get(2)?)?,
+        password_mode: parse_1c_bool_field(Some(fields.get(2)?))?,
         format: parse_information_register_localized_value(fields.get(3)?)?,
         edit_format: parse_information_register_localized_value(fields.get(18)?)?,
         tooltip: parse_information_register_localized_value(fields.get(4)?)?,
-        mark_negatives: information_register_bool(fields.get(5)?)?,
+        mark_negatives: parse_1c_bool_field(Some(fields.get(5)?))?,
         mask: parse_1c_quoted_string(fields.get(6)?.trim())?,
-        multi_line: information_register_bool(fields.get(7)?)?,
-        extended_edit: information_register_bool(fields.get(17)?)?,
+        multi_line: parse_1c_bool_field(Some(fields.get(7)?))?,
+        extended_edit: parse_1c_bool_field(Some(fields.get(17)?))?,
         min_value,
         max_value,
-        fill_from_filling_value: information_register_bool(fields.get(20)?)?,
+        fill_from_filling_value: parse_1c_bool_field(Some(fields.get(20)?))?,
         emit_fill_from_filling_value: true,
         fill_value: Some(parse_information_register_fill_value(
             fields.get(19)?,
@@ -22454,14 +22446,6 @@ fn parse_information_register_common_child_properties(
     })
 }
 
-fn information_register_bool(value: &str) -> Option<bool> {
-    match value.trim() {
-        "0" => Some(false),
-        "1" => Some(true),
-        _ => None,
-    }
-}
-
 fn information_register_indexing(value: &str) -> Option<&'static str> {
     metadata_attribute_indexing_xml(value.trim())
 }
@@ -22533,7 +22517,7 @@ fn parse_information_register_fill_value(
             format_1c_date_time(fields.get(1)?.trim()).map(MetadataChildFillValue::DateTime)
         }
         r#""B""# if fields.len() == 2 => {
-            information_register_bool(fields.get(1)?).map(MetadataChildFillValue::Boolean)
+            parse_1c_bool_field(Some(fields.get(1)?)).map(MetadataChildFillValue::Boolean)
         }
         r##""#""## if fields.len() == 3 && design_time_ref_value_is_zero(&fields) => {
             Some(MetadataChildFillValue::DesignTimeRef(String::new()))
@@ -23138,7 +23122,7 @@ fn parse_metadata_choice_parameter_typed_value(
             parse_1c_quoted_string(fields.get(1)?.trim())?,
         )),
         r#""B""# if fields.len() == 2 => {
-            information_register_bool(fields.get(1)?).map(MetadataChoiceParameterValue::Boolean)
+            parse_1c_bool_field(Some(fields.get(1)?)).map(MetadataChoiceParameterValue::Boolean)
         }
         r#""N""# if fields.len() == 2 => {
             let value = fields.get(1)?.trim();
@@ -23219,12 +23203,12 @@ fn parse_catalog_child_properties(
         return None;
     }
 
-    let password_mode = information_register_bool(payload.get(2)?)?;
+    let password_mode = parse_1c_bool_field(Some(payload.get(2)?))?;
     let format = parse_metadata_child_localized_value(payload.get(3)?)?;
     let tooltip = parse_metadata_child_localized_value(payload.get(4)?)?;
-    let mark_negatives = information_register_bool(payload.get(5)?)?;
+    let mark_negatives = parse_1c_bool_field(Some(payload.get(5)?))?;
     let mask = parse_1c_quoted_string(payload.get(6)?.trim())?;
-    let multi_line = information_register_bool(payload.get(7)?)?;
+    let multi_line = parse_1c_bool_field(Some(payload.get(7)?))?;
     let min_value = parse_information_register_bound(payload.get(8)?)?;
     let max_value = parse_information_register_bound(payload.get(9)?)?;
     let choice_folders_and_items = catalog_choice_folders_and_items_xml(payload.get(10)?.trim())?;
@@ -23244,11 +23228,11 @@ fn parse_catalog_child_properties(
         type_index,
         metadata_object_refs,
     )?;
-    let extended_edit = information_register_bool(payload.get(17)?)?;
+    let extended_edit = parse_1c_bool_field(Some(payload.get(17)?))?;
     let edit_format = parse_metadata_child_localized_value(payload.get(18)?)?;
     let fill_value =
         parse_information_register_fill_value(payload.get(19)?, type_index, metadata_object_refs)?;
-    let fill_from_filling_value = information_register_bool(payload.get(20)?)?;
+    let fill_from_filling_value = parse_1c_bool_field(Some(payload.get(20)?))?;
     if nested
         && (fill_from_filling_value
             || !matches!(&fill_value, MetadataChildFillValue::String(value) if value.is_empty()))
@@ -23585,12 +23569,12 @@ fn parse_document_child_properties(
         return None;
     }
 
-    let password_mode = information_register_bool(payload.get(2)?)?;
+    let password_mode = parse_1c_bool_field(Some(payload.get(2)?))?;
     let format = parse_metadata_child_localized_value(payload.get(3)?)?;
     let tooltip = parse_metadata_child_localized_value(payload.get(4)?)?;
-    let mark_negatives = information_register_bool(payload.get(5)?)?;
+    let mark_negatives = parse_1c_bool_field(Some(payload.get(5)?))?;
     let mask = parse_1c_quoted_string(payload.get(6)?.trim())?;
-    let multi_line = information_register_bool(payload.get(7)?)?;
+    let multi_line = parse_1c_bool_field(Some(payload.get(7)?))?;
     let min_value = parse_information_register_bound(payload.get(8)?)?;
     let max_value = parse_information_register_bound(payload.get(9)?)?;
     let choice_folders_and_items = catalog_choice_folders_and_items_xml(payload.get(10)?.trim())?;
@@ -23619,7 +23603,7 @@ fn parse_document_child_properties(
         type_index,
         metadata_object_refs,
     )?;
-    let extended_edit = information_register_bool(payload.get(17)?)?;
+    let extended_edit = parse_1c_bool_field(Some(payload.get(17)?))?;
     let edit_format = parse_metadata_child_localized_value(payload.get(18)?)?;
     let fill_value = parse_document_fill_value(
         payload.get(19)?,
@@ -23628,7 +23612,7 @@ fn parse_document_child_properties(
         metadata_object_refs,
         form_refs,
     )?;
-    let fill_from_filling_value = information_register_bool(payload.get(20)?)?;
+    let fill_from_filling_value = parse_1c_bool_field(Some(payload.get(20)?))?;
     if nested
         && (fill_from_filling_value
             || !matches!(&fill_value, MetadataChildFillValue::String(value) if value.is_empty()))
@@ -25544,8 +25528,8 @@ fn parse_chart_of_accounts_properties(
     }
     Some(ChartOfAccountsProperties {
         generated_types,
-        use_standard_commands: information_register_bool(fields.get(16)?)?,
-        include_help_in_contents: information_register_bool(fields.get(17)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(16)?))?,
+        include_help_in_contents: parse_1c_bool_field(Some(fields.get(17)?))?,
         ext_dimension_types: if parse_information_register_uuid(fields.get(19)?)
             .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
         {
@@ -25575,7 +25559,7 @@ fn parse_chart_of_accounts_properties(
         // `_ДемоОсновной` and `uh` `Хозрасчетный` write `"1"`/`true`, and
         // `uh` `МСФО` and `Международный` write `"0"`/`false` while field 27
         // stays `"1"` on all four.
-        check_unique: information_register_bool(fields.get(34)?)?,
+        check_unique: parse_1c_bool_field(Some(fields.get(34)?))?,
         default_presentation: match fields.get(26)?.trim() {
             "0" => "AsCode",
             "1" => "AsDescription",
@@ -25598,7 +25582,7 @@ fn parse_chart_of_accounts_properties(
         )?,
         predefined_data_update: parse_chart_predefined_data_update(fields.get(51)?)?,
         edit_type: parse_chart_edit_type(fields.get(31)?)?,
-        quick_choice: information_register_bool(fields.get(32)?)?,
+        quick_choice: parse_1c_bool_field(Some(fields.get(32)?))?,
         // No chart of accounts of the stand separates `<ChoiceMode>`: all
         // four export `BothWays`. Field 36, against which this used to be
         // pinned, carries `<DataLockControlMode>` and refused the two charts
@@ -25665,7 +25649,7 @@ fn parse_chart_of_accounts_properties(
         // of accounts of the ordinary corpora, `"0"`/`false` on the chart of an
         // extension (whose field 27, the constant validated above, stays
         // `"1"`). Field 34 is `<CheckUnique>` and is `"0"` on two of the four.
-        auto_order_by_code: information_register_bool(fields.get(24)?)?,
+        auto_order_by_code: parse_1c_bool_field(Some(fields.get(24)?))?,
         order_length: parse_signed_length(fields.get(25)?)?,
         // `<DataLockControlMode>` rides field 36 with the shared 0/1/2 encoding:
         // `uh` `МСФО` and `Хозрасчетный` write `"0"`/`Automatic`, `ssl`
@@ -25673,10 +25657,10 @@ fn parse_chart_of_accounts_properties(
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(36)?)?,
         full_text_search: register_child_full_text_search_xml(fields.get(37)?.trim())?,
         data_history: metadata_data_history_xml(fields.get(54)?.trim())?,
-        update_data_history_immediately_after_write: information_register_bool(fields.get(55)?)?,
-        execute_after_write_data_history_version_processing: information_register_bool(
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(55)?))?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_field(Some(
             fields.get(56)?,
-        )?,
+        ))?,
         object_presentation: parse_information_register_owner_localized_value(fields.get(43)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
             fields.get(44)?,
@@ -25891,7 +25875,7 @@ fn parse_chart_of_calculation_types_properties(
     }
     Some(ChartOfCalculationTypesProperties {
         generated_types,
-        use_standard_commands: information_register_bool(fields.get(24)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(24)?))?,
         code_length: parse_signed_length(fields.get(25)?)?,
         description_length: parse_signed_length(fields.get(30)?)?,
         code_type: match fields.get(26)?.trim() {
@@ -26002,7 +25986,7 @@ fn parse_chart_of_calculation_types_properties(
                 object_refs,
             )?
         },
-        action_period_use: information_register_bool(fields.get(29)?)?,
+        action_period_use: parse_1c_bool_field(Some(fields.get(29)?))?,
         standard_attributes: parse_chart_root_standard_attributes(
             fields.get(43)?,
             &CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES,
@@ -26048,7 +26032,7 @@ fn parse_chart_of_calculation_types_properties(
         // of field 53: the БСП demo chart writes `0` and exports `false`, both
         // ERP УХ charts write `1` and export `true`. Field 53 is
         // `<CodeAllowedLength>` and disagreed with that reading on one of them.
-        include_help_in_contents: information_register_bool(fields.get(37)?)?,
+        include_help_in_contents: parse_1c_bool_field(Some(fields.get(37)?))?,
         // `<DataLockControlMode>` rides field 41 with the shared 0/1 encoding:
         // the БСП demo chart writes `1`/`Managed`, both ERP УХ charts write
         // `0`/`Automatic`. Field 55, against which this used to be read, is `1`
@@ -26065,10 +26049,10 @@ fn parse_chart_of_calculation_types_properties(
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(52)?)?,
         data_history: metadata_data_history_xml(fields.get(60)?.trim())?,
-        update_data_history_immediately_after_write: information_register_bool(fields.get(61)?)?,
-        execute_after_write_data_history_version_processing: information_register_bool(
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(61)?))?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_field(Some(
             fields.get(62)?,
-        )?,
+        ))?,
         child_objects,
         child_forms,
     })
@@ -26898,8 +26882,8 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     }
     Some(ChartOfCharacteristicTypesProperties {
         generated_types,
-        use_standard_commands: information_register_bool(fields.get(14)?)?,
-        include_help_in_contents: information_register_bool(fields.get(16)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(14)?))?,
+        include_help_in_contents: parse_1c_bool_field(Some(fields.get(16)?))?,
         characteristic_ext_values: parse_cct_characteristic_ext_values(
             fields.get(17)?,
             object_refs,
@@ -26907,8 +26891,8 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         value_types: stable_partition_metadata_types(classify_metadata_reference_type_sets(
             parse_metadata_type_pattern(fields.get(18)?, type_index)?,
         )),
-        hierarchical: information_register_bool(fields.get(19)?)?,
-        folders_on_top: information_register_bool(fields.get(20)?)?,
+        hierarchical: parse_1c_bool_field(Some(fields.get(19)?))?,
+        folders_on_top: parse_1c_bool_field(Some(fields.get(20)?))?,
         code_length,
         code_allowed_length: match fields.get(49)?.trim() {
             "0" => "Fixed",
@@ -26925,8 +26909,8 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         // whole, because field 35 was also the slot `CreateOnInput` was pinned
         // against.
         code_series: cct_code_series_xml(fields.get(35)?.trim())?,
-        check_unique: information_register_bool(fields.get(34)?)?,
-        autonumbering: information_register_bool(fields.get(22)?)?,
+        check_unique: parse_1c_bool_field(Some(fields.get(34)?))?,
+        autonumbering: parse_1c_bool_field(Some(fields.get(22)?))?,
         // `<DefaultPresentation>` has no separating carrier on this family:
         // all 47 characteristic-type plans of the stand write
         // `AsDescription`. It used to be pinned against field 25, which
@@ -26963,7 +26947,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             "2" => "BothWays",
             _ => return None,
         },
-        quick_choice: information_register_bool(fields.get(32)?)?,
+        quick_choice: parse_1c_bool_field(Some(fields.get(32)?))?,
         input_by_string: parse_cct_input_by_string(fields.get(33)?, &header.name)?,
         // `<CreateOnInput>` rides field 51: 46 plans of the stand write
         // `DontUse` with `"1"` and one (`uh`
@@ -27060,10 +27044,10 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(48)?)?,
         data_history: metadata_data_history_xml(fields.get(56)?.trim())?,
-        update_data_history_immediately_after_write: information_register_bool(fields.get(57)?)?,
-        execute_after_write_data_history_version_processing: information_register_bool(
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(57)?))?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_field(Some(
             fields.get(58)?,
-        )?,
+        ))?,
         child_metadata_objects,
         child_forms,
         child_templates,
@@ -27358,7 +27342,7 @@ fn parse_cct_standard_attribute_fill_value(
         // written in the same `{"B",flag}` dialect the register readers already
         // decode (`КаналыРекламныхВоздействий` carries `false`).
         "-4" if fields.len() == 2 && fields.first()?.trim() == r#""B""# => {
-            information_register_bool(fields.get(1)?).map(MetadataChildFillValue::Boolean)
+            parse_1c_bool_field(Some(fields.get(1)?)).map(MetadataChildFillValue::Boolean)
         }
         _ => None,
     }
@@ -27567,7 +27551,7 @@ fn parse_cct_attribute_properties(
     };
     let fill_value =
         parse_information_register_fill_value(payload.get(19)?, type_index, metadata_object_refs)?;
-    let fill_from_filling_value = information_register_bool(payload.get(20)?)?;
+    let fill_from_filling_value = parse_1c_bool_field(Some(payload.get(20)?))?;
     if nested
         && (fill_from_filling_value
             || !matches!(&fill_value, MetadataChildFillValue::String(value) if value.is_empty()))
@@ -27583,14 +27567,14 @@ fn parse_cct_attribute_properties(
     let full_text_search_index = if nested || !direct_use_mode { 3 } else { 4 };
     let data_history_index = if nested || !direct_use_mode { 4 } else { 5 };
     Some(MetadataChildProperties {
-        password_mode: information_register_bool(payload.get(2)?)?,
+        password_mode: parse_1c_bool_field(Some(payload.get(2)?))?,
         format: parse_metadata_child_localized_value(payload.get(3)?)?,
         edit_format: parse_metadata_child_localized_value(payload.get(18)?)?,
         tooltip: parse_metadata_child_localized_value(payload.get(4)?)?,
-        mark_negatives: information_register_bool(payload.get(5)?)?,
+        mark_negatives: parse_1c_bool_field(Some(payload.get(5)?))?,
         mask: parse_information_register_quoted_string(payload.get(6)?)?,
-        multi_line: information_register_bool(payload.get(7)?)?,
-        extended_edit: information_register_bool(payload.get(17)?)?,
+        multi_line: parse_1c_bool_field(Some(payload.get(7)?))?,
+        extended_edit: parse_1c_bool_field(Some(payload.get(17)?))?,
         min_value: parse_information_register_bound(payload.get(8)?)?,
         max_value: parse_information_register_bound(payload.get(9)?)?,
         fill_from_filling_value,
@@ -28312,18 +28296,18 @@ fn parse_strict_catalog_properties_from_text(
 
     Some(CatalogProperties {
         generated_types,
-        hierarchical: information_register_bool(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?)?,
+        hierarchical: parse_1c_bool_field(Some(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?))?,
         hierarchy_type: catalog_hierarchy_type_xml(
             fields.get(CATALOG_OWNER_FIELD_HIERARCHY_TYPE)?,
         )?,
-        limit_level_count: information_register_bool(fields.get(38)?)?,
+        limit_level_count: parse_1c_bool_field(Some(fields.get(38)?))?,
         level_count: parse_signed_length(fields.get(10)?)?,
-        folders_on_top: information_register_bool(fields.get(13)?)?,
+        folders_on_top: parse_1c_bool_field(Some(fields.get(13)?))?,
         owners: Some(owners),
         subordination_use: Some(catalog_subordination_use_xml(parse_exchange_plan_u32(
             fields.get(39)?,
         )?)?),
-        use_standard_commands: information_register_bool(fields.get(31)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(31)?))?,
         code_length: parse_signed_length(fields.get(CATALOG_OWNER_FIELD_CODE_LENGTH)?)?,
         description_length: parse_signed_length(
             fields.get(CATALOG_OWNER_FIELD_DESCRIPTION_LENGTH)?,
@@ -28337,8 +28321,8 @@ fn parse_strict_catalog_properties_from_text(
         code_series: Some(catalog_code_series_xml(parse_exchange_plan_u32(
             fields.get(16)?,
         )?)?),
-        check_unique: information_register_bool(fields.get(14)?)?,
-        autonumbering: information_register_bool(fields.get(15)?)?,
+        check_unique: parse_1c_bool_field(Some(fields.get(14)?))?,
+        autonumbering: parse_1c_bool_field(Some(fields.get(15)?))?,
         default_presentation: Some(match fields.get(20)?.trim() {
             "0" => "AsCode",
             "1" => "AsDescription",
@@ -28366,7 +28350,7 @@ fn parse_strict_catalog_properties_from_text(
             "2" => "BothWays",
             _ => return None,
         },
-        quick_choice: information_register_bool(fields.get(41)?)?,
+        quick_choice: parse_1c_bool_field(Some(fields.get(41)?))?,
         choice_mode: match fields.get(40)?.trim() {
             "0" => "FromForm",
             "1" => "QuickChoice",
@@ -28437,7 +28421,7 @@ fn parse_strict_catalog_properties_from_text(
             &header.name,
             form_refs,
         )?,
-        include_help_in_contents: information_register_bool(fields.get(33)?)?,
+        include_help_in_contents: parse_1c_bool_field(Some(fields.get(33)?))?,
         based_on,
         data_lock_fields,
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(43)?)?,
@@ -28454,9 +28438,9 @@ fn parse_strict_catalog_properties_from_text(
         create_on_input,
         choice_history_on_input,
         data_history,
-        update_data_history_immediately_after_write: information_register_bool(fields.get(59)?)?,
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(59)?))?,
         execute_after_write_data_history_version_processing: match fields.get(60) {
-            Some(value) => information_register_bool(value)?,
+            Some(value) => parse_1c_bool_field(Some(value))?,
             None => false,
         },
         child_metadata_objects,
@@ -29743,7 +29727,7 @@ fn parse_document_properties_from_text(
 
     Some(DocumentProperties {
         generated_types,
-        use_standard_commands: information_register_bool(fields.get(23)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(23)?))?,
         numbering: DocumentNumberingProperties {
             numerator: parse_document_optional_object_reference(fields.get(10)?, object_refs)?,
             number_type: match fields.get(11)?.trim() {
@@ -29765,8 +29749,8 @@ fn parse_document_properties_from_text(
             number_periodicity: ibcmd_schema::metadata_storage_facts::document_number_periodicity(
                 fields.get(13)?,
             )?,
-            check_unique: information_register_bool(fields.get(14)?)?,
-            autonumbering: information_register_bool(fields.get(15)?)?,
+            check_unique: parse_1c_bool_field(Some(fields.get(14)?))?,
+            autonumbering: parse_1c_bool_field(Some(fields.get(15)?))?,
         },
         standard_attributes: parse_document_standard_attributes(
             fields.get(32)?,
@@ -29856,9 +29840,9 @@ fn parse_document_properties_from_text(
                 "CalculationRegister.",
             ],
         )?,
-        post_in_privileged_mode: information_register_bool(fields.get(33)?)?,
-        unpost_in_privileged_mode: information_register_bool(fields.get(34)?)?,
-        include_help_in_contents: information_register_bool(fields.get(25)?)?,
+        post_in_privileged_mode: parse_1c_bool_field(Some(fields.get(33)?))?,
+        unpost_in_privileged_mode: parse_1c_bool_field(Some(fields.get(34)?))?,
+        include_help_in_contents: parse_1c_bool_field(Some(fields.get(25)?))?,
         data_lock_fields,
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(30)?)?,
         full_text_search: register_child_full_text_search_xml(fields.get(31)?.trim())?,
@@ -29873,10 +29857,10 @@ fn parse_document_properties_from_text(
         explanation: parse_information_register_owner_localized_value(fields.get(42)?)?,
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(49)?.trim())?,
         data_history: metadata_data_history_xml(fields.get(50)?.trim())?,
-        update_data_history_immediately_after_write: information_register_bool(fields.get(51)?)?,
-        execute_after_write_data_history_version_processing: information_register_bool(
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(51)?))?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_field(Some(
             fields.get(52)?,
-        )?,
+        ))?,
         child_metadata_objects,
         child_forms,
         child_templates,
@@ -30936,7 +30920,7 @@ fn parse_business_process_properties_from_text(
     Some(BusinessProcessProperties {
         generated_types,
         characteristics,
-        use_standard_commands: information_register_bool(fields.get(2)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(2)?))?,
         edit_type: match fields.get(21)?.trim() {
             "1" => "InDialog",
             _ => return None,
@@ -30990,23 +30974,23 @@ fn parse_business_process_properties_from_text(
         },
         number_length: parse_exchange_plan_u32(fields.get(18)?)?,
         number_allowed_length: parse_business_process_number_allowed_length(fields)?,
-        check_unique: information_register_bool(fields.get(19)?)?,
+        check_unique: parse_1c_bool_field(Some(fields.get(19)?))?,
         standard_attributes: parse_business_process_standard_attributes(
             fields.get(30)?,
             type_index,
             metadata_object_refs,
         )?,
-        autonumbering: information_register_bool(fields.get(20)?)?,
+        autonumbering: parse_1c_bool_field(Some(fields.get(20)?))?,
         based_on: parse_business_process_based_on(fields.get(15)?, object_refs)?,
         number_periodicity: match fields.get(17)?.trim() {
             "0" => "Nonperiodical",
             _ => return None,
         },
         task: parse_owner_optional_reference(fields.get(25)?, object_refs, "Task.")?,
-        create_task_in_privileged_mode: information_register_bool(fields.get(31)?)?,
+        create_task_in_privileged_mode: parse_1c_bool_field(Some(fields.get(31)?))?,
         data_lock_fields,
         data_lock_control_mode: parse_business_process_data_lock_control_mode(fields)?,
-        include_help_in_contents: information_register_bool(fields.get(26)?)?,
+        include_help_in_contents: parse_1c_bool_field(Some(fields.get(26)?))?,
         full_text_search: register_child_full_text_search_xml(fields.get(29)?.trim())?,
         object_presentation: parse_information_register_owner_localized_value(fields.get(35)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
@@ -31018,10 +31002,10 @@ fn parse_business_process_properties_from_text(
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(39)?)?,
         data_history: metadata_data_history_xml(fields.get(46)?.trim())?,
-        update_data_history_immediately_after_write: information_register_bool(fields.get(47)?)?,
-        execute_after_write_data_history_version_processing: information_register_bool(
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(47)?))?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_field(Some(
             fields.get(48)?,
-        )?,
+        ))?,
         child_attributes,
         child_tabular_sections,
         child_forms,
@@ -31740,7 +31724,7 @@ fn parse_task_properties_from_text(
             field_13: internal_uuid_slots.field_13,
             field_14: internal_uuid_slots.field_14,
         },
-        use_standard_commands: information_register_bool(fields.get(2)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(fields.get(2)?))?,
         number_type: match fields.get(18)?.trim() {
             "0" => "Number",
             "1" => "String",
@@ -31748,8 +31732,8 @@ fn parse_task_properties_from_text(
         },
         number_length: parse_exchange_plan_u32(fields.get(19)?)?,
         number_allowed_length: parse_task_number_allowed_length_slot(fields.get(43)?)?.xml_value(),
-        check_unique: information_register_bool(fields.get(20)?)?,
-        autonumbering: information_register_bool(fields.get(21)?)?,
+        check_unique: parse_1c_bool_field(Some(fields.get(20)?))?,
+        autonumbering: parse_1c_bool_field(Some(fields.get(21)?))?,
         task_number_auto_prefix: task_number_auto_prefix.xml_value(),
         description_length: parse_signed_length(fields.get(22)?)?,
         addressing,
@@ -32774,9 +32758,9 @@ fn parse_document_journal_properties_from_text(
         generated_types,
         default_form,
         auxiliary_form,
-        use_standard_commands: information_register_bool(owner_fields.get(5)?)?,
+        use_standard_commands: parse_1c_bool_field(Some(owner_fields.get(5)?))?,
         registered_documents,
-        include_help_in_contents: information_register_bool(owner_fields.get(7)?)?,
+        include_help_in_contents: parse_1c_bool_field(Some(owner_fields.get(7)?))?,
         standard_attributes,
         list_presentation: parse_information_register_owner_localized_value(owner_fields.get(14)?)?,
         extended_list_presentation: parse_information_register_owner_localized_value(
@@ -35449,8 +35433,8 @@ fn parse_web_service_operations(
         operations.push(WebServiceOperationProperties {
             header,
             returning_value_type: parse_web_service_xdto_type(operation.get(2)?)?,
-            nillable: information_register_bool(operation.get(3)?)?,
-            transactioned: information_register_bool(operation.get(4)?)?,
+            nillable: parse_1c_bool_field(Some(operation.get(3)?))?,
+            transactioned: parse_1c_bool_field(Some(operation.get(4)?))?,
             procedure_name: parse_web_service_nonempty_quoted_string(operation.get(5)?)?,
             data_lock_control_mode,
             parameters: parse_web_service_parameters(entry.get(2)?, seen_uuids)?,
@@ -35500,7 +35484,7 @@ fn parse_web_service_parameters(
         parameters.push(WebServiceParameterProperties {
             header,
             value_type: parse_web_service_xdto_type(parameter.get(2)?)?,
-            nillable: information_register_bool(parameter.get(3)?)?,
+            nillable: parse_1c_bool_field(Some(parameter.get(3)?))?,
             transfer_direction,
         });
     }

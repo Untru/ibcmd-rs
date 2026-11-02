@@ -25038,8 +25038,8 @@ fn covers_information_register_owner_scalar_protocol_domains() {
     for (raw, expected) in [("0", "DontUse"), ("1", "Use")] {
         assert_eq!(information_register_full_text_search(raw), Some(expected));
     }
-    assert_eq!(information_register_bool("0"), Some(false));
-    assert_eq!(information_register_bool("1"), Some(true));
+    assert_eq!(parse_1c_bool_field(Some("0")), Some(false));
+    assert_eq!(parse_1c_bool_field(Some("1")), Some(true));
 
     for invalid in ["-1", "7", "1 trailing", "{1}", ""] {
         assert!(information_register_periodicity_xml(invalid).is_none());
@@ -25047,7 +25047,7 @@ fn covers_information_register_owner_scalar_protocol_domains() {
         assert!(information_register_edit_type_xml(invalid).is_none());
         assert!(information_register_data_lock_control_mode_xml(invalid).is_none());
         assert!(information_register_full_text_search(invalid).is_none());
-        assert!(information_register_bool(invalid).is_none());
+        assert!(parse_1c_bool_field(Some(invalid)).is_none());
     }
 }
 

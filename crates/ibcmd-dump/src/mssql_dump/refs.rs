@@ -18,13 +18,12 @@ use super::{
     contains_metadata_header_name_between, contains_metadata_header_uuid_between,
     decode_owner_graph_for_family_parser, enclosing_metadata_header_for_code,
     form_source_reference_name, format_configuration_source_xml, inflate_raw_deflate,
-    information_register_bool, information_register_decimal_is_valid,
-    information_register_periodicity_xml, information_register_uuid_is_zero,
-    information_register_write_mode_xml, insert_configuration_internal_info_xml,
-    insert_configuration_root_child_objects_xml, insert_metadata_child_objects_xml,
-    is_defined_type_metadata_text, is_form_metadata_text, is_metadata_header_marker,
-    is_offset_inside_metadata_object_code, is_template_metadata_text, is_uuid_text,
-    looks_like_graphical_scheme_blob_text, metadata_header_field_index,
+    information_register_decimal_is_valid, information_register_periodicity_xml,
+    information_register_uuid_is_zero, information_register_write_mode_xml,
+    insert_configuration_internal_info_xml, insert_configuration_root_child_objects_xml,
+    insert_metadata_child_objects_xml, is_defined_type_metadata_text, is_form_metadata_text,
+    is_metadata_header_marker, is_offset_inside_metadata_object_code, is_template_metadata_text,
+    is_uuid_text, looks_like_graphical_scheme_blob_text, metadata_header_field_index,
     metadata_kind_can_own_forms, metadata_kind_can_own_templates, metadata_kind_for_source_folder,
     metadata_object_field_candidates_around_header, metadata_object_fields,
     metadata_reference_collection_len, metadata_source_for_object_text, metadata_source_for_text,
@@ -142,7 +141,7 @@ fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeade
         // `0:<uuid>` sentinel, because this function returned `None` (falling
         // back to the default `true`) for every kind but `Catalog`.
         let fields = parse_information_register_owner_fields(text, header)?;
-        return information_register_bool(fields.logical.get(7)?);
+        return parse_1c_bool_field(Some(fields.logical.get(7)?));
     }
     if kind == "Report" {
         // Same slot `parse_report_properties_from_text` reads for the report's
@@ -202,7 +201,7 @@ fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeade
     };
     let mut diagnostic = None;
     let graph = decode_owner_graph_for_family_parser(family, text, header, &mut diagnostic)?;
-    information_register_bool(graph.owner_fields.get(slot)?)
+    parse_1c_bool_field(Some(graph.owner_fields.get(slot)?))
 }
 
 /// How many members the target's own `<BasedOn>` list declares, read at the
@@ -579,7 +578,7 @@ fn catalog_declared_standard_attributes(
         ),
         owned: metadata_reference_collection_len(fields.get(CATALOG_OWNER_FIELD_OWNERS)?)
             .map(|count| count > 0),
-        hierarchical: information_register_bool(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?),
+        hierarchical: parse_1c_bool_field(Some(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?)),
         folder_hierarchy: catalog_hierarchy_type_xml(
             fields.get(CATALOG_OWNER_FIELD_HIERARCHY_TYPE)?,
         )
@@ -4481,7 +4480,7 @@ pub(super) fn parse_configuration_allowed_incoming_share_request_types(
             uti: parse_1c_quoted_string(payload.get(2)?.trim())?,
             ext: parse_1c_quoted_string(payload.get(3)?.trim())?,
             processing_variant: processing_variant.to_string(),
-            is_custom: information_register_bool(payload.get(5)?)?,
+            is_custom: parse_1c_bool_field(Some(payload.get(5)?))?,
         });
     }
     Some(types)
