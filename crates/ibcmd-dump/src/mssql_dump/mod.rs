@@ -10736,6 +10736,8 @@ struct ChartOfCalculationTypesProperties {
     auxiliary_choice_form: Option<String>,
     dependence_on_calculation_types: &'static str,
     base_calculation_types: String,
+    based_on: Vec<String>,
+    data_lock_fields: Vec<String>,
     action_period_use: bool,
     standard_attributes: Vec<RegisterStandardAttribute>,
     characteristics: Characteristics,
@@ -25805,8 +25807,6 @@ fn parse_chart_of_calculation_types_properties(
     if metadata_header_field_index(fields, &header.uuid) != Some(1)
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
-        || !cct_pair_is(fields.get(36)?, "0", "0")
-        || !cct_data_lock_fields_are_empty(fields.get(56)?)
     {
         return None;
     }
@@ -25816,8 +25816,8 @@ fn parse_chart_of_calculation_types_properties(
     // 3.2.12.6 charts of calculation types declare 3 and 2 items there and the
     // platform writes exactly 3 and 2 `<xr:Characteristic>` elements for them,
     // while the БСП demo chart declares none and exports `<Characteristics/>`.
-    // `<BasedOn>` rides field 36, checked above with the same `{0,0}` empty
-    // form.
+    // `<BasedOn>` rides field 36 and `<DataLockFields>` field 56; both are
+    // read as properties below.
     let characteristics = decode_owner_characteristics(
         owner_graph::CharacteristicsOwnerFamily::ChartOfCalculationTypes,
         fields,
@@ -25902,6 +25902,29 @@ fn parse_chart_of_calculation_types_properties(
     // Slots 35 and 55 are `UseStandardCommands` and `CreateOnInput` and are
     // read as properties below; the old fixed-`1` gate refused every chart
     // that separated either of them.
+    let attribute_references = child_objects
+        .iter()
+        .filter(|child| child.tag == "Attribute")
+        .map(|child| {
+            format!(
+                "ChartOfCalculationTypes.{}.Attribute.{}",
+                header.name, child.header.name
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let based_on = parse_document_reference_collection(
+        fields.get(36)?,
+        object_refs,
+        &METADATA_BASED_ON_PREFIXES,
+    )?;
+    let data_lock_fields = parse_chart_field_references(
+        fields.get(56)?,
+        "ChartOfCalculationTypes",
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[("-3", "Description"), ("-2", "Code")],
+    )?;
     Some(ChartOfCalculationTypesProperties {
         generated_types,
         use_standard_commands: parse_1c_bool_field(Some(fields.get(35)?))?,
@@ -26016,6 +26039,8 @@ fn parse_chart_of_calculation_types_properties(
                 object_refs,
             )?
         },
+        based_on,
+        data_lock_fields,
         action_period_use: parse_1c_bool_field(Some(fields.get(29)?))?,
         standard_attributes: parse_chart_root_standard_attributes(
             fields.get(43)?,
@@ -39116,7 +39141,7 @@ fn format_chart_of_calculation_types_source_xml(
         chart.auxiliary_list_form.as_deref(),
         chart.auxiliary_choice_form.as_deref(),
     );
-    properties.push_str("\t\t\t<BasedOn/>\r\n");
+    push_task_based_on_xml(&mut properties, &chart.based_on);
     properties.push_str(&format!(
         "\t\t\t<DependenceOnCalculationTypes>{}</DependenceOnCalculationTypes>\r\n\
 {}\
@@ -39150,6 +39175,13 @@ fn format_chart_of_calculation_types_source_xml(
         chart.data_lock_control_mode,
         chart.full_text_search,
     ));
+    let mut data_lock_fields_xml = String::new();
+    push_exchange_plan_field_collection_xml(
+        &mut data_lock_fields_xml,
+        "DataLockFields",
+        &chart.data_lock_fields,
+    );
+    properties = properties.replace("\t\t\t<DataLockFields/>\r\n", &data_lock_fields_xml);
     push_localized_property(
         &mut properties,
         "\t\t\t",
