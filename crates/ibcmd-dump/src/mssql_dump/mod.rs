@@ -18304,7 +18304,7 @@ fn parse_register_properties_from_text(
             properties.auxiliary_list_form.clone(),
         )
     } else {
-        parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs)
+        parse_register_form_refs(kind, &fields, uuid, form_refs)
     };
     let calculation_form_pair =
         parse_calculation_register_fixed_form_pair(kind, &fields, &header, form_refs)?;
@@ -18504,24 +18504,13 @@ fn parse_register_form_refs(
     kind: &str,
     fields: &[&str],
     uuid: &str,
-    owner_name: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> (Option<String>, Option<String>) {
     let Some(header_index) = metadata_header_field_index(fields, uuid) else {
         return (None, None);
     };
-    let owner_folder = metadata_source_folder_for_kind(kind);
-    let default_list_form_ref = |offset| {
-        owner_folder.and_then(|owner_folder| {
-            parse_default_list_form_ref(
-                fields,
-                &[header_index + offset],
-                form_refs,
-                owner_folder,
-                owner_name,
-            )
-        })
-    };
+    let default_list_form_ref =
+        |offset| parse_catalog_form_ref(fields.get(header_index + offset).copied(), form_refs);
     match kind {
         "AccountingRegister" => (
             default_list_form_ref(4),
