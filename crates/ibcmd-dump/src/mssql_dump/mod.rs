@@ -31645,27 +31645,8 @@ fn parse_task_properties_from_text(
         }
     };
 
-    // Field 45 is constant "1" across all five cross-edition captures
-    // (УТ, БСП демо, WMS5, ERP WE, БСП WE) and does not track any XML
-    // property discovered so far -- it is not `IncludeHelpInContents`,
-    // which lives at field 24 (see below). Kept as a validated reserved
-    // constant rather than invented XML: unknown values fail closed.
-    //
-    // Field 20 joins the same reserved-constant treatment: it used to be
-    // read directly as the `NumberAllowedLength` slot, but it is `"1"` on
-    // every native `Task` object traced (`ЗадачаИсполнителя` across three
-    // editions and the synthetic `CorpusTask` fixture alike) regardless of
-    // which `<NumberAllowedLength>` the platform actually writes -- see
-    // `task_number_allowed_length_from_auto_prefix` for the slot that
-    // really carries it. Kept validated rather than dropped, so a future
-    // corpus record where it varies fails closed instead of silently
-    // reusing a stale assumption.
-    if fields.get(45)?.trim() != "1"
-        || fields.get(20)?.trim() != "1"
-        || !owner_graph::task_reserved_tail_is_zero(&fields)
-    {
-        return None;
-    }
+    // Slots 45 and 20 are `CreateOnInput` and `CheckUnique`; slots 49-51 are
+    // the data-history triple. All five are read as properties below.
 
     let characteristics = decode_owner_characteristics(
         owner_graph::CharacteristicsOwnerFamily::Task,
@@ -31739,13 +31720,19 @@ fn parse_task_properties_from_text(
         edit_type: match fields.get(23)?.trim() {
             "0" => "InList",
             "1" => "InDialog",
+            "2" => "BothWays",
             _ => return None,
         },
         input_by_string,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
-        create_on_input: "DontUse",
+        create_on_input: match fields.get(45)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            "2" => "Use",
+            _ => return None,
+        },
         default_object_form,
         default_list_form,
         default_choice_form,
@@ -31775,9 +31762,11 @@ fn parse_task_properties_from_text(
             fields.get(41)?,
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(42)?)?,
-        data_history: "DontUse",
-        update_data_history_immediately_after_write: false,
-        execute_after_write_data_history_version_processing: false,
+        data_history: metadata_data_history_xml(fields.get(49)?.trim())?,
+        update_data_history_immediately_after_write: parse_1c_bool_field(Some(fields.get(50)?))?,
+        execute_after_write_data_history_version_processing: parse_1c_bool_field(Some(
+            fields.get(51)?,
+        ))?,
         child_attributes,
         child_tabular_sections,
         child_forms,

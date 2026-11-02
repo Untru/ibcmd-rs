@@ -4073,6 +4073,7 @@ pub fn parse_task_include_help_in_contents_slot(value: &str) -> Option<bool> {
 pub enum TaskDataLockControlMode {
     Managed,
     Automatic,
+    AutomaticAndManaged,
 }
 
 impl TaskDataLockControlMode {
@@ -4080,6 +4081,7 @@ impl TaskDataLockControlMode {
         match self {
             Self::Managed => "Managed",
             Self::Automatic => "Automatic",
+            Self::AutomaticAndManaged => "AutomaticAndManaged",
         }
     }
 }
@@ -4103,6 +4105,7 @@ pub fn parse_task_data_lock_control_mode_slot(value: &str) -> Option<TaskDataLoc
     match value.trim() {
         "0" => Some(TaskDataLockControlMode::Automatic),
         "1" => Some(TaskDataLockControlMode::Managed),
+        "2" => Some(TaskDataLockControlMode::AutomaticAndManaged),
         _ => None,
     }
 }
@@ -15264,7 +15267,12 @@ mod tests {
 
         assert!(parse_task_choice_history_on_input_slot("2").is_none());
         assert!(parse_task_include_help_in_contents_slot("2").is_none());
-        assert!(parse_task_data_lock_control_mode_slot("2").is_none());
+        assert_eq!(
+            parse_task_data_lock_control_mode_slot("2")
+                .unwrap()
+                .xml_value(),
+            "AutomaticAndManaged"
+        );
         assert!(parse_task_full_text_search_slot("2").is_none());
     }
 
