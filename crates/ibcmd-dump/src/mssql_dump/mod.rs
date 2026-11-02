@@ -43,7 +43,7 @@ use ibcmd_1c_vocab::{
     metadata_type_xml_namespace_attr, number_allowed_sign_xml, parse_common_command_picture_value,
     parse_common_command_shortcut_value, parse_design_time_reference,
     platform_reference_family_type_reference, push_binary_data_qualifiers_xml, scoped_value_type,
-    standard_style_item_for_code, string_allowed_length_xml, style_system_color_name,
+    standard_style_item_for_code, string_allowed_length_xml, style_win_color_name,
     unique_metadata_type_reference,
 };
 pub(super) use ibcmd_1c_vocab::{
@@ -37096,12 +37096,12 @@ fn parse_style_color_value(value: &str) -> Option<String> {
             let blue = (color >> 16) & 0xff;
             Some(format!("#{red:02X}{green:02X}{blue:02X}"))
         }
-        // Variant 1 names the system palette, variant 3 the standard style
-        // items; an item whose colour names neither is refused below rather
-        // than written as a bare code.
-        1 => style_system_color_name(code).map(ToOwned::to_owned),
-        3 => standard_style_item_for_code(code).map(|(_, name)| format!("style:{name}")),
+        // Variant 1 names the Windows palette, variant 2 the web palette,
+        // variant 3 the standard style items; an item whose colour names none
+        // of them is refused below rather than written as a bare code.
+        1 => style_win_color_name(code).map(ToOwned::to_owned),
         2 => style_web_color_name(code).map(ToOwned::to_owned),
+        3 => standard_style_item_for_code(code).map(|(_, name)| format!("style:{name}")),
         // The automatic colour names no value: the platform writes `auto`.
         4 => Some("auto".to_owned()),
         _ => None,

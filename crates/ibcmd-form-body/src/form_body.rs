@@ -17037,7 +17037,7 @@ fn parse_form_control_color_space(
 /// of 1С:Управление торговлей 11.5.27.75; the observation count of each code
 /// follows its arm. This is a different palette from the one the style and
 /// spreadsheet decoders read, and the two disagree on six shared codes, so a
-/// form colour never goes through `style_system_color_name`.
+/// form colour never goes through `standard_style_item_for_code`.
 pub fn form_control_system_color_name(code: i32) -> Option<&'static str> {
     match code {
         -1 => Some("style:FormBackColor"),              // 120

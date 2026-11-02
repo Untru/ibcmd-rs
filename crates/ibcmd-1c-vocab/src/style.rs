@@ -3,25 +3,25 @@
 pub fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> {
     let name = match code {
         -1 => "FormBackColor",
-        -11 => "FieldTextColor",
         -3 => "FormTextColor",
-        -15 => "FieldSelectedTextColor",
         -7 => "ButtonBackColor",
-        -13 => "FieldAlternativeBackColor",
-        -21 => "ButtonTextColor",
         -10 => "FieldBackColor",
+        -11 => "FieldTextColor",
+        -13 => "FieldAlternativeBackColor",
         -14 => "FieldSelectionBackColor",
-        -23 => "ToolTipBackColor",
-        -24 => "ToolTipTextColor",
+        -15 => "FieldSelectedTextColor",
         -16 => "SpecialTextColor",
         -17 => "NegativeTextColor",
+        -18 => "ControlBorder",
+        -20 => "TextFont",
+        -21 => "ButtonTextColor",
         -22 => "BorderColor",
+        -23 => "ToolTipBackColor",
+        -24 => "ToolTipTextColor",
         -25 => "ReportHeaderBackColor",
         -26 => "ReportGroup1BackColor",
         -27 => "ReportGroup2BackColor",
         -28 => "ReportLineColor",
-        -18 => "ControlBorder",
-        -20 => "TextFont",
         -30 => "SmallTextFont",
         -31 => "NormalTextFont",
         -32 => "LargeTextFont",
@@ -34,8 +34,8 @@ pub fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> 
         -42 => "NavigationColor",
         -43 => "AuxiliaryNavigationColor",
         -44 => "ActivityColor",
-        -47 => "ImportantColor",
         -46 => "AccentColor",
+        -47 => "ImportantColor",
         // Platform 8.5 standard style fonts. 8.5.1.1150 BSP: every form item
         // and style item that carries exactly one style font pairs the code
         // with the native `ref` without exception (`fontcodes.py`).
@@ -235,7 +235,7 @@ pub fn style_web_color_name(code: i32) -> Option<&'static str> {
     }
 }
 
-pub fn style_system_color_name(code: i32) -> Option<&'static str> {
+pub fn style_win_color_name(code: i32) -> Option<&'static str> {
     match code {
         -2 => Some("win:MiddleGradientInactiveCaption"),
         -1 => Some("win:MiddleGradientActiveCaption"),
