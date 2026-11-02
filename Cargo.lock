@@ -766,12 +766,84 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibcmd-config-apply"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "ibcmd-apply-check",
+ "ibcmd-cancel",
+ "ibcmd-compiler",
+ "ibcmd-compiler-families",
+ "ibcmd-dynamic-generation",
+ "ibcmd-form-body",
+ "ibcmd-metadata-blob",
+ "ibcmd-metadata-model",
+ "ibcmd-module-blob",
+ "ibcmd-mssql-live",
+ "ibcmd-restructure",
+ "ibcmd-restructure-engine",
+ "ibcmd-sql",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tiberius",
+ "uuid",
+]
+
+[[package]]
 name = "ibcmd-core"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "ibcmd-dump"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "flate2",
+ "ibcmd-1c-text",
+ "ibcmd-1c-vocab",
+ "ibcmd-cancel",
+ "ibcmd-cf",
+ "ibcmd-compiler",
+ "ibcmd-compiler-families",
+ "ibcmd-config-apply",
+ "ibcmd-core",
+ "ibcmd-dump-readers",
+ "ibcmd-dynamic-generation",
+ "ibcmd-filedb",
+ "ibcmd-form-body",
+ "ibcmd-form-native",
+ "ibcmd-form-schema",
+ "ibcmd-form-writer",
+ "ibcmd-metadata-blob",
+ "ibcmd-metadata-model",
+ "ibcmd-module-blob",
+ "ibcmd-moxel",
+ "ibcmd-mssql-extensions",
+ "ibcmd-mssql-live",
+ "ibcmd-parallel",
+ "ibcmd-platform-spec",
+ "ibcmd-restructure",
+ "ibcmd-schema",
+ "ibcmd-sql",
+ "ibcmd-v8",
+ "ibcmd-xml",
+ "quick-xml 0.38.4",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "uuid",
+ "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -783,6 +855,14 @@ dependencies = [
  "ibcmd-1c-text",
  "ibcmd-metadata-blob",
  "ibcmd-schema",
+ "ibcmd-xml",
+]
+
+[[package]]
+name = "ibcmd-dynamic-generation"
+version = "0.1.0"
+dependencies = [
+ "uuid",
 ]
 
 [[package]]
@@ -940,6 +1020,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibcmd-mssql-extensions"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "ibcmd-1c-text",
+ "ibcmd-core",
+ "ibcmd-sql",
+ "sha1",
+ "uuid",
+]
+
+[[package]]
 name = "ibcmd-mssql-live"
 version = "0.1.0"
 dependencies = [
@@ -980,6 +1072,20 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "ibcmd-platform-spec"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ibcmd-core",
+ "ibcmd-metadata-model",
+ "ibcmd-mssql-live",
+ "ibcmd-platform",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1033,8 +1139,11 @@ dependencies = [
  "ibcmd-compiler",
  "ibcmd-compiler-families",
  "ibcmd-compiler-readiness",
+ "ibcmd-config-apply",
  "ibcmd-core",
+ "ibcmd-dump",
  "ibcmd-dump-readers",
+ "ibcmd-dynamic-generation",
  "ibcmd-edt",
  "ibcmd-filedb",
  "ibcmd-form-body",
@@ -1046,9 +1155,11 @@ dependencies = [
  "ibcmd-metadata-source",
  "ibcmd-module-blob",
  "ibcmd-moxel",
+ "ibcmd-mssql-extensions",
  "ibcmd-mssql-live",
  "ibcmd-parallel",
  "ibcmd-platform",
+ "ibcmd-platform-spec",
  "ibcmd-postgres",
  "ibcmd-restructure",
  "ibcmd-restructure-engine",
@@ -1093,6 +1204,7 @@ dependencies = [
  "futures-util",
  "ibcmd-postgres",
  "serde_json",
+ "sha2",
  "tiberius",
  "tokio",
  "tokio-util",

@@ -370,7 +370,7 @@ fn ci_steps(root: &Path) -> Vec<Step> {
                     "test",
                     "--locked",
                     "-p",
-                    ROOT_PACKAGE,
+                    "ibcmd-dump",
                     "--lib",
                     filter,
                     "--no-default-features",
@@ -1076,6 +1076,11 @@ mod tests {
             assert_eq!(step.temp.as_ref(), Some(&test_temp(&root)), "{name}");
             if name.starts_with("test (bounded Form") {
                 assert!(step.env.contains(&("IBCMD_TEST_KEEP_FIXTURES", "1")));
+                assert!(
+                    step.args
+                        .windows(2)
+                        .any(|pair| pair == ["-p", "ibcmd-dump"])
+                );
             }
         }
         assert_eq!(steps.last().unwrap().name, "temporary directory left empty");

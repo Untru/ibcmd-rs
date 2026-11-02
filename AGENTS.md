@@ -76,15 +76,16 @@ cargo build --locked --profile iter                                      # binar
 
 ## Traps
 
-- The monoliths are 17–80k lines (`src/mssql_dump/{mod,form_body,tests}.rs`,
-  `src/module_blob.rs`, `src/mssql.rs`). Never read one whole: use `rg -n`,
-  the LSP and ranged reads.
+- The monoliths are 17–55k lines (`crates/ibcmd-dump/src/mssql_dump/{mod,tests}.rs`,
+  `crates/ibcmd-form-body/src/form_body.rs`, `src/mssql.rs`). Never read one
+  whole: use `rg -n`, the LSP and ranged reads.
 - Slot semantics come from schema-owned names and bounds (`ibcmd-schema`). No
   new numeric slot indices in production parsers and no special cases for
   named objects (a form called `ФормаСписка`): find the rule shared by all.
   `tools/validate-physical-adapter-policy.ps1` fails new literals in
-  `src/module_blob.rs`, `src/mssql_dump/` and the crate directories listed in its
-  `$GuardedCrateDirectories` (code moved out of those two). Refresh its baseline only for a
+  `src/module_blob.rs` and the crate directories listed in its
+  `$GuardedCrateDirectories` (code moved out of it and out of `src/mssql_dump/`,
+  the exporter's own `crates/ibcmd-dump/src/` included). Refresh its baseline only for a
   reviewed policy, never to hide literals (`tools/physical-adapter-policy-guard.md`).
 - A new heuristic needs an EDT writer rule or a full corpus of
   counterexamples, plus a measured win on the full gate.

@@ -5,7 +5,7 @@ fn explicit_english_source_owned_blob() -> Vec<u8> {
     use sha2::Digest as _;
     let bytes: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/ut-chart-policy/explicit-english-zero-series/source.cf"
+        "/../../tests/fixtures/ut-chart-policy/explicit-english-zero-series/source.cf"
     ));
     assert_eq!(bytes.len(), 7505);
     assert_eq!(
@@ -74,11 +74,11 @@ fn explicit_english_projection_keeps_default_and_stored_identical() {
 fn explicit_english_projection_leaves_compiler_source_roundtrip_stored() {
     let xml = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/ut-chart-policy/wrapper-prototype/tree/CommonTemplates/ChartPolicySeed/Ext/Template.xml"
+        "/../../tests/fixtures/ut-chart-policy/wrapper-prototype/tree/CommonTemplates/ChartPolicySeed/Ext/Template.xml"
     ));
-    let blob = crate::compiler::bodies::template::compile_evidenced_template(
-        crate::compiler::bodies::template::TemplateKind::SpreadsheetDocument,
-        crate::compiler::bodies::template::TemplateSource::Spreadsheet {
+    let blob = ibcmd_compiler::compiler::bodies::template::compile_evidenced_template(
+        ibcmd_compiler::compiler::bodies::template::TemplateKind::SpreadsheetDocument,
+        ibcmd_compiler::compiler::bodies::template::TemplateSource::Spreadsheet {
             xml,
             source: None,
             number_format_hint: None,

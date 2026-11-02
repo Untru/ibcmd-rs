@@ -353,7 +353,8 @@ pub fn resolve(info: &CopyInfo) -> Vec<ResolvedType> {
     out
 }
 
-/// Owner class → class of its form collection (`src/metadata_owner_graph.rs`,
+/// Owner class → class of its form collection
+/// (`crates/ibcmd-dump-readers/src/metadata_owner_graph.rs`,
 /// `src/compiler/families/business_object.rs`); a two-step copyinfo path
 /// through it names a form of a configuration object.
 const FORM_COLLECTIONS: &[(&str, &str)] = &[

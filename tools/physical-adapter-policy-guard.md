@@ -4,10 +4,11 @@ Run `pwsh -File tools/validate-physical-adapter-policy.ps1 -RepositoryRoot .`
 and `pwsh -File tools/validate-physical-adapter-policy.ps1 -RepositoryRoot .
 -SelfTest`.
 
-The guarded production slice is `src/module_blob.rs` plus non-test Rust modules
-under `src/mssql_dump/`, plus the non-test Rust modules under the `crates/`
-directories that hold code moved out of them (`$GuardedCrateDirectories`):
-`crates/ibcmd-1c-text/src/` (the 1C braced-text primitives and scalar fields,
+The guarded production slice is `src/module_blob.rs` plus the non-test Rust
+modules under the `crates/` directories that hold code moved out of it and out
+of the former `src/mssql_dump/` (`$GuardedCrateDirectories`):
+`crates/ibcmd-dump/src/` (the exporter itself, formerly `src/mssql_dump/`; see
+the last section), `crates/ibcmd-1c-text/src/` (the 1C braced-text primitives and scalar fields,
 and the source tree's file-name segment, formerly in `src/mssql_dump/mod.rs`,
 `source_assets.rs` and `refs.rs`),
 `crates/ibcmd-1c-vocab/src/` (the platform-type, standard-attribute, style and
@@ -62,7 +63,8 @@ only of moved code is listed by its `src/`.  The MOXCEL decoder itself
 (`crates/ibcmd-moxel`, formerly `src/mssql_dump/moxel.rs` and `mxl_ir.rs`) was
 outside the slice and stays outside it, so only the module directory that holds
 what it took from the slice is listed; its root entry points in
-`src/mssql_dump/moxel_entry.rs` are guarded.
+`crates/ibcmd-dump/src/mssql_dump/moxel_entry.rs` (formerly
+`src/mssql_dump/moxel_entry.rs`) are guarded.
 A module the compiler reads only for tests is not production and is left out
 with every file below its directory: the guard finds it from the declaration
 `#[cfg(test)] mod name;` (also `pub`, or with other attributes) in a scoped
@@ -387,3 +389,176 @@ is the process-wide cancellation flag formerly `src/cancel.rs`, which was
 outside the slice; the root's `cancel` module re-exports it, so the flag
 keeps one owner. The file joins the slice with no occurrence. Every other
 record, the two stale ones included, is unchanged.
+
+The config-apply seams of #559 change the slice in two places:
+- `crates/ibcmd-mssql-live/src/mssql_main_activation.rs` takes the main
+  activation's inputs (`read_activation_inputs`, `allowed_activation_targets`
+  and the marker rule), formerly in `src/mssql.rs`, which was outside the
+  slice. The statement that names the three service rows
+  (`"root" | "version" | "versions"`) joins it with three
+  `name-special-case` records, count one each; the file's other records are
+  unchanged.
+- `crates/ibcmd-dynamic-generation/src/` also belongs to the slice. Its
+  `lib.rs` is the dynamic-generation overlay formerly
+  `src/mssql_dump/dynamic_generation.rs`, with its process-wide registry of
+  installed overlays and `stored_row_name`, formerly in
+  `src/mssql_dump/mod.rs`. The moved file held no occurrence: the crate's
+  `lib.rs` joins with an empty record, and the root's facade at the old path
+  keeps that path's empty record. The live lab test
+  (`src/mssql_dump/dynamic_generation/live.rs`) is a test-only module.
+No fingerprint changes. Every other record, the two stale ones included, is
+unchanged.
+
+`crates/ibcmd-config-apply/src/` also belongs to the slice (#559). It holds
+the own configuration apply, formerly `src/mssql_config_apply/` (without
+the developer command, which stays in the root as
+`src/mssql_config_apply_command.rs`), the S1 structural gate, formerly
+`src/restructure/s1.rs`, and the guard of its structure phase, formerly
+`src/restructure/size_guard/phase.rs`; all were outside the slice. Its
+production files join with 212 records (214 occurrences):
+- `mssql_config_apply/dynamic_overlay.rs`: 25 records;
+- `mssql_config_apply/dynamic_metadata.rs`: 23;
+- `mssql_config_apply/dynamic.rs`: 14;
+- `mssql_config_apply/mod.rs`: 11;
+- `mssql_config_apply/gate.rs`: 7;
+- `mssql_config_apply/objects.rs`: 5;
+- `mssql_config_apply/params_marker.rs`: 4;
+- `mssql_config_apply/{dynamic_platform85,model,recovery,removals}.rs`: 3
+  each;
+- `restructure/s1.rs`: 2 `name-special-case`;
+- `mssql_config_apply/registrations.rs`: 1;
+- `mssql_config_apply/{gate_parts,objects_analysis,removals,synonyms}_tests.rs`
+  (10, 27, 54 with 56 occurrences, and 17 records): unit tests, but their
+  modules are declared with `#[path = "..."]`, which the guard does not
+  resolve, so they stay in the slice;
+- `lib.rs`, `restructure/mod.rs`, `restructure/size_guard/phase.rs` and
+  `mssql_config_apply/{check_gate,errors,si,sqlgen,synonyms,versions}.rs`:
+  none.
+`mssql_config_apply/dynamic/activation_tests.rs`,
+`restructure/{tests_s1,tests_plan,tests_sections}.rs` and `test_scratch.rs`
+are test-only modules. The root's facades (`src/mssql_config_apply.rs`,
+`src/restructure/s1.rs`) stay outside the slice. Each record equals the one
+a scan of the same file as it stood at its old path gives, except two: the
+clippy fix of the S1 gate's blocker filter changes the statement that holds
+its two `name-special-case` records, whose fingerprints change with it
+(category, count and literal unchanged):
+- `"deleted"`: `797728d2303e010ac925f5f8d2c8ca4d0cb3fc0e537cf952b95d27771a6abb42`
+  -> `33d61819e63890a2c8292d9506c27226dc1be273779940a5905940772c412a83`;
+- `"root"`: `0c8ac485677fde8beacc402785e5960dcc28442d8eb3846e67575e2d53f1b32e`
+  -> `6d47de36a6e7b6b493fc52ea5725d0fb774c94b196483bd62f9079f419200cd9`.
+Every other record, the two stale ones included, is unchanged.
+
+The exporter's prerequisite leaf modules of #559 join the slice in four
+crates; all of them were outside it:
+- `crates/ibcmd-dump-readers/src/` (already listed) takes
+  `metadata_owner_graph.rs`, formerly `src/metadata_owner_graph.rs`, with
+  41 records (45 occurrences: 19 `uuid-literal`, 22 `name-special-case`);
+  `external/brace.rs`, formerly `src/external/brace.rs`, with none; and
+  `extension/adoption.rs` (4 `name-special-case`, 1 `uuid-literal`) and
+  `extension/predefined.rs` (10 records, 12 occurrences: 5
+  `name-special-case`, 5 `xml-policy`), formerly under `src/extension/`.
+- `crates/ibcmd-sql/src/` (already listed) takes `runtime_evidence_schema.rs`,
+  formerly `src/runtime_evidence_schema.rs`, with 13 records (5
+  `name-special-case`, 8 `xml-policy`).
+- `crates/ibcmd-platform-spec/src/` (new) holds `legacy_version.rs`,
+  `platform/mod.rs` and `adapters/mssql_legacy.rs`, formerly at the same
+  paths under `src/`: `mssql_legacy.rs` with 1 `uuid-literal` (the nil
+  uuid), the others and `lib.rs` with none. `platform/tests.rs` is a
+  test-only module.
+- `crates/ibcmd-mssql-extensions/src/` (new) holds
+  `mssql_extension_stage.rs`, formerly `src/mssql_extension_stage.rs`, with
+  9 `name-special-case` records; `lib.rs` has none.
+Each record equals the one a scan of the same file at its old path in the
+commit before its move gives. The 19 `uuid-literal` records of
+`metadata_owner_graph.rs` differ from a scan of the file before #559's
+preparation of it, because the statements that hold them changed from
+`pub(crate) const` to `pub const`; they were not in the baseline before.
+The root's facades (`src/platform.rs`, `src/adapters/mod.rs`,
+`src/mssql_extension_stage.rs`, `src/external/mod.rs`,
+`src/extension/mod.rs`) stay outside the slice. No baseline fingerprint
+changes. Every other record, the two stale ones included, is unchanged.
+
+The seams the exporter needs before it moves (#559) add two files to the
+slice, both from outside it and neither with a guarded literal, so each
+joins with an empty record: `src/mssql_dump/args.rs`, the exporter's two
+command-line argument structs, formerly in `src/cli.rs`; and
+`crates/ibcmd-module-blob/src/deleted.rs` (the crate is already listed), the
+`deleted` row of an import, formerly in `src/mssql/override_stage.rs`. The
+engine's lock, formerly in `src/stored_objects.rs`, joins
+`crates/ibcmd-cancel/src/lib.rs` (already listed) and adds no record. The
+root's re-exports (`src/cli.rs`, `src/mssql/override_stage.rs`,
+`src/stored_objects.rs`) stay outside the slice. No baseline fingerprint
+changes. Every other record, the two stale ones included, is unchanged.
+
+The exporter's root-only preparation for its move into a crate (#559)
+names the crates behind the root's composite facades in
+`src/mssql_dump/`. Two `name-special-case` fingerprints of
+`src/mssql_dump/source_assets.rs` change around unchanged literals, count
+one each, because their statements now name
+`ibcmd_compiler_families::compiler::families::assets::{SourceAssetRegistry,
+SourceAssetRole}` instead of the root's `crate::compiler::families::assets`
+path: `"CommonPicture"`
+`48fe7234b66ec2400abe453b4f2a22a38006b065fb96abc1cb02267cec7f9817` to
+`6d545f63e45cfe84d27f1e6fd27333bb71e62190e4f3141d5788c2104215796f`, and
+`"XDTOPackage"`
+`9c39df022e204d74129422ad98ac80f42533f7b5973d0268de41ad8d3ba2bcd5` to
+`c43a0be548e99c0b625d852691ddf5ca677a9267c81afaa1bf43c4160d182f88`. The
+exporter's tests that call root-only code moved into
+`src/mssql_dump/root_tests.rs`, a test-only module. Every other record,
+the two stale ones included, is unchanged.
+
+The exporter's move into its crate (#559) takes the rest of
+`src/mssql_dump/` out of the root. Its 50 Rust files move to
+`crates/ibcmd-dump/src/mssql_dump/`, and `crates/ibcmd-dump/src/` joins
+`$GuardedCrateDirectories`. The script's hard-coded scan of `src/mssql_dump/`
+goes, and its self-test fixtures build under the crate's path. The root keeps
+its facade `src/mssql_dump.rs`, outside the slice, and two test-only modules
+beside it, `src/mssql_dump/root_tests.rs` and `src/mssql_dump/live_moxel_probes.rs`.
+The crate's `lib.rs` joins with an empty record. The 41 file records of
+`src/mssql_dump/` change only their key, to the same path under
+`crates/ibcmd-dump/`, record by record, with every occurrence entry
+unchanged. Each of 39 of them equals a scan of its file at the old path.
+The other two carry stale allowances on purpose:
+`src/mssql_dump/config_dump_info.rs` (10 entries where a scan finds 3) and
+`src/mssql_dump/incremental.rs` (10 where a scan finds 2), now
+`crates/ibcmd-dump/src/mssql_dump/config_dump_info.rs` and
+`crates/ibcmd-dump/src/mssql_dump/incremental.rs`. They are rekeyed
+verbatim, stale entries included, as the earlier moves kept them, and no
+entry is dropped or refreshed.
+
+The edits that follow the move change nine fingerprints around unchanged
+literals, count one each, in two files:
+- `crates/ibcmd-dump/src/mssql_dump/mod.rs`, `uuid-literal`: the
+  `#[expect(dead_code, …)]` attribute joins the statement of each of the five
+  unused standard-picture constants:
+  `6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f`
+  `fc99d8a92482464a82994f08bef71c0a334c952bdc8e5f34a727c18105e84e80` to
+  `5d1eecadf8c5b12ad51689e2e4c4a084f97872ace7643abf1c1633ab9fc25a35`;
+  `283ecabd-aaed-41d1-ad46-6cca91c29120`
+  `c8c95009044c7eef7ec7b59ee83ba953295b4b6d2c91d55dc538e69f5bb9f054` to
+  `3905a699464adab632f0d9a63efc7bcebee044fc4e3542ea4ef00f267d9a004d`;
+  `5b87ad1b-d8cc-43c1-b5c4-dc43613c518c`
+  `96906dce7d268b47025e3f56be3d9455147a80595059d051b5c8fc50f25dcb54` to
+  `f854474e7c4e5fbbc71b49c993fd39fe3477a89b73d0743fe7ef61168847d869`;
+  `a064544f-6037-48ca-b19f-8ad63e43af23`
+  `c819c72d663dc92bcd523ce0a6e78573ab40e394e1a8127ef49f138d86c7194a` to
+  `9873bf60e539605d96bcfe2dc28f2aebb0df4e647d21e02257cc0e21abd8f964`;
+  `f04794cb-c198-4172-86c3-649386013c85`
+  `ffc9e3058b400941de60a957722fcaa859398441737f7ba9052244754dfea0c8` to
+  `153eaefe7fc5a0048ff810c2df7fd15960a60d3a6cd845dde5e2eb55bf6b322b`;
+- `crates/ibcmd-dump/src/mssql_dump/extension/mod.rs`, `uuid-literal`, the
+  same for `EXTENDED_OBJECT_PROPERTY` (`9595ddd6-e72c-47ad-a156-672db811628c`):
+  `395f7a63c294119a1fc3c03429c1568243b74ee73632060d72a8936caf6809ab` to
+  `5c04568b9b9a65fa57b5d6f222c7596d6e9546c3c8986305a53a888fd3c3cc76`;
+- `crates/ibcmd-dump/src/mssql_dump/mod.rs`, `name-special-case`, from the
+  clippy fixes: `"ScheduledJob"`
+  `f5d7efcf91c55d203583531aba372fd4609cd80bfcc0cc21cb011025c35ae238` to
+  `9e7dc1ba451d00f000936dcf3a72f894257407dbe92566e394cd4b7f9e78d4a5` and
+  `"EventSubscription"`
+  `3267dd60ba445bf116d2d2e48b327833244dbac86417934bf0fbee056086736b` to
+  `13e5751ff3fc55db57b1a95ee124c932412a0e3f6a37c5025a9b30153ab6942c` (an
+  `if` folded into a let chain), `"DataProcessor"`
+  `96eb06fe074c9e30e34e02601b92fa7edad57cb73c23e30268d6ebb48b96a342` to
+  `7a30a52c2d3f649386ff8058df5a1e4faad390fa40c22999dc33ae3a8aadb29c` (a
+  `then(…).unwrap_or_default()` written as `if … else`).
+Every other record, the two stale ones included, is unchanged.

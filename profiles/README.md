@@ -69,7 +69,7 @@ supported platform profile declares, as constants,
   list in its `version` row, with its fixed uuid (`palette-colors` on 8.5.1).
 
 `crates/ibcmd-platform` reads these declarations (it does not repeat them),
-and `src/platform/` adds the command line's XML selector and the MSSQL
+and `crates/ibcmd-platform-spec` (`platform`) adds the command line's XML selector and the MSSQL
 capabilities to what it answers for
 `--platform 8.3.27 | 8.5.1 | 8.3.27.2214 | 8.5.1.1150`: an exact build, or a
 release standing for every known build of it while they agree. A build whose
@@ -78,7 +78,8 @@ every version no profile names; nothing maps to the nearest version. The
 `--source-version` aliases `8.3`/`8.3.27` and `8.5`/`8.5.1` follow the same
 mapping. A new build that changes nothing for ibcmd-rs is one more profile; a
 changed layout or XML format also needs a delta module named after the full
-version (`layout_8_5_4.rs`, `xml_2_22_*`), see `src/platform/mod.rs`. The
+version (`layout_8_5_4.rs`, `xml_2_22_*`), see
+`crates/ibcmd-platform-spec/src/platform/mod.rs`. The
 registry also reports live-activation support: an exact build whose profile
 declares `mssql.main.write` supported, as above.
 

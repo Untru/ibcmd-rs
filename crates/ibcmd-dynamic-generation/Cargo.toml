@@ -1,0 +1,14 @@
+[package]
+name = "ibcmd-dynamic-generation"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The active dynamic (online) configuration generation of an MSSQL storage table: the overlay of what it publishes, the process-wide registry of the installed overlays and the table expression that reads them"
+
+[dependencies]
+# The entries of a generation history are UUIDs.
+uuid = "1.19"
+
+[lints.rust]
+unsafe_code = "forbid"

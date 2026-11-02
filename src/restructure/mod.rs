@@ -48,12 +48,6 @@ pub mod xdto;
 #[cfg(test)]
 mod tests_create;
 #[cfg(test)]
-mod tests_plan;
-#[cfg(test)]
-mod tests_s1;
-#[cfg(test)]
-mod tests_sections;
-#[cfg(test)]
 mod tests_size_guard;
 
 #[cfg(test)]
@@ -66,13 +60,3 @@ mod test_corpus_support;
 #[cfg(test)]
 #[path = "../../tests/support/restructure_create.rs"]
 mod test_create_support;
-#[cfg(test)]
-#[path = "../../tests/support/restructure_plan.rs"]
-mod test_plan_support;
-#[cfg(test)]
-#[path = "../../tests/support/restructure_sections.rs"]
-#[expect(
-    dead_code,
-    reason = "Shared fixture helpers retain paths also consumed by the engine tests"
-)]
-mod test_sections_support;

@@ -1,4 +1,5 @@
-//! Cooperative cancellation of a long operation.
+//! Cooperative cancellation of a long operation, and the lock under which
+//! one such operation runs at a time.
 //!
 //! A caller that can be asked to stop (the editor server, `serve --stdio`,
 //! on `$/cancelRequest`) installs a flag for the duration of one operation
@@ -10,14 +11,34 @@
 //!
 //! The flag is process-wide, not per thread: the export converts rows on a
 //! pool of worker threads, and every one of them must see it. One operation
-//! runs at a time anyway (the offline rows and the storage views of the
-//! export are process-wide too, see `stored_objects`).
+//! runs at a time anyway: the offline rows and the storage views of the
+//! export are process-wide too, so the operations of the root's
+//! `stored_objects` hold [`engine`] and whatever else reads or writes through
+//! that state runs through [`exclusive`]. The lock moved here from
+//! `stored_objects`, which re-exports `exclusive` at its old path, so that
+//! the export below it takes the same one.
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 
 static CURRENT: RwLock<Option<Arc<AtomicBool>>> = RwLock::new(None);
+
+static ENGINE: Mutex<()> = Mutex::new(());
+
+/// Holds the engine's lock until the guard drops; a panic that poisoned it
+/// does not keep the next operation out.
+pub fn engine() -> MutexGuard<'static, ()> {
+    ENGINE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Runs `operation` while no other operation holds [`engine`]: what else reads
+/// or writes through the export's process-wide state (a stage, whose guard
+/// exports in memory; a check of ConfigSave) takes its turn with them.
+pub fn exclusive<T>(operation: impl FnOnce() -> T) -> T {
+    let _engine = engine();
+    operation()
+}
 
 /// The error an operation stopped by its caller fails with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

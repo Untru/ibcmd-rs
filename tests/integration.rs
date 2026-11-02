@@ -55,6 +55,7 @@ mod coverage_corpus;
 mod coverage_extension_envelope;
 mod coverage_fixture_features;
 mod coverage_observed_problems;
+mod coverage_round_trip;
 mod coverage_storage_records;
 mod default_style;
 mod dropin_cli;
