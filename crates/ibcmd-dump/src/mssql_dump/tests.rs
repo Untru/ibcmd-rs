@@ -48103,18 +48103,23 @@ fn calculation_presentations_emit_mandatory_empty_triple_in_schema_position() {
 }
 
 #[test]
-fn calculation_presentations_reject_nonempty_and_malformed_slots_atomically() {
+fn calculation_presentations_accept_nonempty_and_reject_malformed_slots_atomically() {
+    let accepted = register_localized_field(&[("en", "valid but unsupported")]);
     let rejected = [
-        register_localized_field(&[("en", "valid but unsupported")]),
         "{1,\"en\"}".to_string(),
         "{1,en,\"value\"}".to_string(),
         "{2,\"en\",\"first\",\"en\",\"second\"}".to_string(),
         "{1,\"en\",\"value\",0}".to_string(),
-        "{ 0 }".to_string(),
         "0".to_string(),
     ];
 
     for slot in 30..=32 {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[slot] = accepted.clone();
+        assert!(
+            fixture.extract().is_some(),
+            "rejected nonempty exact field {slot}"
+        );
         for value in &rejected {
             let mut fixture = CalculationRegisterPresentationsFixture::exact();
             fixture.fields[slot] = value.clone();
@@ -48122,6 +48127,14 @@ fn calculation_presentations_reject_nonempty_and_malformed_slots_atomically() {
                 fixture.extract().is_none(),
                 "accepted unsupported exact field {slot}: {value:?}"
             );
+        }
+    }
+
+    for empty in ["{ 0 }"] {
+        for slot in 30..=32 {
+            let mut fixture = CalculationRegisterPresentationsFixture::exact();
+            fixture.fields[slot] = empty.to_string();
+            assert!(fixture.extract().is_some(), "rejected empty {empty:?}");
         }
     }
 }

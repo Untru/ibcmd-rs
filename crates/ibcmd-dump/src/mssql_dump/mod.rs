@@ -19197,12 +19197,9 @@ fn parse_calculation_register_empty_presentations(
     if !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)? {
         return Some(false);
     }
-    if fields.get(30)?.trim() != "{0}"
-        || fields.get(31)?.trim() != "{0}"
-        || fields.get(32)?.trim() != "{0}"
-    {
-        return None;
-    }
+    parse_information_register_owner_localized_value(fields.get(30)?)?;
+    parse_information_register_owner_localized_value(fields.get(31)?)?;
+    parse_information_register_owner_localized_value(fields.get(32)?)?;
     Some(true)
 }
 
@@ -19518,6 +19515,22 @@ fn parse_register_presentations(
     Vec<(String, String)>,
     Vec<(String, String)>,
 ) {
+    if kind == "CalculationRegister" {
+        return (
+            fields
+                .get(30)
+                .and_then(|field| parse_information_register_owner_localized_value(field))
+                .unwrap_or_default(),
+            fields
+                .get(31)
+                .and_then(|field| parse_information_register_owner_localized_value(field))
+                .unwrap_or_default(),
+            fields
+                .get(32)
+                .and_then(|field| parse_information_register_owner_localized_value(field))
+                .unwrap_or_default(),
+        );
+    }
     if kind != "AccountingRegister" {
         return (Vec::new(), Vec::new(), Vec::new());
     }
@@ -38764,7 +38777,9 @@ fn format_register_source_xml(
                     xml_bool(enable_totals_splitting)
                 ));
             }
-            if kind == "AccumulationRegister" && register.emit_accumulation_presentations {
+            if (kind == "AccumulationRegister" && register.emit_accumulation_presentations)
+                || (kind == "CalculationRegister" && register.emit_calculation_presentations)
+            {
                 push_localized_property(
                     &mut properties,
                     "\t\t\t",
@@ -38782,13 +38797,6 @@ fn format_register_source_xml(
                     "\t\t\t",
                     "Explanation",
                     &register.explanation,
-                );
-            }
-            if kind == "CalculationRegister" && register.emit_calculation_presentations {
-                properties.push_str(
-                    "\t\t\t<ListPresentation/>\r\n\
-\t\t\t<ExtendedListPresentation/>\r\n\
-\t\t\t<Explanation/>\r\n",
                 );
             }
             xml.insert_str(index, &properties);
