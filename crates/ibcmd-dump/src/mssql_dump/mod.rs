@@ -27121,7 +27121,11 @@ fn parse_cct_input_by_string(value: &str, owner_name: &str) -> Option<Vec<String
         .iter()
         .filter_map(|field| field.rsplit('.').next())
         .collect::<Vec<_>>();
-    matches!(names.as_slice(), ["Description"] | ["Description", "Code"]).then_some(fields)
+    matches!(
+        names.as_slice(),
+        ["Description"] | ["Description", "Code"] | ["Code"]
+    )
+    .then_some(fields)
 }
 
 fn parse_cct_owned_form_ref(
