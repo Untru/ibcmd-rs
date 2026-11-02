@@ -11752,18 +11752,23 @@ fn detects_style_colors_the_document_management_objects_attest() {
     // `web:LemonChiffon`, not the `web:LightCoral` the table already gives 66,
     // and `-7` is `style:ButtonBackColor`, not `FieldBackColor`.
     assert_eq!(style_web_color_name(64), Some("web:LemonChiffon"));
-    assert_eq!(style_system_color_name(-7), Some("style:ButtonBackColor"));
+    assert_eq!(
+        standard_style_item_for_code(-7).map(|(_, name)| name),
+        Some("ButtonBackColor")
+    );
     // Every style-palette index the style items of the stand exercise agrees
     // with the form palette.
     for code in [-3, -7, -11, -16, -21, -23, -42] {
         assert_eq!(
-            style_system_color_name(code),
+            standard_style_item_for_code(code)
+                .map(|(_, name)| format!("style:{name}"))
+                .as_deref(),
             form_body::form_control_system_color_name(code),
             "style index {code}"
         );
     }
     // An index neither palette names still refuses the whole object.
-    assert_eq!(style_system_color_name(-99), None);
+    assert_eq!(standard_style_item_for_code(-99), None);
     assert_eq!(style_web_color_name(9_999), None);
 }
 
