@@ -420,7 +420,7 @@ fn chart_of_calculation_types_properties_ride_their_stored_slots() {
             (
                 "DependenceOnCalculationTypes",
                 "DontUse",
-                "OnBasePeriod",
+                "OnRegistrationPeriod",
                 27,
                 "2",
             ),

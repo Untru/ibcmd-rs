@@ -261,7 +261,7 @@ const CODE_TYPE: &[(&str, &str)] = &[("Number", "0"), ("String", "1")];
 const DEPENDENCE_ON_CALCULATION_TYPES: &[(&str, &str)] = &[
     ("DontUse", "0"),
     ("OnActionPeriod", "1"),
-    ("OnBasePeriod", "2"),
+    ("OnRegistrationPeriod", "2"),
 ];
 const CCT_CODE_SERIES: &[(&str, &str)] = &[
     ("WholeCharacteristicKind", "0"),

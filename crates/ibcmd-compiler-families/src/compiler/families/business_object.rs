@@ -5997,7 +5997,7 @@ mod tests {
                 (
                     "DependenceOnCalculationTypes",
                     "DontUse",
-                    "OnBasePeriod",
+                    "OnRegistrationPeriod",
                     27,
                     "2",
                 ),

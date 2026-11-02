@@ -204,8 +204,11 @@ pub const BP_NUMBER_PERIODICITY: Codes = &[
     ("Day", 4),
 ];
 pub const TASK_NUMBER_AUTO_PREFIX: Codes = &[("BusinessProcessNumber", 0), ("DontUse", 1)];
-pub const DEPENDENCE_ON_CALCULATION_TYPES: Codes =
-    &[("DontUse", 0), ("OnActionPeriod", 1), ("OnBasePeriod", 2)];
+pub const DEPENDENCE_ON_CALCULATION_TYPES: Codes = &[
+    ("DontUse", 0),
+    ("OnActionPeriod", 1),
+    ("OnRegistrationPeriod", 2),
+];
 
 // Standard-attribute markers per family, root level.
 pub const CATALOG_STANDARD: Codes =

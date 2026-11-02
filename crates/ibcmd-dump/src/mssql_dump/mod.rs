@@ -25960,15 +25960,13 @@ fn parse_chart_of_calculation_types_properties(
             &header.name,
             form_refs,
         )?,
-        // `<DependenceOnCalculationTypes>` rides field 27: the three charts of
-        // the ordinary corpora write `1` and export `OnActionPeriod`, the chart
-        // of an extension writes `0` and exports `DontUse`. Field 35, against
-        // which this used to be read, is `1` on all four and is kept as a
-        // checked constant above.
+        // `<DependenceOnCalculationTypes>` rides field 27. The stored codes
+        // are the three values the property accepts: `0` DontUse, `1`
+        // OnActionPeriod, `2` OnRegistrationPeriod.
         dependence_on_calculation_types: match fields.get(27)?.trim() {
             "0" => "DontUse",
             "1" => "OnActionPeriod",
-            "2" => "OnBasePeriod",
+            "2" => "OnRegistrationPeriod",
             _ => return None,
         },
         base_calculation_types: if cct_pair_is(fields.get(28)?, "0", "0") {
