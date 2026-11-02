@@ -31621,18 +31621,25 @@ fn parses_constant_choice_parameters_as_design_time_refs() {
         "9fe5bd6a-0dc3-492a-8124-5d8374b7dc0f".to_string(),
         "Enum.ТипыИзмеряемыхВеличин.EnumValue.Вес".to_string(),
     )]);
-    let parameters = parse_constant_choice_parameters(
+    let parameters = parse_metadata_child_choice_parameters(
         Some(
             r##"{0,1,"Отбор.ТипИзмеряемойВеличины", {"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,e9aecab4-da2b-4a51-b13c-fb8ca3924bce,9fe5bd6a-0dc3-492a-8124-5d8374b7dc0f}}}"##,
         ),
+        &BTreeMap::from([(
+            "e9aecab4-da2b-4a51-b13c-fb8ca3924bce".to_string(),
+            "Enum.ТипыИзмеряемыхВеличин".to_string(),
+        )]),
         &object_refs,
-    );
+    )
+    .expect("choice parameters");
+    let mut xml = String::new();
+    push_choice_parameters_xml_with_tag(&mut xml, "\t\t\t", "ChoiceParameters", &parameters, false);
 
     assert_eq!(parameters.len(), 1);
     assert_eq!(parameters[0].name, "Отбор.ТипИзмеряемойВеличины");
     assert_eq!(
-        format_choice_parameters_xml(&parameters),
-        "<ChoiceParameters>\r\n\t\t\t\t<app:item name=\"Отбор.ТипИзмеряемойВеличины\">\r\n\t\t\t\t\t<app:value xsi:type=\"xr:DesignTimeRef\">Enum.ТипыИзмеряемыхВеличин.EnumValue.Вес</app:value>\r\n\t\t\t\t</app:item>\r\n\t\t\t</ChoiceParameters>"
+        xml,
+        "\t\t\t<ChoiceParameters>\r\n\t\t\t\t<app:item name=\"Отбор.ТипИзмеряемойВеличины\">\r\n\t\t\t\t\t<app:value xsi:type=\"xr:DesignTimeRef\">Enum.ТипыИзмеряемыхВеличин.EnumValue.Вес</app:value>\r\n\t\t\t\t</app:item>\r\n\t\t\t</ChoiceParameters>\r\n"
     );
 }
 

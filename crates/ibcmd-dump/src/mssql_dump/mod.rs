@@ -11107,13 +11107,13 @@ struct MetadataChoiceParameterLink {
     value_change: &'static str,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct MetadataChoiceParameter {
     name: String,
     value: MetadataChoiceParameterValue,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 enum MetadataChoiceParameterValue {
     Nil,
     Boolean(bool),
@@ -11761,7 +11761,7 @@ struct ConstantProperties {
     /// `{5006,1,"Отбор.ВалютаЦены",1,{0,63bc19ed-…},1}` and the platform
     /// publishes the link.
     choice_parameter_links: Vec<MetadataChoiceParameterLink>,
-    choice_parameters: Vec<ChoiceParameter>,
+    choice_parameters: Vec<MetadataChoiceParameter>,
     choice_history_on_input: &'static str,
     data_lock_control_mode: &'static str,
     multi_line: bool,
@@ -11777,11 +11777,6 @@ struct ConstantProperties {
     choice_form: Option<String>,
     update_data_history_immediately_after_write: bool,
     execute_after_write_data_history_version_processing: bool,
-}
-
-struct ChoiceParameter {
-    name: String,
-    value_ref: String,
 }
 
 struct DefinedTypeProperties {
@@ -12089,6 +12084,7 @@ struct CommonAttributePropertyDetails {
     create_on_input: &'static str,
     choice_history_on_input: &'static str,
     choice_form: Option<String>,
+    choice_parameters: Vec<MetadataChoiceParameter>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -34029,8 +34025,12 @@ fn parse_constant_properties_from_text(
         Some("1") => "ShowError",
         _ => "DontCheck",
     };
-    let choice_parameters =
-        parse_constant_choice_parameters(constant_detail_fields.get(16).copied(), object_refs);
+    let choice_parameters = parse_metadata_child_choice_parameters(
+        constant_detail_fields.get(16).copied(),
+        type_index,
+        object_refs,
+    )
+    .unwrap_or_default();
     let header = parse_metadata_header_from_text(text, uuid)?;
     let choice_parameter_links = parse_metadata_child_choice_parameter_links(
         constant_detail_fields.get(14).copied(),
@@ -34110,33 +34110,6 @@ fn parse_constant_properties_from_text(
             constant_fields.get(16)?.trim(),
         )?,
     })
-}
-
-fn parse_constant_choice_parameters(
-    field: Option<&str>,
-    object_refs: &BTreeMap<String, String>,
-) -> Vec<ChoiceParameter> {
-    let Some(fields) = field.and_then(|field| split_1c_braced_fields(field, 0)) else {
-        return Vec::new();
-    };
-    let count = fields
-        .get(1)
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .unwrap_or(0);
-    let mut parameters = Vec::new();
-    let mut index = 2usize;
-    for _ in 0..count {
-        let (Some(name), Some(value)) = (fields.get(index), fields.get(index + 1)) else {
-            break;
-        };
-        if let Some(name) = parse_1c_quoted_string(name.trim())
-            && let Some(value_ref) = parse_design_time_reference(value, object_refs)
-        {
-            parameters.push(ChoiceParameter { name, value_ref });
-        }
-        index += 2;
-    }
-    parameters
 }
 
 /// `object_refs` here is the reference index that also carries predefined
@@ -34674,7 +34647,7 @@ fn parse_common_attribute_properties_from_text(
 
     Some(CommonAttributeProperties {
         value_types: typed.value_types,
-        property_details: parse_common_attribute_property_details(&fields, object_refs),
+        property_details: parse_common_attribute_property_details(&fields, type_index, object_refs),
         auto_use,
         content,
         separation: additional_order_tail
@@ -34775,6 +34748,7 @@ fn common_attribute_zero_reference_envelope(value: &str) -> bool {
 
 fn parse_common_attribute_property_details(
     fields: &[&str],
+    type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<CommonAttributePropertyDetails> {
     let typed_fields = fields
@@ -34853,6 +34827,12 @@ fn parse_common_attribute_property_details(
             .map(|field| field.trim())
             .filter(|uuid| *uuid != "00000000-0000-0000-0000-000000000000")
             .and_then(|uuid| object_refs.get(uuid).cloned()),
+        choice_parameters: parse_metadata_child_choice_parameters(
+            typed_fields.get(16).copied(),
+            type_index,
+            object_refs,
+        )
+        .unwrap_or_default(),
     })
 }
 
@@ -42777,24 +42757,6 @@ fn format_constant_bound_xml(name: &str, value: Option<&str>) -> String {
     }
 }
 
-fn format_choice_parameters_xml(parameters: &[ChoiceParameter]) -> String {
-    if parameters.is_empty() {
-        return "<ChoiceParameters/>".to_string();
-    }
-    let mut xml = "<ChoiceParameters>\r\n".to_string();
-    for parameter in parameters {
-        xml.push_str(&format!(
-            "\t\t\t\t<app:item name=\"{}\">\r\n\
-\t\t\t\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n\
-\t\t\t\t</app:item>\r\n",
-            escape_xml_text(&parameter.name),
-            escape_xml_element_text(&parameter.value_ref)
-        ));
-    }
-    xml.push_str("\t\t\t</ChoiceParameters>");
-    xml
-}
-
 fn format_constant_source_xml(
     header: &MetadataHeader,
     constant: &ConstantProperties,
@@ -42847,6 +42809,17 @@ fn format_constant_source_xml(
     push_localized_property(&mut insert, "\t\t\t", "Format", &constant.format);
     push_localized_property(&mut insert, "\t\t\t", "EditFormat", &constant.edit_format);
     push_localized_property(&mut insert, "\t\t\t", "ToolTip", &constant.tooltip);
+    let choice_parameters = {
+        let mut xml = String::new();
+        push_choice_parameters_xml_with_tag(
+            &mut xml,
+            "\t\t\t",
+            "ChoiceParameters",
+            &constant.choice_parameters,
+            false,
+        );
+        xml
+    };
     insert.push_str(&format!(
         "\t\t\t<MarkNegatives>{}</MarkNegatives>\r\n\
 \t\t\t{}\r\n\
@@ -42857,7 +42830,7 @@ fn format_constant_source_xml(
 \t\t\t<FillChecking>{}</FillChecking>\r\n\
 \t\t\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n\
 {}\
-\t\t\t{}\r\n\
+{}\
 \t\t\t<QuickChoice>{}</QuickChoice>\r\n\
 \t\t\t<ChoiceForm/>\r\n\
 \t\t\t<LinkByType/>\r\n\
@@ -42883,7 +42856,7 @@ fn format_constant_source_xml(
             );
             links
         },
-        format_choice_parameters_xml(&constant.choice_parameters),
+        choice_parameters,
         constant.quick_choice,
         constant.choice_history_on_input,
         constant.data_lock_control_mode,
@@ -43078,11 +43051,22 @@ fn format_common_attribute_property_details_xml(
         Some(form) => format!("<ChoiceForm>{form}</ChoiceForm>"),
         None => "<ChoiceForm/>".to_string(),
     };
+    let choice_parameters = {
+        let mut xml = String::new();
+        push_choice_parameters_xml_with_tag(
+            &mut xml,
+            "\t\t\t",
+            "ChoiceParameters",
+            &details.choice_parameters,
+            false,
+        );
+        xml
+    };
     xml.push_str(&format!(
         "<FillChecking>{}</FillChecking>\r\n\
 \t\t\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n\
 \t\t\t<ChoiceParameterLinks/>\r\n\
-\t\t\t<ChoiceParameters/>\r\n\
+{}\
 \t\t\t<QuickChoice>{}</QuickChoice>\r\n\
 \t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
 \t\t\t{}\r\n\
@@ -43090,6 +43074,7 @@ fn format_common_attribute_property_details_xml(
 \t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n",
         details.fill_checking,
         details.choice_folders_and_items,
+        choice_parameters,
         details.quick_choice,
         details.create_on_input,
         choice_form,
