@@ -35387,7 +35387,6 @@ fn rejects_invalid_strict_filter_criterion_content_atomically() {
     );
 
     for invalid_reference in [
-        "Document.Invoice",
         "Document.Invoice.Command.Open",
         "Document.Invoice.TabularSection.Lines.Item",
         "Document..Attribute.Code",

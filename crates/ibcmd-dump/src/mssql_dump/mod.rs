@@ -44433,6 +44433,7 @@ fn filter_criterion_content_reference_is_valid(reference: &str) -> bool {
             parts.as_slice(),
             [_, _, "TabularSection", _, "Attribute", _]
         )
+        || (parts.len() == 2 && metadata_source_folder_for_kind(parts[0]).is_some())
 }
 
 fn filter_criterion_extraction_diagnostic(
