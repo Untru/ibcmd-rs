@@ -35169,11 +35169,7 @@ fn document_numerator_allowed_length_xml(value: u32) -> Option<&'static str> {
 }
 
 fn document_numerator_periodicity_xml(value: u32) -> Option<&'static str> {
-    match value {
-        0 => Some("Nonperiodical"),
-        1 => Some("Year"),
-        _ => None,
-    }
+    ibcmd_schema::metadata_storage_facts::document_number_periodicity(&value.to_string())
 }
 
 fn parse_ws_reference_properties_from_text(
