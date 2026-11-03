@@ -74,6 +74,7 @@ pub(crate) use ibcmd_form_body::{
     InformationRegisterMasterDimensionIndex,
 };
 use ibcmd_schema::metadata_storage_facts::DataProcessorRevision16Layout;
+use ibcmd_schema::metadata_storage_facts::OwnedFormFamily;
 use ibcmd_schema::{
     GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner,
     parse_task_data_lock_control_mode_slot, parse_task_full_text_search_slot,
@@ -12464,7 +12465,7 @@ fn push_indexed_tabular_section_generated_types(
         ("cfg:DocumentRef.", "Document"),
         (
             "cfg:ChartOfCharacteristicTypesRef.",
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
         ),
         ("cfg:ChartOfAccountsRef.", "ChartOfAccounts"),
         ("cfg:ChartOfCalculationTypesRef.", "ChartOfCalculationTypes"),
@@ -13928,11 +13929,12 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         Vec::new()
     };
     let mut document_journal_child_commands = Vec::new();
-    let information_register_child_commands = if kind == "InformationRegister" {
-        parse_information_register_child_commands(text, uuid, type_index, object_refs)
-    } else {
-        Vec::new()
-    };
+    let information_register_child_commands =
+        if kind == OwnedFormFamily::InformationRegister.as_str() {
+            parse_information_register_child_commands(text, uuid, type_index, object_refs)
+        } else {
+            Vec::new()
+        };
     let mut strict_chart_root_formatted = false;
     let mut xml = if kind == "CommonPicture" {
         let picture = parse_common_picture_properties_from_text(text, uuid)?;
@@ -14106,7 +14108,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         format_exchange_plan_source_xml(header, &exchange_plan, source_version, type_set_leaves)
             .into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
-        let register_object_refs = if kind == "InformationRegister" {
+        let register_object_refs = if kind == OwnedFormFamily::InformationRegister.as_str() {
             metadata_object_refs
         } else {
             object_refs
@@ -14120,7 +14122,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             source_version,
         )?;
-        if kind == "CalculationRegister" {
+        if kind == OwnedFormFamily::CalculationRegister.as_str() {
             register.recalculations = parse_calculation_register_recalculation_child_names(
                 text,
                 header,
@@ -15084,9 +15086,9 @@ fn parse_exchange_plan_properties_from_text(
 ) -> Option<ExchangePlanProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = parse_exchange_plan_owner_fields(text, &header)?;
-    if fields.get(16)?.trim() != "0"
+    if !ibcmd_schema::metadata_storage_facts::stored_code_is_zero(fields.get(16)?)
         || !exchange_plan_characteristics_is_empty(fields.get(40)?)
-        || fields.get(49)?.trim() != "0"
+        || !ibcmd_schema::metadata_storage_facts::stored_code_is_zero(fields.get(49)?)
     {
         return None;
     }
@@ -15118,7 +15120,7 @@ fn parse_exchange_plan_properties_from_text(
     let input_by_string = parse_field_reference_collection(
         &fields.physical,
         27,
-        "ExchangePlan",
+        OwnedFormFamily::ExchangePlan.as_str(),
         &header.name,
         object_refs,
         &BTreeSet::new(),
@@ -15129,16 +15131,15 @@ fn parse_exchange_plan_properties_from_text(
         .iter()
         .filter_map(|reference| reference.rsplit('.').next())
         .collect::<Vec<_>>();
-    if !matches!(
-        input_by_string_names.as_slice(),
-        ["Description", "Code"] | ["Code", "Description"] | ["Description"] | ["Code"]
+    if !ibcmd_schema::metadata_storage_facts::chart_of_characteristic_types_input_by_string_order_is_valid(
+        &input_by_string_names,
     ) {
         return None;
     }
     let data_lock_fields = parse_field_reference_collection(
         &fields.physical,
         42,
-        "ExchangePlan",
+        OwnedFormFamily::ExchangePlan.as_str(),
         &header.name,
         object_refs,
         &exchange_plan_attribute_references,
@@ -15157,66 +15158,54 @@ fn parse_exchange_plan_properties_from_text(
             _ => return None,
         },
         description_length: parse_signed_length(fields.get(17)?)?,
-        default_presentation: match fields.get(25)?.trim() {
-            "0" => "AsCode",
-            "1" => "AsDescription",
-            _ => return None,
-        },
-        edit_type: match fields.get(21)?.trim() {
-            "0" => "InList",
-            "1" => "InDialog",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        default_presentation: ibcmd_schema::metadata_storage_facts::chart_default_presentation(
+            fields.get(25)?,
+        )?,
+        edit_type: ibcmd_schema::metadata_storage_facts::edit_type_xml(fields.get(21)?)?,
         quick_choice: parse_1c_bool_field(Some(fields.get(23)?))?,
-        choice_mode: match fields.get(22)?.trim() {
-            "0" => "FromForm",
-            "1" => "QuickChoice",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        choice_mode: ibcmd_schema::metadata_storage_facts::choice_mode_xml(fields.get(22)?)?,
         input_by_string,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
         default_object_form: parse_declared_owned_form_ref(
             fields.get(14)?,
-            "ExchangePlan",
+            OwnedFormFamily::ExchangePlan.as_str(),
             form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_declared_owned_form_ref(
             fields.get(19)?,
-            "ExchangePlan",
+            OwnedFormFamily::ExchangePlan.as_str(),
             form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
         default_choice_form: parse_declared_owned_form_ref(
             fields.get(20)?,
-            "ExchangePlan",
+            OwnedFormFamily::ExchangePlan.as_str(),
             form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
         auxiliary_object_form: parse_declared_owned_form_ref(
             fields.get(31)?,
-            "ExchangePlan",
+            OwnedFormFamily::ExchangePlan.as_str(),
             form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_declared_owned_form_ref(
             fields.get(32)?,
-            "ExchangePlan",
+            OwnedFormFamily::ExchangePlan.as_str(),
             form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
         auxiliary_choice_form: parse_declared_owned_form_ref(
             fields.get(33)?,
-            "ExchangePlan",
+            OwnedFormFamily::ExchangePlan.as_str(),
             form_uuids.as_deref(),
             &header.name,
             form_refs,
@@ -15225,12 +15214,7 @@ fn parse_exchange_plan_properties_from_text(
         based_on: parse_exchange_plan_based_on(fields.get(24)?, object_refs)?,
         distributed_infobase: parse_1c_bool_field(Some(fields.get(26)?))?,
         include_configuration_extensions: parse_1c_bool_field(Some(fields.get(45)?))?,
-        create_on_input: match fields.get(41)?.trim() {
-            "0" => "Auto",
-            "1" => "DontUse",
-            "2" => "Use",
-            _ => return None,
-        },
+        create_on_input: ibcmd_schema::metadata_storage_facts::auto_use_mode_xml(fields.get(41)?)?,
         choice_history_on_input: match fields.get(44)?.trim() {
             "0" => "Auto",
             "1" => "DontUse",
@@ -15316,7 +15300,7 @@ fn parse_exchange_plan_child_objects(
     let mut section_child_ids = BTreeSet::new();
     let sections = parse_cct_tabular_sections_indexed(
         &collections[2],
-        "ExchangePlan",
+        OwnedFormFamily::ExchangePlan.as_str(),
         owner_name,
         type_index,
         object_refs,
@@ -15392,7 +15376,7 @@ fn parse_exchange_plan_attribute(
     let common = split_information_register_braced_fields(wrapper.get(1)?)?;
     let mut child = parse_strict_common_metadata_attribute(
         common,
-        "ExchangePlan",
+        OwnedFormFamily::ExchangePlan.as_str(),
         owner_name,
         type_index,
         object_refs,
@@ -17232,16 +17216,7 @@ fn parse_information_register_owner_fields<'a>(
 }
 
 fn information_register_periodicity_xml(value: &str) -> Option<&'static str> {
-    match value.trim() {
-        "0" => Some("Nonperiodical"),
-        "1" => Some("Year"),
-        "2" => Some("Quarter"),
-        "3" => Some("Month"),
-        "4" => Some("Day"),
-        "5" => Some("Second"),
-        "6" => Some("RecorderPosition"),
-        _ => None,
-    }
+    ibcmd_schema::metadata_storage_facts::information_register_periodicity_xml(value)
 }
 
 fn information_register_write_mode_xml(value: &str) -> Option<&'static str> {
@@ -18075,14 +18050,14 @@ fn parse_information_register_owner_properties(
     Some(InformationRegisterOwnerProperties {
         default_record_form: parse_declared_owned_form_ref(
             fields.get(2)?,
-            "InformationRegister",
+            OwnedFormFamily::InformationRegister.as_str(),
             form_uuids,
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_declared_owned_form_ref(
             fields.get(3)?,
-            "InformationRegister",
+            OwnedFormFamily::InformationRegister.as_str(),
             form_uuids,
             &header.name,
             form_refs,
@@ -18103,21 +18078,23 @@ fn parse_information_register_owner_properties(
         // flag (fixture `main_filter`: stored set, dumped false by
         // 8.3.27.2214; a real extension, nine such registers).
         main_filter_on_period: parse_1c_bool_field(Some(fields.get(9)?))?
-            && periodicity != "Nonperiodical"
-            && information_register_write_mode_xml(fields.get(5)?)? != "RecorderSubordinate",
+            && periodicity
+                != ibcmd_schema::metadata_storage_facts::INFORMATION_REGISTER_NONPERIODICAL
+            && information_register_write_mode_xml(fields.get(5)?)?
+                != ibcmd_schema::metadata_storage_facts::INFORMATION_REGISTER_RECORDER_SUBORDINATE,
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(10)?)?,
         full_text_search: information_register_full_text_search(fields.get(11)?)?,
         standard_attributes: parse_information_register_standard_attributes(fields.get(12)?)?,
         auxiliary_record_form: parse_declared_owned_form_ref(
             fields.get(13)?,
-            "InformationRegister",
+            OwnedFormFamily::InformationRegister.as_str(),
             form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_declared_owned_form_ref(
             fields.get(14)?,
-            "InformationRegister",
+            OwnedFormFamily::InformationRegister.as_str(),
             form_uuids,
             &header.name,
             form_refs,
@@ -18160,7 +18137,8 @@ fn parse_register_properties_from_text(
         parse_exact_accumulation_register_owner_properties(kind, &fields, &header, form_refs)?;
     let mut exact_calculation_register =
         parse_exact_calculation_register_owner_properties(kind, &fields, &header)?;
-    let exact_calculation_generated_types = if kind == "CalculationRegister" {
+    let exact_calculation_generated_types = if kind == OwnedFormFamily::CalculationRegister.as_str()
+    {
         parse_exact_calculation_register_generated_types(&fields, &header)?
     } else {
         None
@@ -18186,7 +18164,7 @@ fn parse_register_properties_from_text(
             );
         }
     }
-    if kind == "InformationRegister" {
+    if kind == OwnedFormFamily::InformationRegister.as_str() {
         push_generated_type_entry(
             &mut generated_types,
             &fields,
@@ -18244,7 +18222,7 @@ fn parse_register_properties_from_text(
             "RecordManager",
         );
     }
-    let information_register = if kind == "InformationRegister" {
+    let information_register = if kind == OwnedFormFamily::InformationRegister.as_str() {
         parse_information_register_owner_fields(text, &header).and_then(|fields| {
             parse_information_register_owner_properties(
                 &fields,
@@ -18256,7 +18234,7 @@ fn parse_register_properties_from_text(
     } else {
         None
     };
-    let use_standard_commands = if kind == "InformationRegister" {
+    let use_standard_commands = if kind == OwnedFormFamily::InformationRegister.as_str() {
         information_register
             .as_ref()
             .map(|properties| properties.use_standard_commands)
@@ -18272,11 +18250,11 @@ fn parse_register_properties_from_text(
         .as_ref()
         .map(|properties| properties.register_type)
         .or_else(|| parse_register_type(kind, &fields, uuid));
-    let include_help_in_contents = if kind == "InformationRegister" {
+    let include_help_in_contents = if kind == OwnedFormFamily::InformationRegister.as_str() {
         information_register
             .as_ref()
             .map(|properties| properties.include_help_in_contents)
-    } else if kind == "CalculationRegister" {
+    } else if kind == OwnedFormFamily::CalculationRegister.as_str() {
         parse_calculation_register_fixed_include_help(kind, &fields, &header)?
     } else {
         parse_register_include_help_in_contents(kind, &fields, uuid)
@@ -18284,7 +18262,7 @@ fn parse_register_properties_from_text(
     let chart_of_accounts = parse_register_chart_of_accounts(kind, &fields, uuid, object_refs);
     let correspondence = parse_register_correspondence(kind, &fields, uuid);
     let period_adjustment_length = parse_register_period_adjustment_length(kind, &fields, uuid);
-    let data_lock_control_mode = if kind == "InformationRegister" {
+    let data_lock_control_mode = if kind == OwnedFormFamily::InformationRegister.as_str() {
         information_register
             .as_ref()
             .map(|properties| properties.data_lock_control_mode)
@@ -18294,16 +18272,16 @@ fn parse_register_properties_from_text(
         parse_register_data_lock_control_mode(kind, &fields, uuid)
     };
     let enable_totals_splitting = parse_register_enable_totals_splitting(kind, &fields, &header)?;
-    let full_text_search = if kind == "InformationRegister" {
+    let full_text_search = if kind == OwnedFormFamily::InformationRegister.as_str() {
         information_register
             .as_ref()
             .map(|properties| properties.full_text_search)
-    } else if kind == "CalculationRegister" {
+    } else if kind == OwnedFormFamily::CalculationRegister.as_str() {
         parse_calculation_register_fixed_full_text_search(kind, &fields, &header)?
     } else {
         parse_register_full_text_search(kind, &fields, uuid)
     };
-    let register_form_refs = if kind == "InformationRegister" {
+    let register_form_refs = if kind == OwnedFormFamily::InformationRegister.as_str() {
         (None, None)
     } else if let Some(properties) = exact_accumulation_register.as_ref() {
         (
@@ -18323,7 +18301,7 @@ fn parse_register_properties_from_text(
     let calculation_period = parse_calculation_register_fixed_period(kind, &fields, &header)?;
     let calculation_schedule =
         parse_calculation_register_fixed_schedule(kind, &fields, &header, object_refs)?;
-    let standard_attributes = if kind == "InformationRegister" {
+    let standard_attributes = if kind == OwnedFormFamily::InformationRegister.as_str() {
         Vec::new()
     } else if let Some(properties) = exact_accumulation_register.as_mut() {
         std::mem::take(&mut properties.standard_attributes)
@@ -18338,7 +18316,7 @@ fn parse_register_properties_from_text(
     let emit_calculation_presentations =
         parse_calculation_register_empty_presentations(kind, &fields, &header)?;
     let (list_presentation, extended_list_presentation, explanation) =
-        if kind == "InformationRegister" {
+        if kind == OwnedFormFamily::InformationRegister.as_str() {
             (Vec::new(), Vec::new(), Vec::new())
         } else if let Some(presentations) = accumulation_presentations {
             presentations
@@ -18476,7 +18454,9 @@ fn parse_register_properties_from_text(
     // information register uses. Both ERP УХ 3.2.12.6 calculation registers
     // show it (6/25/4 and 1/9/2 children); the single БСП demo calculation
     // register declares no attribute at all and so is unaffected either way.
-    if kind == "InformationRegister" || kind == "CalculationRegister" {
+    if kind == OwnedFormFamily::InformationRegister.as_str()
+        || kind == OwnedFormFamily::CalculationRegister.as_str()
+    {
         child_objects.sort_by_key(|child| match child.tag {
             "Resource" => 0,
             "Attribute" => 1,
@@ -19066,13 +19046,18 @@ fn parse_exact_register_owned_form_ref(
         .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
     let (_, form) = matches.next()?;
     if matches.next().is_some()
-        || form.kind != "Form"
+        || form.kind != OWNER_GRAPH_FORM_KIND
         || form
             .relative_path
             .extension()
             .and_then(|value| value.to_str())
             != Some("xml")
-        || !is_owned_metadata_child_path(&form.relative_path, owner_folder, owner_name, "Forms")
+        || !is_owned_metadata_child_path(
+            &form.relative_path,
+            owner_folder,
+            owner_name,
+            OWNER_GRAPH_FORM_FOLDER,
+        )
     {
         return None;
     }
@@ -19239,13 +19224,7 @@ fn parse_calculation_register_empty_presentations(
 /// `2` `Month`, `3` `Day`. The corpus separates all four against the platform's
 /// own XML; an unobserved code refuses rather than being invented.
 fn calculation_register_periodicity_xml(value: &str) -> Option<&'static str> {
-    match value.trim() {
-        "0" => Some("Year"),
-        "1" => Some("Quarter"),
-        "2" => Some("Month"),
-        "3" => Some("Day"),
-        _ => None,
-    }
+    ibcmd_schema::metadata_storage_facts::calculation_register_periodicity_xml(value)
 }
 
 fn parse_calculation_register_fixed_period(
@@ -19388,14 +19367,14 @@ fn parse_calculation_register_fixed_form_pair(
     Some(Some(CalculationRegisterFormPair {
         default_list_form: parse_declared_owned_form_ref(
             fields.get(23)?,
-            "CalculationRegister",
+            OwnedFormFamily::CalculationRegister.as_str(),
             form_uuids,
             &expected_header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_declared_owned_form_ref(
             fields.get(29)?,
-            "CalculationRegister",
+            OwnedFormFamily::CalculationRegister.as_str(),
             form_uuids,
             &expected_header.name,
             form_refs,
@@ -19506,7 +19485,7 @@ fn parse_register_presentations(
     Vec<(String, String)>,
     Vec<(String, String)>,
 ) {
-    if kind == "CalculationRegister" {
+    if kind == OwnedFormFamily::CalculationRegister.as_str() {
         return (
             fields
                 .get(30)
@@ -19887,7 +19866,7 @@ fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Opt
     if is_offset_inside_owner_command_collection(kind, text, marker_start) {
         return None;
     }
-    if kind == "InformationRegister"
+    if kind == OwnedFormFamily::InformationRegister.as_str()
         && is_offset_inside_metadata_object_code(text, marker_start, 27)
     {
         if is_offset_inside_metadata_object_code(text, marker_start, 9) {
@@ -22035,7 +22014,7 @@ fn parse_information_register_child_payload_from_fields(
     let common_fields = split_1c_braced_fields(common_field, 0)?;
     let mut properties = parse_information_register_common_child_properties(
         &common_fields,
-        "InformationRegister",
+        OwnedFormFamily::InformationRegister.as_str(),
         owner_name,
         type_index,
         object_refs,
@@ -22413,12 +22392,9 @@ fn parse_information_register_common_child_properties(
             "2" => "Auto",
             _ => return None,
         }),
-        create_on_input: Some(match fields.get(21)?.trim() {
-            "0" => "Auto",
-            "1" => "DontUse",
-            "2" => "Use",
-            _ => return None,
-        }),
+        create_on_input: Some(ibcmd_schema::metadata_storage_facts::auto_use_mode_xml(
+            fields.get(21)?,
+        )?),
         choice_form: Some(parse_information_register_choice_form(
             fields.get(11)?,
             type_index,
@@ -23037,12 +23013,12 @@ fn parse_information_register_data_path(
                         ))
                     }
                 }
-                ("-2", 1) if owner_kind == "InformationRegister" => {
+                ("-2", 1) if owner_kind == OwnedFormFamily::InformationRegister.as_str() => {
                     Some(ResolvedDataPathSegment::Own(format!(
                         "InformationRegister.{owner_name}.StandardAttribute.Period"
                     )))
                 }
-                ("-3", 1) if owner_kind == "InformationRegister" => {
+                ("-3", 1) if owner_kind == OwnedFormFamily::InformationRegister.as_str() => {
                     Some(ResolvedDataPathSegment::Own(format!(
                         "InformationRegister.{owner_name}.StandardAttribute.Recorder"
                     )))
@@ -23494,7 +23470,7 @@ fn build_document_data_path_owner_proof(
     let mut ambiguous = BTreeSet::<String>::new();
     for (child, marker_start) in nested_headers_with_offsets_from_text(text, owner_uuid, |_| true) {
         let Some((tag, parent)) = attribute_tabular_section_child_object_tag(
-            "Document",
+            OwnedFormFamily::Document.as_str(),
             owner_name,
             owner_uuid,
             text,
@@ -25415,7 +25391,7 @@ fn parse_chart_of_accounts_properties(
     let form_uuids = parse_task_form_uuids(collections.get(3)?)?;
     let child_forms = parse_strict_chart_child_forms(
         text,
-        "ChartOfAccounts",
+        OwnedFormFamily::ChartOfAccounts.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
@@ -25452,7 +25428,7 @@ fn parse_chart_of_accounts_properties(
     let mut section_child_ids = BTreeSet::new();
     let tabular_sections = parse_cct_tabular_sections_indexed(
         collections.get(2)?,
-        "ChartOfAccounts",
+        OwnedFormFamily::ChartOfAccounts.as_str(),
         &header.name,
         type_index,
         object_refs,
@@ -25511,7 +25487,7 @@ fn parse_chart_of_accounts_properties(
     let command_identity_slots =
         parse_owner_graph_command_identity_slots_indexed(collections.first()?).ok()?;
     let child_commands = parse_strict_owned_commands(
-        "ChartOfAccounts",
+        OwnedFormFamily::ChartOfAccounts.as_str(),
         text,
         &header.uuid,
         &command_identity_slots,
@@ -25523,7 +25499,7 @@ fn parse_chart_of_accounts_properties(
     let input_modes = parse_catalog_input_modes(fields.get(52)?)?;
     let attribute_references = child_objects
         .iter()
-        .filter(|child| child.tag == "Attribute")
+        .filter(|child| child.tag == ibcmd_schema::metadata_storage_facts::ATTRIBUTE_TAG)
         .map(|child| {
             format!(
                 "ChartOfAccounts.{}.Attribute.{}",
@@ -25539,7 +25515,7 @@ fn parse_chart_of_accounts_properties(
     let data_lock_fields = parse_field_reference_collection(
         fields,
         50,
-        "ChartOfAccounts",
+        OwnedFormFamily::ChartOfAccounts.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -25562,7 +25538,7 @@ fn parse_chart_of_accounts_properties(
         } else {
             parse_chart_direct_object_reference(
                 fields.get(19)?,
-                "ChartOfCharacteristicTypes",
+                OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
                 object_refs,
             )?
         },
@@ -25583,11 +25559,9 @@ fn parse_chart_of_accounts_properties(
         // `uh` `МСФО` and `Международный` write `"0"`/`false` while field 27
         // stays `"1"` on all four.
         check_unique: parse_1c_bool_field(Some(fields.get(34)?))?,
-        default_presentation: match fields.get(26)?.trim() {
-            "0" => "AsCode",
-            "1" => "AsDescription",
-            _ => return None,
-        },
+        default_presentation: ibcmd_schema::metadata_storage_facts::chart_default_presentation(
+            fields.get(26)?,
+        )?,
         standard_attributes: parse_chart_root_standard_attributes(
             fields.get(38)?,
             CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
@@ -25606,16 +25580,11 @@ fn parse_chart_of_accounts_properties(
         predefined_data_update: parse_chart_predefined_data_update(fields.get(51)?)?,
         edit_type: information_register_edit_type_xml(fields.get(27)?)?,
         quick_choice: parse_1c_bool_field(Some(fields.get(32)?))?,
-        choice_mode: match fields.get(31)?.trim() {
-            "0" => "FromForm",
-            "1" => "QuickChoice",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        choice_mode: ibcmd_schema::metadata_storage_facts::choice_mode_xml(fields.get(31)?)?,
         input_by_string: parse_field_reference_collection(
             fields,
             33,
-            "ChartOfAccounts",
+            OwnedFormFamily::ChartOfAccounts.as_str(),
             &header.name,
             object_refs,
             &own_attribute_references,
@@ -25625,51 +25594,46 @@ fn parse_chart_of_accounts_properties(
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
         choice_data_get_mode_on_input_by_string: input_modes.2,
-        create_on_input: match fields.get(49)?.trim() {
-            "0" => "Auto",
-            "1" => "DontUse",
-            "2" => "Use",
-            _ => return None,
-        },
+        create_on_input: ibcmd_schema::metadata_storage_facts::auto_use_mode_xml(fields.get(49)?)?,
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(53)?.trim())?,
         default_object_form: parse_owned_form_ref(
             fields.get(28)?,
-            "ChartOfAccounts",
+            OwnedFormFamily::ChartOfAccounts.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_owned_form_ref(
             fields.get(29)?,
-            "ChartOfAccounts",
+            OwnedFormFamily::ChartOfAccounts.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_choice_form: parse_owned_form_ref(
             fields.get(30)?,
-            "ChartOfAccounts",
+            OwnedFormFamily::ChartOfAccounts.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_object_form: parse_owned_form_ref(
             fields.get(40)?,
-            "ChartOfAccounts",
+            OwnedFormFamily::ChartOfAccounts.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_owned_form_ref(
             fields.get(41)?,
-            "ChartOfAccounts",
+            OwnedFormFamily::ChartOfAccounts.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_choice_form: parse_owned_form_ref(
             fields.get(42)?,
-            "ChartOfAccounts",
+            OwnedFormFamily::ChartOfAccounts.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
@@ -25882,7 +25846,7 @@ fn parse_chart_of_calculation_types_properties(
     let form_uuids = parse_task_form_uuids(collections.get(4)?)?;
     let child_forms = parse_strict_chart_child_forms(
         text,
-        "ChartOfCalculationTypes",
+        OwnedFormFamily::ChartOfCalculationTypes.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
@@ -25900,7 +25864,7 @@ fn parse_chart_of_calculation_types_properties(
     // that separated either of them.
     let attribute_references = child_objects
         .iter()
-        .filter(|child| child.tag == "Attribute")
+        .filter(|child| child.tag == ibcmd_schema::metadata_storage_facts::ATTRIBUTE_TAG)
         .map(|child| {
             format!(
                 "ChartOfCalculationTypes.{}.Attribute.{}",
@@ -25916,7 +25880,7 @@ fn parse_chart_of_calculation_types_properties(
     let data_lock_fields = parse_field_reference_collection(
         fields,
         56,
-        "ChartOfCalculationTypes",
+        OwnedFormFamily::ChartOfCalculationTypes.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -25928,11 +25892,7 @@ fn parse_chart_of_calculation_types_properties(
         use_standard_commands: parse_1c_bool_field(Some(fields.get(35)?))?,
         code_length: parse_signed_length(fields.get(25)?)?,
         description_length: parse_signed_length(fields.get(30)?)?,
-        code_type: match fields.get(26)?.trim() {
-            "0" => "Number",
-            "1" => "String",
-            _ => return None,
-        },
+        code_type: ibcmd_schema::metadata_storage_facts::number_type_xml(fields.get(26)?)?,
         // `<CodeAllowedLength>` rides field 53, not field 27: one ERP УХ chart
         // writes `0` there and exports `Fixed`, while the other and the БСП
         // demo chart write `1` and export `Variable`; field 27 is `1` on all
@@ -25942,23 +25902,14 @@ fn parse_chart_of_calculation_types_properties(
             "1" => "Variable",
             _ => return None,
         },
-        default_presentation: match fields.get(31)?.trim() {
-            "0" => "AsCode",
-            "1" => "AsDescription",
-            _ => return None,
-        },
+        default_presentation: ibcmd_schema::metadata_storage_facts::chart_default_presentation(fields.get(31)?)?,
         edit_type: information_register_edit_type_xml(fields.get(24)?)?,
         quick_choice: parse_1c_bool_field(Some(fields.get(39)?))?,
-        choice_mode: match fields.get(38)?.trim() {
-            "0" => "FromForm",
-            "1" => "QuickChoice",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        choice_mode: ibcmd_schema::metadata_storage_facts::choice_mode_xml(fields.get(38)?)?,
         input_by_string: parse_field_reference_collection(
             fields,
             40,
-            "ChartOfCalculationTypes",
+            OwnedFormFamily::ChartOfCalculationTypes.as_str(),
             &header.name,
             object_refs,
             &BTreeSet::new(),
@@ -25968,51 +25919,46 @@ fn parse_chart_of_calculation_types_properties(
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
         choice_data_get_mode_on_input_by_string: input_modes.2,
-        create_on_input: match fields.get(55)?.trim() {
-            "0" => "Auto",
-            "1" => "DontUse",
-            "2" => "Use",
-            _ => return None,
-        },
+        create_on_input: ibcmd_schema::metadata_storage_facts::auto_use_mode_xml(fields.get(55)?)?,
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(59)?.trim())?,
         default_object_form: parse_owned_form_ref(
             fields.get(32)?,
-            "ChartOfCalculationTypes",
+            OwnedFormFamily::ChartOfCalculationTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_owned_form_ref(
             fields.get(33)?,
-            "ChartOfCalculationTypes",
+            OwnedFormFamily::ChartOfCalculationTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_choice_form: parse_owned_form_ref(
             fields.get(34)?,
-            "ChartOfCalculationTypes",
+            OwnedFormFamily::ChartOfCalculationTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_object_form: parse_owned_form_ref(
             fields.get(45)?,
-            "ChartOfCalculationTypes",
+            OwnedFormFamily::ChartOfCalculationTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_owned_form_ref(
             fields.get(46)?,
-            "ChartOfCalculationTypes",
+            OwnedFormFamily::ChartOfCalculationTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_choice_form: parse_owned_form_ref(
             fields.get(47)?,
-            "ChartOfCalculationTypes",
+            OwnedFormFamily::ChartOfCalculationTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
@@ -26020,19 +25966,16 @@ fn parse_chart_of_calculation_types_properties(
         // `<DependenceOnCalculationTypes>` rides field 27. The stored codes
         // are the three values the property accepts: `0` DontUse, `1`
         // OnActionPeriod, `2` OnRegistrationPeriod.
-        dependence_on_calculation_types: match fields.get(27)?.trim() {
-            "0" => "DontUse",
-            "1" => "OnActionPeriod",
-            "2" => "OnRegistrationPeriod",
-            _ => return None,
-        },
+        dependence_on_calculation_types: ibcmd_schema::metadata_storage_facts::calculation_register_dependence_on_calculation_types(
+            fields.get(27)?,
+        )?,
         base_calculation_types: if cct_pair_is(fields.get(28)?, "0", "0") {
             // The exact empty collection is also valid on ordinary charts.
             String::new()
         } else {
             parse_chart_wrapped_object_reference(
                 fields.get(28)?,
-                "ChartOfCalculationTypes",
+                OwnedFormFamily::ChartOfCalculationTypes.as_str(),
                 object_refs,
             )?
         },
@@ -26222,7 +26165,7 @@ fn parse_chart_of_accounts_child_templates(
         })
         .collect::<Vec<_>>();
     owner_graph::resolve_owned_template_names(
-        "ChartOfAccounts",
+        OwnedFormFamily::ChartOfAccounts.as_str(),
         "ChartsOfAccounts",
         owner_name,
         OWNER_GRAPH_TEMPLATE_FOLDER,
@@ -26314,7 +26257,7 @@ fn parse_chart_of_accounts_child_collection(
             let common = split_information_register_braced_fields(wrapper.get(1)?)?;
             let mut child = parse_strict_common_metadata_attribute(
                 common,
-                "ChartOfAccounts",
+                OwnedFormFamily::ChartOfAccounts.as_str(),
                 owner_name,
                 type_index,
                 object_refs,
@@ -26847,7 +26790,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     let code_length = fields.get(21)?.trim().parse::<i32>().ok()?;
     let attribute_references = child_metadata_objects
         .iter()
-        .filter(|child| child.tag == "Attribute")
+        .filter(|child| child.tag == ibcmd_schema::metadata_storage_facts::ATTRIBUTE_TAG)
         .map(|child| {
             format!(
                 "ChartOfCharacteristicTypes.{}.Attribute.{}",
@@ -26863,7 +26806,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     let data_lock_fields = parse_field_reference_collection(
         fields,
         52,
-        "ChartOfCharacteristicTypes",
+        OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -26873,7 +26816,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     let input_by_string = match parse_field_reference_collection(
         fields,
         33,
-        "ChartOfCharacteristicTypes",
+        OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
         &header.name,
         object_refs,
         &BTreeSet::new(),
@@ -26929,11 +26872,9 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         code_series: cct_code_series_xml(fields.get(35)?.trim())?,
         check_unique: parse_1c_bool_field(Some(fields.get(34)?))?,
         autonumbering: parse_1c_bool_field(Some(fields.get(22)?))?,
-        default_presentation: match fields.get(24)?.trim() {
-            "0" => "AsCode",
-            "1" => "AsDescription",
-            _ => return None,
-        },
+        default_presentation: ibcmd_schema::metadata_storage_facts::chart_default_presentation(
+            fields.get(24)?,
+        )?,
         standard_attributes: parse_cct_standard_attributes(
             fields.get(38)?,
             &header.name,
@@ -26950,21 +26891,11 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         // write `InDialog` with `"1"`, two (`uh` `ВидыСубконтоМеждународные`,
         // `ВидыСубконтоХозрасчетные`) write `InList` with `"0"`, and one
         // (`uh` `ВидыСубконтоКорпоративные`) writes `BothWays` with `"2"`.
-        edit_type: match fields.get(25)?.trim() {
-            "0" => "InList",
-            "1" => "InDialog",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        edit_type: ibcmd_schema::metadata_storage_facts::edit_type_xml(fields.get(25)?)?,
         // Field 31 carries `<ChoiceMode>`, which the renderer used to print as
         // the literal `BothWays`: 46 plans write it with `"2"` and one (`uh`
         // `ВидыСубконтоКорпоративные`) writes `FromForm` with `"0"`.
-        choice_mode: match fields.get(31)?.trim() {
-            "0" => "FromForm",
-            "1" => "QuickChoice",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        choice_mode: ibcmd_schema::metadata_storage_facts::choice_mode_xml(fields.get(31)?)?,
         quick_choice: parse_1c_bool_field(Some(fields.get(32)?))?,
         input_by_string,
         search_string_mode_on_input_by_string,
@@ -26975,12 +26906,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         // `ОперацииФинансовыхИнструментов`) writes `Use` with `"2"`. Field 51
         // used to be required to be `"1"` as a fixed marker in front of the
         // data-lock mode, which refused that one plan whole.
-        create_on_input: match fields.get(51)?.trim() {
-            "0" => "Auto",
-            "1" => "DontUse",
-            "2" => "Use",
-            _ => return None,
-        },
+        create_on_input: ibcmd_schema::metadata_storage_facts::auto_use_mode_xml(fields.get(51)?)?,
         choice_history_on_input: match fields.get(55)?.trim() {
             "0" => "Auto",
             "1" => "DontUse",
@@ -26988,70 +26914,70 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         },
         default_object_form: parse_owned_form_ref(
             fields.get(26)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_folder_form: parse_owned_form_ref(
             fields.get(27)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_owned_form_ref(
             fields.get(28)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_choice_form: parse_owned_form_ref(
             fields.get(29)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_folder_choice_form: parse_owned_form_ref(
             fields.get(30)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_object_form: parse_owned_form_ref(
             fields.get(39)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_folder_form: parse_owned_form_ref(
             fields.get(40)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_owned_form_ref(
             fields.get(41)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_choice_form: parse_owned_form_ref(
             fields.get(42)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_folder_choice_form: parse_owned_form_ref(
             fields.get(43)?,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
@@ -27106,9 +27032,11 @@ fn cct_pair_is(value: &str, first: &str, second: &str) -> bool {
 }
 
 fn cct_characteristics_preconditions(fields: &[&str]) -> bool {
-    fields
-        .get(36)
-        .is_some_and(|value| matches!(value.trim(), "0" | "1" | "2"))
+    fields.get(36).is_some_and(|value| {
+        ibcmd_schema::metadata_storage_facts::chart_characteristics_precondition_code_is_valid(
+            value,
+        )
+    })
 }
 
 fn parse_cct_characteristic_ext_values(
@@ -27135,7 +27063,7 @@ fn parse_cct_child_forms(
     for uuid in form_uuids {
         let reference = parse_exact_register_owned_form_ref(
             uuid,
-            "ChartOfCharacteristicTypes",
+            OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
             owner_name,
             form_refs,
         )??;
@@ -27163,7 +27091,7 @@ fn parse_cct_child_templates(
         })
         .collect::<Vec<_>>();
     owner_graph::resolve_owned_template_names(
-        "ChartOfCharacteristicTypes",
+        OwnedFormFamily::ChartOfCharacteristicTypes.as_str(),
         "ChartsOfCharacteristicTypes",
         owner_name,
         OWNER_GRAPH_TEMPLATE_FOLDER,
@@ -28206,7 +28134,7 @@ fn parse_strict_catalog_properties_from_text(
 
     let direct_attribute_references = child_metadata_objects
         .iter()
-        .filter(|child| child.tag == "Attribute")
+        .filter(|child| child.tag == ibcmd_schema::metadata_storage_facts::ATTRIBUTE_TAG)
         .map(|child| format!("Catalog.{}.Attribute.{}", header.name, child.header.name))
         .collect::<BTreeSet<_>>();
     let catalog_field_references = |field_index, standard_attributes| {
@@ -28225,7 +28153,7 @@ fn parse_strict_catalog_properties_from_text(
         parse_field_reference_collection(
             fields,
             field_index,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &header.name,
             object_refs,
             &direct_attribute_references,
@@ -28322,11 +28250,9 @@ fn parse_strict_catalog_properties_from_text(
         )?)?),
         check_unique: parse_1c_bool_field(Some(fields.get(14)?))?,
         autonumbering: parse_1c_bool_field(Some(fields.get(15)?))?,
-        default_presentation: Some(match fields.get(20)?.trim() {
-            "0" => "AsCode",
-            "1" => "AsDescription",
-            _ => return None,
-        }),
+        default_presentation: Some(
+            ibcmd_schema::metadata_storage_facts::chart_default_presentation(fields.get(20)?)?,
+        ),
         standard_attributes: parse_catalog_standard_attributes(
             fields.get(45)?,
             owner_code,
@@ -28343,89 +28269,79 @@ fn parse_strict_catalog_properties_from_text(
             "2" => "DontAutoUpdate",
             _ => return None,
         },
-        edit_type: match fields.get(11)?.trim() {
-            "0" => "InList",
-            "1" => "InDialog",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        edit_type: ibcmd_schema::metadata_storage_facts::edit_type_xml(fields.get(11)?)?,
         quick_choice: parse_1c_bool_field(Some(fields.get(41)?))?,
-        choice_mode: match fields.get(40)?.trim() {
-            "0" => "FromForm",
-            "1" => "QuickChoice",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        choice_mode: ibcmd_schema::metadata_storage_facts::choice_mode_xml(fields.get(40)?)?,
         input_by_string_fields,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
         default_object_form: parse_owned_form_ref(
             fields.get(21)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_folder_form: parse_owned_form_ref(
             fields.get(22)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_owned_form_ref(
             fields.get(23)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_choice_form: parse_owned_form_ref(
             fields.get(24)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_folder_choice_form: parse_owned_form_ref(
             fields.get(25)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_object_form: parse_owned_form_ref(
             fields.get(26)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_folder_form: parse_owned_form_ref(
             fields.get(27)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_owned_form_ref(
             fields.get(28)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_choice_form: parse_owned_form_ref(
             fields.get(29)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_folder_choice_form: parse_owned_form_ref(
             fields.get(30)?,
-            "Catalog",
+            OwnedFormFamily::Catalog.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
@@ -29215,7 +29131,7 @@ fn parse_strict_report_child_objects(
         form_refs,
     )
     .into_iter()
-    .filter(|child| child.tag == "TabularSection")
+    .filter(|child| child.tag == ibcmd_schema::metadata_storage_facts::TABULAR_SECTION_TAG)
     .collect::<Vec<_>>();
     children.extend(parse_strict_tabular_sections(
         &section_values,
@@ -29310,7 +29226,7 @@ fn parse_chart_of_calculation_types_attribute(
     let common = split_information_register_braced_fields(wrapper.get(1)?)?;
     let mut child = parse_strict_common_metadata_attribute(
         common,
-        "ChartOfCalculationTypes",
+        OwnedFormFamily::ChartOfCalculationTypes.as_str(),
         owner_name,
         type_index,
         object_refs,
@@ -29364,7 +29280,7 @@ fn parse_chart_of_calculation_types_child_objects(
         })
         .collect::<Option<Vec<_>>>()?;
     let generic_sections = parse_attribute_tabular_section_child_objects(
-        "ChartOfCalculationTypes",
+        OwnedFormFamily::ChartOfCalculationTypes.as_str(),
         owner_name,
         text,
         owner_uuid,
@@ -29375,12 +29291,12 @@ fn parse_chart_of_calculation_types_child_objects(
         form_refs,
     )
     .into_iter()
-    .filter(|child| child.tag == "TabularSection")
+    .filter(|child| child.tag == ibcmd_schema::metadata_storage_facts::TABULAR_SECTION_TAG)
     .collect::<Vec<_>>();
     let sections = parse_strict_tabular_sections(
         collections.first()?,
         false,
-        "ChartOfCalculationTypes",
+        OwnedFormFamily::ChartOfCalculationTypes.as_str(),
         owner_name,
         CHART_OF_CALCULATION_TYPES_TABULAR_ATTRIBUTE_GROUP_UUID,
         generic_sections,
@@ -29576,13 +29492,13 @@ fn parse_document_properties_from_text(
 
     let attribute_references = child_metadata_objects
         .iter()
-        .filter(|child| child.tag == "Attribute")
+        .filter(|child| child.tag == ibcmd_schema::metadata_storage_facts::ATTRIBUTE_TAG)
         .map(|child| format!("Document.{}.Attribute.{}", header.name, child.header.name))
         .collect::<BTreeSet<_>>();
     let input_by_string = match parse_field_reference_collection(
         fields,
         29,
-        "Document",
+        OwnedFormFamily::Document.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -29608,7 +29524,7 @@ fn parse_document_properties_from_text(
     let data_lock_fields = match parse_field_reference_collection(
         fields,
         47,
-        "Document",
+        OwnedFormFamily::Document.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -29697,11 +29613,7 @@ fn parse_document_properties_from_text(
         use_standard_commands: parse_1c_bool_field(Some(fields.get(23)?))?,
         numbering: DocumentNumberingProperties {
             numerator: parse_document_optional_object_reference(fields.get(10)?, object_refs)?,
-            number_type: match fields.get(11)?.trim() {
-                "0" => "Number",
-                "1" => "String",
-                _ => return None,
-            },
+            number_type: ibcmd_schema::metadata_storage_facts::number_type_xml(fields.get(11)?)?,
             number_length: parse_exchange_plan_u32(fields.get(12)?)?,
             number_allowed_length: match fields.get(44)?.trim() {
                 "0" => "Fixed",
@@ -29737,42 +29649,42 @@ fn parse_document_properties_from_text(
         choice_data_get_mode_on_input_by_string,
         default_object_form: parse_owned_form_ref(
             fields.get(16)?,
-            "Document",
+            OwnedFormFamily::Document.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_owned_form_ref(
             fields.get(17)?,
-            "Document",
+            OwnedFormFamily::Document.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_choice_form: parse_owned_form_ref(
             fields.get(18)?,
-            "Document",
+            OwnedFormFamily::Document.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_object_form: parse_owned_form_ref(
             fields.get(35)?,
-            "Document",
+            OwnedFormFamily::Document.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_owned_form_ref(
             fields.get(36)?,
-            "Document",
+            OwnedFormFamily::Document.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_choice_form: parse_owned_form_ref(
             fields.get(37)?,
-            "Document",
+            OwnedFormFamily::Document.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
@@ -30309,10 +30221,12 @@ fn parse_field_reference_collection(
                     .ok_or_else(|| {
                         item_failure(owner_graph::OwnerGraphOwnedChildReason::Unexpected)
                     })?;
-                format!("{family}.{owner_name}.StandardAttribute.{name}")
+                ibcmd_schema::metadata_storage_facts::standard_attribute_reference(
+                    family, owner_name, name,
+                )
             }
             [kind, uuid] => {
-                if kind.trim() != "0" {
+                if !ibcmd_schema::metadata_storage_facts::owned_child_kind_is_reference(kind) {
                     return Err(item_failure(
                         owner_graph::OwnerGraphOwnedChildReason::WrongKind,
                     ));
@@ -30776,7 +30690,7 @@ fn parse_business_process_properties_from_text(
     let input_by_string = match parse_field_reference_collection(
         fields,
         27,
-        "BusinessProcess",
+        OwnedFormFamily::BusinessProcess.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -30795,7 +30709,7 @@ fn parse_business_process_properties_from_text(
     let data_lock_fields = match parse_field_reference_collection(
         fields,
         43,
-        "BusinessProcess",
+        OwnedFormFamily::BusinessProcess.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -30875,12 +30789,7 @@ fn parse_business_process_properties_from_text(
         generated_types,
         characteristics,
         use_standard_commands: parse_1c_bool_field(Some(fields.get(2)?))?,
-        edit_type: match fields.get(21)?.trim() {
-            "0" => "InList",
-            "1" => "InDialog",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        edit_type: ibcmd_schema::metadata_storage_facts::edit_type_xml(fields.get(21)?)?,
         input_by_string,
         create_on_input: metadata_create_on_input_xml(fields.get(42)?.trim())?,
         search_string_mode_on_input_by_string,
@@ -30888,52 +30797,48 @@ fn parse_business_process_properties_from_text(
         full_text_search_on_input_by_string,
         default_object_form: parse_owned_form_ref(
             fields.get(22)?,
-            "BusinessProcess",
+            OwnedFormFamily::BusinessProcess.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_owned_form_ref(
             fields.get(23)?,
-            "BusinessProcess",
+            OwnedFormFamily::BusinessProcess.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_choice_form: parse_owned_form_ref(
             fields.get(24)?,
-            "BusinessProcess",
+            OwnedFormFamily::BusinessProcess.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_object_form: parse_owned_form_ref(
             fields.get(32)?,
-            "BusinessProcess",
+            OwnedFormFamily::BusinessProcess.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_list_form: parse_owned_form_ref(
             fields.get(33)?,
-            "BusinessProcess",
+            OwnedFormFamily::BusinessProcess.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         auxiliary_choice_form: parse_owned_form_ref(
             fields.get(34)?,
-            "BusinessProcess",
+            OwnedFormFamily::BusinessProcess.as_str(),
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(45)?.trim())?,
-        number_type: match fields.get(16)?.trim() {
-            "0" => "Number",
-            "1" => "String",
-            _ => return None,
-        },
+        number_type: ibcmd_schema::metadata_storage_facts::number_type_xml(fields.get(16)?)?,
         number_length: parse_exchange_plan_u32(fields.get(18)?)?,
         number_allowed_length: parse_business_process_number_allowed_length(fields)?,
         check_unique: parse_1c_bool_field(Some(fields.get(19)?))?,
@@ -30944,14 +30849,9 @@ fn parse_business_process_properties_from_text(
         )?,
         autonumbering: parse_1c_bool_field(Some(fields.get(20)?))?,
         based_on: parse_business_process_based_on(fields.get(15)?, object_refs)?,
-        number_periodicity: match fields.get(17)?.trim() {
-            "0" => "Nonperiodical",
-            "1" => "Year",
-            "2" => "Quarter",
-            "3" => "Month",
-            "4" => "Day",
-            _ => return None,
-        },
+        number_periodicity: ibcmd_schema::metadata_storage_facts::document_number_periodicity(
+            fields.get(17)?,
+        )?,
         task: parse_owner_optional_reference(fields.get(25)?, object_refs, "Task.")?,
         create_task_in_privileged_mode: parse_1c_bool_field(Some(fields.get(31)?))?,
         data_lock_fields,
@@ -31121,7 +31021,7 @@ fn parse_business_process_child_forms(
         .map(|uuid| {
             let reference = parse_exact_register_owned_form_ref(
                 uuid,
-                "BusinessProcess",
+                OwnedFormFamily::BusinessProcess.as_str(),
                 owner_name,
                 form_refs,
             )??;
@@ -31493,7 +31393,7 @@ fn parse_task_properties_from_text(
     let mut section_child_ids = BTreeSet::new();
     let child_tabular_sections = parse_cct_tabular_sections_indexed(
         &collections.get(4)?.items,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &header.name,
         type_index,
         object_refs,
@@ -31550,7 +31450,7 @@ fn parse_task_properties_from_text(
     let input_by_string = parse_field_reference_collection(
         &fields,
         28,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -31560,7 +31460,7 @@ fn parse_task_properties_from_text(
     let data_lock_fields = parse_field_reference_collection(
         &fields,
         46,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &header.name,
         object_refs,
         &attribute_references,
@@ -31570,42 +31470,42 @@ fn parse_task_properties_from_text(
 
     let default_object_form = parse_owned_form_ref(
         fields.get(15)?,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let default_list_form = parse_owned_form_ref(
         fields.get(16)?,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let default_choice_form = parse_owned_form_ref(
         fields.get(17)?,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let auxiliary_object_form = parse_owned_form_ref(
         fields.get(35)?,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let auxiliary_list_form = parse_owned_form_ref(
         fields.get(36)?,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let auxiliary_choice_form = parse_owned_form_ref(
         fields.get(37)?,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
@@ -31668,11 +31568,7 @@ fn parse_task_properties_from_text(
             field_14: internal_uuid_slots.field_14,
         },
         use_standard_commands: parse_1c_bool_field(Some(fields.get(2)?))?,
-        number_type: match fields.get(18)?.trim() {
-            "0" => "Number",
-            "1" => "String",
-            _ => return None,
-        },
+        number_type: ibcmd_schema::metadata_storage_facts::number_type_xml(fields.get(18)?)?,
         number_length: parse_exchange_plan_u32(fields.get(19)?)?,
         number_allowed_length: parse_task_number_allowed_length_slot(fields.get(43)?)?.xml_value(),
         check_unique: parse_1c_bool_field(Some(fields.get(20)?))?,
@@ -31692,29 +31588,17 @@ fn parse_task_properties_from_text(
             type_index,
             metadata_object_refs,
         )?,
-        default_presentation: match fields.get(27)?.trim() {
-            "0" => "AsNumber",
-            "1" => "AsDescription",
-            _ => return None,
-        },
+        default_presentation: ibcmd_schema::metadata_storage_facts::task_default_presentation(
+            fields.get(27)?,
+        )?,
         // Slot 23 carries `<EditType>`: one task of the corpus writes
         // `InList` and stores `0`, the rest write `InDialog` and store `1`.
-        edit_type: match fields.get(23)?.trim() {
-            "0" => "InList",
-            "1" => "InDialog",
-            "2" => "BothWays",
-            _ => return None,
-        },
+        edit_type: ibcmd_schema::metadata_storage_facts::edit_type_xml(fields.get(23)?)?,
         input_by_string,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
-        create_on_input: match fields.get(45)?.trim() {
-            "0" => "Auto",
-            "1" => "DontUse",
-            "2" => "Use",
-            _ => return None,
-        },
+        create_on_input: ibcmd_schema::metadata_storage_facts::auto_use_mode_xml(fields.get(45)?)?,
         default_object_form,
         default_list_form,
         default_choice_form,
@@ -31762,7 +31646,7 @@ fn malformed_task_internal_uuid_slot_diagnostic(
 ) -> MetadataSourceExtractionDiagnostic {
     let mut diagnostic = MetadataSourceExtractionDiagnostic::new(
         MetadataSourceFailureClass::Malformed,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         "task_internal_uuid_slot",
         "uuid_syntax",
     );
@@ -32033,7 +31917,7 @@ fn parse_task_wrapped_child(
     let value_types = parse_task_child_type_pattern(detail.get(2)?, type_index)?;
     let mut properties = parse_information_register_common_child_properties(
         &payload,
-        "Task",
+        OwnedFormFamily::Task.as_str(),
         owner_name,
         type_index,
         metadata_object_refs,
@@ -32503,28 +32387,28 @@ fn parse_settings_storage_properties_from_text(
     )?;
     let default_load_form = parse_owned_form_ref(
         fields.get(4)?,
-        "SettingsStorage",
+        OwnedFormFamily::SettingsStorage.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let default_save_form = parse_owned_form_ref(
         fields.get(5)?,
-        "SettingsStorage",
+        OwnedFormFamily::SettingsStorage.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let auxiliary_load_form = parse_owned_form_ref(
         fields.get(6)?,
-        "SettingsStorage",
+        OwnedFormFamily::SettingsStorage.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let auxiliary_save_form = parse_owned_form_ref(
         fields.get(7)?,
-        "SettingsStorage",
+        OwnedFormFamily::SettingsStorage.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
@@ -32645,14 +32529,14 @@ fn parse_document_journal_properties_from_text(
 
     let default_form = parse_owned_form_ref(
         owner_fields.get(4)?,
-        "DocumentJournal",
+        OwnedFormFamily::DocumentJournal.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
     )?;
     let auxiliary_form = parse_owned_form_ref(
         owner_fields.get(13)?,
-        "DocumentJournal",
+        OwnedFormFamily::DocumentJournal.as_str(),
         &form_uuids,
         &header.name,
         form_refs,
@@ -32964,7 +32848,7 @@ fn parse_document_journal_commands(
     }
 
     let commands = nested_child_commands_from_text(
-        "DocumentJournal",
+        OwnedFormFamily::DocumentJournal.as_str(),
         text,
         owner_uuid,
         type_index,
@@ -33481,7 +33365,7 @@ fn metadata_source_folder_for_kind(kind: &str) -> Option<&'static str> {
         // carried this pair; only the forward one was missing, because until
         // now no filter criterion needed its own owned-form folder resolved.
         "FilterCriterion" => Some("FilterCriteria"),
-        "SettingsStorage" => Some("SettingsStorages"),
+        k if k == OwnedFormFamily::SettingsStorage.as_str() => Some("SettingsStorages"),
         _ => None,
     }
 }
@@ -34711,7 +34595,7 @@ fn parse_common_attribute_property_details(
         choice_form: typed_fields
             .get(11)
             .map(|field| field.trim())
-            .filter(|uuid| *uuid != "00000000-0000-0000-0000-000000000000")
+            .filter(|uuid| *uuid != ibcmd_schema::metadata_storage_facts::NIL_UUID)
             .and_then(|uuid| object_refs.get(uuid).cloned()),
         choice_parameters: parse_metadata_child_choice_parameters(
             typed_fields.get(16).copied(),
@@ -36431,7 +36315,9 @@ fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<Style
         == Some("#")
     {
         match value_fields.get(1).map(|field| field.trim()) {
-            Some("9cd510c7-abfc-11d4-9434-004095e12fc7") => {
+            Some(candidate)
+                if candidate == ibcmd_schema::metadata_storage_facts::STYLE_COLOR_TYPE_UUID =>
+            {
                 return Some(StyleItemProperties {
                     item_type,
                     value_xml: format!(
@@ -36440,13 +36326,17 @@ fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<Style
                     ),
                 });
             }
-            Some("9cd510c8-abfc-11d4-9434-004095e12fc7") => {
+            Some(candidate)
+                if candidate == ibcmd_schema::metadata_storage_facts::STYLE_FONT_TYPE_UUID =>
+            {
                 return Some(StyleItemProperties {
                     item_type,
                     value_xml: parse_style_font_value_xml(value),
                 });
             }
-            Some("4d10ca00-111a-4d43-9c96-92cd773716de") => {
+            Some(candidate)
+                if candidate == ibcmd_schema::metadata_storage_facts::STYLE_BORDER_TYPE_UUID =>
+            {
                 return Some(StyleItemProperties {
                     item_type,
                     value_xml: parse_style_border_value_xml(value)?,
@@ -36947,7 +36837,7 @@ fn parse_style_border_value_xml(value: &str) -> Option<String> {
     }
     // A border either names a standard style item or carries its own style and
     // width; the second field says which.
-    if border_fields.get(1)?.trim() == "1" {
+    if ibcmd_schema::metadata_storage_facts::border_carries_own_style(border_fields.get(1)?) {
         let reference = split_1c_braced_fields(border_fields.get(2)?, 0)?;
         let code = reference.first()?.trim().parse::<i32>().ok()?;
         let (_, name) = standard_style_item_for_code(code)?;
@@ -36955,18 +36845,7 @@ fn parse_style_border_value_xml(value: &str) -> Option<String> {
             "<Value xsi:type=\"v8ui:Border\" ref=\"style:{name}\"/>"
         ));
     }
-    let style = match border_fields.get(3)?.trim() {
-        "0" => "WithoutBorder",
-        "1" => "Single",
-        "2" => "Embossed",
-        "3" => "Indented",
-        "4" => "Underline",
-        "5" => "DoubleUnderline",
-        "6" => "Rounded",
-        "7" => "Overline",
-        "200" => "Double",
-        _ => return None,
-    };
+    let style = ibcmd_schema::metadata_storage_facts::border_style_xml(border_fields.get(3)?)?;
     // The width that follows the style in the record is the one the platform
     // writes; a border with no visible line still carries it.
     let width = border_fields.get(4)?.trim();
@@ -37087,7 +36966,7 @@ fn parse_style_font_value_xml(value: &str) -> String {
         if kind == "1" {
             kind_xml = "WindowsFont";
             attrs.push(("ref", "sys:DefaultGUIFont".to_string()));
-        } else if kind == "3" {
+        } else if ibcmd_schema::metadata_storage_facts::font_kind_is_auto(kind) {
             // The automatic font names nothing: the platform writes the kind alone.
             kind_xml = "AutoFont";
         } else {
@@ -38425,7 +38304,9 @@ fn format_register_source_xml(
     type_set_leaves: &MetadataTypeSetLeafIndex,
 ) -> String {
     let mut xml = format_full_metadata_source_xml(kind, header, source_version);
-    if kind == "InformationRegister" && source_version == InfobaseConfigSourceVersion::V2_21 {
+    if kind == OwnedFormFamily::InformationRegister.as_str()
+        && source_version == InfobaseConfigSourceVersion::V2_21
+    {
         const STYLE_NAMESPACE_ATTRIBUTE: &str =
             " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\"";
         const PALETTE_NAMESPACE_ATTRIBUTE: &str =
@@ -38440,7 +38321,7 @@ fn format_register_source_xml(
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
         let mut properties = String::new();
-        if kind == "InformationRegister" {
+        if kind == OwnedFormFamily::InformationRegister.as_str() {
             if let Some(information_register) = &register.information_register {
                 push_information_register_owner_properties_xml(
                     &mut properties,
@@ -38463,7 +38344,7 @@ fn format_register_source_xml(
                 push_optional_text_element(
                     &mut properties,
                     "\t\t\t",
-                    "ChartOfAccounts",
+                    OwnedFormFamily::ChartOfAccounts.as_str(),
                     register.chart_of_accounts.as_deref(),
                 );
                 if let Some(correspondence) = register.correspondence {
@@ -38553,7 +38434,7 @@ fn format_register_source_xml(
                     register.auxiliary_list_form.as_deref(),
                 );
             }
-            if kind == "CalculationRegister"
+            if kind == OwnedFormFamily::CalculationRegister.as_str()
                 && let Some(form_pair) = register.calculation_form_pair.as_ref()
             {
                 push_optional_text_element(
@@ -38569,7 +38450,7 @@ fn format_register_source_xml(
                     form_pair.auxiliary_list_form.as_deref(),
                 );
             }
-            if kind == "CalculationRegister"
+            if kind == OwnedFormFamily::CalculationRegister.as_str()
                 && let Some(period) = register.calculation_period.as_ref()
             {
                 properties.push_str(&format!(
@@ -38581,7 +38462,7 @@ fn format_register_source_xml(
                     xml_bool(period.base_period),
                 ));
             }
-            if kind == "CalculationRegister"
+            if kind == OwnedFormFamily::CalculationRegister.as_str()
                 && let Some(schedule) = register.calculation_schedule.as_ref()
             {
                 push_optional_text_element(
@@ -38605,7 +38486,7 @@ fn format_register_source_xml(
                 push_optional_text_element(
                     &mut properties,
                     "\t\t\t",
-                    "ChartOfCalculationTypes",
+                    OwnedFormFamily::ChartOfCalculationTypes.as_str(),
                     Some(schedule.chart_of_calculation_types.as_str()),
                 );
             }
@@ -38639,8 +38520,10 @@ fn format_register_source_xml(
                     xml_bool(enable_totals_splitting)
                 ));
             }
-            if (kind == "AccumulationRegister" && register.emit_accumulation_presentations)
-                || (kind == "CalculationRegister" && register.emit_calculation_presentations)
+            if (kind == OwnedFormFamily::AccumulationRegister.as_str()
+                && register.emit_accumulation_presentations)
+                || (kind == OwnedFormFamily::CalculationRegister.as_str()
+                    && register.emit_calculation_presentations)
             {
                 push_localized_property(
                     &mut properties,
@@ -39644,7 +39527,7 @@ fn format_report_source_xml(
     push_optional_text_element(
         &mut xml,
         "\t\t\t",
-        "SettingsStorage",
+        OwnedFormFamily::SettingsStorage.as_str(),
         report.settings_storage.as_deref(),
     );
     xml.push_str(&format!(
@@ -39851,7 +39734,7 @@ fn format_document_source_xml(
             for child in document
                 .child_metadata_objects
                 .iter()
-                .filter(|child| child.tag == "Attribute")
+                .filter(|child| child.tag == ibcmd_schema::metadata_storage_facts::ATTRIBUTE_TAG)
             {
                 push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
             }
@@ -39861,11 +39744,9 @@ fn format_document_source_xml(
                     escape_xml_element_text(form)
                 ));
             }
-            for child in document
-                .child_metadata_objects
-                .iter()
-                .filter(|child| child.tag == "TabularSection")
-            {
+            for child in document.child_metadata_objects.iter().filter(|child| {
+                child.tag == ibcmd_schema::metadata_storage_facts::TABULAR_SECTION_TAG
+            }) {
                 push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
             }
             for template in &document.child_templates {
@@ -41509,7 +41390,7 @@ fn push_metadata_child_object_xml_with_tail_order(
             );
         }
         xml.push_str("\t\t\t\t</ChildObjects>\r\n");
-    } else if child.tag == "TabularSection" {
+    } else if child.tag == ibcmd_schema::metadata_storage_facts::TABULAR_SECTION_TAG {
         // A TabularSection is the one child kind that can itself own
         // children (its own Attribute list); native always writes the
         // element, self-closed when that list is empty, the way it does for
@@ -43077,10 +42958,9 @@ fn format_common_attribute_fill_value_xml(value: &CommonAttributeFillValue) -> S
 fn format_common_attribute_bound_xml(tag: &str, value: &CommonAttributeFillValue) -> String {
     match value {
         CommonAttributeFillValue::Nil => format!("<{tag} xsi:nil=\"true\"/>"),
-        CommonAttributeFillValue::Boolean(value) => format!(
-            "<{tag} xsi:type=\"xs:boolean\">{}</{tag}>",
-            xml_bool(*value)
-        ),
+        CommonAttributeFillValue::Boolean(value) => {
+            ibcmd_schema::metadata_storage_facts::common_attribute_boolean_xml(tag, *value)
+        }
         CommonAttributeFillValue::Decimal(value) => format!(
             "<{tag} xsi:type=\"xs:decimal\">{}</{tag}>",
             escape_xml_element_text(value)
@@ -43578,7 +43458,7 @@ fn filter_criterion_owned_form_reference(
     if matches.next().is_some() {
         return Err(fail(FilterCriterionDecodeReason::AmbiguousReference));
     }
-    if form.kind != "Form"
+    if form.kind != OWNER_GRAPH_FORM_KIND
         || !is_owned_metadata_child_path(
             &form.relative_path,
             metadata_source_folder_for_kind("FilterCriterion")
@@ -44182,11 +44062,10 @@ fn filter_criterion_content_reference_is_valid(reference: &str) -> bool {
     if parts.iter().any(|part| part.is_empty()) {
         return false;
     }
-    matches!(parts.as_slice(), [_, _, "Attribute", _])
-        || matches!(
-            parts.as_slice(),
-            [_, _, "TabularSection", _, "Attribute", _]
-        )
+    (parts.len() == 4 && parts[2] == ibcmd_schema::metadata_storage_facts::ATTRIBUTE_TAG)
+        || (parts.len() == 6
+            && parts[2] == ibcmd_schema::metadata_storage_facts::TABULAR_SECTION_TAG
+            && parts[4] == ibcmd_schema::metadata_storage_facts::ATTRIBUTE_TAG)
         || (parts.len() == 2 && metadata_source_folder_for_kind(parts[0]).is_some())
 }
 

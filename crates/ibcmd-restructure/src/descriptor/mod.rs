@@ -194,15 +194,6 @@ pub const NUMBER_PERIODICITY: Codes = &[
     ("Month", 3),
     ("Day", 4),
 ];
-/// A business process spells its number type and periodicity its own way.
-pub const BP_NUMBER_TYPE: Codes = &[("String", 0), ("Number", 1)];
-pub const BP_NUMBER_PERIODICITY: Codes = &[
-    ("Year", 0),
-    ("Nonperiodical", 1),
-    ("Quarter", 2),
-    ("Month", 3),
-    ("Day", 4),
-];
 pub const TASK_NUMBER_AUTO_PREFIX: Codes = &[("BusinessProcessNumber", 0), ("DontUse", 1)];
 pub const DEPENDENCE_ON_CALCULATION_TYPES: Codes = &[
     ("DontUse", 0),
@@ -834,8 +825,8 @@ static BUSINESS_PROCESS: Layout = Layout {
         Generated("Manager"),
         Generated("RoutePointRef"),
         References("BasedOn"),
-        Code("NumberType", BP_NUMBER_TYPE),
-        Code("NumberPeriodicity", BP_NUMBER_PERIODICITY),
+        Code("NumberType", CODE_TYPE),
+        Code("NumberPeriodicity", NUMBER_PERIODICITY),
         Number("NumberLength"),
         Flag("CheckUnique"),
         Flag("Autonumbering"),
