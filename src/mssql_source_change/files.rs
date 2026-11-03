@@ -1,4 +1,7 @@
 //! Original regular-file custody for the source inventory, not a source model.
+#[cfg(windows)]
+mod windows_profile;
+
 use super::{SourceChangeError, path_to_slash};
 use sha2::{Digest, Sha256};
 #[cfg(windows)]
@@ -62,6 +65,7 @@ fn stamp(file: &File, regular: bool) -> Result<Stamp, SourceChangeError> {
         if information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             return Err(io("source handle is a reparse point"));
         }
+        windows_profile::handle(file, &information)?;
         (
             FileIdentity(
                 u64::from(information.dwVolumeSerialNumber),
@@ -102,18 +106,29 @@ impl RootAnchor {
     pub(super) fn open(path: &Path) -> Result<Arc<Self>, SourceChangeError> {
         #[cfg(windows)]
         let (file, ancestors) = {
-            let mut ancestors = Vec::new();
-            for ancestor in path
-                .ancestors()
-                .skip(1)
-                .filter(|p| !p.as_os_str().is_empty())
-            {
-                let parent = open_windows(ancestor, true)?;
-                stamp(&parent, false)?;
-                ancestors.try_reserve(1).map_err(io)?;
-                ancestors.push(parent);
+            windows_profile::root_path(path)?;
+            let mut directories = Vec::new();
+            let mut volume = None;
+            // Acquire parents before descendants. Each held directory has
+            // share-participating access and excludes ordinary DELETE opens.
+            let mut names = Vec::new();
+            for directory in path.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+                names.try_reserve(1).map_err(io)?;
+                names.push(directory);
             }
-            (open_windows(path, true)?, ancestors)
+            for directory in names.into_iter().rev() {
+                let held = open_windows(directory, true)?;
+                let identity = stamp(&held, false)?.identity;
+                if let Some(root) = volume {
+                    windows_profile::same_volume(root, identity)?;
+                } else {
+                    volume = Some(identity);
+                }
+                directories.try_reserve(1).map_err(io)?;
+                directories.push(held);
+            }
+            let file = directories.pop().ok_or_else(|| io("empty source root"))?;
+            (file, directories)
         };
         #[cfg(unix)]
         let (file, ancestors) = {
@@ -212,7 +227,8 @@ impl RootAnchor {
                 path.push(name);
                 if components.peek().is_some() {
                     let directory = open_windows(&path, true)?;
-                    stamp(&directory, false)?;
+                    let identity = stamp(&directory, false)?.identity;
+                    windows_profile::same_volume(self.identity, identity)?;
                     parents.try_reserve(1).map_err(io)?;
                     parents.push(directory);
                 }
@@ -228,10 +244,16 @@ impl RootAnchor {
         #[cfg(any(unix, windows))]
         {
             let original = stamp(&file, true)?;
+            #[cfg(windows)]
+            windows_profile::same_volume(self.identity, original.identity)?;
             let ancestors = parents
                 .iter()
                 .map(|parent| stamp(parent, false))
                 .collect::<Result<Vec<_>, _>>()?;
+            #[cfg(windows)]
+            for ancestor in &ancestors {
+                windows_profile::same_volume(self.identity, ancestor.identity)?;
+            }
             Ok(OriginalFile {
                 root: self.clone(),
                 relative: relative.to_owned(),
@@ -248,16 +270,22 @@ impl RootAnchor {
 fn open_windows(path: &Path, directory: bool) -> Result<File, SourceChangeError> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
     let mut options = fs::OpenOptions::new();
-    if directory {
-        options.access_mode(0);
+    let sharing = if directory {
+        // LIST makes deny-delete sharing effective. Rename opens its destination
+        // parent with add-child/write access (MS-FSA FileRenameInformation), so
+        // permit WRITE sharing while still excluding DELETE sharing.
+        options.access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES);
+        FILE_SHARE_READ | FILE_SHARE_WRITE
     } else {
         options.read(true);
-    }
+        FILE_SHARE_READ
+    };
     options
-        .share_mode(FILE_SHARE_READ)
+        .share_mode(sharing)
         .custom_flags(
             FILE_FLAG_OPEN_REPARSE_POINT
                 | if directory {
@@ -429,3 +457,6 @@ impl OriginalFile {
         Ok(())
     }
 }
+
+#[cfg(all(test, windows))]
+mod windows_custody_tests;
