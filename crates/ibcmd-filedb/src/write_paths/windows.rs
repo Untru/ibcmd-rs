@@ -1,5 +1,7 @@
 //! Windows anchors directory names by denying DELETE access for each ancestor.
 //! Leaf operations stay inside that held chain; identity never falls back to paths.
+mod snapshot;
+
 use crate::{Error, Result};
 use std::os::windows::fs::OpenOptionsExt;
 use std::{
@@ -10,6 +12,8 @@ use std::{
 const FILE_SHARE_READ: u32 = 1;
 const FILE_SHARE_WRITE: u32 = 2;
 const FILE_SHARE_DELETE: u32 = 4;
+const FILE_LIST_DIRECTORY: u32 = 0x1;
+const FILE_READ_ATTRIBUTES: u32 = 0x80;
 const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x00200000;
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
@@ -79,6 +83,17 @@ fn metadata_handle(path: &Path, directory: bool, share: u32) -> std::io::Result<
         .open(path)
 }
 
+// Unlike zero-access metadata queries, FILE_LIST_DIRECTORY participates in
+// the Windows share-access checks. Without it, omitting SHARE_DELETE does not
+// exclude a new directory DELETE open (MS-FSA 2.1.5.1.2.1).
+fn held_directory(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new()
+        .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+}
+
 pub(super) struct Custody {
     parent: PathBuf,
     directories: Vec<(PathBuf, File, Identity)>,
@@ -90,7 +105,7 @@ impl Custody {
         // Hold each ancestor before resolving its child. No held directory can
         // be renamed/deleted, including between the final guard and publication.
         for path in parent.ancestors().collect::<Vec<_>>().into_iter().rev() {
-            let file = metadata_handle(path, true, FILE_SHARE_READ | FILE_SHARE_WRITE)?;
+            let file = held_directory(path)?;
             let id = identity(&file, true)?;
             directories.push((path.to_owned(), file, id));
         }
@@ -130,6 +145,10 @@ impl Custody {
         }
         Ok(())
     }
+    pub(super) fn snapshot_identity(&self, path: &Path, file: &File) -> Result<[u8; 12]> {
+        snapshot::identity(&self.checked(path)?, file)
+    }
+
     fn plain_leaf(&self, path: &Path, missing_ok: bool) -> std::io::Result<PathBuf> {
         let path = self.checked(path)?;
         match metadata_handle(
