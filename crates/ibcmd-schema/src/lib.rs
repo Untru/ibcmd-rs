@@ -18592,6 +18592,30 @@ pub mod metadata_storage_facts {
         ]
     }
 
+    /// Root collection that holds an ExchangePlan's owned forms.
+    pub fn exchange_plan_form_collection_uuid() -> &'static str {
+        "87c509ab-3d38-4d67-b379-aca796298578"
+    }
+
+    /// Root collection that holds a register's owned forms.
+    pub fn register_form_collection_uuid(kind: &str) -> Option<&'static str> {
+        match kind {
+            "InformationRegister" => Some("b44ba719-945c-445c-8aab-1088fa4df16e"),
+            "CalculationRegister" => Some("a2cb086c-db98-43e4-a1a9-0760ab048f8d"),
+            _ => None,
+        }
+    }
+
+    /// The order in which a chart of characteristic types may write its
+    /// `InputByString` standard attributes. The corpus contains all four
+    /// observed orders, including `Code,Description`.
+    pub fn chart_of_characteristic_types_input_by_string_order_is_valid(names: &[&str]) -> bool {
+        matches!(
+            names,
+            ["Description"] | ["Description", "Code"] | ["Code", "Description"] | ["Code"]
+        )
+    }
+
     pub fn document_number_periodicity(code: &str) -> Option<&'static str> {
         match code.trim() {
             "0" => Some("Nonperiodical"),

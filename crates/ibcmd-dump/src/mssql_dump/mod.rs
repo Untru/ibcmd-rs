@@ -15002,33 +15002,6 @@ fn parse_signed_length(value: &str) -> Option<i32> {
     value.trim().parse::<i32>().ok()
 }
 
-fn parse_exchange_plan_owned_form_ref(
-    value: &str,
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?;
-    if information_register_uuid_is_zero(&uuid) {
-        return Some(None);
-    }
-    let mut matches = form_refs
-        .iter()
-        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
-    let (_, form) = matches.next()?;
-    if matches.next().is_some()
-        || form.kind != "Form"
-        || !is_owned_metadata_child_path(&form.relative_path, "ExchangePlans", owner_name, "Forms")
-    {
-        return None;
-    }
-    let reference = form_source_reference_name(form)?;
-    let prefix = format!("ExchangePlan.{owner_name}.Form.");
-    reference
-        .strip_prefix(&prefix)
-        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
-        .then_some(Some(reference))
-}
-
 fn resolve_exchange_plan_index_reference(
     uuid: &str,
     object_refs: &BTreeMap<String, String>,
@@ -15093,72 +15066,6 @@ fn parse_exchange_plan_field_ref_collection(value: &str) -> Option<Vec<&str>> {
     (payload.len() == count.checked_add(2)?).then(|| payload[2..].to_vec())
 }
 
-fn parse_exchange_plan_input_by_string(value: &str, owner_name: &str) -> Option<Vec<String>> {
-    let mut seen = BTreeSet::new();
-    let fields = parse_exchange_plan_field_ref_collection(value)?
-        .into_iter()
-        .map(|value| {
-            let payload = parse_exchange_plan_field_ref_payload(value)?;
-            let marker = match payload.as_slice() {
-                [marker] => marker.trim(),
-                _ => return None,
-            };
-            let name = match marker {
-                "-3" => "Description",
-                "-2" => "Code",
-                _ => return None,
-            };
-            seen.insert(marker)
-                .then(|| format!("ExchangePlan.{owner_name}.StandardAttribute.{name}"))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let suffixes = fields
-        .iter()
-        .filter_map(|field| field.rsplit('.').next())
-        .collect::<Vec<_>>();
-    matches!(
-        suffixes.as_slice(),
-        ["Description", "Code"] | ["Code", "Description"] | ["Description"] | ["Code"]
-    )
-    .then_some(fields)
-}
-
-fn parse_exchange_plan_data_lock_fields(
-    value: &str,
-    owner_name: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<String>> {
-    let mut seen = BTreeSet::new();
-    parse_exchange_plan_field_ref_collection(value)?
-        .into_iter()
-        .map(|value| {
-            let payload = parse_exchange_plan_field_ref_payload(value)?;
-            let reference = match payload.as_slice() {
-                [marker] => {
-                    if marker.trim() != "-2" {
-                        return None;
-                    }
-                    format!("ExchangePlan.{owner_name}.StandardAttribute.Code")
-                }
-                [kind, uuid] if kind.trim() == "0" => {
-                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
-                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
-                    let prefix = format!("ExchangePlan.{owner_name}.Attribute.");
-                    if !reference
-                        .strip_prefix(&prefix)
-                        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
-                    {
-                        return None;
-                    }
-                    reference
-                }
-                _ => return None,
-            };
-            seen.insert(reference.clone()).then_some(reference)
-        })
-        .collect()
-}
-
 fn exchange_plan_characteristics_is_empty(value: &str) -> bool {
     split_information_register_braced_fields(value).is_some_and(|fields| {
         fields.len() == 2
@@ -15189,7 +15096,7 @@ fn parse_exchange_plan_properties_from_text(
         choice_data_get_mode_on_input_by_string,
     ) = parse_owner_input_modes(fields.get(43)?)?;
 
-    let (child_objects, emit_empty_child_objects) = parse_exchange_plan_child_objects(
+    let (child_objects, emit_empty_child_objects, form_uuids) = parse_exchange_plan_child_objects(
         text,
         uuid,
         &header.name,
@@ -15197,6 +15104,47 @@ fn parse_exchange_plan_properties_from_text(
         object_refs,
         form_refs,
     )?;
+
+    let exchange_plan_attribute_prefix = format!("ExchangePlan.{}.Attribute.", header.name);
+    let exchange_plan_attribute_references = object_refs
+        .values()
+        .filter(|reference| {
+            reference
+                .strip_prefix(&exchange_plan_attribute_prefix)
+                .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let input_by_string = parse_field_reference_collection(
+        &fields.physical,
+        27,
+        "ExchangePlan",
+        &header.name,
+        object_refs,
+        &BTreeSet::new(),
+        &[("-3", "Description"), ("-2", "Code")],
+    )
+    .ok()?;
+    let input_by_string_names = input_by_string
+        .iter()
+        .filter_map(|reference| reference.rsplit('.').next())
+        .collect::<Vec<_>>();
+    if !matches!(
+        input_by_string_names.as_slice(),
+        ["Description", "Code"] | ["Code", "Description"] | ["Description"] | ["Code"]
+    ) {
+        return None;
+    }
+    let data_lock_fields = parse_field_reference_collection(
+        &fields.physical,
+        42,
+        "ExchangePlan",
+        &header.name,
+        object_refs,
+        &exchange_plan_attribute_references,
+        &[("-2", "Code")],
+    )
+    .ok()?;
 
     Some(ExchangePlanProperties {
         this_node: parse_information_register_non_zero_uuid(fields.get(11)?)?,
@@ -15227,37 +15175,49 @@ fn parse_exchange_plan_properties_from_text(
             "2" => "BothWays",
             _ => return None,
         },
-        input_by_string: parse_exchange_plan_input_by_string(fields.get(27)?, &header.name)?,
+        input_by_string,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
-        default_object_form: parse_exchange_plan_owned_form_ref(
+        default_object_form: parse_declared_owned_form_ref(
             fields.get(14)?,
+            "ExchangePlan",
+            form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
-        default_list_form: parse_exchange_plan_owned_form_ref(
+        default_list_form: parse_declared_owned_form_ref(
             fields.get(19)?,
+            "ExchangePlan",
+            form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
-        default_choice_form: parse_exchange_plan_owned_form_ref(
+        default_choice_form: parse_declared_owned_form_ref(
             fields.get(20)?,
+            "ExchangePlan",
+            form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
-        auxiliary_object_form: parse_exchange_plan_owned_form_ref(
+        auxiliary_object_form: parse_declared_owned_form_ref(
             fields.get(31)?,
+            "ExchangePlan",
+            form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
-        auxiliary_list_form: parse_exchange_plan_owned_form_ref(
+        auxiliary_list_form: parse_declared_owned_form_ref(
             fields.get(32)?,
+            "ExchangePlan",
+            form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
-        auxiliary_choice_form: parse_exchange_plan_owned_form_ref(
+        auxiliary_choice_form: parse_declared_owned_form_ref(
             fields.get(33)?,
+            "ExchangePlan",
+            form_uuids.as_deref(),
             &header.name,
             form_refs,
         )?,
@@ -15277,11 +15237,7 @@ fn parse_exchange_plan_properties_from_text(
             _ => return None,
         },
         include_help_in_contents: parse_1c_bool_field(Some(fields.get(18)?))?,
-        data_lock_fields: parse_exchange_plan_data_lock_fields(
-            fields.get(42)?,
-            &header.name,
-            object_refs,
-        )?,
+        data_lock_fields,
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(28)?)?,
         full_text_search: match fields.get(29)?.trim() {
             "0" => "DontUse",
@@ -15314,7 +15270,7 @@ fn parse_exchange_plan_child_objects(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<(Vec<MetadataChildObject>, bool)> {
+) -> Option<(Vec<MetadataChildObject>, bool, Option<Vec<String>>)> {
     let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
     if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
         return None;
@@ -15378,7 +15334,17 @@ fn parse_exchange_plan_child_objects(
         return None;
     }
     child_objects.extend(sections);
-    Some((child_objects, emit_empty_child_objects))
+    let form_uuids = root
+        .iter()
+        .skip(3)
+        .find_map(|value| {
+            parse_strict_metadata_collection(
+                value,
+                ibcmd_schema::metadata_storage_facts::exchange_plan_form_collection_uuid(),
+            )
+        })
+        .and_then(|forms| parse_task_form_uuids(&forms));
+    Some((child_objects, emit_empty_child_objects, form_uuids))
 }
 
 fn parse_strict_metadata_collection<'a>(
@@ -17313,38 +17279,6 @@ fn information_register_data_lock_control_mode_xml(value: &str) -> Option<&'stat
         .map(|(_, name)| *name)
 }
 
-fn parse_information_register_owned_form_ref(
-    value: &str,
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?;
-    if information_register_uuid_is_zero(&uuid) {
-        return Some(None);
-    }
-    let mut matches = form_refs
-        .iter()
-        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
-    let (_, form) = matches.next()?;
-    if matches.next().is_some()
-        || form.kind != "Form"
-        || !is_owned_metadata_child_path(
-            &form.relative_path,
-            "InformationRegisters",
-            owner_name,
-            "Forms",
-        )
-    {
-        return None;
-    }
-    let reference = form_source_reference_name(form)?;
-    let prefix = format!("InformationRegister.{owner_name}.Form.");
-    reference
-        .strip_prefix(&prefix)
-        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
-        .then_some(Some(reference))
-}
-
 // Platform serialization IDs shared by the BSP, UT, and SFC cohorts; these are not
 // identities of metadata objects from the information base being decoded.
 const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID: &str =
@@ -18090,22 +18024,66 @@ fn parse_exchange_plan_standard_attributes(value: &str) -> Option<Vec<RegisterSt
 /// against.
 const INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY: usize = 4;
 
+/// The owned-form collection of a register root. The collection is stored among
+/// the root collections, not in the owner field block the form-property slots
+/// live in. `None` means a legacy record stores no such collection, so the
+/// declaration cannot be cross-checked.
+fn parse_register_form_uuids(kind: &str, text: &str) -> Option<Option<Vec<String>>> {
+    let Some(form_collection_uuid) =
+        ibcmd_schema::metadata_storage_facts::register_form_collection_uuid(kind)
+    else {
+        return Some(None);
+    };
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    let Some(forms) = root
+        .iter()
+        .skip(3)
+        .find_map(|value| parse_strict_metadata_collection(value, form_collection_uuid))
+    else {
+        return Some(None);
+    };
+    parse_task_form_uuids(&forms).map(Some)
+}
+
+/// A form reference checked against the declared collection when the record
+/// stores one. A legacy record without the collection falls back to the form
+/// index, as it did before the collection was read.
+fn parse_declared_owned_form_ref(
+    value: &str,
+    owner_kind: &str,
+    form_uuids: Option<&[String]>,
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    match form_uuids {
+        Some(form_uuids) => {
+            parse_owned_form_ref(value, owner_kind, form_uuids, owner_name, form_refs)
+        }
+        None => parse_exact_register_owned_form_ref(value, owner_kind, owner_name, form_refs),
+    }
+}
+
 fn parse_information_register_owner_properties(
     fields: &InformationRegisterOwnerFields<'_>,
     header: &MetadataHeader,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    form_uuids: Option<&[String]>,
 ) -> Option<InformationRegisterOwnerProperties> {
     let periodicity = information_register_periodicity_xml(
         fields.get(INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY)?,
     )?;
     Some(InformationRegisterOwnerProperties {
-        default_record_form: parse_information_register_owned_form_ref(
+        default_record_form: parse_declared_owned_form_ref(
             fields.get(2)?,
+            "InformationRegister",
+            form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_list_form: parse_information_register_owned_form_ref(
+        default_list_form: parse_declared_owned_form_ref(
             fields.get(3)?,
+            "InformationRegister",
+            form_uuids,
             &header.name,
             form_refs,
         )?,
@@ -18130,13 +18108,17 @@ fn parse_information_register_owner_properties(
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(10)?)?,
         full_text_search: information_register_full_text_search(fields.get(11)?)?,
         standard_attributes: parse_information_register_standard_attributes(fields.get(12)?)?,
-        auxiliary_record_form: parse_information_register_owned_form_ref(
+        auxiliary_record_form: parse_declared_owned_form_ref(
             fields.get(13)?,
+            "InformationRegister",
+            form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_list_form: parse_information_register_owned_form_ref(
+        auxiliary_list_form: parse_declared_owned_form_ref(
             fields.get(14)?,
+            "InformationRegister",
+            form_uuids,
             &header.name,
             form_refs,
         )?,
@@ -18173,6 +18155,7 @@ fn parse_register_properties_from_text(
     }
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
+    let form_uuids = parse_register_form_uuids(kind, text)?;
     let mut exact_accumulation_register =
         parse_exact_accumulation_register_owner_properties(kind, &fields, &header, form_refs)?;
     let mut exact_calculation_register =
@@ -18263,7 +18246,12 @@ fn parse_register_properties_from_text(
     }
     let information_register = if kind == "InformationRegister" {
         parse_information_register_owner_fields(text, &header).and_then(|fields| {
-            parse_information_register_owner_properties(&fields, &header, form_refs)
+            parse_information_register_owner_properties(
+                &fields,
+                &header,
+                form_refs,
+                form_uuids.as_deref(),
+            )
         })
     } else {
         None
@@ -18325,8 +18313,13 @@ fn parse_register_properties_from_text(
     } else {
         parse_register_form_refs(kind, &fields, uuid, form_refs)
     };
-    let calculation_form_pair =
-        parse_calculation_register_fixed_form_pair(kind, &fields, &header, form_refs)?;
+    let calculation_form_pair = parse_calculation_register_fixed_form_pair(
+        kind,
+        &fields,
+        &header,
+        form_refs,
+        form_uuids.as_deref(),
+    )?;
     let calculation_period = parse_calculation_register_fixed_period(kind, &fields, &header)?;
     let calculation_schedule =
         parse_calculation_register_fixed_schedule(kind, &fields, &header, object_refs)?;
@@ -19074,6 +19067,11 @@ fn parse_exact_register_owned_form_ref(
     let (_, form) = matches.next()?;
     if matches.next().is_some()
         || form.kind != "Form"
+        || form
+            .relative_path
+            .extension()
+            .and_then(|value| value.to_str())
+            != Some("xml")
         || !is_owned_metadata_child_path(&form.relative_path, owner_folder, owner_name, "Forms")
     {
         return None;
@@ -19085,6 +19083,31 @@ fn parse_exact_register_owned_form_ref(
         .strip_prefix(&prefix)
         .is_some_and(|name| !name.is_empty() && !name.contains('.'))
         .then_some(Some(reference))
+}
+
+/// A reference to one of the owner's own forms.
+///
+/// A non-nil value must both be declared in the owner's form collection and
+/// resolve to an owned form of this very object. An empty collection therefore
+/// means the object declares no forms and refuses a non-nil reference.
+fn parse_owned_form_ref(
+    value: &str,
+    owner_kind: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+    if !form_uuids
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
+    {
+        return None;
+    }
+    parse_exact_register_owned_form_ref(value, owner_kind, owner_name, form_refs)
 }
 
 fn parse_exact_accumulation_register_owner_properties(
@@ -19348,6 +19371,7 @@ fn parse_calculation_register_fixed_form_pair(
     fields: &[&str],
     expected_header: &MetadataHeader,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    form_uuids: Option<&[String]>,
 ) -> Option<Option<CalculationRegisterFormPair>> {
     if kind != "CalculationRegister"
         || !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)?
@@ -19362,63 +19386,21 @@ fn parse_calculation_register_fixed_form_pair(
     // owned form of this register refuses the whole record instead of dropping
     // the element: the designer types both slots as the register's own forms.
     Some(Some(CalculationRegisterFormPair {
-        default_list_form: calculation_register_owned_list_form(
+        default_list_form: parse_declared_owned_form_ref(
             fields.get(23)?,
+            "CalculationRegister",
+            form_uuids,
             &expected_header.name,
             form_refs,
         )?,
-        auxiliary_list_form: calculation_register_owned_list_form(
+        auxiliary_list_form: parse_declared_owned_form_ref(
             fields.get(29)?,
+            "CalculationRegister",
+            form_uuids,
             &expected_header.name,
             form_refs,
         )?,
     }))
-}
-
-/// The owned list-form name behind one form slot of a calculation register.
-///
-/// `Some(None)` is a nil uuid, the register naming no form. `None` refuses a
-/// value that names anything but an owned form of this very register (a common
-/// form, another owner's form, an unknown or ambiguous uuid, a malformed value),
-/// so such a record never reaches the export.
-fn calculation_register_owned_list_form(
-    value: &str,
-    register_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?;
-    if information_register_uuid_is_zero(&uuid) {
-        return Some(None);
-    }
-
-    let mut matches = form_refs
-        .iter()
-        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
-    let (_, form) = matches.next()?;
-    if matches.next().is_some()
-        || form.kind != "Form"
-        || form
-            .relative_path
-            .extension()
-            .and_then(|value| value.to_str())
-            != Some("xml")
-        || !is_owned_metadata_child_path(
-            &form.relative_path,
-            "CalculationRegisters",
-            register_name,
-            "Forms",
-        )
-    {
-        return None;
-    }
-
-    let reference = form_source_reference_name(form)?;
-    let expected_prefix = format!("CalculationRegister.{register_name}.Form.");
-    let form_name = reference.strip_prefix(&expected_prefix)?;
-    if form_name.is_empty() || form_name.contains('.') {
-        return None;
-    }
-    Some(Some(reference))
 }
 
 fn parse_calculation_register_fixed_include_help(
@@ -25460,6 +25442,10 @@ fn parse_chart_of_accounts_properties(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    let own_attribute_references = own_attributes
+        .values()
+        .map(|name| format!("ChartOfAccounts.{}.Attribute.{}", header.name, name))
+        .collect::<BTreeSet<_>>();
     // The platform writes the chart's tabular sections after its attributes
     // and before the accounting/ext-dimension flags.
     let mut section_generated_ids = BTreeSet::new();
@@ -25550,14 +25536,16 @@ fn parse_chart_of_accounts_properties(
         object_refs,
         &METADATA_BASED_ON_PREFIXES,
     )?;
-    let data_lock_fields = parse_chart_field_references(
-        fields.get(50)?,
+    let data_lock_fields = parse_field_reference_collection(
+        fields,
+        50,
         "ChartOfAccounts",
         &header.name,
         object_refs,
         &attribute_references,
         &[("-7", "Code"), ("-8", "Description")],
-    )?;
+    )
+    .ok()?;
     // Slots 27 and 49 are `EditType` and `CreateOnInput` and are read as
     // properties below; the old fixed-`1` gate refused every chart that
     // separated either of them.
@@ -25624,13 +25612,16 @@ fn parse_chart_of_accounts_properties(
             "2" => "BothWays",
             _ => return None,
         },
-        input_by_string: parse_chart_input_by_string(
-            fields.get(33)?,
+        input_by_string: parse_field_reference_collection(
+            fields,
+            33,
             "ChartOfAccounts",
             &header.name,
+            object_refs,
+            &own_attribute_references,
             &[("-7", "Code"), ("-8", "Description")],
-            &own_attributes,
-        )?,
+        )
+        .ok()?,
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
         choice_data_get_mode_on_input_by_string: input_modes.2,
@@ -25641,42 +25632,42 @@ fn parse_chart_of_accounts_properties(
             _ => return None,
         },
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(53)?.trim())?,
-        default_object_form: parse_strict_chart_owned_form_ref(
+        default_object_form: parse_owned_form_ref(
             fields.get(28)?,
             "ChartOfAccounts",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_list_form: parse_strict_chart_owned_form_ref(
+        default_list_form: parse_owned_form_ref(
             fields.get(29)?,
             "ChartOfAccounts",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_choice_form: parse_strict_chart_owned_form_ref(
+        default_choice_form: parse_owned_form_ref(
             fields.get(30)?,
             "ChartOfAccounts",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_object_form: parse_strict_chart_owned_form_ref(
+        auxiliary_object_form: parse_owned_form_ref(
             fields.get(40)?,
             "ChartOfAccounts",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_list_form: parse_strict_chart_owned_form_ref(
+        auxiliary_list_form: parse_owned_form_ref(
             fields.get(41)?,
             "ChartOfAccounts",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_choice_form: parse_strict_chart_owned_form_ref(
+        auxiliary_choice_form: parse_owned_form_ref(
             fields.get(42)?,
             "ChartOfAccounts",
             &form_uuids,
@@ -25922,14 +25913,16 @@ fn parse_chart_of_calculation_types_properties(
         object_refs,
         &METADATA_BASED_ON_PREFIXES,
     )?;
-    let data_lock_fields = parse_chart_field_references(
-        fields.get(56)?,
+    let data_lock_fields = parse_field_reference_collection(
+        fields,
+        56,
         "ChartOfCalculationTypes",
         &header.name,
         object_refs,
         &attribute_references,
         &[("-3", "Description"), ("-2", "Code")],
-    )?;
+    )
+    .ok()?;
     Some(ChartOfCalculationTypesProperties {
         generated_types,
         use_standard_commands: parse_1c_bool_field(Some(fields.get(35)?))?,
@@ -25962,17 +25955,16 @@ fn parse_chart_of_calculation_types_properties(
             "2" => "BothWays",
             _ => return None,
         },
-        input_by_string: parse_chart_input_by_string(
-            fields.get(40)?,
+        input_by_string: parse_field_reference_collection(
+            fields,
+            40,
             "ChartOfCalculationTypes",
             &header.name,
+            object_refs,
+            &BTreeSet::new(),
             &[("-3", "Description"), ("-2", "Code")],
-            // A chart of calculation types whose strict root reads has an
-            // empty attribute collection by construction (the gate above), so
-            // it can own no attribute for `<InputByString>` to name; a
-            // `{0,<uuid>}` member therefore still refuses the object.
-            &BTreeMap::new(),
-        )?,
+        )
+        .ok()?,
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
         choice_data_get_mode_on_input_by_string: input_modes.2,
@@ -25983,42 +25975,42 @@ fn parse_chart_of_calculation_types_properties(
             _ => return None,
         },
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(59)?.trim())?,
-        default_object_form: parse_strict_chart_owned_form_ref(
+        default_object_form: parse_owned_form_ref(
             fields.get(32)?,
             "ChartOfCalculationTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_list_form: parse_strict_chart_owned_form_ref(
+        default_list_form: parse_owned_form_ref(
             fields.get(33)?,
             "ChartOfCalculationTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_choice_form: parse_strict_chart_owned_form_ref(
+        default_choice_form: parse_owned_form_ref(
             fields.get(34)?,
             "ChartOfCalculationTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_object_form: parse_strict_chart_owned_form_ref(
+        auxiliary_object_form: parse_owned_form_ref(
             fields.get(45)?,
             "ChartOfCalculationTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_list_form: parse_strict_chart_owned_form_ref(
+        auxiliary_list_form: parse_owned_form_ref(
             fields.get(46)?,
             "ChartOfCalculationTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_choice_form: parse_strict_chart_owned_form_ref(
+        auxiliary_choice_form: parse_owned_form_ref(
             fields.get(47)?,
             "ChartOfCalculationTypes",
             &form_uuids,
@@ -26182,58 +26174,6 @@ fn strict_chart_owner_reference(reference: &str, expected_kind: &str) -> bool {
     matches!(fields.as_slice(), [kind, name] if *kind == expected_kind && !name.is_empty())
 }
 
-/// A chart's `<InputByString>`: a field reference list whose members are
-/// either a standard-attribute marker or the owner's own attribute.
-///
-/// The two-member `{0,<uuid>}` payload is the same own-child form the
-/// owner-graph decoder already reads for catalogs, documents and tasks
-/// (`parse_owner_graph_field_references`), and the chart reader had no arm for
-/// it at all: it accepted only the single-member marker and refused the whole
-/// object otherwise. All three ERP УХ 3.2.12.6 charts of accounts list three
-/// fields -- `-8` Description, `-7` Code and one `{0,<uuid>}` naming their own
-/// `КодБыстрогоВыбора` attribute -- against БСП demo `_ДемоОсновной`, which
-/// lists the two markers only. `ChartsOfAccounts/Международный` lost its whole
-/// file to this and `МСФО`/`Хозрасчетный` fell back to the property-less
-/// default-list-form writer.
-///
-/// Only the owner's own attributes resolve, exactly as the owner-graph decoder
-/// requires: a uuid that is not among them refuses the object rather than
-/// being resolved through the global reference index.
-fn parse_chart_input_by_string(
-    value: &str,
-    owner_kind: &str,
-    owner_name: &str,
-    definitions: &[(&str, &str)],
-    own_attributes: &BTreeMap<String, String>,
-) -> Option<Vec<String>> {
-    let mut seen = BTreeSet::new();
-    parse_exchange_plan_field_ref_collection(value)?
-        .into_iter()
-        .map(|field| {
-            let payload = parse_exchange_plan_field_ref_payload(field)?;
-            let reference = match payload.as_slice() {
-                [marker] => {
-                    let (_, name) = definitions
-                        .iter()
-                        .find(|(candidate, _)| marker.trim() == *candidate)?;
-                    format!("{owner_kind}.{owner_name}.StandardAttribute.{name}")
-                }
-                [kind, uuid] => {
-                    if parse_information_register_usize(kind) != Some(0) {
-                        return None;
-                    }
-                    let uuid = parse_information_register_non_zero_uuid(uuid)?.to_ascii_lowercase();
-                    let name = own_attributes.get(&uuid)?;
-                    format!("{owner_kind}.{owner_name}.Attribute.{name}")
-                }
-                _ => return None,
-            };
-            seen.insert(reference.to_ascii_lowercase())
-                .then_some(reference)
-        })
-        .collect()
-}
-
 fn parse_chart_predefined_data_update(value: &str) -> Option<&'static str> {
     match value.trim() {
         "0" => Some("Auto"),
@@ -26241,22 +26181,6 @@ fn parse_chart_predefined_data_update(value: &str) -> Option<&'static str> {
         "2" => Some("DontAutoUpdate"),
         _ => None,
     }
-}
-
-fn parse_strict_chart_owned_form_ref(
-    value: &str,
-    owner_kind: &str,
-    form_uuids: &[String],
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
-    if !information_register_uuid_is_zero(&uuid)
-        && !form_uuids.iter().any(|candidate| candidate == &uuid)
-    {
-        return None;
-    }
-    parse_exact_register_owned_form_ref(value, owner_kind, owner_name, form_refs)
 }
 
 fn parse_strict_chart_child_forms(
@@ -26936,14 +26860,44 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         object_refs,
         &METADATA_BASED_ON_PREFIXES,
     )?;
-    let data_lock_fields = parse_chart_field_references(
-        fields.get(52)?,
+    let data_lock_fields = parse_field_reference_collection(
+        fields,
+        52,
         "ChartOfCharacteristicTypes",
         &header.name,
         object_refs,
         &attribute_references,
         &[("-9", "Description"), ("-8", "Code")],
-    )?;
+    )
+    .ok()?;
+    let input_by_string = match parse_field_reference_collection(
+        fields,
+        33,
+        "ChartOfCharacteristicTypes",
+        &header.name,
+        object_refs,
+        &BTreeSet::new(),
+        &[("-9", "Description"), ("-8", "Code")],
+    ) {
+        Ok(references) => references,
+        Err(error) => {
+            *owner_graph_diagnostic = Some(field_reference_diagnostic(
+                owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+                33,
+                error,
+            ));
+            return None;
+        }
+    };
+    let input_by_string_names = input_by_string
+        .iter()
+        .filter_map(|reference| reference.rsplit('.').next())
+        .collect::<Vec<_>>();
+    if !ibcmd_schema::metadata_storage_facts::chart_of_characteristic_types_input_by_string_order_is_valid(
+        &input_by_string_names,
+    ) {
+        return None;
+    }
     Some(ChartOfCharacteristicTypesProperties {
         generated_types,
         use_standard_commands: parse_1c_bool_field(Some(fields.get(14)?))?,
@@ -27012,7 +26966,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             _ => return None,
         },
         quick_choice: parse_1c_bool_field(Some(fields.get(32)?))?,
-        input_by_string: parse_cct_input_by_string(fields.get(33)?, &header.name)?,
+        input_by_string,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
@@ -27032,62 +26986,72 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             "1" => "DontUse",
             _ => return None,
         },
-        default_object_form: parse_cct_owned_form_ref(
+        default_object_form: parse_owned_form_ref(
             fields.get(26)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_folder_form: parse_cct_owned_form_ref(
+        default_folder_form: parse_owned_form_ref(
             fields.get(27)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_list_form: parse_cct_owned_form_ref(
+        default_list_form: parse_owned_form_ref(
             fields.get(28)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_choice_form: parse_cct_owned_form_ref(
+        default_choice_form: parse_owned_form_ref(
             fields.get(29)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_folder_choice_form: parse_cct_owned_form_ref(
+        default_folder_choice_form: parse_owned_form_ref(
             fields.get(30)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_object_form: parse_cct_owned_form_ref(
+        auxiliary_object_form: parse_owned_form_ref(
             fields.get(39)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_folder_form: parse_cct_owned_form_ref(
+        auxiliary_folder_form: parse_owned_form_ref(
             fields.get(40)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_list_form: parse_cct_owned_form_ref(
+        auxiliary_list_form: parse_owned_form_ref(
             fields.get(41)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_choice_form: parse_cct_owned_form_ref(
+        auxiliary_choice_form: parse_owned_form_ref(
             fields.get(42)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_folder_choice_form: parse_cct_owned_form_ref(
+        auxiliary_folder_choice_form: parse_owned_form_ref(
             fields.get(43)?,
+            "ChartOfCharacteristicTypes",
             &form_uuids,
             &header.name,
             form_refs,
@@ -27158,52 +27122,6 @@ fn parse_cct_characteristic_ext_values(
     let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
     let name = reference.strip_prefix("Catalog.")?;
     (!name.is_empty() && !name.contains('.')).then_some(Some(reference))
-}
-
-fn parse_cct_input_by_string(value: &str, owner_name: &str) -> Option<Vec<String>> {
-    let mut seen = BTreeSet::new();
-    let fields = parse_exchange_plan_field_ref_collection(value)?
-        .into_iter()
-        .map(|field| {
-            let payload = parse_exchange_plan_field_ref_payload(field)?;
-            let marker = match payload.as_slice() {
-                [marker] => marker.trim(),
-                _ => return None,
-            };
-            let name = match marker {
-                "-9" => "Description",
-                "-8" => "Code",
-                _ => return None,
-            };
-            seen.insert(marker).then(|| {
-                format!("ChartOfCharacteristicTypes.{owner_name}.StandardAttribute.{name}")
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let names = fields
-        .iter()
-        .filter_map(|field| field.rsplit('.').next())
-        .collect::<Vec<_>>();
-    matches!(
-        names.as_slice(),
-        ["Description"] | ["Description", "Code"] | ["Code"]
-    )
-    .then_some(fields)
-}
-
-fn parse_cct_owned_form_ref(
-    value: &str,
-    form_uuids: &[String],
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
-    if !information_register_uuid_is_zero(&uuid)
-        && !form_uuids.iter().any(|candidate| candidate == &uuid)
-    {
-        return None;
-    }
-    parse_exact_register_owned_form_ref(value, "ChartOfCharacteristicTypes", owner_name, form_refs)
 }
 
 fn parse_cct_child_forms(
@@ -28291,31 +28209,49 @@ fn parse_strict_catalog_properties_from_text(
         .filter(|child| child.tag == "Attribute")
         .map(|child| format!("Catalog.{}.Attribute.{}", header.name, child.header.name))
         .collect::<BTreeSet<_>>();
-    let input_by_string_fields = match parse_catalog_field_references(
-        fields,
-        42,
-        &header.name,
-        object_refs,
-        &direct_attribute_references,
-        &CATALOG_INPUT_BY_STRING_STANDARD_ATTRIBUTES,
-    ) {
-        Ok(references) => references,
-        Err(diagnostic) => {
-            *owner_graph_diagnostic = Some(diagnostic);
-            return None;
+    let catalog_field_references = |field_index, standard_attributes| {
+        // The compact Catalog source layout carries an empty input-by-string
+        // set as the exact scalar sentinel `{0}`. It is a closed zero-item
+        // form, not a fallback for a malformed typed collection; non-empty
+        // references flow through the common reader below.
+        if fields.get(field_index).is_some_and(|value| {
+            owner_graph::CharacteristicsPhysicalSchema::catalog_compact_reference_collection_is_empty(
+                field_index,
+                value.trim(),
+            )
+        }) {
+            return Ok(Vec::new());
         }
+        parse_field_reference_collection(
+            fields,
+            field_index,
+            "Catalog",
+            &header.name,
+            object_refs,
+            &direct_attribute_references,
+            standard_attributes,
+        )
     };
-    let data_lock_fields = match parse_catalog_field_references(
-        fields,
-        54,
-        &header.name,
-        object_refs,
-        &direct_attribute_references,
-        &CATALOG_STANDARD_ATTRIBUTES,
-    ) {
+    let input_by_string_fields =
+        match catalog_field_references(42, &CATALOG_INPUT_BY_STRING_STANDARD_ATTRIBUTES) {
+            Ok(references) => references,
+            Err(error) => {
+                *owner_graph_diagnostic = Some(field_reference_diagnostic(
+                    owner_graph::OwnerGraphFamily::Catalog,
+                    42,
+                    error,
+                ));
+                return None;
+            }
+        };
+    let data_lock_fields = match catalog_field_references(54, &CATALOG_STANDARD_ATTRIBUTES) {
         Ok(references) => references,
-        Err(diagnostic) => {
-            *owner_graph_diagnostic = Some(diagnostic);
+        Err(error) => {
+            *owner_graph_diagnostic = Some(field_reference_diagnostic(
+                owner_graph::OwnerGraphFamily::Catalog,
+                54,
+                error,
+            ));
             return None;
         }
     };
@@ -28424,62 +28360,72 @@ fn parse_strict_catalog_properties_from_text(
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
-        default_object_form: parse_catalog_owned_form_ref(
+        default_object_form: parse_owned_form_ref(
             fields.get(21)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_folder_form: parse_catalog_owned_form_ref(
+        default_folder_form: parse_owned_form_ref(
             fields.get(22)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_list_form: parse_catalog_owned_form_ref(
+        default_list_form: parse_owned_form_ref(
             fields.get(23)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_choice_form: parse_catalog_owned_form_ref(
+        default_choice_form: parse_owned_form_ref(
             fields.get(24)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_folder_choice_form: parse_catalog_owned_form_ref(
+        default_folder_choice_form: parse_owned_form_ref(
             fields.get(25)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_object_form: parse_catalog_owned_form_ref(
+        auxiliary_object_form: parse_owned_form_ref(
             fields.get(26)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_folder_form: parse_catalog_owned_form_ref(
+        auxiliary_folder_form: parse_owned_form_ref(
             fields.get(27)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_list_form: parse_catalog_owned_form_ref(
+        auxiliary_list_form: parse_owned_form_ref(
             fields.get(28)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_choice_form: parse_catalog_owned_form_ref(
+        auxiliary_choice_form: parse_owned_form_ref(
             fields.get(29)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_folder_choice_form: parse_catalog_owned_form_ref(
+        auxiliary_folder_choice_form: parse_owned_form_ref(
             fields.get(30)?,
+            "Catalog",
             &form_uuids,
             &header.name,
             form_refs,
@@ -28934,23 +28880,6 @@ fn parse_catalog_child_forms(
         .collect()
 }
 
-fn parse_catalog_owned_form_ref(
-    value: &str,
-    form_uuids: &[String],
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
-    if !information_register_uuid_is_zero(&uuid)
-        && !form_uuids
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
-    {
-        return None;
-    }
-    parse_exact_register_owned_form_ref(value, "Catalog", owner_name, form_refs)
-}
-
 fn parse_catalog_child_templates(
     template_uuids: &[String],
     owner_name: &str,
@@ -28985,41 +28914,6 @@ fn parse_catalog_child_templates(
             .then(|| name.to_string())
         })
         .collect()
-}
-
-#[expect(
-    clippy::result_large_err,
-    reason = "moved verbatim in #559; cleanup later"
-)]
-fn parse_catalog_field_references(
-    fields: &[&str],
-    field_index: usize,
-    owner_name: &str,
-    object_refs: &BTreeMap<String, String>,
-    attribute_references: &BTreeSet<String>,
-    standard_attributes: &[(&str, &str)],
-) -> std::result::Result<Vec<String>, MetadataSourceExtractionDiagnostic> {
-    // The compact Catalog source layout carries an empty input-by-string set
-    // as the exact scalar sentinel `{0}`.  This is a closed zero-item form,
-    // not a fallback for a malformed typed collection; non-empty references
-    // still flow through the common, fully typed owner-graph decoder below.
-    if fields.get(field_index).is_some_and(|value| {
-        owner_graph::CharacteristicsPhysicalSchema::catalog_compact_reference_collection_is_empty(
-            field_index,
-            value.trim(),
-        )
-    }) {
-        return Ok(Vec::new());
-    }
-    parse_owner_graph_field_references(
-        fields,
-        field_index,
-        owner_graph::OwnerGraphFamily::Catalog,
-        owner_name,
-        object_refs,
-        attribute_references,
-        standard_attributes,
-    )
 }
 
 fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
@@ -29685,17 +29579,22 @@ fn parse_document_properties_from_text(
         .filter(|child| child.tag == "Attribute")
         .map(|child| format!("Document.{}.Attribute.{}", header.name, child.header.name))
         .collect::<BTreeSet<_>>();
-    let input_by_string = match parse_document_field_references(
+    let input_by_string = match parse_field_reference_collection(
         fields,
         29,
+        "Document",
         &header.name,
         object_refs,
         &attribute_references,
         &DOCUMENT_INPUT_BY_STRING_STANDARD_ATTRIBUTES,
     ) {
         Ok(references) => references,
-        Err(diagnostic) => {
-            *owner_graph_diagnostic = Some(diagnostic);
+        Err(error) => {
+            *owner_graph_diagnostic = Some(field_reference_diagnostic(
+                owner_graph::OwnerGraphFamily::Document,
+                29,
+                error,
+            ));
             return None;
         }
     };
@@ -29706,17 +29605,22 @@ fn parse_document_properties_from_text(
     // list (`Date` three times, `Number` once) and every other Document in
     // the corpus names only its own attributes, so both values are observed.
     // The empty table refused all four documents outright.
-    let data_lock_fields = match parse_document_field_references(
+    let data_lock_fields = match parse_field_reference_collection(
         fields,
         47,
+        "Document",
         &header.name,
         object_refs,
         &attribute_references,
         &DOCUMENT_STANDARD_ATTRIBUTES,
     ) {
         Ok(references) => references,
-        Err(diagnostic) => {
-            *owner_graph_diagnostic = Some(diagnostic);
+        Err(error) => {
+            *owner_graph_diagnostic = Some(field_reference_diagnostic(
+                owner_graph::OwnerGraphFamily::Document,
+                47,
+                error,
+            ));
             return None;
         }
     };
@@ -29831,38 +29735,44 @@ fn parse_document_properties_from_text(
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
-        default_object_form: parse_document_form_ref(
+        default_object_form: parse_owned_form_ref(
             fields.get(16)?,
+            "Document",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_list_form: parse_document_form_ref(
+        default_list_form: parse_owned_form_ref(
             fields.get(17)?,
+            "Document",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_choice_form: parse_document_form_ref(
+        default_choice_form: parse_owned_form_ref(
             fields.get(18)?,
+            "Document",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_object_form: parse_document_form_ref(
+        auxiliary_object_form: parse_owned_form_ref(
             fields.get(35)?,
+            "Document",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_list_form: parse_document_form_ref(
+        auxiliary_list_form: parse_owned_form_ref(
             fields.get(36)?,
+            "Document",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_choice_form: parse_document_form_ref(
+        auxiliary_choice_form: parse_owned_form_ref(
             fields.get(37)?,
+            "Document",
             &form_uuids,
             &header.name,
             form_refs,
@@ -29945,23 +29855,6 @@ fn parse_document_optional_object_reference(
         return None;
     }
     Some(Some(reference))
-}
-
-fn parse_document_form_ref(
-    value: &str,
-    form_uuids: &[String],
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
-    if !information_register_uuid_is_zero(&uuid)
-        && !form_uuids
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
-    {
-        return None;
-    }
-    parse_exact_register_owned_form_ref(value, "Document", owner_name, form_refs)
 }
 
 fn parse_document_child_forms(
@@ -30371,82 +30264,55 @@ fn validate_document_owner_graph_child_objects(
     Ok(())
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "moved verbatim in #559; cleanup later"
-)]
-fn parse_document_field_references(
-    fields: &[&str],
-    field_index: usize,
-    owner_name: &str,
-    object_refs: &BTreeMap<String, String>,
-    attribute_references: &BTreeSet<String>,
-    standard_attributes: &[(&str, &str)],
-) -> std::result::Result<Vec<String>, MetadataSourceExtractionDiagnostic> {
-    parse_owner_graph_field_references(
-        fields,
-        field_index,
-        owner_graph::OwnerGraphFamily::Document,
-        owner_name,
-        object_refs,
-        attribute_references,
-        standard_attributes,
-    )
-}
+/// A field-reference list whose members are either a standard-attribute
+/// marker or the owner's own attribute.
+///
+/// The two-member `{0,<uuid>}` payload is the own-child form. All three
+/// ERP УХ 3.2.12.6 charts of accounts list three fields -- `-8` Description,
+/// `-7` Code and one `{0,<uuid>}` naming their own `КодБыстрогоВыбора`
+/// attribute -- against БСП demo `_ДемоОсновной`, which lists the two markers
+/// only.
+///
+/// Only the owner's own attributes resolve: a uuid that is not among them
+/// refuses the object rather than being resolved through the global reference
+/// index.
+type FieldReferenceError = (Option<usize>, owner_graph::OwnerGraphOwnedChildReason);
 
-#[expect(
-    clippy::result_large_err,
-    reason = "moved verbatim in #559; cleanup later"
-)]
-fn parse_owner_graph_field_references(
+fn parse_field_reference_collection(
     fields: &[&str],
     field_index: usize,
-    family: owner_graph::OwnerGraphFamily,
+    family: &str,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
     attribute_references: &BTreeSet<String>,
     standard_attributes: &[(&str, &str)],
-) -> std::result::Result<Vec<String>, MetadataSourceExtractionDiagnostic> {
-    let failure = |item_index, reason| {
-        owner_graph_field_diagnostic(
-            family,
-            owner_graph::OwnerCollectionRole::DirectAttribute,
-            field_index,
-            item_index,
-            owner_graph::OwnerGraphReference::ChildUuid,
-            reason,
-        )
-    };
+) -> std::result::Result<Vec<String>, FieldReferenceError> {
     let value = fields
         .get(field_index)
         .copied()
-        .ok_or_else(|| failure(None, owner_graph::OwnerGraphOwnedChildReason::Missing))?;
-    let items = parse_exchange_plan_field_ref_collection(value).ok_or_else(|| {
-        failure(
-            None,
-            owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
-        )
-    })?;
+        .ok_or((None, owner_graph::OwnerGraphOwnedChildReason::Missing))?;
+    let items = parse_exchange_plan_field_ref_collection(value).ok_or((
+        None,
+        owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+    ))?;
     let mut seen = BTreeSet::new();
     let mut references = Vec::with_capacity(items.len());
     for (item_index, value) in items.into_iter().enumerate() {
-        let item_failure = |reason| failure(Some(item_index), reason);
+        let item_failure = |reason| (Some(item_index), reason);
         let item_payload = parse_exchange_plan_field_ref_payload(value)
             .ok_or_else(|| item_failure(owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch))?;
         let reference = match item_payload.as_slice() {
             [marker] => {
-                let Some((_, name)) = standard_attributes
+                let (_, name) = standard_attributes
                     .iter()
                     .find(|(candidate, _)| marker.trim() == *candidate)
-                else {
-                    return Err(item_failure(
-                        owner_graph::OwnerGraphOwnedChildReason::Unexpected,
-                    ));
-                };
-                format!("{}.{owner_name}.StandardAttribute.{name}", family.as_str())
+                    .ok_or_else(|| {
+                        item_failure(owner_graph::OwnerGraphOwnedChildReason::Unexpected)
+                    })?;
+                format!("{family}.{owner_name}.StandardAttribute.{name}")
             }
             [kind, uuid] => {
-                if parse_information_register_usize(kind) != Some(0) {
+                if kind.trim() != "0" {
                     return Err(item_failure(
                         owner_graph::OwnerGraphOwnedChildReason::WrongKind,
                     ));
@@ -30491,6 +30357,21 @@ fn parse_owner_graph_field_references(
         references.push(reference);
     }
     Ok(references)
+}
+
+fn field_reference_diagnostic(
+    family: owner_graph::OwnerGraphFamily,
+    field_index: usize,
+    error: FieldReferenceError,
+) -> MetadataSourceExtractionDiagnostic {
+    owner_graph_field_diagnostic(
+        family,
+        owner_graph::OwnerCollectionRole::DirectAttribute,
+        field_index,
+        error.0,
+        owner_graph::OwnerGraphReference::ChildUuid,
+        error.1,
+    )
 }
 
 fn parse_document_reference_collection(
@@ -30892,31 +30773,41 @@ fn parse_business_process_properties_from_text(
             )
         })
         .collect::<BTreeSet<_>>();
-    let input_by_string = match parse_business_process_field_references(
+    let input_by_string = match parse_field_reference_collection(
         fields,
         27,
+        "BusinessProcess",
         &header.name,
         object_refs,
         &attribute_references,
         &[("-2", "Number")],
     ) {
         Ok(references) => references,
-        Err(diagnostic) => {
-            *owner_graph_diagnostic = Some(diagnostic);
+        Err(error) => {
+            *owner_graph_diagnostic = Some(field_reference_diagnostic(
+                owner_graph::OwnerGraphFamily::BusinessProcess,
+                27,
+                error,
+            ));
             return None;
         }
     };
-    let data_lock_fields = match parse_business_process_field_references(
+    let data_lock_fields = match parse_field_reference_collection(
         fields,
         43,
+        "BusinessProcess",
         &header.name,
         object_refs,
         &attribute_references,
         &[("-8", "HeadTask"), ("-2", "Number")],
     ) {
         Ok(references) => references,
-        Err(diagnostic) => {
-            *owner_graph_diagnostic = Some(diagnostic);
+        Err(error) => {
+            *owner_graph_diagnostic = Some(field_reference_diagnostic(
+                owner_graph::OwnerGraphFamily::BusinessProcess,
+                43,
+                error,
+            ));
             return None;
         }
     };
@@ -30995,38 +30886,44 @@ fn parse_business_process_properties_from_text(
         search_string_mode_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
         full_text_search_on_input_by_string,
-        default_object_form: parse_business_process_form_ref(
+        default_object_form: parse_owned_form_ref(
             fields.get(22)?,
+            "BusinessProcess",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_list_form: parse_business_process_form_ref(
+        default_list_form: parse_owned_form_ref(
             fields.get(23)?,
+            "BusinessProcess",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        default_choice_form: parse_business_process_form_ref(
+        default_choice_form: parse_owned_form_ref(
             fields.get(24)?,
+            "BusinessProcess",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_object_form: parse_business_process_form_ref(
+        auxiliary_object_form: parse_owned_form_ref(
             fields.get(32)?,
+            "BusinessProcess",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_list_form: parse_business_process_form_ref(
+        auxiliary_list_form: parse_owned_form_ref(
             fields.get(33)?,
+            "BusinessProcess",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
-        auxiliary_choice_form: parse_business_process_form_ref(
+        auxiliary_choice_form: parse_owned_form_ref(
             fields.get(34)?,
+            "BusinessProcess",
             &form_uuids,
             &header.name,
             form_refs,
@@ -31235,23 +31132,6 @@ fn parse_business_process_child_forms(
         .collect()
 }
 
-fn parse_business_process_form_ref(
-    value: &str,
-    form_uuids: &[String],
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
-    if !information_register_uuid_is_zero(&uuid)
-        && !form_uuids
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
-    {
-        return None;
-    }
-    parse_exact_register_owned_form_ref(value, "BusinessProcess", owner_name, form_refs)
-}
-
 fn parse_business_process_based_on(
     value: &str,
     object_refs: &BTreeMap<String, String>,
@@ -31291,29 +31171,6 @@ fn parse_business_process_based_on(
                 .then_some(reference)
         })
         .collect()
-}
-
-#[expect(
-    clippy::result_large_err,
-    reason = "moved verbatim in #559; cleanup later"
-)]
-fn parse_business_process_field_references(
-    fields: &[&str],
-    field_index: usize,
-    owner_name: &str,
-    object_refs: &BTreeMap<String, String>,
-    attribute_references: &BTreeSet<String>,
-    standard_attributes: &[(&str, &str)],
-) -> std::result::Result<Vec<String>, MetadataSourceExtractionDiagnostic> {
-    parse_owner_graph_field_references(
-        fields,
-        field_index,
-        owner_graph::OwnerGraphFamily::BusinessProcess,
-        owner_name,
-        object_refs,
-        attribute_references,
-        standard_attributes,
-    )
 }
 
 const BUSINESS_PROCESS_STANDARD_ATTRIBUTES: [(&str, &str); 7] = [
@@ -31690,33 +31547,69 @@ fn parse_task_properties_from_text(
         .iter()
         .map(|attribute| format!("Task.{}.Attribute.{}", header.name, attribute.header.name))
         .collect::<BTreeSet<_>>();
-    let input_by_string = parse_task_field_references(
-        fields.get(28)?,
+    let input_by_string = parse_field_reference_collection(
+        &fields,
+        28,
+        "Task",
         &header.name,
         object_refs,
         &attribute_references,
         &[("-9", "Description"), ("-2", "Number")],
-    )?;
-    let data_lock_fields = parse_task_field_references(
-        fields.get(46)?,
+    )
+    .ok()?;
+    let data_lock_fields = parse_field_reference_collection(
+        &fields,
+        46,
+        "Task",
         &header.name,
         object_refs,
         &attribute_references,
         &[("-7", "BusinessProcess"), ("-2", "Number")],
-    )?;
+    )
+    .ok()?;
 
-    let default_object_form =
-        parse_task_form_ref(fields.get(15)?, &form_uuids, &header.name, form_refs)?;
-    let default_list_form =
-        parse_task_form_ref(fields.get(16)?, &form_uuids, &header.name, form_refs)?;
-    let default_choice_form =
-        parse_task_form_ref(fields.get(17)?, &form_uuids, &header.name, form_refs)?;
-    let auxiliary_object_form =
-        parse_task_form_ref(fields.get(35)?, &form_uuids, &header.name, form_refs)?;
-    let auxiliary_list_form =
-        parse_task_form_ref(fields.get(36)?, &form_uuids, &header.name, form_refs)?;
-    let auxiliary_choice_form =
-        parse_task_form_ref(fields.get(37)?, &form_uuids, &header.name, form_refs)?;
+    let default_object_form = parse_owned_form_ref(
+        fields.get(15)?,
+        "Task",
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let default_list_form = parse_owned_form_ref(
+        fields.get(16)?,
+        "Task",
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let default_choice_form = parse_owned_form_ref(
+        fields.get(17)?,
+        "Task",
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let auxiliary_object_form = parse_owned_form_ref(
+        fields.get(35)?,
+        "Task",
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let auxiliary_list_form = parse_owned_form_ref(
+        fields.get(36)?,
+        "Task",
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let auxiliary_choice_form = parse_owned_form_ref(
+        fields.get(37)?,
+        "Task",
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
 
     let (
         search_string_mode_on_input_by_string,
@@ -32007,23 +31900,6 @@ fn parse_task_child_forms(
         .collect()
 }
 
-fn parse_task_form_ref(
-    value: &str,
-    form_uuids: &[String],
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
-    if !information_register_uuid_is_zero(&uuid)
-        && !form_uuids
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
-    {
-        return None;
-    }
-    parse_exact_register_owned_form_ref(value, "Task", owner_name, form_refs)
-}
-
 fn parse_task_child_attributes(
     items: &[&str],
     owner_name: &str,
@@ -32303,75 +32179,6 @@ fn parse_task_based_on(value: &str, object_refs: &BTreeMap<String, String>) -> O
                 && !reference.starts_with('.')
                 && !reference.ends_with('.');
             (valid && seen.insert(reference.to_ascii_lowercase())).then_some(reference)
-        })
-        .collect()
-}
-
-fn parse_task_field_references(
-    value: &str,
-    owner_name: &str,
-    object_refs: &BTreeMap<String, String>,
-    attribute_references: &BTreeSet<String>,
-    standard_attributes: &[(&str, &str)],
-) -> Option<Vec<String>> {
-    let mut seen = BTreeSet::new();
-    parse_exchange_plan_field_ref_collection(value)?
-        .into_iter()
-        .map(|value| {
-            let payload = parse_exchange_plan_field_ref_payload(value)?;
-            let reference = match payload.as_slice() {
-                [marker] => {
-                    let (_, name) = standard_attributes
-                        .iter()
-                        .find(|(candidate, _)| marker.trim() == *candidate)?;
-                    format!("Task.{owner_name}.StandardAttribute.{name}")
-                }
-                [kind, uuid] if kind.trim() == "0" => {
-                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
-                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
-                    attribute_references
-                        .contains(&reference)
-                        .then_some(reference)?
-                }
-                _ => return None,
-            };
-            seen.insert(reference.to_ascii_lowercase())
-                .then_some(reference)
-        })
-        .collect()
-}
-
-fn parse_chart_field_references(
-    value: &str,
-    family: &str,
-    owner_name: &str,
-    object_refs: &BTreeMap<String, String>,
-    attribute_references: &BTreeSet<String>,
-    standard_attributes: &[(&str, &str)],
-) -> Option<Vec<String>> {
-    let mut seen = BTreeSet::new();
-    parse_exchange_plan_field_ref_collection(value)?
-        .into_iter()
-        .map(|value| {
-            let payload = parse_exchange_plan_field_ref_payload(value)?;
-            let reference = match payload.as_slice() {
-                [marker] => {
-                    let (_, name) = standard_attributes
-                        .iter()
-                        .find(|(candidate, _)| marker.trim() == *candidate)?;
-                    format!("{family}.{owner_name}.StandardAttribute.{name}")
-                }
-                [kind, uuid] if kind.trim() == "0" => {
-                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
-                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
-                    attribute_references
-                        .contains(&reference)
-                        .then_some(reference)?
-                }
-                _ => return None,
-            };
-            seen.insert(reference.to_ascii_lowercase())
-                .then_some(reference)
         })
         .collect()
 }
@@ -32694,26 +32501,30 @@ fn parse_settings_storage_properties_from_text(
         root_fields.get(4)?,
         SETTINGS_STORAGE_FORM_COLLECTION_UUID,
     )?;
-    let default_load_form = parse_settings_storage_default_form_ref(
+    let default_load_form = parse_owned_form_ref(
         fields.get(4)?,
+        "SettingsStorage",
         &form_uuids,
         &header.name,
         form_refs,
     )?;
-    let default_save_form = parse_settings_storage_default_form_ref(
+    let default_save_form = parse_owned_form_ref(
         fields.get(5)?,
+        "SettingsStorage",
         &form_uuids,
         &header.name,
         form_refs,
     )?;
-    let auxiliary_load_form = parse_settings_storage_default_form_ref(
+    let auxiliary_load_form = parse_owned_form_ref(
         fields.get(6)?,
+        "SettingsStorage",
         &form_uuids,
         &header.name,
         form_refs,
     )?;
-    let auxiliary_save_form = parse_settings_storage_default_form_ref(
+    let auxiliary_save_form = parse_owned_form_ref(
         fields.get(7)?,
+        "SettingsStorage",
         &form_uuids,
         &header.name,
         form_refs,
@@ -32832,14 +32643,16 @@ fn parse_document_journal_properties_from_text(
         return None;
     }
 
-    let default_form = parse_document_journal_form_ref(
+    let default_form = parse_owned_form_ref(
         owner_fields.get(4)?,
+        "DocumentJournal",
         &form_uuids,
         &header.name,
         form_refs,
     )?;
-    let auxiliary_form = parse_document_journal_form_ref(
+    let auxiliary_form = parse_owned_form_ref(
         owner_fields.get(13)?,
+        "DocumentJournal",
         &form_uuids,
         &header.name,
         form_refs,
@@ -32883,23 +32696,6 @@ fn parse_document_journal_standard_attributes(
         return Some(Vec::new());
     }
     parse_exact_register_standard_attributes(value, &DOCUMENT_JOURNAL_STANDARD_ATTRIBUTES)
-}
-
-fn parse_document_journal_form_ref(
-    value: &str,
-    form_uuids: &[String],
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
-    if !information_register_uuid_is_zero(&uuid)
-        && !form_uuids
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
-    {
-        return None;
-    }
-    parse_exact_register_owned_form_ref(value, "DocumentJournal", owner_name, form_refs)
 }
 
 fn parse_document_journal_child_forms(
@@ -33216,49 +33012,6 @@ fn parse_settings_storage_collection(
         uuids.push(uuid);
     }
     Some(uuids)
-}
-
-fn settings_storage_uuid_is_zero(value: &str) -> bool {
-    value.trim() == "00000000-0000-0000-0000-000000000000"
-}
-
-fn parse_settings_storage_default_form_ref(
-    value: &str,
-    owner_form_uuids: &[String],
-    owner_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Option<Option<String>> {
-    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
-    if settings_storage_uuid_is_zero(&uuid) {
-        return Some(None);
-    }
-    if !owner_form_uuids.iter().any(|candidate| candidate == &uuid) {
-        return None;
-    }
-    let mut matches = form_refs
-        .iter()
-        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
-    let (_, form) = matches.next()?;
-    if matches.next().is_some() {
-        return None;
-    }
-    if form.kind != "Form"
-        || !is_owned_metadata_child_path(
-            &form.relative_path,
-            "SettingsStorages",
-            owner_name,
-            "Forms",
-        )
-    {
-        return None;
-    }
-    let reference = form_source_reference_name(form)?;
-    let expected_prefix = format!("SettingsStorage.{owner_name}.Form.");
-    let form_name = reference.strip_prefix(&expected_prefix)?;
-    if form_name.is_empty() || form_name.contains('.') {
-        return None;
-    }
-    Some(Some(reference))
 }
 
 #[expect(
@@ -33728,6 +33481,7 @@ fn metadata_source_folder_for_kind(kind: &str) -> Option<&'static str> {
         // carried this pair; only the forward one was missing, because until
         // now no filter criterion needed its own owned-form folder resolved.
         "FilterCriterion" => Some("FilterCriteria"),
+        "SettingsStorage" => Some("SettingsStorages"),
         _ => None,
     }
 }

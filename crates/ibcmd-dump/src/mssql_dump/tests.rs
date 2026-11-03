@@ -3485,15 +3485,17 @@ fn catalog_field_references_report_unknown_second_item_without_payload() {
     let mut fields = vec![""; 43];
     fields[42] = &collection;
 
-    let diagnostic = parse_catalog_field_references(
+    let error = parse_field_reference_collection(
         &fields,
         42,
+        "Catalog",
         "Owner",
         &BTreeMap::new(),
         &BTreeSet::new(),
         &[("-3", "Description"), ("-2", "Code")],
     )
     .unwrap_err();
+    let diagnostic = field_reference_diagnostic(owner_graph::OwnerGraphFamily::Catalog, 42, error);
 
     assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
     assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
@@ -3518,15 +3520,17 @@ fn catalog_field_references_report_duplicate_second_item() {
     let mut fields = vec![""; 55];
     fields[54] = &collection;
 
-    let diagnostic = parse_catalog_field_references(
+    let error = parse_field_reference_collection(
         &fields,
         54,
+        "Catalog",
         "Owner",
         &BTreeMap::new(),
         &BTreeSet::new(),
         &CATALOG_STANDARD_ATTRIBUTES,
     )
     .unwrap_err();
+    let diagnostic = field_reference_diagnostic(owner_graph::OwnerGraphFamily::Catalog, 54, error);
 
     assert_eq!(diagnostic.structural_signature, "ambiguous");
     assert_eq!(diagnostic.field_index, Some(54));
@@ -3534,6 +3538,110 @@ fn catalog_field_references_report_duplicate_second_item() {
     assert_eq!(
         diagnostic.collection_role.as_deref(),
         Some("direct_attribute")
+    );
+}
+
+#[test]
+fn field_reference_collection_rejects_a_leading_zero_kind() {
+    let uuid = "44444444-4444-4444-8444-444444444444";
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{00,{uuid}}}}}");
+    let collection = format!("{{1,{{0,1,{item}}}}}");
+    let fields = [collection.as_str()];
+    let object_refs = BTreeMap::from([(
+        uuid.to_owned(),
+        "ChartOfAccounts.Owner.Attribute.КодБыстрогоВыбора".to_owned(),
+    )]);
+    let attribute_references =
+        BTreeSet::from(["ChartOfAccounts.Owner.Attribute.КодБыстрогоВыбора".to_owned()]);
+
+    let error = parse_field_reference_collection(
+        &fields,
+        0,
+        "ChartOfAccounts",
+        "Owner",
+        &object_refs,
+        &attribute_references,
+        &[],
+    )
+    .unwrap_err();
+
+    assert_eq!(error.1, owner_graph::OwnerGraphOwnedChildReason::WrongKind);
+}
+
+#[test]
+fn field_reference_collection_resolves_a_chart_of_accounts_own_attribute() {
+    let uuid = "44444444-4444-4444-8444-444444444444";
+    let reference = "ChartOfAccounts.Owner.Attribute.КодБыстрогоВыбора";
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{uuid}}}}}");
+    let collection = format!("{{1,{{0,1,{item}}}}}");
+    let fields = [collection.as_str()];
+    let object_refs = BTreeMap::from([(uuid.to_owned(), reference.to_owned())]);
+    let attribute_references = BTreeSet::from([reference.to_owned()]);
+
+    assert_eq!(
+        parse_field_reference_collection(
+            &fields,
+            0,
+            "ChartOfAccounts",
+            "Owner",
+            &object_refs,
+            &attribute_references,
+            &[],
+        )
+        .unwrap(),
+        vec![reference.to_owned()]
+    );
+}
+
+#[test]
+fn field_reference_collection_resolves_an_exchange_plan_own_attribute() {
+    let uuid = "44444444-4444-4444-8444-444444444444";
+    let reference = "ExchangePlan.Owner.Attribute.Очередь";
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{uuid}}}}}");
+    let collection = format!("{{1,{{0,1,{item}}}}}");
+    let fields = [collection.as_str()];
+    let object_refs = BTreeMap::from([(uuid.to_owned(), reference.to_owned())]);
+    let attribute_references = BTreeSet::from([reference.to_owned()]);
+
+    assert_eq!(
+        parse_field_reference_collection(
+            &fields,
+            0,
+            "ExchangePlan",
+            "Owner",
+            &object_refs,
+            &attribute_references,
+            &[],
+        )
+        .unwrap(),
+        vec![reference.to_owned()]
+    );
+}
+
+#[test]
+fn declared_form_collection_must_name_the_form() {
+    let uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    let forms = BTreeMap::from([(
+        uuid.to_owned(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Products/Forms/Item.xml"),
+            kind: "Form",
+        },
+    )]);
+    let declared = [uuid.to_owned()];
+    let foreign = ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2".to_owned()];
+
+    assert_eq!(
+        parse_owned_form_ref(uuid, "Catalog", &declared, "Products", &forms),
+        Some(Some("Catalog.Products.Form.Item".to_owned()))
+    );
+    assert!(
+        parse_owned_form_ref(uuid, "Catalog", &[], "Products", &forms).is_none(),
+        "an empty declared collection names no form"
+    );
+    assert!(
+        parse_owned_form_ref(uuid, "Catalog", &foreign, "Products", &forms).is_none(),
+        "a non-member uuid must not resolve"
     );
 }
 
@@ -3558,15 +3666,17 @@ fn document_field_references_report_second_foreign_attribute() {
     ]);
     let attribute_references = BTreeSet::from(["Document.Owner.Attribute.First".to_owned()]);
 
-    let diagnostic = parse_document_field_references(
+    let error = parse_field_reference_collection(
         &fields,
         47,
+        "Document",
         "Owner",
         &object_refs,
         &attribute_references,
         &[],
     )
     .unwrap_err();
+    let diagnostic = field_reference_diagnostic(owner_graph::OwnerGraphFamily::Document, 47, error);
 
     assert_eq!(diagnostic.structural_signature, "wrong_owner");
     assert_eq!(diagnostic.field_index, Some(47));
@@ -3587,15 +3697,21 @@ fn business_process_field_references_keep_fields_27_and_43_typed() {
         let collection = format!("{{1,{{0,2,{item},{item}}}}}");
         let mut fields = vec![""; field_index + 1];
         fields[field_index] = &collection;
-        let diagnostic = parse_business_process_field_references(
+        let error = parse_field_reference_collection(
             &fields,
             field_index,
+            "BusinessProcess",
             "Owner",
             &BTreeMap::new(),
             &BTreeSet::new(),
             &[(marker, name)],
         )
         .unwrap_err();
+        let diagnostic = field_reference_diagnostic(
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            field_index,
+            error,
+        );
         assert_eq!(diagnostic.family, "BusinessProcess");
         assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
         assert_eq!(diagnostic.structural_signature, "ambiguous");
@@ -3619,15 +3735,18 @@ fn business_process_field_references_keep_fields_27_and_43_typed() {
     )]);
     let attribute_references =
         BTreeSet::from([format!("BusinessProcess.Owner.Attribute.{declared}")]);
-    let diagnostic = parse_business_process_field_references(
+    let error = parse_field_reference_collection(
         &fields,
         27,
+        "BusinessProcess",
         "Owner",
         &object_refs,
         &attribute_references,
         &[("-2", "Number")],
     )
     .unwrap_err();
+    let diagnostic =
+        field_reference_diagnostic(owner_graph::OwnerGraphFamily::BusinessProcess, 27, error);
     assert_eq!(diagnostic.structural_signature, "wrong_owner");
     assert_eq!(diagnostic.collection_index, Some(0));
     let serialized = serde_json::to_string(&diagnostic).unwrap();
@@ -10608,8 +10727,18 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
             .is_some(),
         "standard attributes"
     );
+    let input_by_string = [fields[33]];
     assert!(
-        parse_cct_input_by_string(fields[33], &header.name).is_some(),
+        parse_field_reference_collection(
+            &input_by_string,
+            0,
+            "ChartOfCharacteristicTypes",
+            &header.name,
+            &object_refs,
+            &BTreeSet::new(),
+            &[("-9", "Description"), ("-8", "Code")],
+        )
+        .is_ok(),
         "input by string"
     );
     let extracted = extract_metadata_source_xml_from_text_row_audited(
@@ -23557,7 +23686,7 @@ fn exact_exchange_plan_root_for_test(
             "{1a1b4fea-e093-470d-94ff-1d2f16cda2ab,0}",
             "{3daea016-69b7-4ed4-9453-127911372fe6,0}",
             "{52293f4b-f98c-43ea-a80f-41047ae7ab58,0}",
-            "{87c509ab-3d38-4d67-b379-aca796298578,0}",
+            "{87c509ab-3d38-4d67-b379-aca796298578,7,70000000-0000-4000-8000-000000000001,70000000-0000-4000-8000-000000000002,70000000-0000-4000-8000-000000000003,70000000-0000-4000-8000-000000000004,70000000-0000-4000-8000-000000000005,70000000-0000-4000-8000-000000000006,77777777-7777-4777-8777-777777777777}",
             "{d5207c64-11d5-4d46-bba2-55b7b07ff4eb,0}",
         ],
     )
@@ -23686,14 +23815,24 @@ fn accepts_leaf_sanitized_captured_exchange_plan_owner_tails() {
             },
         ),
     ]);
+    let form_uuids = form_refs.keys().cloned().collect::<Vec<_>>();
     let make_root = |code: &str, tail: &str| {
         let tail = split_information_register_braced_fields(tail).unwrap();
         let owner = format!(
             "{{{code},22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{{3,{{1,0,11111111-1111-4111-8111-111111111111}},\"Captured\",{{1,\"en\",\"Captured\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{}}}",
             tail.join(",")
         );
+        let form_collection = if form_uuids.is_empty() {
+            "{87c509ab-3d38-4d67-b379-aca796298578,0}".to_string()
+        } else {
+            format!(
+                "{{87c509ab-3d38-4d67-b379-aca796298578,{},{}}}",
+                form_uuids.len(),
+                form_uuids.join(",")
+            )
+        };
         format!(
-            "{{1,{owner},5,{{1a1b4fea-e093-470d-94ff-1d2f16cda2ab,0}},{{3daea016-69b7-4ed4-9453-127911372fe6,0}},{{52293f4b-f98c-43ea-a80f-41047ae7ab58,0}},{{87c509ab-3d38-4d67-b379-aca796298578,0}},{{d5207c64-11d5-4d46-bba2-55b7b07ff4eb,0}}}}"
+            "{{1,{owner},5,{{1a1b4fea-e093-470d-94ff-1d2f16cda2ab,0}},{{3daea016-69b7-4ed4-9453-127911372fe6,0}},{{52293f4b-f98c-43ea-a80f-41047ae7ab58,0}},{form_collection},{{d5207c64-11d5-4d46-bba2-55b7b07ff4eb,0}}}}"
         )
     };
 
@@ -25086,22 +25225,30 @@ fn resolves_only_unambiguous_same_owner_information_register_forms() {
             kind: "Form",
         },
     )]);
+    let declared = [uuid.to_string()];
     assert_eq!(
-        parse_information_register_owned_form_ref(uuid, "Prices", &valid),
+        parse_owned_form_ref(uuid, "InformationRegister", &declared, "Prices", &valid),
         Some(Some("InformationRegister.Prices.Form.Record".to_string()))
     );
     assert_eq!(
-        parse_information_register_owned_form_ref(
+        parse_owned_form_ref(
             "00000000-0000-0000-0000-000000000000",
+            "InformationRegister",
+            &[],
             "Prices",
             &BTreeMap::new(),
         ),
         Some(None)
     );
-    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &BTreeMap::new()).is_none());
     assert!(
-        parse_information_register_owned_form_ref(
+        parse_owned_form_ref(uuid, "InformationRegister", &[], "Prices", &valid).is_none(),
+        "an empty declared collection names no form"
+    );
+    assert!(
+        parse_owned_form_ref(
             "99999999-9999-4999-8999-99999999999",
+            "InformationRegister",
+            &declared,
             "Prices",
             &valid,
         )
@@ -25124,7 +25271,10 @@ fn resolves_only_unambiguous_same_owner_information_register_forms() {
             },
         ),
     ]);
-    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &ambiguous).is_none());
+    assert!(
+        parse_owned_form_ref(uuid, "InformationRegister", &declared, "Prices", &ambiguous)
+            .is_none()
+    );
     let foreign = BTreeMap::from([(
         uuid.to_string(),
         FormSourceReference {
@@ -25132,7 +25282,9 @@ fn resolves_only_unambiguous_same_owner_information_register_forms() {
             kind: "Form",
         },
     )]);
-    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &foreign).is_none());
+    assert!(
+        parse_owned_form_ref(uuid, "InformationRegister", &declared, "Prices", &foreign).is_none()
+    );
 }
 
 #[test]
@@ -25288,7 +25440,8 @@ fn rejects_malformed_information_register_standard_attribute_envelopes_and_bags(
     let header = parse_metadata_header_from_text(&root, register_uuid).unwrap();
     let owner = parse_information_register_owner_fields(&root, &header).unwrap();
     assert!(
-        parse_information_register_owner_properties(&owner, &header, &BTreeMap::new()).is_none()
+        parse_information_register_owner_properties(&owner, &header, &BTreeMap::new(), None)
+            .is_none()
     );
 
     let fields = split_information_register_braced_fields(&modern_bag).unwrap();
@@ -39735,8 +39888,10 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
         5
     );
     assert_eq!(
-        parse_task_field_references(
-            fields[28],
+        parse_field_reference_collection(
+            &fields,
+            28,
+            "Task",
             "CorpusTask",
             &BTreeMap::new(),
             &BTreeSet::new(),
@@ -39746,8 +39901,10 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
         vec!["Task.CorpusTask.StandardAttribute.Number"]
     );
     assert_eq!(
-        parse_task_field_references(
-            fields[46],
+        parse_field_reference_collection(
+            &fields,
+            46,
+            "Task",
             "CorpusTask",
             &BTreeMap::new(),
             &BTreeSet::new(),
@@ -48956,6 +49113,7 @@ fn calculation_form_pair_resolver_refuses_references_the_designer_does_not_own()
                 &fields,
                 &header,
                 &form_refs,
+                None,
             )
             .is_none(),
             "{label} must refuse the register"
@@ -49009,6 +49167,7 @@ fn calculation_form_pair_reads_auxiliary_slot_and_refuses_non_owned_values() {
                 &fields,
                 &header,
                 &form_refs,
+                None,
             )
             .is_none(),
             "unowned F29 {value} must refuse the register"
@@ -49038,6 +49197,7 @@ fn calculation_form_pair_direct_seam_requires_full_exact_owner_boundary() {
             &fields,
             &expected,
             &form_refs,
+            None,
         ),
         Some(Some(_))
     ));
@@ -49071,6 +49231,7 @@ fn calculation_form_pair_direct_seam_requires_full_exact_owner_boundary() {
                 &fields,
                 &expected,
                 &form_refs,
+                None,
             )
             .is_none()
         );
@@ -49084,6 +49245,7 @@ fn calculation_form_pair_direct_seam_requires_full_exact_owner_boundary() {
             &fields,
             &mismatch,
             &form_refs,
+            None,
         )
         .is_none()
     );
