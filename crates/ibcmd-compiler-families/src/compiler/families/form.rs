@@ -300,6 +300,13 @@ pub fn decode_form_metadata_blob(
     blob: &[u8],
     _profile: &FormMetadataProfile,
 ) -> Result<FormMetadataNativeIr, FormMetadataBuildError> {
+    decode_form_metadata_layout(blob)
+}
+
+/// Decode the Form metadata grammar, without platform or write admission.
+pub fn decode_form_metadata_layout(
+    blob: &[u8],
+) -> Result<FormMetadataNativeIr, FormMetadataBuildError> {
     let root = inflate_and_parse(blob).map_err(native_error)?;
     parse_native(&root)
 }
@@ -1220,6 +1227,18 @@ mod tests {
         );
         let blob = encode_form_metadata_blob(&ir, &profile).unwrap();
         assert_eq!(decode_form_metadata_blob(&blob, &profile).unwrap(), ir);
+    }
+
+    #[test]
+    fn metadata_layout_decoder_matches_profile_decoder() {
+        let profile = FormMetadataProfile::fixture();
+        let ir = project_object(&decoded_source()).unwrap();
+        let blob = encode_form_metadata_blob(&ir, &profile).unwrap();
+        assert_eq!(decode_form_metadata_layout(&blob).unwrap(), ir);
+        assert_eq!(
+            decode_form_metadata_layout(&blob).unwrap(),
+            decode_form_metadata_blob(&blob, &profile).unwrap()
+        );
     }
 
     #[test]

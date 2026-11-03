@@ -32,3 +32,6 @@ tests/fixtures/native-export-commands/**/*.gz binary
 # Native EDS oracle bytes must be identical on every checkout platform.
 tests/fixtures/eds-matrix/**/*.xml -text whitespace=cr-at-eol
 tests/fixtures/eds-corpus2/*.xml -text whitespace=cr-at-eol
+
+# Held-snapshot control anchors and source hashes use canonical LF bytes.
+src/server/sql_import/snapshot.sql text eol=lf

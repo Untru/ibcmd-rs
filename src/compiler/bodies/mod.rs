@@ -35,7 +35,9 @@ pub use ibcmd_metadata_blob::dynamic_list;
 pub mod form {
     pub use ibcmd_compiler::compiler::bodies::form::{
         ManagedFormBody, ManagedFormCodecError, ManagedFormCodecProfile, compile_managed_form,
-        decode_managed_form,
+        decode_managed_form, decode_managed_form_layout, decode_native_managed_form_module_layout,
+        validate_original_managed_form_layout, verify_module_only_edit,
+        verify_native_form_module_only_edit,
     };
     // The transitional reader of historic fixtures, for the export and apply
     // adapters.

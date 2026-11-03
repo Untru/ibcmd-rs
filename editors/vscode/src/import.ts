@@ -1,9 +1,23 @@
 import { RpcError } from "./rpc";
 export class ImportValidationError extends Error {}
+const OUTCOME_UNKNOWN =
+  "Import outcome is unconfirmed; inspect the database before retrying";
+const COMMITTED_RECOVERY_REQUIRED =
+  "Database changes were committed; inspect recovery before retrying";
+
+export class ImportOutcomeUnknownError extends Error {
+  constructor() {
+    super(OUTCOME_UNKNOWN);
+    this.name = "ImportOutcomeUnknownError";
+  }
+}
 
 // Server chains may contain credentials, user names and absolute paths.
 export function importErrorMessage(error: unknown): string {
+  if (error instanceof ImportOutcomeUnknownError) return OUTCOME_UNKNOWN;
   if (error instanceof RpcError) {
+    if (error.code === -32017) return OUTCOME_UNKNOWN;
+    if (error.code === -32018) return COMMITTED_RECOVERY_REQUIRED;
     if (error.code === -32016)
       return "Database changes were published; backup update failed. Inspect recovery before retrying";
     return error.message;
@@ -89,7 +103,10 @@ function owner(path: string): string {
 async function check(ui: ImportUi, signal?: AbortSignal) {
   if (signal?.aborted)
     throw new ImportValidationError("Import cancelled before publication");
-  if (!(await ui.current()))
+  const current = await ui.current();
+  if (signal?.aborted)
+    throw new ImportValidationError("Import cancelled before publication");
+  if (!current)
     throw new ImportValidationError(
       "Connection or settings changed; prepare the import again",
     );
@@ -162,15 +179,23 @@ export async function runImport(
   )
     return;
   await check(ui, signal);
-  return rpc.request(
-    "objects/import",
-    {
-      infobase: request.infobase,
-      sourceDir: request.sourceDir,
-      plan: prepared.plan,
-      confirm: true,
-    },
-    signal,
-    600000,
-  );
+  try {
+    // After this attempt, transport loss cannot prove that nothing was committed.
+    // Keep acknowledged replies authoritative, including success after late abort.
+    return await rpc.request(
+      "objects/import",
+      {
+        infobase: request.infobase,
+        sourceDir: request.sourceDir,
+        plan: prepared.plan,
+        confirm: true,
+      },
+      signal,
+      600000,
+    );
+  } catch (error) {
+    if (error instanceof RpcError) throw error;
+    // Do not retain transport text, causes or credentials, and never replay.
+    throw new ImportOutcomeUnknownError();
+  }
 }

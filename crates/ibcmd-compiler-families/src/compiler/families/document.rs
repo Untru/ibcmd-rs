@@ -9,7 +9,7 @@ use super::super::CompileAxes;
 use super::super::graph::BootstrapGraph;
 use super::business_object::{
     BusinessObjectFamily, BusinessObjectMetadataProfile, compile_business_object,
-    decode_business_object_blob,
+    decode_business_object_layout,
 };
 
 pub use super::business_object::{
@@ -43,7 +43,14 @@ pub fn compile_document_metadata(
 /// Strictly decodes an evidenced Document primary row into inventory IR.
 pub fn decode_document_blob(
     blob: &[u8],
-    profile: &DocumentMetadataProfile,
+    _profile: &DocumentMetadataProfile,
 ) -> Result<BusinessObjectNativeIr, BusinessObjectBuildError> {
-    decode_business_object_blob(blob, &profile.0)
+    decode_document_layout(blob)
+}
+
+/// Decode only the fixed Document grammar; this grants no platform/write authority.
+pub fn decode_document_layout(
+    blob: &[u8],
+) -> Result<BusinessObjectNativeIr, BusinessObjectBuildError> {
+    decode_business_object_layout(blob, BusinessObjectFamily::Document)
 }

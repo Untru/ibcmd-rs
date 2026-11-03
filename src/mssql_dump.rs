@@ -27,11 +27,13 @@ pub(crate) use ibcmd_dump::mssql_dump::{
     fetch_config_part0_rows, fetch_config_row_whole, fetch_extension_activation_rows,
     fetch_main_activation_rows, file_db_rows_from_reader, file_extension_base_provider,
     file_infobase_config, file_infobase_effective, help_link_marker_is_anchor,
-    help_standard_picture_negative_index, read_config_dump_info_with_sql, rewrite_help_links,
-    role_rights_xml_from_blob, root_family_folder, trace_form_body_with_context,
+    help_standard_picture_negative_index, import_evidence, native_module_file_bytes,
+    read_config_dump_info_with_sql, rewrite_help_links, role_rights_xml_from_blob,
+    root_family_folder, trace_form_body_with_context,
     try_extract_moxel_spreadsheet_xml_with_generated_types, unpack_form_body_module_text,
-    with_database_table, with_file_db_table, with_main_database_table, with_memory_rows_table,
-    with_rows_dir_table, write_source_xml_file,
+    validate_sql_versions_change, validate_sql_versions_inventory, with_database_table,
+    with_file_db_table, with_main_database_table, with_memory_rows_table, with_rows_dir_table,
+    write_source_xml_file,
 };
 
 // The exporter's crate-visible re-exports of other crates' items, from their

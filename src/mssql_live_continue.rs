@@ -12,7 +12,9 @@
 
 pub use ibcmd_mssql_live::mssql_live_continue::*;
 
-pub(crate) use ibcmd_mssql_live::mssql_live_continue::finish_verified;
+pub(crate) use ibcmd_mssql_live::mssql_live_continue::{
+    acquire_pending_live_for_dedicated_session, finish_verified,
+};
 // Read only by a root test; outside tests it still hides the item from the glob.
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use ibcmd_mssql_live::mssql_live_continue::database_ident;

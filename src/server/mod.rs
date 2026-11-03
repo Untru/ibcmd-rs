@@ -21,8 +21,10 @@
 //! carries the protocol only; the engine's own diagnostics go to stderr.
 
 mod apply;
+mod import_plans;
 pub mod infobases;
 pub mod rpc;
+pub mod sql_import;
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -35,7 +37,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::settings::{ENV_CONFIG, ENV_DB_PASSWORD, Settings, SettingsSources};
+use crate::settings::{ENV_CONFIG, Settings, SettingsSources};
 use crate::stored_objects::{self as objects, ConfigSource, UnknownObject};
 use infobases::{Entry, EntryParams, Login, Secret, Session};
 use rpc::{RpcError, codes};
@@ -264,28 +266,25 @@ fn work(
         settings: Settings::default(),
         entries: Vec::new(),
         sessions: HashMap::new(),
-        import_plans: HashMap::new(),
+        import_plans: import_plans::Registry::new(),
         connection_epoch: 0,
     };
     for job in queue {
         let outcome = if job.cancel.load(Ordering::SeqCst) {
+            discard_cancelled_import_plan(
+                &mut state.import_plans,
+                &job.method,
+                &job.params,
+                state.connection_epoch,
+                std::time::Instant::now(),
+            );
             Err(cancelled())
         } else {
             let _scope = crate::cancel::scope(job.cancel.clone());
             std::panic::catch_unwind(AssertUnwindSafe(|| {
                 state.handle(&job.id, &job.method, job.params)
             }))
-            .unwrap_or_else(|panic| {
-                let message = panic
-                    .downcast_ref::<String>()
-                    .cloned()
-                    .or_else(|| panic.downcast_ref::<&str>().map(|text| text.to_string()))
-                    .unwrap_or_else(|| "unknown panic".to_string());
-                Err(RpcError::new(
-                    codes::INTERNAL_ERROR,
-                    format!("{} failed inside the server: {message}", job.method),
-                ))
-            })
+            .unwrap_or_else(|panic| Err(panic_failure(&job.method, panic)))
         };
         in_flight
             .lock()
@@ -293,6 +292,49 @@ fn work(
             .remove(&id_key(&job.id));
         output.send(&rpc::response(&job.id, outcome));
     }
+}
+
+fn panic_failure(method: &str, panic: Box<dyn std::any::Any + Send>) -> RpcError {
+    // Unwinding does not establish whether publication preceded the panic.
+    if method == "objects/import" {
+        return RpcError::new(
+            codes::IMPORT_OUTCOME_UNKNOWN,
+            "Import outcome is unconfirmed; inspect the database before retrying",
+        );
+    }
+    let message = panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| panic.downcast_ref::<&str>().map(|text| text.to_string()))
+        .unwrap_or_else(|| "unknown panic".to_string());
+    RpcError::new(
+        codes::INTERNAL_ERROR,
+        format!("{method} failed inside the server: {message}"),
+    )
+}
+
+/// A cancelled queued publication never reaches the handler. Still revoke its
+/// supplied capability, including malformed requests and mismatched bindings.
+fn discard_cancelled_import_plan<P>(
+    plans: &mut import_plans::Registry<P>,
+    method: &str,
+    params: &Value,
+    epoch: u64,
+    now: std::time::Instant,
+) {
+    if method != "objects/import" {
+        return;
+    }
+    let Some(token) = params
+        .get("plan")
+        .and_then(Value::as_str)
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+    else {
+        return;
+    };
+    let target = params.get("infobase").and_then(Value::as_str).unwrap_or("");
+    // take removes before checking target, epoch or expiry. No payload is used.
+    let _ = plans.take(&token, target, epoch, now);
 }
 
 fn cancelled() -> RpcError {
@@ -312,6 +354,30 @@ fn failure(error: anyhow::Error) -> RpcError {
         return RpcError::new(
             codes::IMPORT_PUBLISHED_RECOVERY_REQUIRED,
             "Database changes were published; backup update failed. Inspect recovery before retrying",
+        );
+    }
+    // An acknowledged commit or indeterminate outcome is authoritative even
+    // when its inner cause is cancellation. Never turn either into no-write.
+    if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<sql_import::transaction::Report>()
+            .is_some_and(|report| report.state == sql_import::transaction::State::Committed)
+    }) {
+        return RpcError::new(
+            codes::IMPORT_COMMITTED_RECOVERY_REQUIRED,
+            "Database changes were committed; inspect recovery before retrying",
+        );
+    }
+    if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<sql_import::transaction::Report>()
+            .is_some_and(|report| {
+                report.state == sql_import::transaction::State::Unknown || report.cleanup_uncertain
+            })
+    }) {
+        return RpcError::new(
+            codes::IMPORT_OUTCOME_UNKNOWN,
+            "Import outcome is unconfirmed; inspect the database before retrying",
         );
     }
     if crate::cancel::is_cancelled(&error) {
@@ -417,7 +483,10 @@ struct ImportParams {
     plan: Option<String>,
     #[serde(default)]
     confirm: bool,
-    verify: Option<bool>,
+    // Preserve the request shape; prepared publication always verifies and
+    // no-plan SQL publication is refused, so this cannot weaken validation.
+    #[serde(rename = "verify")]
+    _verify: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -425,6 +494,11 @@ struct ImportParams {
 struct ReadParams {
     infobase: String,
     path: String,
+}
+
+enum ImportPlan {
+    FileDb(Box<crate::file_import::Plan>),
+    SqlModule(Box<sql_import::CommonModulePlan>),
 }
 
 struct State {
@@ -435,7 +509,7 @@ struct State {
     entries: Vec<Entry>,
     /// Open infobases by id.
     sessions: HashMap<String, Session>,
-    import_plans: HashMap<String, (String, u64, crate::file_import::Plan)>,
+    import_plans: import_plans::Registry<ImportPlan>,
     connection_epoch: u64,
 }
 
@@ -757,33 +831,63 @@ impl State {
 
     fn prepare_import(&mut self, params: ImportParams) -> Result<Value, RpcError> {
         let session = self.session(&params.infobase)?;
-        let ConfigSource::FileDb(target) = session.configuration.source() else {
-            return Err(RpcError::invalid_params(
-                "safe preflight currently requires a file-db connection",
-            ));
+        let selection = crate::file_import::Selection {
+            files: params.files,
+            objects: params.objects,
+            changed: params.changed,
         };
-        let plan = crate::file_import::prepare(
-            target,
-            &params.source_dir,
-            &crate::file_import::Selection {
-                files: params.files,
-                objects: params.objects,
-                changed: params.changed,
-            },
-            session.configuration.platform(),
-        )
-        .map_err(failure)?;
-        let token = uuid::Uuid::new_v4().to_string();
-        let result = json!({"plan": token, "preflight": plan.summary()});
-        // One pending confirmation per connection, bounded across the window.
-        self.import_plans
-            .retain(|_, (id, _, _)| id != &params.infobase);
-        if self.import_plans.len() >= 4 {
-            self.import_plans.clear();
-        }
-        self.import_plans
-            .insert(token, (params.infobase, self.connection_epoch, plan));
-        Ok(result)
+        let (plan, preflight) = match session.configuration.source() {
+            ConfigSource::FileDb(target) => {
+                let plan = crate::file_import::prepare(
+                    target,
+                    &params.source_dir,
+                    &selection,
+                    session.configuration.platform(),
+                )
+                .map_err(failure)?;
+                let preflight = json!(plan.summary());
+                (ImportPlan::FileDb(Box::new(plan)), preflight)
+            }
+            ConfigSource::Database { sql, database } => {
+                let client = sql.client().ok_or_else(|| {
+                    RpcError::invalid_params("SQL guarded import requires the built-in client")
+                })?;
+                let plan = sql_import::CommonModulePlan::prepare_supported(
+                    client,
+                    database,
+                    &params.source_dir,
+                    &selection,
+                    params._verify,
+                    Arc::new(|| crate::cancel::check().map_err(Into::into)),
+                )
+                .map_err(|error| {
+                    if let Some(refused) = error.downcast_ref::<sql_import::RequestRefused>() {
+                        RpcError::invalid_params(refused.to_string())
+                    } else {
+                        failure(error)
+                    }
+                })?;
+                let preflight = json!(plan.summary());
+                (ImportPlan::SqlModule(Box::new(plan)), preflight)
+            }
+            ConfigSource::RowsDir(_) => {
+                return Err(RpcError::invalid_params(
+                    "safe preflight requires a file-db or supported SQL connection",
+                ));
+            }
+        };
+        let token = self
+            .import_plans
+            .insert(
+                &params.infobase,
+                self.connection_epoch,
+                plan,
+                std::time::Instant::now(),
+            )
+            .map_err(|_| {
+                RpcError::new(codes::INTERNAL_ERROR, "could not retain import preflight")
+            })?;
+        Ok(json!({"plan": token.to_string(), "preflight": preflight}))
     }
 
     fn import(&mut self, params: ImportParams) -> Result<Value, RpcError> {
@@ -791,27 +895,61 @@ impl State {
             if !params.confirm {
                 return Err(RpcError::new(
                     codes::CONFIRMATION_REQUIRED,
-                    "confirm the prepared file import before publication",
+                    "confirm the prepared import before publication",
                 ));
             }
-            let (id, epoch, plan) = self.import_plans.remove(token).ok_or_else(|| {
-                RpcError::invalid_params("import preflight expired; prepare again")
-            })?;
-            if id != params.infobase || epoch != self.connection_epoch {
-                return Err(RpcError::invalid_params(
-                    "connection changed since preflight; prepare again",
-                ));
-            }
+            let token = uuid::Uuid::parse_str(token)
+                .map_err(|_| RpcError::invalid_params("invalid import preflight; prepare again"))?;
+            let plan = self
+                .import_plans
+                .take(
+                    &token,
+                    &params.infobase,
+                    self.connection_epoch,
+                    std::time::Instant::now(),
+                )
+                .map_err(|_| {
+                    RpcError::invalid_params(
+                        "import preflight expired or connection changed; prepare again",
+                    )
+                })?;
             let session = self.session(&params.infobase)?;
-            let ConfigSource::FileDb(target) = session.configuration.source() else {
-                return Err(RpcError::invalid_params(
+            return match (plan, session.configuration.source()) {
+                (ImportPlan::FileDb(plan), ConfigSource::FileDb(target)) => {
+                    let report = plan.publish(target).map_err(failure)?;
+                    Ok(
+                        json!({"report": {"backend":"file-db-partial-configsave", "stagedRows":report.rows_after, "backup":report.backup}}),
+                    )
+                }
+                (ImportPlan::SqlModule(plan), ConfigSource::Database { sql, database }) => {
+                    // A token selects its retained bytes; confirmation may not
+                    // replace its selection or disable verification.
+                    if !params.files.is_empty()
+                        || !params.objects.is_empty()
+                        || params.changed
+                        || params._verify == Some(false)
+                    {
+                        return Err(RpcError::invalid_params(
+                            "SQL publication accepts only its prepared token; prepare again",
+                        ));
+                    }
+                    let client = sql.client().ok_or_else(|| {
+                        RpcError::invalid_params("SQL guarded import requires the built-in client")
+                    })?;
+                    let rows = plan.staged_rows();
+                    let backend = plan.backend();
+                    let report = plan.publish(
+                        client,
+                        database,
+                        &params.source_dir,
+                        Arc::new(|| crate::cancel::check().map_err(Into::into)),
+                    );
+                    sql_import_reply(report, rows, backend)
+                }
+                _ => Err(RpcError::invalid_params(
                     "connection changed since preflight",
-                ));
+                )),
             };
-            let report = plan.publish(target).map_err(failure)?;
-            return Ok(
-                json!({"report": {"backend":"file-db-partial-configsave", "stagedRows":report.rows_after, "backup":report.backup}}),
-            );
         }
         if !params.files.is_empty() || params.changed {
             return Err(RpcError::invalid_params(
@@ -821,14 +959,13 @@ impl State {
         if params.objects.is_empty() {
             return Err(RpcError::invalid_params("objects is empty"));
         }
-        let mut prefixes = Vec::new();
         for name in &params.objects {
-            prefixes.extend(objects::source_prefixes(name).ok_or_else(|| {
-                RpcError::new(
+            if objects::source_prefixes(name).is_none() {
+                return Err(RpcError::new(
                     codes::UNKNOWN_OBJECT,
                     format!("{name} is not an object name"),
-                )
-            })?);
+                ));
+            }
         }
         let session = self.session(&params.infobase)?;
         if let ConfigSource::RowsDir(_) = session.configuration.source() {
@@ -837,51 +974,11 @@ impl State {
         if matches!(session.configuration.source(), ConfigSource::FileDb(_)) {
             return Err(offline("objects/import", session));
         }
-        if !params.confirm {
-            return Err(RpcError::new(
-                codes::CONFIRMATION_REQUIRED,
-                "objects/import replaces the infobase's ConfigSave: pass confirm: true",
-            ));
-        }
-        let platform = session.configuration.platform();
-        let args = crate::cli::MssqlStageSourceObjectsArgs {
-            server: session.server.clone(),
-            sql_user: session.login.user.clone(),
-            sql_pwd: session
-                .login
-                .password
-                .as_ref()
-                .map(|password| password.expose().to_string()),
-            sql_pwd_env: ENV_DB_PASSWORD.to_string(),
-            database: session.database.clone(),
-            source_root: params.source_dir.clone(),
-            sqlcmd: None,
-            replace_config_save: true,
-            allow_non_lab: true,
-            batch_size: None,
-            platform: Some(platform),
-            source_version: Some(platform.xml_version()),
-            path_prefix: prefixes,
-            files: Vec::new(),
-            native_files: None,
-            script_output: Some(
-                std::env::temp_dir()
-                    .join("ibcmd-rs-serve")
-                    .join(format!("{}_import.sql", session.database)),
-            ),
-            script_only: false,
-            bulk: false,
-            per_row: false,
-            bcp_executable: None,
-            base_free: false,
-            verify: params.verify.unwrap_or(true),
-        };
-        let report = objects::exclusive(|| {
-            crate::settings::commands::check_tree(platform, &args.source_root, &args.database)?;
-            crate::mssql::stage_source_objects(&args)
-        })
-        .map_err(failure)?;
-        Ok(json!({ "report": report }))
+        // No direct editor RPC may enter the legacy full CONFIGSAVE replacement
+        // path. Only an independently prepared, admitted one-shot SQL plan may publish.
+        Err(RpcError::invalid_params(
+            "SQL import requires guarded preflight; prepare again",
+        ))
     }
 
     fn pending(&mut self, params: InfobaseParams) -> Result<Value, RpcError> {
@@ -913,6 +1010,23 @@ impl State {
             "verdict": verdict,
         }))
     }
+}
+
+/// Preserve acknowledged/uncertain outcomes before generic cancellation mapping.
+fn sql_import_reply(
+    report: sql_import::transaction::Report,
+    rows: usize,
+    backend: &'static str,
+) -> Result<Value, RpcError> {
+    use sql_import::transaction::State;
+    if !matches!(report.state, State::Committed | State::Unchanged)
+        || report.error.is_some()
+        || report.cleanup_uncertain
+    {
+        return Err(failure(report.into()));
+    }
+    Ok(json!({"report": {"backend":backend,
+        "stagedRows":rows, "state":format!("{:?}",report.state), "nativeApplied":false}}))
 }
 
 fn offline(method: &str, session: &Session) -> RpcError {
@@ -956,6 +1070,188 @@ fn opened_message(session: &Session) -> String {
 #[cfg(test)]
 mod import_error_tests {
     use super::*;
+    #[test]
+    fn sql_publication_reply_preserves_terminal_outcomes() {
+        use sql_import::transaction::{Report, State};
+        for state in [State::Unchanged, State::Committed] {
+            let value = sql_import_reply(
+                Report {
+                    state,
+                    error: None,
+                    cleanup_uncertain: false,
+                },
+                2,
+                "mssql-common-module-configsave",
+            )
+            .unwrap();
+            assert_eq!(value["report"]["state"], format!("{state:?}"));
+            assert_eq!(value["report"]["nativeApplied"], false);
+        }
+        for (state, uncertain, code) in [
+            (
+                State::Committed,
+                false,
+                codes::IMPORT_COMMITTED_RECOVERY_REQUIRED,
+            ),
+            (State::Unknown, false, codes::IMPORT_OUTCOME_UNKNOWN),
+            (State::RolledBack, true, codes::IMPORT_OUTCOME_UNKNOWN),
+            (State::RolledBack, false, codes::REQUEST_CANCELLED),
+        ] {
+            let error = sql_import_reply(
+                Report {
+                    state,
+                    error: Some(crate::cancel::Cancelled.into()),
+                    cleanup_uncertain: uncertain,
+                },
+                2,
+                "mssql-common-module-configsave",
+            )
+            .unwrap_err();
+            assert_eq!(error.code, code);
+            assert!(error.data.is_none());
+        }
+    }
+
+    #[test]
+    fn sql_reply_keeps_the_prepared_module_backend() {
+        for backend in [
+            "mssql-common-module-configsave",
+            "mssql-document-form-module-configsave",
+        ] {
+            let value = sql_import_reply(
+                sql_import::transaction::Report {
+                    state: sql_import::transaction::State::Committed,
+                    error: None,
+                    cleanup_uncertain: false,
+                },
+                2,
+                backend,
+            )
+            .unwrap();
+            assert_eq!(value["report"]["backend"], backend);
+            assert_eq!(value["report"]["state"], "Committed");
+            assert_eq!(value["report"]["nativeApplied"], false);
+        }
+    }
+
+    #[test]
+    fn publication_panic_is_redacted_and_never_claims_no_write() {
+        let payloads: Vec<Box<dyn std::any::Any + Send>> = vec![
+            Box::new("private-panic-sentinel".to_owned()),
+            Box::new("private-panic-sentinel"),
+            Box::new(17_u32),
+            Box::new(crate::cancel::Cancelled),
+        ];
+        for payload in payloads {
+            let response = panic_failure("objects/import", payload);
+            assert_eq!(response.code, codes::IMPORT_OUTCOME_UNKNOWN);
+            assert_eq!(
+                response.message,
+                "Import outcome is unconfirmed; inspect the database before retrying"
+            );
+            assert!(response.data.is_none());
+        }
+        let response = panic_failure("objects/status", Box::new("existing status error"));
+        assert_eq!(response.code, codes::INTERNAL_ERROR);
+        assert_eq!(
+            response.message,
+            "objects/status failed inside the server: existing status error"
+        );
+    }
+
+    #[test]
+    fn queued_cancel_burns_import_token_even_with_malformed_or_stale_binding() {
+        use std::time::Instant;
+        for (target, epoch) in [
+            (json!("db"), 1),
+            (json!("other"), 1),
+            (json!("db"), 2),
+            (Value::Null, 1),
+            (json!(17), 1),
+        ] {
+            let now = Instant::now();
+            let mut plans = import_plans::Registry::new();
+            let token = plans.insert("db", 1, (), now).unwrap();
+            let other = plans.insert("unrelated", 1, (), now).unwrap();
+            // Other malformed fields must not prevent revocation.
+            let params = json!({"plan":token.to_string(),"infobase":target,
+                "files":17,"confirm":"invalid"});
+            discard_cancelled_import_plan(&mut plans, "objects/import", &params, epoch, now);
+            assert_eq!(
+                plans.take(&token, "db", 1, now),
+                Err(import_plans::TakeError::Missing)
+            );
+            assert_eq!(plans.take(&other, "unrelated", 1, now), Ok(()));
+        }
+    }
+
+    #[test]
+    fn queued_cancel_does_not_revoke_unidentified_or_other_method_tokens() {
+        let now = std::time::Instant::now();
+        let mut plans = import_plans::Registry::new();
+        let token = plans.insert("db", 1, (), now).unwrap();
+        discard_cancelled_import_plan(
+            &mut plans,
+            "objects/status",
+            &json!({"plan":token.to_string(),"infobase":"db"}),
+            1,
+            now,
+        );
+        for params in [
+            Value::Null,
+            json!({}),
+            json!({"plan":null}),
+            json!({"plan":17}),
+            json!({"plan":"not-a-uuid"}),
+        ] {
+            discard_cancelled_import_plan(&mut plans, "objects/import", &params, 1, now);
+        }
+        assert_eq!(plans.take(&token, "db", 1, now), Ok(()));
+    }
+
+    #[test]
+    fn sql_terminal_outcomes_precede_cancellation_and_are_redacted() {
+        use sql_import::transaction::{Report, State};
+        for (state, uncertain, expected) in [
+            (State::Unknown, false, codes::IMPORT_OUTCOME_UNKNOWN),
+            (
+                State::Committed,
+                false,
+                codes::IMPORT_COMMITTED_RECOVERY_REQUIRED,
+            ),
+            (
+                State::Committed,
+                true,
+                codes::IMPORT_COMMITTED_RECOVERY_REQUIRED,
+            ),
+            (State::RolledBack, true, codes::IMPORT_OUTCOME_UNKNOWN),
+            (State::RolledBack, false, codes::REQUEST_CANCELLED),
+            (State::NotPublished, false, codes::REQUEST_CANCELLED),
+        ] {
+            let cause = anyhow::Error::from(crate::cancel::Cancelled)
+                .context("private-user/path/password-sentinel");
+            let response = failure(
+                anyhow::Error::from(Report {
+                    state,
+                    error: Some(cause),
+                    cleanup_uncertain: uncertain,
+                })
+                .context("private-outer-sentinel"),
+            );
+            assert_eq!(response.code, expected);
+            assert!(!response.message.contains("sentinel"));
+            assert!(response.data.is_none());
+        }
+        let response = failure(anyhow::Error::from(Report {
+            state: State::Unknown,
+            error: Some(anyhow::anyhow!("private-noncancellation-sentinel")),
+            cleanup_uncertain: true,
+        }));
+        assert_eq!(response.code, codes::IMPORT_OUTCOME_UNKNOWN);
+        assert!(!response.message.contains("sentinel"));
+        assert!(response.data.is_none());
+    }
+
     #[test]
     fn source_cancel_and_published_recovery_have_distinct_safe_codes() {
         let cancelled_source =

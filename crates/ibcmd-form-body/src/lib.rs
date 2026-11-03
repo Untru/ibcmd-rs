@@ -61,7 +61,10 @@ pub use attributes_tail::{
     FormAttributesTailLayout, parse_form_attributes_conditional_appearance_tail,
     scan_form_attributes_tail_layout,
 };
-pub use blob::{FormBodyContainer, FormBodyRevision, ParsedFormBodyBlob, parse_form_body_plain};
+pub use blob::{
+    FormBodyContainer, FormBodyRevision, ParsedFormBodyBlob, parse_form_body_plain,
+    parse_original_form_body_plain,
+};
 pub use compatibility::{
     FormCompatibility, compatibility_mode_spells_any_ref, forms_mark_no_main_table_default_picture,
     forms_write_usual_group_behavior,

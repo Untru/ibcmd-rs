@@ -8,6 +8,7 @@ mod tests {
 
     use crate::compiler::bodies::form::{
         ManagedFormCodecProfile, compile_managed_form, decode_managed_form,
+        decode_native_managed_form_module_layout, verify_native_form_module_only_edit,
     };
 
     // The codec's own constants are private to it.
@@ -122,5 +123,45 @@ mod tests {
                 "missing {tag}: {extracted}"
             );
         }
+    }
+    #[test]
+    #[ignore = "read-only offline check: explicit retained public synthetic native body required"]
+    fn measured_public_native_form_module_envelope() {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let path =
+            std::env::var_os("IBCMD_TEST_PUBLIC_FORM_BODY").expect("public fixture path required");
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .unwrap()
+            .take(1154)
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert_eq!(bytes.len(), 1153);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&bytes)),
+            "7f989004e1b22bd2896b74cdf8c4b2df9bc0562eae5f5069be806ff8b73043ff"
+        );
+        let old = decode_native_managed_form_module_layout(&bytes).unwrap();
+        assert_eq!(old.plaintext().len(), 3012);
+        assert_eq!(old.module_text().matches("Номер = 1;").count(), 1);
+        let edited = old.module_text().replacen("Номер = 1;", "Номер = 2;", 1);
+        let new =
+            ibcmd_metadata_blob::pack_form_body_blob_from_module_text(&bytes, edited.as_bytes())
+                .unwrap()
+                .blob;
+        verify_native_form_module_only_edit(&bytes, &new).unwrap();
+        assert_eq!(
+            decode_native_managed_form_module_layout(&new)
+                .unwrap()
+                .module_text(),
+            edited
+        );
+        let export = crate::mssql_dump::native_module_file_bytes(edited.as_bytes());
+        assert_eq!(export.len(), 187);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&export)),
+            "a2d21b5183f1b1f907fcf4a88c67a0127a3d9d7585bd0f0c5efabc2a82ab5f01"
+        );
     }
 }

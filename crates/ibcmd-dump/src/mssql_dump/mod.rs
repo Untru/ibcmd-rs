@@ -1067,6 +1067,8 @@ pub(crate) use source_assets::declare_palette_namespace_beside_style;
 mod eds_export;
 mod forms;
 pub mod help_audit;
+#[doc(hidden)]
+pub mod import_evidence;
 pub mod incremental;
 pub mod interface_audit;
 mod metadata;
@@ -1163,7 +1165,7 @@ use forms::*;
 use metadata::*;
 use moxel_entry::*;
 #[doc(hidden)]
-pub use output_writer::FileSink;
+pub use output_writer::{FileSink, native_module_file_bytes};
 use output_writer::{MssqlDumpTimingReportOutputExt, OutputWriter};
 use refs::*;
 use role_rights::*;
@@ -1171,6 +1173,8 @@ use selected::*;
 use source_asset_diagnostics::cluster_source_asset_diagnostics;
 use source_assets::*;
 
+#[doc(hidden)]
+pub use config_dump_info::{validate_sql_versions_change, validate_sql_versions_inventory};
 pub use ibcmd_moxel::{MxlDiagnostic, MxlDiagnosticStage};
 pub use metadata::MetadataExtractionMissReason;
 pub use source_asset_diagnostics::{
@@ -7661,7 +7665,7 @@ fn dump_table_row_bytes(
                         }
                         context
                             .output
-                            .write(&path, text)
+                            .write_module(&path, text, !context.write_binary_rows)
                             .with_context(|| format!("failed to write {}", path.display()))?;
                         module_text_rows = 1;
                         timings.module_text_cpu_ms += elapsed_ms(started);

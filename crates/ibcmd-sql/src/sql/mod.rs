@@ -58,14 +58,44 @@ pub enum ScriptVariables {
     Literal,
 }
 
+/// One owned, synchronous dedicated connection. It cannot be retained outside
+/// the callback. Session-level batches own transaction/SET/temp-table scope;
+/// parameterized calls may use that state but do not create a new session.
+/// This primitive does not classify transaction publication outcomes.
+pub trait SqlSession {
+    fn run_batch(&mut self, sql: &str) -> Result<()>;
+    fn execute(&mut self, sql: &str, params: &[SqlParam<'_>]) -> Result<u64>;
+    fn read_rows(
+        &mut self,
+        sql: &str,
+        params: &[SqlParam<'_>],
+        each: &mut dyn FnMut(SqlRow) -> Result<()>,
+    ) -> Result<()>;
+    /// One terminal rollback-only cleanup attempt, if protocol state is usable.
+    /// Success requires an active transaction actually rolled back and acknowledged.
+    /// Failure is not a rollback acknowledgement; no other work may follow it.
+    fn rollback_only(&mut self) -> Result<()>;
+}
+
 /// What a command needs from a database server, whatever the DBMS.
 ///
 /// Every method may be called from several threads at once; a client keeps
 /// up to [`SqlClient::max_connections`] connections open for that. Session
 /// state a request sets up (the current database, `SET` options, temporary
-/// tables) ends with the request, except within [`SqlClient::run_script`].
+/// tables) ends with the request, except within [`SqlClient::run_script`] or
+/// [`SqlClient::with_dedicated_session`].
 pub trait SqlClient: Send + Sync {
     fn dbms(&self) -> Dbms;
+
+    /// Invoke work once on a fresh owned session, never through a pooled lease,
+    /// external-tool fallback or retry of work. Closes on return/error/unwind.
+    /// Unsupported clients refuse before invoking work.
+    fn with_dedicated_session(
+        &self,
+        _work: &mut dyn FnMut(&mut dyn SqlSession) -> Result<()>,
+    ) -> Result<()> {
+        bail!("dedicated SQL sessions are unsupported by this client")
+    }
 
     /// Why every request fails, for a handle that reaches no database
     /// (`SqlExec::detached`); `None` for a real client.
@@ -586,5 +616,29 @@ mod tests {
         })
         .unwrap();
         assert!(!format!("{sql:?}").contains("s3cret-value"));
+    }
+}
+
+#[cfg(test)]
+mod dedicated_session_default_tests {
+    use super::*;
+    #[test]
+    fn unsupported_session_never_invokes_work_or_a_fallback() {
+        let sql = SqlExec::detached("synthetic detached client");
+        let mut called = false;
+        let error = sql
+            .client()
+            .unwrap()
+            .with_dedicated_session(&mut |_| {
+                called = true;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(!called);
+        assert!(
+            error
+                .to_string()
+                .contains("dedicated SQL sessions are unsupported")
+        );
     }
 }

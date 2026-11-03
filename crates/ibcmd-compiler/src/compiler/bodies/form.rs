@@ -84,7 +84,127 @@ pub fn decode_managed_form(
     blob: &[u8],
 ) -> Result<ManagedFormBody, ManagedFormCodecError> {
     let _ = profile;
+    decode_managed_form_layout(blob)
+}
+
+/// Decode the existing reader layout, including its legacy upgrade behavior.
+/// Success is not platform, SQL schema or write admission.
+pub fn decode_managed_form_layout(blob: &[u8]) -> Result<ManagedFormBody, ManagedFormCodecError> {
     decode_strict(blob)
+}
+
+/// Validate the original managed Form layout before any legacy reader upgrade.
+pub fn validate_original_managed_form_layout(
+    blob: &[u8],
+) -> Result<ManagedFormBody, ManagedFormCodecError> {
+    original_layout(blob).map(|(body, _)| body)
+}
+
+fn original_layout(
+    blob: &[u8],
+) -> Result<(ManagedFormBody, std::ops::Range<usize>), ManagedFormCodecError> {
+    let plain = inflate(blob)?;
+    if !plain.starts_with(UTF8_BOM) {
+        return Err(ManagedFormCodecError::MissingBom);
+    }
+    let text = std::str::from_utf8(&plain)
+        .map_err(|error| ManagedFormCodecError::NativeBody(error.to_string()))?;
+    let (parsed, range) = ibcmd_form_body::parse_original_form_body_plain(text)
+        .map_err(|error| ManagedFormCodecError::NativeBody(error.to_string()))?;
+    validate_layout(&parsed)?;
+    // The field scanner includes whitespace; only the quoted token may change.
+    let field = &text[range.clone()];
+    let start = range.start + field.len() - field.trim_start().len();
+    let end = range.end - (field.len() - field.trim_end().len());
+    Ok((ManagedFormBody { plain, parsed }, start..end))
+}
+
+/// Require exact original UTF-8 bytes outside the quoted module token.
+/// Both containers must satisfy the original admitted layout; this grants no write authority.
+pub fn verify_module_only_edit(old: &[u8], new: &[u8]) -> Result<(), ManagedFormCodecError> {
+    let (old, a) = original_layout(old)?;
+    let (new, b) = original_layout(new)?;
+    if old.plain[..a.start] != new.plain[..b.start] || old.plain[a.end..] != new.plain[b.end..] {
+        return Err(ManagedFormCodecError::InvalidShape(
+            "Form edit changed bytes outside the quoted module".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Decode the original native V4/marker50 module-only envelope. This grammar
+/// witness admits no Form.xml rewrite, platform build or SQL write authority.
+/// Five trailing blocks are retained as opaque bytes; both final scalars are zero.
+/// The base-free four-tail compiler/profile APIs keep their existing contract.
+pub fn decode_native_managed_form_module_layout(
+    blob: &[u8],
+) -> Result<ManagedFormBody, ManagedFormCodecError> {
+    native_module_layout(blob).map(|(body, _)| body)
+}
+
+fn native_module_layout(
+    blob: &[u8],
+) -> Result<(ManagedFormBody, std::ops::Range<usize>), ManagedFormCodecError> {
+    use crate::compiler::families::native::parse;
+
+    let plain = inflate(blob)?;
+    // One existing bounded lexical parser checks BOM, depth, quoting and full
+    // input consumption. Never serialize this tree back into storage.
+    let native = parse(&plain)?;
+    let fields = native.as_list().ok_or_else(|| {
+        ManagedFormCodecError::InvalidShape("native Form envelope is not a list".into())
+    })?;
+    if fields.len() != 10
+        || fields[0].as_token() != Some("4")
+        || fields[1]
+            .as_list()
+            .and_then(|v| v.first())
+            .and_then(|v| v.as_token())
+            != Some("50")
+        || fields[2].as_text().is_none()
+        || fields[3..8].iter().any(|v| v.as_list().is_none())
+        || fields[8].as_token() != Some("0")
+        || fields[9].as_token() != Some("0")
+    {
+        return Err(ManagedFormCodecError::InvalidShape(
+            "native module edit requires V4/marker50, five blocks and two zero scalars".into(),
+        ));
+    }
+    let text = std::str::from_utf8(&plain)
+        .map_err(|error| ManagedFormCodecError::NativeBody(error.to_string()))?;
+    let (parsed, range) = ibcmd_form_body::parse_original_form_body_plain(text)
+        .map_err(|error| ManagedFormCodecError::NativeBody(error.to_string()))?;
+    // Original container only: no legacy layout upgrade or module reformatting.
+    if parsed.revision != ibcmd_form_body::FormBodyRevision::V4
+        || parsed.trailing_fields != 7
+        || parsed.trailing.len() != 7
+    {
+        return Err(ManagedFormCodecError::InvalidShape(
+            "native Form parsers disagree".into(),
+        ));
+    }
+    // The field scanner trims space/tab/CR/LF, but admitted form-feed can
+    // remain around the quoted token. Protect those neighboring bytes too.
+    let field = &text[range.clone()];
+    let start = range.start + field.len() - field.trim_start().len();
+    let end = range.end - (field.len() - field.trim_end().len());
+    Ok((ManagedFormBody { plain, parsed }, start..end))
+}
+
+/// Preserve every original plaintext byte outside the quoted module token.
+/// Opaque native sections are copied, never interpreted or rebuilt by this API.
+pub fn verify_native_form_module_only_edit(
+    old: &[u8],
+    new: &[u8],
+) -> Result<(), ManagedFormCodecError> {
+    let (old, a) = native_module_layout(old)?;
+    let (new, b) = native_module_layout(new)?;
+    if old.plain[..a.start] != new.plain[..b.start] || old.plain[a.end..] != new.plain[b.end..] {
+        return Err(ManagedFormCodecError::InvalidShape(
+            "native Form edit changed bytes outside the quoted module".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Transitional reader for historic synthetic fixtures that did not carry a
@@ -198,6 +318,229 @@ mod tests {
     use super::*;
     use crate::compiler::families::native::deflate_bytes;
 
+    fn native_module_fixture() -> Vec<u8> {
+        deflate_bytes(
+            "\u{feff}{4,{50,0}, \"old\" ,{4,1,{7,0}},{0,0},{0,0},{0,0},{0,0},0,0}".as_bytes(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn native_module_envelope_is_distinct_and_preserves_exact_raw_bytes() {
+        let old = native_module_fixture();
+        let decoded = decode_native_managed_form_module_layout(&old).unwrap();
+        assert_eq!(decoded.module_text(), "old");
+        assert_eq!(decoded.parsed().trailing_fields, 7);
+        assert!(decode_managed_form(&ManagedFormCodecProfile::fixture(), &old).is_err());
+        let changed = ibcmd_metadata_blob::pack_form_body_blob_from_module_text(
+            &old,
+            "новый \"quoted\"\r\n".as_bytes(),
+        )
+        .unwrap()
+        .blob;
+        verify_native_form_module_only_edit(&old, &changed).unwrap();
+        assert_eq!(
+            decode_native_managed_form_module_layout(&changed)
+                .unwrap()
+                .module_text(),
+            "новый \"quoted\"\r\n"
+        );
+        let text = String::from_utf8(inflate(&changed).unwrap()).unwrap();
+        let (_, token) = native_module_layout(&changed).unwrap();
+        let mut before_quote = text.clone();
+        before_quote.insert(token.start, ' ');
+        let mut after_quote = text.clone();
+        after_quote.insert(token.end, '\t');
+        for altered in [
+            before_quote,
+            after_quote,
+            text.replacen("{50,0}", "{50,1}", 1),
+            text.replacen("{4,1,{7,0}}", "{4,1,{7,1}}", 1),
+            text.replacen("{0,0}", "{0,1}", 1),
+            format!("{text} "),
+        ] {
+            let packed = deflate_bytes(altered.as_bytes()).unwrap();
+            assert!(decode_native_managed_form_module_layout(&packed).is_ok());
+            assert!(verify_native_form_module_only_edit(&old, &packed).is_err());
+        }
+    }
+
+    #[test]
+    fn native_module_token_range_excludes_preserved_ascii_whitespace() {
+        let prefix = "\u{feff}{4,{50,0},";
+        let suffix = ",{4,1,{7,0}},{0,0},{0,0},{0,0},{0,0},0,0}";
+        let module = "новый \"quoted\"\r\n";
+        for (before, after) in [(" \t\r\n", ""), ("", "\r\n\t "), (" \t\r\n", "\r\n\t ")] {
+            let expected_prefix = format!("{prefix}{before}");
+            let expected_suffix = format!("{after}{suffix}");
+            let plain = format!("{expected_prefix}\"old\"{expected_suffix}");
+            let old = deflate_bytes(plain.as_bytes()).unwrap();
+            let (old_body, old_token) = native_module_layout(&old).unwrap();
+            // Independent fixture offsets distinguish the quoted token from
+            // the containing comma-delimited field and its ASCII whitespace.
+            assert_eq!(old_token, expected_prefix.len()..expected_prefix.len() + 5);
+            assert_eq!(&old_body.plaintext()[old_token.clone()], b"\"old\"");
+            let new =
+                ibcmd_metadata_blob::pack_form_body_blob_from_module_text(&old, module.as_bytes())
+                    .unwrap()
+                    .blob;
+            let (new_body, new_token) = native_module_layout(&new).unwrap();
+            assert_eq!(new_body.module_text(), module);
+            assert_eq!(
+                &new_body.plaintext()[new_token.clone()],
+                "\"новый \"\"quoted\"\"\r\n\"".as_bytes()
+            );
+            assert_eq!(
+                &new_body.plaintext()[..new_token.start],
+                expected_prefix.as_bytes()
+            );
+            assert_eq!(
+                &new_body.plaintext()[new_token.end..],
+                expected_suffix.as_bytes()
+            );
+            assert_eq!(
+                &old_body.plaintext()[..old_token.start],
+                &new_body.plaintext()[..new_token.start]
+            );
+            assert_eq!(
+                &old_body.plaintext()[old_token.end..],
+                &new_body.plaintext()[new_token.end..]
+            );
+            verify_native_form_module_only_edit(&old, &new).unwrap();
+
+            for boundary in [new_token.start, new_token.end] {
+                let mut altered = String::from_utf8(new_body.plaintext().to_vec()).unwrap();
+                altered.insert(boundary, '\t');
+                let altered = deflate_bytes(altered.as_bytes()).unwrap();
+                // Neighbor whitespace remains grammatically valid but is
+                // outside the only token the module edit may replace.
+                assert!(decode_native_managed_form_module_layout(&altered).is_ok());
+                assert_eq!(
+                    verify_native_form_module_only_edit(&old, &altered),
+                    Err(ManagedFormCodecError::InvalidShape(
+                        "native Form edit changed bytes outside the quoted module".into()
+                    ))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_module_ff_range_excludes_admitted_form_feed() {
+        let prefix = "\u{feff}{4,{50,0},";
+        let suffix = ",{4,1,{7,0}},{0,0},{0,0},{0,0},{0,0},0,0}";
+        for (before, after) in [("\x0c", ""), ("", "\x0c"), ("\x0c", "\x0c")] {
+            let expected_prefix = format!("{prefix}{before}");
+            let expected_suffix = format!("{after}{suffix}");
+            let plain = format!("{expected_prefix}\"old\"{expected_suffix}");
+            let old = deflate_bytes(plain.as_bytes()).unwrap();
+            assert_eq!(
+                decode_native_managed_form_module_layout(&old)
+                    .unwrap()
+                    .module_text(),
+                "old"
+            );
+            let (body, token) = native_module_layout(&old).unwrap();
+            assert_eq!(token, expected_prefix.len()..expected_prefix.len() + 5);
+            assert_eq!(&body.plaintext()[token.clone()], b"\"old\"");
+            assert_eq!(&body.plaintext()[..token.start], expected_prefix.as_bytes());
+            assert_eq!(&body.plaintext()[token.end..], expected_suffix.as_bytes());
+        }
+    }
+
+    #[test]
+    fn native_module_ff_neighbor_mutations_and_packer_loss_are_refused() {
+        let prefix = "\u{feff}{4,{50,0},";
+        let suffix = ",{4,1,{7,0}},{0,0},{0,0},{0,0},{0,0},0,0}";
+        for (before, after) in [("\x0c", ""), ("", "\x0c"), ("\x0c", "\x0c")] {
+            let expected_prefix = format!("{prefix}{before}");
+            let expected_suffix = format!("{after}{suffix}");
+            let plain = format!("{expected_prefix}\"old\"{expected_suffix}");
+            let old = deflate_bytes(plain.as_bytes()).unwrap();
+            assert!(decode_native_managed_form_module_layout(&old).is_ok());
+            let preserved = format!("{expected_prefix}\"new\"{expected_suffix}");
+            let new = deflate_bytes(preserved.as_bytes()).unwrap();
+            verify_native_form_module_only_edit(&old, &new).unwrap();
+            for boundary in [expected_prefix.len(), expected_prefix.len() + 5] {
+                let mut altered = preserved.clone();
+                altered.insert(boundary, '\x0c');
+                let altered = deflate_bytes(altered.as_bytes()).unwrap();
+                assert!(decode_native_managed_form_module_layout(&altered).is_ok());
+                assert!(verify_native_form_module_only_edit(&old, &altered).is_err());
+            }
+            let packed = ibcmd_metadata_blob::pack_form_body_blob_from_module_text(&old, b"new")
+                .unwrap()
+                .blob;
+            let packed_plain = inflate(&packed).unwrap();
+            assert!(!packed_plain.contains(&b'\x0c'));
+            assert!(decode_native_managed_form_module_layout(&packed).is_ok());
+            assert!(verify_native_form_module_only_edit(&old, &packed).is_err());
+        }
+    }
+
+    #[test]
+    fn native_module_envelope_refuses_unmeasured_shapes_and_partial_input() {
+        let old = native_module_fixture();
+        let text = String::from_utf8(inflate(&old).unwrap()).unwrap();
+        for altered in [
+            text.replacen("{4,", "{3,", 1),
+            text.replacen("{50,", "{49,", 1),
+            text.replacen("{50,", "{42,", 1),
+            text.replacen("{4,1,{7,0}}", "0", 1),
+            text.replacen(",{0,0},0,0}", ",{0,0},1,0}", 1),
+            text.replacen(",{0,0},0,0}", ",{0,0},0,0,0}", 1),
+            format!("\u{feff}garbage{}", text.trim_start_matches('\u{feff}')),
+            format!("{text}garbage"),
+            text[..text.len() - 1].into(),
+            text.trim_start_matches('\u{feff}').into(),
+        ] {
+            assert_ne!(altered, text);
+            assert!(
+                decode_native_managed_form_module_layout(
+                    &deflate_bytes(altered.as_bytes()).unwrap()
+                )
+                .is_err()
+            );
+        }
+        let abbreviated = compile_managed_form(
+            &ManagedFormCodecProfile::fixture(),
+            SIMPLE_FORM,
+            Some(b"old"),
+            None,
+        )
+        .unwrap();
+        assert!(decode_managed_form(&ManagedFormCodecProfile::fixture(), &abbreviated).is_ok());
+        assert!(decode_native_managed_form_module_layout(&abbreviated).is_err());
+    }
+
+    const SIMPLE_FORM: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Title><v8:item><v8:lang>en</v8:lang><v8:content>Standalone</v8:content></v8:item></Title>
+	<Width>480</Width>
+	<Height>320</Height>
+	<AutoTitle>false</AutoTitle>
+	<AutoCommandBar name="FormCommandBar" id="-1"/>
+	<Commands>
+		<Command name="Do" id="1"/>
+	</Commands>
+	<Attributes>
+		<Attribute name="Description" id="2">
+			<Type><v8:Type>xs:string</v8:Type></Type>
+		</Attribute>
+	</Attributes>
+	<Parameters>
+		<Parameter name="Key"><Type><v8:Type>xs:string</v8:Type></Type></Parameter>
+	</Parameters>
+	<ChildItems>
+		<UsualGroup name="Main" id="10">
+			<ChildItems>
+				<Button name="Run" id="11"><CommandName>Form.Command.Do</CommandName></Button>
+				<InputField name="Description" id="12"><DataPath>Description</DataPath></InputField>
+			</ChildItems>
+		</UsualGroup>
+	</ChildItems>
+</Form>"#;
+
     #[test]
     fn unsupported_source_layout_is_a_hard_blocker() {
         let profile = ManagedFormCodecProfile::fixture();
@@ -280,6 +623,97 @@ mod tests {
             }
         }
         output
+    }
+
+    #[test]
+    fn original_layout_and_module_edit_witnesses_preserve_raw_bytes() {
+        let profile = ManagedFormCodecProfile::fixture();
+        let old = compile_managed_form(&profile, SIMPLE_FORM, Some(b"old"), None).unwrap();
+        assert_eq!(
+            decode_managed_form_layout(&old).unwrap(),
+            decode_managed_form(&profile, &old).unwrap()
+        );
+        assert_eq!(
+            validate_original_managed_form_layout(&old).unwrap(),
+            decode_managed_form_layout(&old).unwrap()
+        );
+        let new = ibcmd_metadata_blob::pack_form_body_blob_from_module_text(&old, b"new\"text")
+            .unwrap()
+            .blob;
+        verify_module_only_edit(&old, &new).unwrap();
+        let (body, range) = original_layout(&new).unwrap();
+        let text = std::str::from_utf8(body.plaintext()).unwrap();
+        // Semantic IR equality must not hide whitespace edits outside the token.
+        let mut trailing_space = text.to_owned();
+        trailing_space.insert(text.rfind("{0}").unwrap(), ' ');
+        for changed in [
+            format!("{} {}", &text[..range.start], &text[range.start..]),
+            text.replacen(",{50,", ", {50,", 1),
+            trailing_space,
+            format!("{} ", text),
+        ] {
+            let blob = deflate_bytes(changed.as_bytes()).unwrap();
+            assert_eq!(
+                decode_managed_form_layout(&blob).unwrap().parsed(),
+                body.parsed()
+            );
+            assert!(verify_module_only_edit(&old, &blob).is_err());
+        }
+        let changed = text.replacen("{50,", "{59,", 1);
+        assert!(
+            verify_module_only_edit(&old, &deflate_bytes(changed.as_bytes()).unwrap()).is_err()
+        );
+    }
+
+    #[test]
+    fn module_packer_preserves_whitespace_around_quoted_token() {
+        let profile = ManagedFormCodecProfile::fixture();
+        let base = compile_managed_form(&profile, SIMPLE_FORM, Some(b"old"), None).unwrap();
+        let (body, range) = original_layout(&base).unwrap();
+        let text = std::str::from_utf8(body.plaintext()).unwrap();
+        for (before, after) in [(" \t", ""), ("", "\r\n "), (" \t", "\r\n ")] {
+            let spaced = format!(
+                "{}{before}{}{after}{}",
+                &text[..range.start],
+                &text[range.clone()],
+                &text[range.end..]
+            );
+            let old = deflate_bytes(spaced.as_bytes()).unwrap();
+            let new = ibcmd_metadata_blob::pack_form_body_blob_from_module_text(&old, b"new\"text")
+                .unwrap()
+                .blob;
+            verify_module_only_edit(&old, &new).unwrap();
+            let (old_body, a) = original_layout(&old).unwrap();
+            let (new_body, b) = original_layout(&new).unwrap();
+            assert_eq!(
+                &old_body.plaintext()[..a.start],
+                &new_body.plaintext()[..b.start]
+            );
+            assert_eq!(
+                &old_body.plaintext()[a.end..],
+                &new_body.plaintext()[b.end..]
+            );
+            assert_eq!(new_body.module_text(), "new\"text");
+            assert_eq!(old_body.parsed().layout, new_body.parsed().layout);
+            assert_eq!(old_body.parsed().trailing, new_body.parsed().trailing);
+        }
+    }
+
+    #[test]
+    fn original_layout_refuses_root_42_before_reader_upgrade() {
+        let plain = concat!(
+            "\u{feff}{3,{42,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,",
+            "{1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,\"ПриСозданииНаСервере\",0,0},{0},1,",
+            "{21,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{\"B\",1},0}},9,\"ФормаКоманднаяПанель\",",
+            "{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3},",
+            "0,\"\",\"\",1,{21,{0},0,0,0,7,\"Navigator\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3},",
+            "1,\"\",0,0,0,0,0,0,3,3,0,0,0},\"\",{0,0},{0,0},{0,0},{0,0},0,0}"
+        );
+        let blob = deflate_bytes(plain.as_bytes()).unwrap();
+        let parsed = ibcmd_metadata_blob::parse_form_body_blob(&blob).unwrap();
+        assert!(parsed.layout.starts_with("{50,"));
+        assert!(matches!(validate_original_managed_form_layout(&blob),
+            Err(ManagedFormCodecError::UnsupportedLayout(marker)) if marker == "42"));
     }
 
     #[test]

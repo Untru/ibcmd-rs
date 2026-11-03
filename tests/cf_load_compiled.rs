@@ -484,7 +484,7 @@ fn closed_module_replacement_is_fresh_on_both_load_routes() {
         assert!(common::export(&out, &back).status.success());
         assert_eq!(
             fs::read(back.join("CommonModules/ТестРасширение_Модуль/Ext/Module.bsl")).unwrap(),
-            text
+            b"\xef\xbb\xbfProcedure Reopened()\r\nEndProcedure\r\n"
         );
     }
 }
