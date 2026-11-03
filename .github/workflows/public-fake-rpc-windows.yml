@@ -1,0 +1,71 @@
+# Public fake gate only. Fixed events/commands; no workflow inputs or dispatch.
+# Public fake peers only; no SQL/ibcmd/Cargo/native/VM/credentials required.
+name: Public fake RPC Windows controls
+on:
+  push:
+    paths:
+      - 'scripts/status-lab/**'
+      - '.github/workflows/public-fake-rpc-windows.yml'
+      - '.gitattributes'
+  pull_request:
+    paths:
+      - 'scripts/status-lab/**'
+      - '.github/workflows/public-fake-rpc-windows.yml'
+      - '.gitattributes'
+permissions:
+  contents: read
+jobs:
+  windows-fake-only:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: ibcmd-rs-lab/repos/issue-380-sql
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: ibcmd-rs-lab/repos/issue-380-sql
+          persist-credentials: false
+      - name: Windows kernel controls (exact seven tests, no skips)
+        id: gate
+        run: |
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          $env:STATUS_LAB_TEST_ROOT = Join-Path $env:GITHUB_WORKSPACE 'ibcmd-rs-lab/tmp/issue-380-rpc-runner'
+          # Reserve a new base; never adopt an existing fixture directory.
+          if (Test-Path $env:STATUS_LAB_TEST_ROOT) { throw 'fixture base already exists' }
+          New-Item -ItemType Directory -Path $env:STATUS_LAB_TEST_ROOT -ErrorAction Stop | Out-Null
+          $env:TMP = $env:STATUS_LAB_TEST_ROOT
+          $env:TEMP = $env:STATUS_LAB_TEST_ROOT
+          $env:TMPDIR = $env:STATUS_LAB_TEST_ROOT
+          # Hosted interpreter only; no runtime/package downloads or installs.
+          $pythonCommands = @(Get-Command python.exe -CommandType Application -All -ErrorAction Stop | Where-Object { $_.Source.StartsWith('C:\hostedtoolcache\windows\Python\', [StringComparison]::OrdinalIgnoreCase) })
+          if ($pythonCommands.Count -lt 1 -or $pythonCommands.Count -gt 8) { throw 'finite hosted Python selection required' }
+          $python = [string]$pythonCommands[0].Source
+          $manifestPath = 'scripts/status-lab/windows-source-sha256.json'
+          $manifestFile = Get-Item $manifestPath -ErrorAction Stop
+          if (($manifestFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $manifestFile.Length -gt 16384) { throw 'manifest boundary' }
+          $manifestHash = (Get-FileHash $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Output ('Public manifest SHA256=' + $manifestHash + ' bytes=' + $manifestFile.Length)
+          if ($manifestHash -ne '380397ccf73b9503d4903352acee50ceb9ebf117e1fba58ec3793ae18044047e') { throw 'manifest binding' }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          foreach ($item in $manifest.sha256.PSObject.Properties) {
+            $path = Join-Path 'scripts/status-lab' $item.Name
+            $file = Get-Item $path -ErrorAction Stop
+            if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $file.Length -gt 1048576) { throw 'source boundary' }
+            if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.Value) { throw 'source binding' }
+          }
+          & $python -B scripts/status-lab/windows_rpc_gate.py
+          $code = $LASTEXITCODE
+          if (Test-Path (Join-Path $env:STATUS_LAB_TEST_ROOT 'artifact-safe.json')) {
+            'artifact_safe=true' >> $env:GITHUB_OUTPUT
+          }
+          if ($code -ne 0) { exit $code }
+      - name: Retain only owned public fake fixtures and gate receipt
+        if: always() && steps.gate.outputs.artifact_safe == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: public-fake-rpc-windows
+          path: ibcmd-rs-lab/tmp/issue-380-rpc-runner
+          if-no-files-found: error
+          retention-days: 7
