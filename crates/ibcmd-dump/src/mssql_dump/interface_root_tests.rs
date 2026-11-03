@@ -70,3 +70,17 @@ fn interface_preflight_uses_production_root_classification() {
             .contains("unsupported Interface descriptor")
     );
 }
+
+#[test]
+fn legacy_form_root_sharing_the_interface_class_is_not_an_interface() {
+    // Legacy configurations store a form's root record under the same numeric
+    // class as the Interface descriptor. The preflight must leave such a row to
+    // the form decoder instead of failing the whole export.
+    let text = concat!(
+        "{1,{7,{3,{1,0,10000000-0000-4000-8000-000000000001},\"ФормаСписка\",",
+        "{1,\"ru\",\"Форма списка\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},0},0}"
+    );
+    let row = metadata_text_row_from_text("10000000-0000-4000-8000-000000000001", text.to_owned())
+        .unwrap();
+    validate_interface_descriptors(&[row]).unwrap();
+}

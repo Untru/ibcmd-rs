@@ -28,7 +28,10 @@ pub(super) fn validate_interface_descriptors(rows: &[MetadataTextRow]) -> Result
     }
     for row in rows.iter().filter(|row| {
         declared.contains(&row.file_name)
-            || (!row.file_name.contains('.') && row.object_code == Some(Layout::RECORD_CODE))
+            || (!row.file_name.contains('.')
+                && row.object_code == Some(Layout::RECORD_CODE)
+                && parse_row(row.text.as_bytes())
+                    .is_ok_and(|tree| Interface::matches_descriptor_layout(&tree)))
     }) {
         let tree = parse_row(row.text.as_bytes()).context("Interface descriptor syntax")?;
         Interface::from_brace(&tree)
