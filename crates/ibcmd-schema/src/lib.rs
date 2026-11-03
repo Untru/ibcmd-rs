@@ -18657,7 +18657,7 @@ pub mod metadata_storage_facts {
     /// Root collection that holds a register's owned forms.
     pub fn register_form_collection_uuid(kind: &str) -> Option<&'static str> {
         match kind {
-            "InformationRegister" => Some("b44ba719-945c-445c-8aab-1088fa4df16e"),
+            "InformationRegister" => Some("13134204-f60b-11d5-a3c7-0050bae0a776"),
             "CalculationRegister" => Some("a2cb086c-db98-43e4-a1a9-0760ab048f8d"),
             _ => None,
         }

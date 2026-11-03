@@ -24388,7 +24388,7 @@ fn extracts_exact_exchange_plan_owner_properties_atomically_and_in_native_order(
         (30, "{1,{1,8}}"),
         (34, "{1,\"en\"}"),
         (39, "2"),
-        (40, "{0}"),
+        (40, "{1}"),
         (41, "3"),
         (42, "{1,{0,1}}"),
         (43, "{9,2,0}"),
@@ -26403,7 +26403,7 @@ fn emits_accounting_register_record_type_from_complete_raw_triplet() {
         let record_type = accounting_register_standard_attribute_block(&xml, "RecordType");
 
         assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
-        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 12);
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 6);
         assert_eq!(
             xml.matches(r#"<xr:StandardAttribute name="RecordType">"#)
                 .count(),
@@ -26441,7 +26441,7 @@ fn preserves_accounting_register_record_type_tooltip_and_synonym() {
         let xml = extract_accounting_register_xml_for_test(&raw, register_uuid, source_version);
         let record_type = accounting_register_standard_attribute_block(&xml, "RecordType");
 
-        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 12);
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 6);
         assert!(record_type.contains("<xr:ToolTip>"));
         assert!(record_type.contains("<v8:content>Record type tip</v8:content>"));
         assert!(record_type.contains("<xr:Synonym>"));
@@ -26461,7 +26461,7 @@ fn omits_accounting_register_record_type_without_raw_marker() {
     ] {
         let xml = extract_accounting_register_xml_for_test(&raw, register_uuid, source_version);
 
-        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 11);
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 5);
         assert!(!xml.contains(r#"<xr:StandardAttribute name="RecordType">"#));
     }
 }
@@ -26518,7 +26518,7 @@ fn rejects_malformed_accounting_register_standard_attribute_collections_atomical
 
             assert_eq!(
                 xml.matches("<xr:StandardAttribute").count(),
-                11,
+                5,
                 "{case} in {}",
                 source_version.as_str()
             );
@@ -28859,6 +28859,7 @@ fn formats_enum_with_empty_child_objects_as_self_closing_node() {
         generated_types: Vec::new(),
         use_standard_commands: true,
         has_standard_attributes: true,
+        characteristics: Default::default(),
         quick_choice: true,
         choice_mode: "BothWays",
         choice_history_on_input: "DontUse",
@@ -54559,7 +54560,7 @@ fn accounting_register_standard_attribute_presence_preserves_absence_and_overrid
         let present_xml = extract_accounting_register_xml_for_test(&present, &uuid, profile);
         assert_eq!(
             present_xml.matches("<xr:StandardAttribute name=").count(),
-            12
+            6
         );
         let record_type = accounting_register_standard_attribute_block(&present_xml, "RecordType");
         assert!(record_type.contains("Record type tip"));
@@ -54589,7 +54590,7 @@ fn accounting_register_standard_attribute_presence_retains_empty_present_and_mal
             let xml = extract_accounting_register_xml_for_test(&raw, &uuid, profile);
             assert_eq!(
                 xml.matches("<xr:StandardAttribute name=").count(),
-                11,
+                5,
                 "{collection}"
             );
             assert!(!xml.contains("name=\"RecordType\""));

@@ -245,6 +245,8 @@ mod characteristics {
             CharacteristicsOwnerFamily::Task => 44,
             CharacteristicsOwnerFamily::ChartOfAccounts => 48,
             CharacteristicsOwnerFamily::ChartOfCalculationTypes => 54,
+            CharacteristicsOwnerFamily::ExchangePlan => 40,
+            CharacteristicsOwnerFamily::Enum => 19,
         }
     }
 
@@ -10870,7 +10872,8 @@ struct ExchangePlanProperties {
     auxiliary_list_form: Option<String>,
     auxiliary_choice_form: Option<String>,
     standard_attributes: Vec<RegisterStandardAttribute>,
-    based_on: Option<String>,
+    characteristics: Characteristics,
+    based_on: Vec<String>,
     distributed_infobase: bool,
     include_configuration_extensions: bool,
     create_on_input: &'static str,
@@ -11715,6 +11718,7 @@ struct EnumProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
     has_standard_attributes: bool,
+    characteristics: Characteristics,
     quick_choice: bool,
     choice_mode: &'static str,
     choice_history_on_input: &'static str,
@@ -14082,7 +14086,15 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid, form_refs)?;
         format_settings_storage_source_xml(header, &settings_storage, source_version).into_bytes()
     } else if kind == "Enum" {
-        let enumeration = parse_enum_properties_from_text(text, uuid, form_refs, template_refs)?;
+        let enumeration = parse_enum_properties_from_text(
+            text,
+            uuid,
+            type_index,
+            object_refs,
+            metadata_object_refs,
+            form_refs,
+            template_refs,
+        )?;
         format_enum_source_xml(header, &enumeration, source_version).into_bytes()
     } else if kind == "FunctionalOptionsParameter" {
         let properties =
@@ -14098,11 +14110,12 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         )?;
         format_subsystem_source_xml(header, &subsystem, source_version).into_bytes()
     } else if kind == "ExchangePlan" {
-        let exchange_plan = parse_exchange_plan_properties_from_text(
+        let exchange_plan = parse_exchange_plan_properties_from_text_with_refs(
             text,
             uuid,
             type_index,
             object_refs,
+            metadata_object_refs,
             form_refs,
         )?;
         format_exchange_plan_source_xml(header, &exchange_plan, source_version, type_set_leaves)
@@ -15018,30 +15031,32 @@ fn resolve_exchange_plan_index_reference(
 fn parse_exchange_plan_based_on(
     value: &str,
     object_refs: &BTreeMap<String, String>,
-) -> Option<Option<String>> {
+) -> Option<Vec<String>> {
     let fields = split_information_register_braced_fields(value)?;
-    match fields.as_slice() {
-        [kind, count] if kind.trim() == "0" && count.trim() == "0" => Some(None),
-        [kind, count, item] if kind.trim() == "0" && count.trim() == "1" => {
-            let typed = split_information_register_braced_fields(item)?;
-            if typed.len() != 3
-                || typed.first()?.trim() != r##""#""##
-                || !information_register_uuid_matches(typed.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
-            {
-                return None;
-            }
-            let reference = split_information_register_braced_fields(typed.get(2)?)?;
-            if reference.len() != 2 || reference.first()?.trim() != "1" {
-                return None;
-            }
-            let uuid = parse_information_register_non_zero_uuid(reference.get(1)?)?;
-            Some(Some(resolve_exchange_plan_index_reference(
-                &uuid,
-                object_refs,
-            )?))
-        }
-        _ => None,
+    if !ibcmd_schema::metadata_storage_facts::stored_code_is_zero(fields.first()?) {
+        return None;
     }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let mut references = Vec::with_capacity(count);
+    for item in &fields[2..] {
+        let typed = split_information_register_braced_fields(item)?;
+        if typed.len() != 3
+            || typed.first()?.trim() != r##""#""##
+            || !information_register_uuid_matches(typed.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
+        {
+            return None;
+        }
+        let reference = split_information_register_braced_fields(typed.get(2)?)?;
+        if reference.len() != 2 || reference.first()?.trim() != "1" {
+            return None;
+        }
+        let uuid = parse_information_register_non_zero_uuid(reference.get(1)?)?;
+        references.push(resolve_exchange_plan_index_reference(&uuid, object_refs)?);
+    }
+    Some(references)
 }
 
 fn parse_exchange_plan_field_ref_payload(value: &str) -> Option<Vec<&str>> {
@@ -15068,15 +15083,7 @@ fn parse_exchange_plan_field_ref_collection(value: &str) -> Option<Vec<&str>> {
     (payload.len() == count.checked_add(2)?).then(|| payload[2..].to_vec())
 }
 
-fn exchange_plan_characteristics_is_empty(value: &str) -> bool {
-    split_information_register_braced_fields(value).is_some_and(|fields| {
-        fields.len() == 2
-            && fields[0].trim() == "0"
-            && split_information_register_braced_fields(fields[1])
-                .is_some_and(|nested| nested.len() == 1 && nested[0].trim() == "0")
-    })
-}
-
+#[cfg(test)]
 fn parse_exchange_plan_properties_from_text(
     text: &str,
     uuid: &str,
@@ -15084,14 +15091,40 @@ fn parse_exchange_plan_properties_from_text(
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<ExchangePlanProperties> {
+    parse_exchange_plan_properties_from_text_with_refs(
+        text,
+        uuid,
+        type_index,
+        object_refs,
+        &BTreeMap::new(),
+        form_refs,
+    )
+}
+
+fn parse_exchange_plan_properties_from_text_with_refs(
+    text: &str,
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<ExchangePlanProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = parse_exchange_plan_owner_fields(text, &header)?;
     if !ibcmd_schema::metadata_storage_facts::stored_code_is_zero(fields.get(16)?)
-        || !exchange_plan_characteristics_is_empty(fields.get(40)?)
         || !ibcmd_schema::metadata_storage_facts::stored_code_is_zero(fields.get(49)?)
     {
         return None;
     }
+    let mut characteristics_diagnostic = None;
+    let characteristics = decode_optional_owner_characteristics(
+        owner_graph::CharacteristicsOwnerFamily::ExchangePlan,
+        &fields.physical,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        &mut characteristics_diagnostic,
+    )?;
     let (
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
@@ -15211,6 +15244,7 @@ fn parse_exchange_plan_properties_from_text(
             form_refs,
         )?,
         standard_attributes: parse_exchange_plan_standard_attributes(fields.get(30)?)?,
+        characteristics,
         based_on: parse_exchange_plan_based_on(fields.get(24)?, object_refs)?,
         distributed_infobase: parse_1c_bool_field(Some(fields.get(26)?))?,
         include_configuration_extensions: parse_1c_bool_field(Some(fields.get(45)?))?,
@@ -16980,6 +17014,31 @@ fn decode_owner_characteristics(
     }
 }
 
+fn decode_optional_owner_characteristics(
+    family: owner_graph::CharacteristicsOwnerFamily,
+    fields: &[&str],
+    type_index: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
+) -> Option<Characteristics> {
+    let slot = characteristics::characteristics_slot(family);
+    if fields.get(slot + 1).is_none() {
+        return Some(Characteristics::default());
+    }
+    match fields.get(slot).map(|value| value.trim()) {
+        None | Some("{0}") | Some("0") => Some(Characteristics::default()),
+        Some(_) => decode_owner_characteristics(
+            family,
+            fields,
+            type_index,
+            metadata_object_refs,
+            object_refs,
+            diagnostic,
+        ),
+    }
+}
+
 fn parse_information_register_non_zero_uuid(value: &str) -> Option<String> {
     let value = parse_information_register_uuid(value)?;
     (!information_register_uuid_is_zero(&value)).then_some(value)
@@ -18585,52 +18644,32 @@ fn register_standard_attributes(
             register_standard_attribute("LineNumber", "DontCheck", accounting_overrides, None),
             register_standard_attribute("Recorder", "DontCheck", accounting_overrides, None),
             register_standard_attribute("Period", "ShowError", accounting_overrides, None),
-            register_standard_attribute(
-                "ExtDimension1",
-                "DontCheck",
-                accounting_overrides,
-                Some(RegisterStandardAttributeLinkByType {
-                    data_path: account_data_path.clone(),
-                    link_item: 1,
-                }),
-            ),
-            register_standard_attribute(
-                "ExtDimensionType1",
-                "DontCheck",
-                accounting_overrides,
-                None,
-            ),
-            register_standard_attribute(
-                "ExtDimension2",
-                "DontCheck",
-                accounting_overrides,
-                Some(RegisterStandardAttributeLinkByType {
-                    data_path: account_data_path.clone(),
-                    link_item: 2,
-                }),
-            ),
-            register_standard_attribute(
-                "ExtDimensionType2",
-                "DontCheck",
-                accounting_overrides,
-                None,
-            ),
-            register_standard_attribute(
-                "ExtDimension3",
-                "DontCheck",
-                accounting_overrides,
-                Some(RegisterStandardAttributeLinkByType {
-                    data_path: account_data_path,
-                    link_item: 3,
-                }),
-            ),
-            register_standard_attribute(
-                "ExtDimensionType3",
-                "DontCheck",
-                accounting_overrides,
-                None,
-            ),
         ]);
+        for (link_item, dimension, dimension_type) in [
+            (1, "ExtDimension1", "ExtDimensionType1"),
+            (2, "ExtDimension2", "ExtDimensionType2"),
+            (3, "ExtDimension3", "ExtDimensionType3"),
+        ] {
+            if accounting_attributes.present.contains(dimension) {
+                attributes.push(register_standard_attribute(
+                    dimension,
+                    "DontCheck",
+                    accounting_overrides,
+                    Some(RegisterStandardAttributeLinkByType {
+                        data_path: account_data_path.clone(),
+                        link_item,
+                    }),
+                ));
+            }
+            if accounting_attributes.present.contains(dimension_type) {
+                attributes.push(register_standard_attribute(
+                    dimension_type,
+                    "DontCheck",
+                    accounting_overrides,
+                    None,
+                ));
+            }
+        }
         return attributes;
     }
     if kind == "AccumulationRegister" {
@@ -32999,6 +33038,9 @@ fn parse_data_processor_properties_from_text(
 fn parse_enum_properties_from_text(
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<EnumProperties> {
@@ -33007,6 +33049,15 @@ fn parse_enum_properties_from_text(
     if fields.first().map(|value| value.trim()) != Some("20") {
         return None;
     }
+    let mut characteristics_diagnostic = None;
+    let characteristics = decode_optional_owner_characteristics(
+        owner_graph::CharacteristicsOwnerFamily::Enum,
+        &fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        &mut characteristics_diagnostic,
+    )?;
     let mut generated_types = Vec::new();
     push_generated_type_entry(
         &mut generated_types,
@@ -33040,6 +33091,7 @@ fn parse_enum_properties_from_text(
         generated_types,
         use_standard_commands: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(true),
         has_standard_attributes: braced_field_has_entries(fields.get(18).copied()),
+        characteristics,
         quick_choice: parse_1c_bool_field(fields.get(12).copied()).unwrap_or(true),
         choice_mode: enum_choice_mode_xml(parse_1c_u32_field(fields.get(11).copied()).unwrap_or(2)),
         choice_history_on_input: fields
@@ -37921,8 +37973,12 @@ fn format_exchange_plan_source_xml(
             exchange_plan.auxiliary_choice_form.as_deref(),
         );
         push_register_standard_attributes_xml(&mut properties, &exchange_plan.standard_attributes);
-        properties.push_str("\t\t\t<Characteristics/>\r\n");
-        push_exchange_plan_based_on_xml(&mut properties, exchange_plan.based_on.as_deref());
+        if let Ok(characteristics) =
+            render_metadata_characteristics_xml(&exchange_plan.characteristics)
+        {
+            properties.push_str(&characteristics);
+        }
+        push_exchange_plan_based_on_xml(&mut properties, &exchange_plan.based_on);
         properties.push_str(&format!(
             "\t\t\t<DistributedInfoBase>{}</DistributedInfoBase>\r\n\
 \t\t\t<IncludeConfigurationExtensions>{}</IncludeConfigurationExtensions>\r\n\
@@ -38010,17 +38066,19 @@ fn push_exchange_plan_form_xml(xml: &mut String, name: &str, value: Option<&str>
     }
 }
 
-fn push_exchange_plan_based_on_xml(xml: &mut String, value: Option<&str>) {
-    if let Some(value) = value {
-        xml.push_str("\t\t\t<BasedOn>\r\n");
+fn push_exchange_plan_based_on_xml(xml: &mut String, values: &[String]) {
+    if values.is_empty() {
+        xml.push_str("\t\t\t<BasedOn/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<BasedOn>\r\n");
+    for value in values {
         xml.push_str(&format!(
             "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
             escape_xml_element_text(value)
         ));
-        xml.push_str("\t\t\t</BasedOn>\r\n");
-    } else {
-        xml.push_str("\t\t\t<BasedOn/>\r\n");
     }
+    xml.push_str("\t\t\t</BasedOn>\r\n");
 }
 
 fn push_exchange_plan_field_collection_xml(xml: &mut String, name: &str, fields: &[String]) {
@@ -40654,9 +40712,11 @@ fn format_enum_source_xml(
     if enumeration.has_standard_attributes {
         push_enum_standard_attributes_xml(&mut xml);
     }
+    if let Ok(characteristics) = render_metadata_characteristics_xml(&enumeration.characteristics) {
+        xml.push_str(&characteristics);
+    }
     xml.push_str(&format!(
-        "\t\t\t<Characteristics/>\r\n\
-\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
+        "\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
 \t\t\t<ChoiceMode>{}</ChoiceMode>\r\n",
         xml_bool(enumeration.quick_choice),
         enumeration.choice_mode
