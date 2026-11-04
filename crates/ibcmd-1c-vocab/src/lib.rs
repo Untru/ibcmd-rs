@@ -71,12 +71,12 @@ pub use standard_attributes::{
     ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES,
     ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES,
     CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
-    CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTION_DEFINITIONS,
-    ChartStandardTabularSectionDefinition, DOCUMENT_STANDARD_ATTRIBUTES,
+    CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTE_DEFINITIONS, DOCUMENT_STANDARD_ATTRIBUTES,
+    STANDARD_TABULAR_SECTION_DEFINITIONS, StandardTabularSectionDefinition,
     accumulation_register_record_set_standard_attribute_name,
     chart_of_accounts_sole_standard_tabular_section_name,
     chart_of_accounts_standard_attribute_definitions, chart_of_accounts_standard_tabular_section,
+    standard_tabular_sections_for,
 };
 pub use style::{
     standard_style_item_code_for_name, standard_style_item_for_code, style_web_color_name,

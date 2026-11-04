@@ -10679,11 +10679,10 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
         .copied()
         .zip(standard_payload[2..].chunks_exact(3))
     {
-        let bag = parse_information_register_standard_attribute_bag(triplet[2])
-            .unwrap_or_else(|| panic!("{name}: bag"));
+        let bag = parse_standard_attribute_bag(triplet[2]).unwrap_or_else(|| panic!("{name}: bag"));
         assert!(bag.has_type_reduction_mode, "{name}: reduction mode");
         let fill = bag
-            .get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)
+            .get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)
             .unwrap_or_else(|| panic!("{name}: fill property"));
         assert!(
             parse_cct_standard_attribute_fill_value(
@@ -23948,8 +23947,7 @@ fn accepts_leaf_sanitized_captured_exchange_plan_owner_tails() {
         let standard_outer =
             split_information_register_braced_fields(owner.get(30).unwrap()).unwrap();
         let standard_payload = split_information_register_braced_fields(standard_outer[1]).unwrap();
-        let first_bag =
-            parse_information_register_standard_attribute_bag(standard_payload[4]).unwrap();
+        let first_bag = parse_standard_attribute_bag(standard_payload[4]).unwrap();
         assert_eq!(first_bag.has_type_reduction_mode, code == "37");
 
         if code == "36" {
@@ -24708,31 +24706,22 @@ fn information_register_default_owner_tail_for_test() -> &'static str {
 {0},{0},{0},{0},{0},0,0,0,0,0"
 }
 
-fn information_register_standard_attribute_direct_enum_for_test(
-    type_uuid: &str,
-    code: &str,
-) -> String {
+fn standard_attribute_direct_enum_for_test(type_uuid: &str, code: &str) -> String {
     format!("{{\"#\",{type_uuid},{code}}}")
 }
 
-fn information_register_standard_attribute_nested_enum_for_test(
-    type_uuid: &str,
-    code: &str,
-) -> String {
+fn standard_attribute_nested_enum_for_test(type_uuid: &str, code: &str) -> String {
     format!("{{\"#\",{type_uuid},{{{type_uuid},{code}}}}}")
 }
 
-fn information_register_standard_attribute_localized_for_test(content: Option<&str>) -> String {
+fn standard_attribute_localized_for_test(content: Option<&str>) -> String {
     let value = content
         .map(|content| format!("{{1,\"en\",\"{content}\"}}"))
         .unwrap_or_else(|| "{0}".to_string());
-    format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{value}}}")
+    format!("{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{value}}}")
 }
 
-fn information_register_standard_attribute_values_for_test(
-    name: &str,
-    non_modal: bool,
-) -> Vec<String> {
+fn standard_attribute_values_for_test(name: &str, non_modal: bool) -> Vec<String> {
     let fill_value = match name {
         "Active" if non_modal => "{\"B\",1}",
         "LineNumber" => "{\"N\",0}",
@@ -24740,81 +24729,56 @@ fn information_register_standard_attribute_values_for_test(
         _ => "{\"U\"}",
     };
     vec![
-        format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,0}}}}"),
-        information_register_standard_attribute_direct_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        format!("{{\"#\",{STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,0}}}}"),
+        standard_attribute_direct_enum_for_test(
+            STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
             if non_modal { "1" } else { "0" },
         ),
         "{\"B\",0}".to_string(),
         format!("{{\"B\",{}}}", u8::from(non_modal)),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
-            "0",
-        ),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
-            "0",
-        ),
+        standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID, "0"),
+        standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID, "0"),
         "{\"U\"}".to_string(),
-        information_register_standard_attribute_localized_for_test(non_modal.then_some("Tooltip")),
+        standard_attribute_localized_for_test(non_modal.then_some("Tooltip")),
         "{\"B\",0}".to_string(),
-        information_register_standard_attribute_localized_for_test(non_modal.then_some("Format")),
+        standard_attribute_localized_for_test(non_modal.then_some("Format")),
         format!(
             "{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,00000000-0000-0000-0000-000000000000}}}}"
         ),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
-            "2",
-        ),
-        information_register_standard_attribute_direct_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-            "0",
-        ),
-        information_register_standard_attribute_localized_for_test(
-            non_modal.then_some("Edit format"),
-        ),
+        standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID, "2"),
+        standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID, "0"),
+        standard_attribute_localized_for_test(non_modal.then_some("Edit format")),
         "{\"B\",0}".to_string(),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+        standard_attribute_nested_enum_for_test(
+            STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
             if non_modal { "0" } else { "1" },
         ),
         "{\"B\",0}".to_string(),
         "{\"U\"}".to_string(),
-        information_register_standard_attribute_localized_for_test(non_modal.then_some("Caption")),
+        standard_attribute_localized_for_test(non_modal.then_some("Caption")),
         "{\"S\",\"\"}".to_string(),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+        standard_attribute_nested_enum_for_test(
+            STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
             if non_modal { "0" } else { "1" },
         ),
-        format!(
-            "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,0}}}}"
-        ),
+        format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,0}}}}"),
         fill_value.to_string(),
         "{\"S\",\"\"}".to_string(),
-        format!(
-            "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,0}}}}"
-        ),
+        format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,0}}}}"),
     ]
 }
 
-fn information_register_standard_attribute_bag_for_test(
-    name: &str,
-    modern: bool,
-    non_modal: bool,
-) -> String {
-    let values = information_register_standard_attribute_values_for_test(name, non_modal);
-    information_register_standard_attribute_bag_from_values_for_test(&values, modern)
+fn standard_attribute_bag_for_test(name: &str, modern: bool, non_modal: bool) -> String {
+    let values = standard_attribute_values_for_test(name, non_modal);
+    standard_attribute_bag_from_values_for_test(&values, modern)
 }
 
-fn information_register_standard_attribute_bag_from_values_for_test(
-    values: &[String],
-    modern: bool,
-) -> String {
+fn standard_attribute_bag_from_values_for_test(values: &[String], modern: bool) -> String {
     let mut fields = vec![
         if modern { "14" } else { "13" }.to_string(),
         if modern { "25" } else { "24" }.to_string(),
     ];
-    for (index, key) in INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+    for (index, key) in STANDARD_ATTRIBUTE_KEYS
         .iter()
         .enumerate()
         .filter(|(index, _)| modern || *index != 5)
@@ -24851,7 +24815,7 @@ impl Default for CatalogStandardAttributeOverrideForTest<'_> {
 /// Builds a schema-exact, 9-entry Catalog `StandardAttributes` payload
 /// (field 45 of `parse_strict_catalog_properties_from_text`). The bag wire
 /// format is shared with InformationRegister standard attributes
-/// (`INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS`); this reuses that proven
+/// (`STANDARD_ATTRIBUTE_KEYS`); this reuses that proven
 /// builder and only overrides the slots (fill checking/value, tooltip,
 /// synonym, type reduction) that a given test cares about, per marker.
 fn catalog_standard_attributes_payload_for_test(
@@ -24872,27 +24836,25 @@ fn catalog_standard_attributes_payload_for_test(
         let default_type_reduction = if name == "Owner" { "2" } else { "0" };
         let over = overrides.get(marker).copied().unwrap_or_default();
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
-        let mut values = information_register_standard_attribute_values_for_test(name, true);
-        values[1] = information_register_standard_attribute_direct_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = standard_attribute_values_for_test(name, true);
+        values[1] = standard_attribute_direct_enum_for_test(
+            STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
             over.fill_checking,
         );
-        values[5] = information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
+        values[5] = standard_attribute_nested_enum_for_test(
+            STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
             over.type_reduction.unwrap_or(default_type_reduction),
         );
-        values[7] = information_register_standard_attribute_localized_for_test(over.tooltip);
-        values[18] = information_register_standard_attribute_localized_for_test(over.synonym);
+        values[7] = standard_attribute_localized_for_test(over.tooltip);
+        values[18] = standard_attribute_localized_for_test(over.synonym);
         values[22] = over.fill_value.to_string();
-        payload.push(
-            information_register_standard_attribute_bag_from_values_for_test(&values, modern),
-        );
+        payload.push(standard_attribute_bag_from_values_for_test(&values, modern));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
 
-fn information_register_standard_attributes_for_test(modern: bool) -> String {
+fn standard_attributes_for_test(modern: bool) -> String {
     let definitions = [
         ("-5", "Active", true),
         ("-4", "LineNumber", false),
@@ -24902,43 +24864,35 @@ fn information_register_standard_attributes_for_test(modern: bool) -> String {
     let mut payload = vec!["1".to_string(), "4".to_string()];
     for (marker, name, non_modal) in definitions {
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
-        payload.push(information_register_standard_attribute_bag_for_test(
-            name, modern, non_modal,
-        ));
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        payload.push(standard_attribute_bag_for_test(name, modern, non_modal));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
 
 fn exchange_plan_standard_attribute_values_for_test(marker: &str) -> Vec<String> {
-    let mut values = information_register_standard_attribute_values_for_test("Recorder", false);
+    let mut values = standard_attribute_values_for_test("Recorder", false);
     match marker {
         "-14" => {
-            values[20] = information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+            values[20] = standard_attribute_nested_enum_for_test(
+                STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
                 "0",
             );
         }
         "-3" => {
-            values[1] = information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-                "1",
-            );
-            values[7] = information_register_standard_attribute_localized_for_test(Some("Tip"));
-            values[18] =
-                information_register_standard_attribute_localized_for_test(Some("Description"));
+            values[1] =
+                standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "1");
+            values[7] = standard_attribute_localized_for_test(Some("Tip"));
+            values[18] = standard_attribute_localized_for_test(Some("Description"));
             values[22] = "{\"S\",\"\"}".to_string();
         }
         "-2" => {
-            values[1] = information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-                "1",
-            );
-            values[7] =
-                information_register_standard_attribute_localized_for_test(Some("Code tip"));
-            values[18] = information_register_standard_attribute_localized_for_test(Some("Code"));
-            values[20] = information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+            values[1] =
+                standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "1");
+            values[7] = standard_attribute_localized_for_test(Some("Code tip"));
+            values[18] = standard_attribute_localized_for_test(Some("Code"));
+            values[20] = standard_attribute_nested_enum_for_test(
+                STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
                 "0",
             );
             values[22] = "{\"S\",\"   \"}".to_string();
@@ -24955,9 +24909,7 @@ fn exchange_plan_standard_attributes_for_test(modern: bool) -> String {
         let values = exchange_plan_standard_attribute_values_for_test(marker);
         payload.push(format!("{{{marker}}}"));
         payload.push("510405d3-2a0c-4fea-960a-7fee59b32f9b".to_string());
-        payload.push(
-            information_register_standard_attribute_bag_from_values_for_test(&values, modern),
-        );
+        payload.push(standard_attribute_bag_from_values_for_test(&values, modern));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
@@ -25025,19 +24977,17 @@ fn parses_exchange_plan_standard_attributes_by_family_and_marker() {
 
     let legacy = exchange_plan_standard_attributes_for_test(false);
     let mixed_shape = valid.replacen(
-        &information_register_standard_attribute_bag_for_test("Recorder", true, false),
-        &information_register_standard_attribute_bag_for_test("Recorder", false, false),
+        &standard_attribute_bag_for_test("Recorder", true, false),
+        &standard_attribute_bag_for_test("Recorder", false, false),
         1,
     );
     assert!(parse_exchange_plan_standard_attributes(&mixed_shape).is_none());
     assert!(parse_exchange_plan_standard_attributes(&legacy).is_some());
 
-    let ir = information_register_standard_attributes_for_test(true);
-    assert!(parse_information_register_standard_attributes(&ir).is_some());
+    let ir = standard_attributes_for_test(true);
+    assert!(parse_standard_attribute_collection(&ir).is_some());
     let ir_with_exchange_plan_string = ir.replacen("{\"U\"}", "{\"S\",\"   \"}", 1);
-    assert!(
-        parse_information_register_standard_attributes(&ir_with_exchange_plan_string).is_none()
-    );
+    assert!(parse_standard_attribute_collection(&ir_with_exchange_plan_string).is_none());
 }
 
 fn information_register_owner_tail_with_standard_attributes_for_test(
@@ -25365,10 +25315,10 @@ fn rejects_task_code33_as_information_register_owner_shape() {
 }
 
 #[test]
-fn parses_information_register_standard_attribute_legacy_and_modern_bags() {
+fn parses_standard_attribute_legacy_and_modern_bags() {
     for modern in [false, true] {
-        let raw = information_register_standard_attributes_for_test(modern);
-        let attributes = parse_information_register_standard_attributes(&raw).unwrap();
+        let raw = standard_attributes_for_test(modern);
+        let attributes = parse_standard_attribute_collection(&raw).unwrap();
 
         assert_eq!(
             attributes
@@ -25426,14 +25376,14 @@ fn parses_information_register_standard_attribute_legacy_and_modern_bags() {
 }
 
 #[test]
-fn accepts_independent_captured_information_register_standard_attribute_bags() {
+fn accepts_independent_captured_standard_attribute_bags() {
     let legacy = r##"{13,24,1183c14f-f814-49c6-9233-a3c26b3f64cf,{"#",9ad557b1-249e-48dc-824b-3e149ecf10a6,{3,0,0}},2723eb98-b4c1-498a-a6f3-70444757902f,{"#",98ea8e5a-b586-442b-b944-6e3447734aa7,0},2bbba66b-fabf-4863-8ba3-54b3c64c896e,{"B",0},2c8143d5-4248-4c43-8bfb-307c0be2e415,{"B",0},33c74a4d-561f-4bc0-9eaa-8d21c893c0a9,{"#",ad3615c5-aae6-4725-89be-91827523abd9,{ad3615c5-aae6-4725-89be-91827523abd9,0}},3eaf5a8b-06d6-47b0-ac7d-a9698247f499,{"U"},4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},4de03908-56f4-4396-a61e-17253afca9ac,{"B",0},580c29e2-8af4-4258-882a-7cf8073e61c8,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},6c4f7074-e7d4-48eb-b31b-132873666262,{"#",157fa490-4ce9-11d4-9415-008048da11f9,{1,00000000-0000-0000-0000-000000000000}},6e3a1131-37a3-4da5-8895-572d9d0c9db6,{"#",ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,{ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,2}},7ba608f2-e654-42a3-8885-334fe88ca910,{"#",12ca4003-ac70-450e-b897-37faf86bd313,0},88149a78-9448-4767-867b-0e650d165d2e,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},90ae4b5d-e0fd-49ef-a008-d67c1e75038c,{"B",0},9288a8ed-b259-46d0-a8e3-70d87956ff2d,{"#",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}},b02800e9-a8d1-42ab-9a12-f673e92be968,{"B",0},c65a541f-0b91-4f33-bc88-fbaaa57f9992,{"U"},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},cf4abea4-37b2-11d4-940f-008048da11f9,{"S",""},d4232326-022b-421e-b6d3-88e418f74327,{"#",3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,{3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,1}},e3da683b-c54a-457a-a243-b9b4f9bf76dd,{"#",b76a58b9-2a56-4e46-bb31-8e04ad9f31ae,{5006,0}},e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208,{"U"},f49e4ced-4033-4e6c-8755-9fbaaccd6078,{"S",""},fcf503b8-1c06-454a-970c-06413e64aee5,{"#",f2eaae14-91a7-47b9-9d69-097877f41580,{0,0}}}"##;
     let modern = r##"{14,25,1183c14f-f814-49c6-9233-a3c26b3f64cf,{"#",9ad557b1-249e-48dc-824b-3e149ecf10a6,{3,0,0}},2723eb98-b4c1-498a-a6f3-70444757902f,{"#",98ea8e5a-b586-442b-b944-6e3447734aa7,0},2bbba66b-fabf-4863-8ba3-54b3c64c896e,{"B",0},2c8143d5-4248-4c43-8bfb-307c0be2e415,{"B",0},33c74a4d-561f-4bc0-9eaa-8d21c893c0a9,{"#",ad3615c5-aae6-4725-89be-91827523abd9,{ad3615c5-aae6-4725-89be-91827523abd9,0}},3b10624f-1e3d-495d-8093-25225efc5313,{"#",502b7765-f89c-4fd0-924f-0a28d3dc09b7,{502b7765-f89c-4fd0-924f-0a28d3dc09b7,0}},3eaf5a8b-06d6-47b0-ac7d-a9698247f499,{"U"},4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},4de03908-56f4-4396-a61e-17253afca9ac,{"B",0},580c29e2-8af4-4258-882a-7cf8073e61c8,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},6c4f7074-e7d4-48eb-b31b-132873666262,{"#",157fa490-4ce9-11d4-9415-008048da11f9,{1,00000000-0000-0000-0000-000000000000}},6e3a1131-37a3-4da5-8895-572d9d0c9db6,{"#",ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,{ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,2}},7ba608f2-e654-42a3-8885-334fe88ca910,{"#",12ca4003-ac70-450e-b897-37faf86bd313,0},88149a78-9448-4767-867b-0e650d165d2e,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},90ae4b5d-e0fd-49ef-a008-d67c1e75038c,{"B",0},9288a8ed-b259-46d0-a8e3-70d87956ff2d,{"#",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}},b02800e9-a8d1-42ab-9a12-f673e92be968,{"B",0},c65a541f-0b91-4f33-bc88-fbaaa57f9992,{"U"},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},cf4abea4-37b2-11d4-940f-008048da11f9,{"S",""},d4232326-022b-421e-b6d3-88e418f74327,{"#",3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,{3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,1}},e3da683b-c54a-457a-a243-b9b4f9bf76dd,{"#",b76a58b9-2a56-4e46-bb31-8e04ad9f31ae,{5006,0}},e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208,{"U"},f49e4ced-4033-4e6c-8755-9fbaaccd6078,{"S",""},fcf503b8-1c06-454a-970c-06413e64aee5,{"#",f2eaae14-91a7-47b9-9d69-097877f41580,{0,0}}}"##;
 
     for (raw, modern) in [(legacy, false), (modern, true)] {
-        let bag = parse_information_register_standard_attribute_bag(raw).unwrap();
+        let bag = parse_standard_attribute_bag(raw).unwrap();
         assert_eq!(bag.has_type_reduction_mode, modern);
-        let attribute = parse_information_register_standard_attribute("Active", &bag).unwrap();
+        let attribute = parse_standard_attribute_with_bag_fill("Active", &bag).unwrap();
         assert_eq!(attribute.fill_checking, "DontCheck");
         assert!(matches!(attribute.fill_value, MetadataChildFillValue::Nil));
     }
@@ -25446,55 +25396,47 @@ fn accepts_independent_captured_information_register_standard_attribute_bags() {
 /// 8.3.27.2214 writes `<xr:DataHistory>Use</xr:DataHistory>` on each of their
 /// standard attributes.
 #[test]
-fn reads_information_register_standard_attribute_bag_revision_9_like_12() {
-    let current = information_register_standard_attribute_bag_for_test("Active", false, false);
+fn reads_standard_attribute_bag_revision_9_like_12() {
+    let current = standard_attribute_bag_for_test("Active", false, false);
     let data_history = r##"9288a8ed-b259-46d0-a8e3-70d87956ff2d,{"#",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}},"##;
     assert!(current.contains(data_history));
     let without_history = current.replacen(data_history, "", 1);
     for revision in ["12", "9"] {
         let raw = without_history.replacen("{13,24,", &format!("{{{revision},23,"), 1);
-        let bag = parse_information_register_standard_attribute_bag(&raw);
+        let bag = parse_standard_attribute_bag(&raw);
         assert!(bag.is_some(), "revision {revision}");
     }
 }
 
 #[test]
-fn rejects_malformed_information_register_standard_attribute_envelopes_and_bags() {
-    let valid = information_register_standard_attributes_for_test(true);
-    assert!(parse_information_register_standard_attributes("{0}").is_some());
-    assert!(parse_information_register_standard_attributes(&format!("{valid} trailing")).is_none());
+fn rejects_malformed_standard_attribute_envelopes_and_bags() {
+    let valid = standard_attributes_for_test(true);
+    assert!(parse_standard_attribute_collection("{0}").is_some());
+    assert!(parse_standard_attribute_collection(&format!("{valid} trailing")).is_none());
     assert!(
-        parse_information_register_standard_attributes(&valid.replacen("{1,{1,4,", "{1,{1,5,", 1))
-            .is_none()
+        parse_standard_attribute_collection(&valid.replacen("{1,{1,4,", "{1,{1,5,", 1)).is_none()
     );
+    assert!(parse_standard_attribute_collection(&valid.replacen("{-5}", "{-4}", 1)).is_none());
     assert!(
-        parse_information_register_standard_attributes(&valid.replacen("{-5}", "{-4}", 1))
-            .is_none()
-    );
-    assert!(
-        parse_information_register_standard_attributes(&valid.replacen(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+        parse_standard_attribute_collection(&valid.replacen(
+            STANDARD_ATTRIBUTE_SECTION_UUID,
             "510405d3-2a0c-4fea-960a-7fee59b32f9c",
             1,
         ))
         .is_none()
     );
-    let modern_bag = information_register_standard_attribute_bag_for_test("Active", true, true);
-    let legacy_bag = information_register_standard_attribute_bag_for_test("Active", false, true);
+    let modern_bag = standard_attribute_bag_for_test("Active", true, true);
+    let legacy_bag = standard_attribute_bag_for_test("Active", false, true);
     assert!(
-        parse_information_register_standard_attributes(&valid.replacen(
-            &modern_bag,
-            &legacy_bag,
-            1,
-        ))
-        .is_none()
+        parse_standard_attribute_collection(&valid.replacen(&modern_bag, &legacy_bag, 1,))
+            .is_none()
     );
     let wrong_typed_wrapper = valid.replacen(
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
         "98ea8e5a-b586-442b-b944-6e3447734aa8",
         1,
     );
-    assert!(parse_information_register_standard_attributes(&wrong_typed_wrapper).is_none());
+    assert!(parse_standard_attribute_collection(&wrong_typed_wrapper).is_none());
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let tail =
         information_register_owner_tail_with_standard_attributes_for_test(&wrong_typed_wrapper);
@@ -25510,41 +25452,33 @@ fn rejects_malformed_information_register_standard_attribute_envelopes_and_bags(
     let rebuild = |fields: &[&str]| format!("{{{}}}", fields.join(","));
     let mut reordered = fields.clone();
     reordered.swap(2, 4);
-    assert!(parse_information_register_standard_attribute_bag(&rebuild(&reordered)).is_none());
+    assert!(parse_standard_attribute_bag(&rebuild(&reordered)).is_none());
     let mut duplicate = fields.clone();
     duplicate[4] = duplicate[2];
-    assert!(parse_information_register_standard_attribute_bag(&rebuild(&duplicate)).is_none());
+    assert!(parse_standard_attribute_bag(&rebuild(&duplicate)).is_none());
     let mut unknown = fields.clone();
     unknown[2] = "1183c14f-f814-49c6-9233-a3c26b3f64ce";
-    assert!(parse_information_register_standard_attribute_bag(&rebuild(&unknown)).is_none());
+    assert!(parse_standard_attribute_bag(&rebuild(&unknown)).is_none());
     let wrong_tag = modern_bag.replacen("{14,25,", "{12,25,", 1);
-    assert!(parse_information_register_standard_attribute_bag(&wrong_tag).is_none());
+    assert!(parse_standard_attribute_bag(&wrong_tag).is_none());
     let wrong_count = modern_bag.replacen("{14,25,", "{14,24,", 1);
-    assert!(parse_information_register_standard_attribute_bag(&wrong_count).is_none());
+    assert!(parse_standard_attribute_bag(&wrong_count).is_none());
 }
 
 #[test]
-fn rejects_non_modal_information_register_standard_attribute_immutable_values() {
+fn rejects_non_modal_standard_attribute_immutable_values() {
     let invalid_values = [
         (
             0,
-            format!(
-                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,1}}}}"
-            ),
+            format!("{{\"#\",{STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,1}}}}"),
         ),
         (
             4,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
-                "1",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID, "1"),
         ),
         (
             5,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
-                "1",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID, "1"),
         ),
         (6, "{\"S\",\"\"}".to_string()),
         (8, "{\"B\",1}".to_string()),
@@ -25556,34 +25490,27 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
         ),
         (
             11,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
-                "1",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID, "1"),
         ),
         (16, "{\"B\",1}".to_string()),
         (17, "{\"N\",0}".to_string()),
         (19, "{\"S\",\"comment\"}".to_string()),
         (
             21,
-            format!(
-                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,1}}}}"
-            ),
+            format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,1}}}}"),
         ),
         (
             24,
-            format!(
-                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,1}}}}"
-            ),
+            format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,1}}}}"),
         ),
     ];
     for (index, invalid) in invalid_values {
-        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        let mut values = standard_attribute_values_for_test("Active", true);
         values[index] = invalid;
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
         assert!(
-            parse_information_register_standard_attribute("Active", &bag).is_none(),
+            parse_standard_attribute_with_bag_fill("Active", &bag).is_none(),
             "immutable property {index} was accepted"
         );
     }
@@ -25596,32 +25523,32 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
     // costing. Both stored values are read; a value outside the closed pair
     // still refuses the attribute.
     for (stored, expected) in [("0", Some(false)), ("1", Some(true))] {
-        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        let mut values = standard_attribute_values_for_test("Active", true);
         values[2] = format!("{{\"B\",{stored}}}");
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
         assert_eq!(
-            parse_information_register_standard_attribute("Active", &bag)
+            parse_standard_attribute_with_bag_fill("Active", &bag)
                 .map(|attribute| attribute.multi_line),
             expected
         );
     }
-    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    let mut values = standard_attribute_values_for_test("Active", true);
     values[2] = "{\"B\",2}".to_string();
-    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+    let raw = standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_standard_attribute_with_bag_fill("Active", &bag).is_none());
 
     // Property 10 is `ChoiceForm`. The empty reference is read as the
     // self-closed element; a named form is refused by this scopeless family,
     // which has no form index to name it with.
-    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    let mut values = standard_attribute_values_for_test("Active", true);
     values[10] = format!(
         "{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,7d3a4bd6-0c30-4d5a-bd51-9f6a5e0f2a11}}}}"
     );
-    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+    let raw = standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_standard_attribute_with_bag_fill("Active", &bag).is_none());
 
     // Property 12 is `ChoiceHistoryOnInput`, and it is not immutable: the
     // stand writes `DontUse` for it on the `Date` standard attribute of `do`
@@ -25629,59 +25556,47 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
     // read now instead of refused; a value outside the closed pair still
     // refuses the attribute.
     for (stored, expected) in [("0", Some("Auto")), ("1", Some("DontUse"))] {
-        let mut values = information_register_standard_attribute_values_for_test("Active", true);
-        values[12] = information_register_standard_attribute_direct_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-            stored,
-        );
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        let mut values = standard_attribute_values_for_test("Active", true);
+        values[12] =
+            standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID, stored);
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
         assert_eq!(
-            parse_information_register_standard_attribute("Active", &bag)
+            parse_standard_attribute_with_bag_fill("Active", &bag)
                 .map(|attribute| attribute.choice_history_on_input),
             expected
         );
     }
-    let mut values = information_register_standard_attribute_values_for_test("Active", true);
-    values[12] = information_register_standard_attribute_direct_enum_for_test(
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-        "2",
-    );
-    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+    let mut values = standard_attribute_values_for_test("Active", true);
+    values[12] =
+        standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID, "2");
+    let raw = standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_standard_attribute_with_bag_fill("Active", &bag).is_none());
 }
 
 #[test]
-fn enforces_information_register_standard_attribute_dynamic_domains() {
+fn enforces_standard_attribute_dynamic_domains() {
     for name in ["Active", "LineNumber", "Recorder", "Period"] {
-        let values = information_register_standard_attribute_values_for_test(name, true);
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-        assert!(parse_information_register_standard_attribute(name, &bag).is_some());
+        let values = standard_attribute_values_for_test(name, true);
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
+        assert!(parse_standard_attribute_with_bag_fill(name, &bag).is_some());
     }
 
     let dynamic_invalid_values = [
         (
             1,
-            information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-                "2",
-            ),
+            standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "2"),
         ),
         (
             1,
-            information_register_standard_attribute_direct_enum_for_test(
-                "98ea8e5a-b586-442b-b944-6e3447734aa8",
-                "0",
-            ),
+            standard_attribute_direct_enum_for_test("98ea8e5a-b586-442b-b944-6e3447734aa8", "0"),
         ),
         (3, "{\"B\",2}".to_string()),
         (
             7,
-            format!(
-                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"en\",\"tip\",junk}}}}"
-            ),
+            format!("{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"en\",\"tip\",junk}}}}"),
         ),
         (
             7,
@@ -25689,25 +25604,19 @@ fn enforces_information_register_standard_attribute_dynamic_domains() {
         ),
         (
             15,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
-                "2",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_DATA_HISTORY_UUID, "2"),
         ),
         (
             20,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
-                "2",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID, "2"),
         ),
     ];
     for (index, invalid) in dynamic_invalid_values {
-        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        let mut values = standard_attribute_values_for_test("Active", true);
         values[index] = invalid;
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-        assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
+        assert!(parse_standard_attribute_with_bag_fill("Active", &bag).is_none());
     }
 
     let fill_value_cases = [
@@ -25725,12 +25634,12 @@ fn enforces_information_register_standard_attribute_dynamic_domains() {
         ("Period", "{\"S\",\"20130101000000\"}", false),
     ];
     for (name, fill_value, expected) in fill_value_cases {
-        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        let mut values = standard_attribute_values_for_test(name, false);
         values[22] = fill_value.to_string();
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
         assert_eq!(
-            parse_information_register_standard_attribute(name, &bag).is_some(),
+            parse_standard_attribute_with_bag_fill(name, &bag).is_some(),
             expected,
             "{name} fill value {fill_value}"
         );
@@ -25742,20 +25651,18 @@ fn enforces_information_register_standard_attribute_dynamic_domains() {
         ("19000101000000", "1900-01-01T00:00:00"),
         ("20130101000000", "2013-01-01T00:00:00"),
     ] {
-        let value = parse_information_register_standard_attribute_fill_value(
-            &format!("{{\"D\",{raw}}}"),
-            "Period",
-        )
-        .unwrap();
+        let value =
+            parse_standard_attribute_fill_value_from_bag(&format!("{{\"D\",{raw}}}"), "Period")
+                .unwrap();
         assert!(matches!(value, MetadataChildFillValue::DateTime(value) if value == expected));
     }
 }
 
 #[test]
-fn emits_information_register_standard_attributes_from_exact_owner_root() {
+fn emits_standard_attributes_from_exact_owner_root() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     for modern in [false, true] {
-        let standard_attributes = information_register_standard_attributes_for_test(modern);
+        let standard_attributes = standard_attributes_for_test(modern);
         let tail =
             information_register_owner_tail_with_standard_attributes_for_test(&standard_attributes);
         let raw = exact_information_register_root_for_test(register_uuid, &tail);
@@ -26020,7 +25927,7 @@ fn extracts_information_register_generated_types_internal_info() {
 }
 
 #[test]
-fn rejects_legacy_short_information_register_standard_attributes() {
+fn rejects_legacy_short_standard_attributes() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let standard_attribute_details = "{1,{0}}";
     let blob = deflate_for_test(
@@ -26377,21 +26284,19 @@ fn accounting_register_standard_attribute_bag_for_test(
     with_overrides: bool,
     modern: bool,
 ) -> String {
-    let mut values = information_register_standard_attribute_values_for_test("Recorder", false);
+    let mut values = standard_attribute_values_for_test("Recorder", false);
     if with_overrides {
-        values[7] =
-            information_register_standard_attribute_localized_for_test(Some("Record type tip"));
-        values[18] =
-            information_register_standard_attribute_localized_for_test(Some("Record type"));
+        values[7] = standard_attribute_localized_for_test(Some("Record type tip"));
+        values[18] = standard_attribute_localized_for_test(Some("Record type"));
     }
-    information_register_standard_attribute_bag_from_values_for_test(&values, modern)
+    standard_attribute_bag_from_values_for_test(&values, modern)
 }
 
 fn accounting_register_standard_attributes_for_test(definitions: &[(&str, bool)]) -> String {
     let mut payload = vec!["1".to_string(), definitions.len().to_string()];
     for (marker, with_overrides) in definitions {
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
         payload.push(accounting_register_standard_attribute_bag_for_test(
             *with_overrides,
             false,
@@ -26542,21 +26447,17 @@ fn rejects_malformed_accounting_register_standard_attribute_collections_atomical
         "1".to_string(),
         "2".to_string(),
         "{-9}".to_string(),
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
+        STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
         property_bag.clone(),
         "{-10}".to_string(),
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
+        STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
         modern_property_bag,
     ];
     let mixed_bag_shapes = format!("{{1,{{{}}}}}", mixed_payload.join(","));
     let mutations = [
         (
             "wrong section UUID",
-            valid.replacen(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-                register_uuid,
-                1,
-            ),
+            valid.replacen(STANDARD_ATTRIBUTE_SECTION_UUID, register_uuid, 1),
         ),
         ("missing property bag", missing_bag),
         ("garbage property bag", garbage_bag),
@@ -39319,22 +39220,19 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
         ];
         let mut payload = vec!["1".to_owned(), attributes.len().to_string()];
         for (marker, fill_value, presentation) in attributes {
-            let mut values =
-                information_register_standard_attribute_values_for_test("Active", false);
+            let mut values = standard_attribute_values_for_test("Active", false);
             values[22] = fill_value.to_owned();
             if let Some((tooltip, synonym)) = presentation {
                 values[7] = format!(
-                    "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{tooltip}\"}}}}"
+                    "{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{tooltip}\"}}}}"
                 );
                 values[18] = format!(
-                    "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{synonym}\"}}}}"
+                    "{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{synonym}\"}}}}"
                 );
             }
             payload.push(format!("{{{marker}}}"));
-            payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
-            payload.push(
-                information_register_standard_attribute_bag_from_values_for_test(&values, true),
-            );
+            payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+            payload.push(standard_attribute_bag_from_values_for_test(&values, true));
         }
         format!("{{1,{{{}}}}}", payload.join(","))
     };
@@ -39462,11 +39360,8 @@ fn extracts_document_numbering_commands_and_default_forms_to_metadata_xml() {
     let mut standard_attribute_payload = vec!["1".to_owned(), "5".to_owned()];
     for marker in ["-7", "-5", "-4", "-3", "-2"] {
         standard_attribute_payload.push(format!("{{{marker}}}"));
-        standard_attribute_payload
-            .push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
-        standard_attribute_payload.push(information_register_standard_attribute_bag_for_test(
-            "Active", true, false,
-        ));
+        standard_attribute_payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        standard_attribute_payload.push(standard_attribute_bag_for_test("Active", true, false));
     }
     fields[32] = format!("{{1,{{{}}}}}", standard_attribute_payload.join(","));
     collections[4] = format!(
@@ -39730,11 +39625,8 @@ fn extracts_document_child_attribute_data_history_tail() {
     let mut standard_attribute_payload = vec!["1".to_owned(), "5".to_owned()];
     for marker in ["-7", "-5", "-4", "-3", "-2"] {
         standard_attribute_payload.push(format!("{{{marker}}}"));
-        standard_attribute_payload
-            .push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
-        standard_attribute_payload.push(information_register_standard_attribute_bag_for_test(
-            "Active", true, false,
-        ));
+        standard_attribute_payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        standard_attribute_payload.push(standard_attribute_bag_for_test("Active", true, false));
     }
     fields[32] = format!("{{1,{{{}}}}}", standard_attribute_payload.join(","));
     collections[2] = attribute_collection;
@@ -45869,18 +45761,13 @@ fn extracts_catalog_tabular_section_property_tail() {
         r#"{"S",""}"#,
         "0",
     );
-    let mut line_number_values =
-        information_register_standard_attribute_values_for_test("LineNumber", true);
-    line_number_values[1] = information_register_standard_attribute_direct_enum_for_test(
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-        "1",
-    );
+    let mut line_number_values = standard_attribute_values_for_test("LineNumber", true);
+    line_number_values[1] =
+        standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "1");
     line_number_values[22] = "{\"U\"}".to_string();
-    let line_number_bag =
-        information_register_standard_attribute_bag_from_values_for_test(&line_number_values, true);
-    let standard_attributes_presence = format!(
-        "{{1,{{1,1,{{-10}},{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID},{line_number_bag}}}}}"
-    );
+    let line_number_bag = standard_attribute_bag_from_values_for_test(&line_number_values, true);
+    let standard_attributes_presence =
+        format!("{{1,{{1,1,{{-10}},{STANDARD_ATTRIBUTE_SECTION_UUID},{line_number_bag}}}}}");
     let tabular = catalog_tabular_section_item_with_overrides_for_test(
         tabular_section_uuid,
         "Prices",
@@ -47368,25 +47255,20 @@ fn exact_register_standard_attributes_with_fill_for_test(
     let mut payload = vec!["1".to_string(), definitions.len().to_string()];
     for (marker, name) in definitions {
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
-        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = standard_attribute_values_for_test(name, false);
         if let Some(fill_value) = fill_value {
-            let index = INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+            let index = STANDARD_ATTRIBUTE_KEYS
                 .iter()
-                .position(|key| {
-                    *key == INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID
-                })
+                .position(|key| *key == STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)
                 .expect("the authored property bag declares its fill-value key");
             values[index] = fill_value.to_owned();
         }
         if *name == "Period" {
-            values[1] = information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-                "1",
-            );
+            values[1] =
+                standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "1");
         }
-        payload
-            .push(information_register_standard_attribute_bag_from_values_for_test(&values, false));
+        payload.push(standard_attribute_bag_from_values_for_test(&values, false));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
@@ -47797,12 +47679,10 @@ fn accumulation_register_exports_with_no_customized_standard_attributes() {
 /// (confirmed by hand).
 #[test]
 fn register_standard_attribute_accepts_choice_parameter_links_kind_5004() {
-    let mut values = information_register_standard_attribute_values_for_test("Active", false);
-    values[21] = format!(
-        "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5004,0}}}}"
-    );
-    let bag_text = information_register_standard_attribute_bag_from_values_for_test(&values, false);
-    let bag = parse_information_register_standard_attribute_bag(&bag_text)
+    let mut values = standard_attribute_values_for_test("Active", false);
+    values[21] = format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5004,0}}}}");
+    let bag_text = standard_attribute_bag_from_values_for_test(&values, false);
+    let bag = parse_standard_attribute_bag(&bag_text)
         .expect("bag with a 5004 choice-parameter-links kind tag must still parse");
     let attribute = parse_register_standard_attribute("Active", &bag, MetadataChildFillValue::Nil);
     assert!(
@@ -51926,26 +51806,21 @@ fn line_number_standard_attributes_for_test(
     edit_format: &str,
     synonym: &str,
 ) -> String {
-    let localized = |content: &str| {
-        format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{content}}}")
-    };
+    let localized =
+        |content: &str| format!("{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{content}}}");
     let mut pairs = Vec::new();
-    for key in INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS {
+    for key in STANDARD_ATTRIBUTE_KEYS {
         let value = match key {
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID => localized(format),
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID => {
-                localized(edit_format)
-            }
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => localized(synonym),
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID => {
-                r#"{"U"}"#.to_owned()
-            }
+            STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID => localized(format),
+            STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID => localized(edit_format),
+            STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => localized(synonym),
+            STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID => r#"{"U"}"#.to_owned(),
             _ => "{0}".to_owned(),
         };
         pairs.push(format!("{key},{value}"));
     }
     let bag = format!("{{14,25,{}}}", pairs.join(","));
-    format!("{{1,{{1,1,{{-10}},{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID},{bag}}}}}")
+    format!("{{1,{{1,1,{{-10}},{STANDARD_ATTRIBUTE_SECTION_UUID},{bag}}}}}")
 }
 
 #[test]
@@ -54502,17 +54377,14 @@ fn task_standard_attribute_presence_root_for_test(standard_attributes: &str) -> 
 fn task_standard_attribute_presence_collection_for_test(override_number: bool) -> String {
     let mut payload = vec!["1".to_owned(), "8".to_owned()];
     for (marker, name) in TASK_STANDARD_ATTRIBUTES {
-        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        let mut values = standard_attribute_values_for_test(name, false);
         if override_number && name == "Number" {
-            values[7] =
-                information_register_standard_attribute_localized_for_test(Some("Number tip"));
-            values[18] =
-                information_register_standard_attribute_localized_for_test(Some("Number caption"));
+            values[7] = standard_attribute_localized_for_test(Some("Number tip"));
+            values[18] = standard_attribute_localized_for_test(Some("Number caption"));
         }
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
-        payload
-            .push(information_register_standard_attribute_bag_from_values_for_test(&values, false));
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        payload.push(standard_attribute_bag_from_values_for_test(&values, false));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
@@ -54667,25 +54539,30 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     );
     assert!(parse_information_register_owner_localized_value("{1,0}").is_none());
     let index = BTreeMap::new();
-    let vocabulary = || ChartStandardAttributeVocabulary::NilOnly;
+    let forms = BTreeMap::new();
+    let vocabulary = || StandardAttributeVocabulary::NilOnly;
     let attributes = parse_chart_root_standard_attributes(
         "{0}",
         CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
         vocabulary(),
+        None,
         &index,
         &index,
+        &forms,
     )
     .unwrap();
     assert!(attributes.is_empty());
     // This root-only admission must not turn unproved ordinary nested
     // standard-attribute absence into accepted/defaulted content.
     assert!(
-        parse_chart_standard_attributes(
+        parse_standard_attributes(
             "{0}",
             CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
             vocabulary(),
+            None,
             &index,
             &index,
+            &forms,
         )
         .is_none()
     );
@@ -54694,8 +54571,10 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
             "{0,0}",
             CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
             vocabulary(),
+            None,
             &index,
             &index,
+            &forms,
         )
         .is_none()
     );
@@ -54706,8 +54585,10 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
         &complete,
         CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
         vocabulary(),
+        None,
         &index,
         &index,
+        &forms,
     )
     .unwrap();
     assert_eq!(
@@ -54721,37 +54602,47 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
         assert_eq!(attribute.name, *name);
     }
     assert!(
-        parse_chart_root_standard_tabular_sections(
+        parse_standard_tabular_sections(
             "{0}",
-            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+            standard_tabular_sections_for("ChartOfAccounts"),
+            None,
+            &index,
+            &index,
+            &forms,
         )
         .unwrap()
         .is_none()
     );
     assert!(
-        parse_chart_root_standard_tabular_sections(
+        parse_standard_tabular_sections(
             "{1,{0,0}}",
-            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+            standard_tabular_sections_for("ChartOfAccounts"),
+            None,
+            &index,
+            &index,
+            &forms,
         )
         .is_none()
     );
     let mut payload = vec![
         "0".to_owned(),
-        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS
+        standard_tabular_sections_for("ChartOfAccounts")
             .len()
             .to_string(),
     ];
-    for (marker, _, definitions) in CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS {
+    for (marker, _, definitions) in standard_tabular_sections_for("ChartOfAccounts") {
         payload.push((*marker).to_owned());
         if definitions.iter().any(|(_, name)| *name == "LineNumber") {
             let numeric_fill = exact_register_standard_attributes_for_test(definitions);
             assert!(
-                parse_chart_standard_attributes(
+                parse_standard_attributes(
                     &numeric_fill,
                     definitions,
                     vocabulary(),
+                    None,
                     &index,
                     &index,
+                    &forms,
                 )
                 .is_none(),
                 "nested chart attributes must still refuse numeric LineNumber fill"
@@ -54763,21 +54654,87 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
             "{{3,{{0}},\"authored section\",0,0,{attributes},{{0}}}}"
         ));
     }
-    let present = parse_chart_root_standard_tabular_sections(
+    let present = parse_standard_tabular_sections(
         &format!("{{1,{{{}}}}}", payload.join(",")),
-        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+        standard_tabular_sections_for("ChartOfAccounts"),
+        None,
+        &index,
+        &index,
+        &forms,
     )
     .unwrap()
     .expect("a complete native section remains present");
     assert_eq!(
         present.len(),
-        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS.len()
+        standard_tabular_sections_for("ChartOfAccounts").len()
     );
     let mut xml = String::new();
     push_chart_standard_tabular_sections_xml(&mut xml, &present);
     assert!(xml.contains("<StandardTabularSections>"));
     assert!(xml.contains("authored section"));
     assert!(xml.contains("name=\"ExtDimensionTypes\""));
+}
+
+/// A chart root's standard attribute may name its own `<xr:ChoiceForm>`.
+///
+/// 8.3.27.2214 `ChartsOfAccounts/ПланСчетов2`: the `Parent` record's
+/// `ChoiceForm` slot carries the uuid of the chart's own `ФормаВыбора` and the
+/// platform exports `<xr:ChoiceForm>ChartOfAccounts.ПланСчетов2.Form.ФормаВыбора</xr:ChoiceForm>`.
+/// `ChartsOfCalculationTypes/ПланВидовРасчета1` names one the same way from a
+/// standard tabular section. The slot used to be read without the form index,
+/// so a named form refused the attribute and the object lost its whole file.
+#[test]
+fn chart_standard_attribute_names_a_resolved_choice_form() {
+    let form_uuid = "337a76d8-b77b-4307-b9b3-c4175953d39f";
+    let mut forms = BTreeMap::new();
+    forms.insert(
+        form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("ChartsOfAccounts/ПланСчетов2/Forms/ФормаВыбора.xml"),
+            kind: "Form",
+        },
+    );
+    let index = BTreeMap::new();
+    let definitions = [("-6", "Parent")];
+    let mut payload = vec!["1".to_string(), definitions.len().to_string()];
+    for (marker, name) in definitions {
+        payload.push(format!("{{{marker}}}"));
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = standard_attribute_values_for_test(name, false);
+        values[10] = format!("{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{form_uuid}}}}}");
+        payload.push(standard_attribute_bag_from_values_for_test(&values, false));
+    }
+    let record = format!("{{1,{{{}}}}}", payload.join(","));
+    let attributes = parse_chart_root_standard_attributes(
+        &record,
+        &definitions,
+        StandardAttributeVocabulary::NilOnly,
+        None,
+        &index,
+        &index,
+        &forms,
+    )
+    .unwrap();
+    match &attributes[0].choice_form {
+        MetadataChoiceForm::Reference(name) => {
+            assert_eq!(name, "ChartOfAccounts.ПланСчетов2.Form.ФормаВыбора")
+        }
+        MetadataChoiceForm::Empty => panic!("the named choice form must resolve to its reference"),
+    }
+    // Without the form index the same record keeps the fail-closed refusal:
+    // the name is never invented from the uuid.
+    assert!(
+        parse_chart_root_standard_attributes(
+            &record,
+            &definitions,
+            StandardAttributeVocabulary::NilOnly,
+            None,
+            &index,
+            &index,
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
 }
 
 #[test]

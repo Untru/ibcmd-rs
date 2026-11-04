@@ -34,10 +34,8 @@ use ibcmd_1c_vocab::{
     ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES,
     ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES,
     CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
-    CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTION_DEFINITIONS,
-    ChartStandardTabularSectionDefinition, DCS_BUILTIN_REFERENCE_TYPE_SETS,
-    DOCUMENT_STANDARD_ATTRIBUTES, TYPE_DESCRIPTION_TYPE_UUID,
+    CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTE_DEFINITIONS, DCS_BUILTIN_REFERENCE_TYPE_SETS,
+    DOCUMENT_STANDARD_ATTRIBUTES, StandardTabularSectionDefinition, TYPE_DESCRIPTION_TYPE_UUID,
     data_processor_builtin_type_reference, elapsed_ms, ext_picture_file_name,
     format_type_description_value_types_xml, inflate_raw_deflate,
     information_register_decimal_is_valid, metadata_choice_folders_and_items_xml,
@@ -45,8 +43,8 @@ use ibcmd_1c_vocab::{
     metadata_type_xml_namespace_attr, number_allowed_sign_xml, parse_common_command_picture_value,
     parse_common_command_shortcut_value, parse_design_time_reference,
     platform_reference_family_type_reference, push_binary_data_qualifiers_xml, scoped_value_type,
-    standard_style_item_for_code, string_allowed_length_xml, style_win_color_name,
-    unique_metadata_type_reference,
+    standard_style_item_for_code, standard_tabular_sections_for, string_allowed_length_xml,
+    style_win_color_name, unique_metadata_type_reference,
 };
 pub(super) use ibcmd_1c_vocab::{
     ConstantValueType, DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME,
@@ -17345,106 +17343,77 @@ fn information_register_data_lock_control_mode_xml(value: &str) -> Option<&'stat
 
 // Platform serialization IDs shared by the BSP, UT, and SFC cohorts; these are not
 // identities of metadata objects from the information base being decoded.
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID: &str =
-    "510405d3-2a0c-4fea-960a-7fee59b32f9b";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID: &str =
-    "87024738-fc2a-4436-ada1-df79d395c424";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID: &str =
-    "9ad557b1-249e-48dc-824b-3e149ecf10a6";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID: &str =
-    "98ea8e5a-b586-442b-b944-6e3447734aa7";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID: &str =
-    "ad3615c5-aae6-4725-89be-91827523abd9";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID: &str =
-    "502b7765-f89c-4fd0-924f-0a28d3dc09b7";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID: &str =
-    "ace3fd07-11b2-477e-ab7f-36f0ea37c8dd";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID: &str =
-    "12ca4003-ac70-450e-b897-37faf86bd313";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID: &str =
-    "d46ea122-3201-4e5e-bed4-e669c6e463c8";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID: &str =
-    "3b8e6bdd-d648-49d5-af2f-d46d84f87dd5";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID: &str =
-    "b76a58b9-2a56-4e46-bb31-8e04ad9f31ae";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID: &str =
-    "f2eaae14-91a7-47b9-9d69-097877f41580";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID: &str =
-    "1183c14f-f814-49c6-9233-a3c26b3f64cf";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID: &str =
-    "2723eb98-b4c1-498a-a6f3-70444757902f";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID: &str =
-    "2bbba66b-fabf-4863-8ba3-54b3c64c896e";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID: &str =
+const STANDARD_ATTRIBUTE_SECTION_UUID: &str = "510405d3-2a0c-4fea-960a-7fee59b32f9b";
+const STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID: &str = "87024738-fc2a-4436-ada1-df79d395c424";
+const STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID: &str = "9ad557b1-249e-48dc-824b-3e149ecf10a6";
+const STANDARD_ATTRIBUTE_FILL_CHECKING_UUID: &str = "98ea8e5a-b586-442b-b944-6e3447734aa7";
+const STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID: &str = "ad3615c5-aae6-4725-89be-91827523abd9";
+const STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID: &str = "502b7765-f89c-4fd0-924f-0a28d3dc09b7";
+const STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID: &str = "ace3fd07-11b2-477e-ab7f-36f0ea37c8dd";
+const STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID: &str = "12ca4003-ac70-450e-b897-37faf86bd313";
+const STANDARD_ATTRIBUTE_DATA_HISTORY_UUID: &str = "d46ea122-3201-4e5e-bed4-e669c6e463c8";
+const STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID: &str = "3b8e6bdd-d648-49d5-af2f-d46d84f87dd5";
+const STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID: &str = "b76a58b9-2a56-4e46-bb31-8e04ad9f31ae";
+const STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID: &str = "f2eaae14-91a7-47b9-9d69-097877f41580";
+const STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID: &str = "1183c14f-f814-49c6-9233-a3c26b3f64cf";
+const STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID: &str = "2723eb98-b4c1-498a-a6f3-70444757902f";
+const STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID: &str = "2bbba66b-fabf-4863-8ba3-54b3c64c896e";
+const STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID: &str =
     "2c8143d5-4248-4c43-8bfb-307c0be2e415";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID: &str =
+const STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID: &str =
     "33c74a4d-561f-4bc0-9eaa-8d21c893c0a9";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID: &str =
+const STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID: &str =
     "3b10624f-1e3d-495d-8093-25225efc5313";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID: &str =
-    "3eaf5a8b-06d6-47b0-ac7d-a9698247f499";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID: &str =
-    "4690ff70-e3fa-4914-9127-6a9acc5fc949";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID: &str =
-    "4de03908-56f4-4396-a61e-17253afca9ac";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID: &str =
-    "580c29e2-8af4-4258-882a-7cf8073e61c8";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID: &str =
-    "6c4f7074-e7d4-48eb-b31b-132873666262";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID: &str =
-    "6e3a1131-37a3-4da5-8895-572d9d0c9db6";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID: &str =
+const STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID: &str = "3eaf5a8b-06d6-47b0-ac7d-a9698247f499";
+const STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID: &str = "4690ff70-e3fa-4914-9127-6a9acc5fc949";
+const STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID: &str = "4de03908-56f4-4396-a61e-17253afca9ac";
+const STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID: &str = "580c29e2-8af4-4258-882a-7cf8073e61c8";
+const STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID: &str = "6c4f7074-e7d4-48eb-b31b-132873666262";
+const STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID: &str = "6e3a1131-37a3-4da5-8895-572d9d0c9db6";
+const STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID: &str =
     "7ba608f2-e654-42a3-8885-334fe88ca910";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID: &str =
-    "88149a78-9448-4767-867b-0e650d165d2e";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID: &str =
-    "90ae4b5d-e0fd-49ef-a008-d67c1e75038c";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID: &str =
-    "9288a8ed-b259-46d0-a8e3-70d87956ff2d";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID: &str =
+const STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID: &str = "88149a78-9448-4767-867b-0e650d165d2e";
+const STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID: &str = "90ae4b5d-e0fd-49ef-a008-d67c1e75038c";
+const STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID: &str = "9288a8ed-b259-46d0-a8e3-70d87956ff2d";
+const STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID: &str =
     "b02800e9-a8d1-42ab-9a12-f673e92be968";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID: &str =
-    "c65a541f-0b91-4f33-bc88-fbaaa57f9992";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID: &str =
-    "cf4abea3-37b2-11d4-940f-008048da11f9";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID: &str =
-    "cf4abea4-37b2-11d4-940f-008048da11f9";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID: &str =
+const STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID: &str = "c65a541f-0b91-4f33-bc88-fbaaa57f9992";
+const STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID: &str = "cf4abea3-37b2-11d4-940f-008048da11f9";
+const STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID: &str = "cf4abea4-37b2-11d4-940f-008048da11f9";
+const STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID: &str =
     "d4232326-022b-421e-b6d3-88e418f74327";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID: &str =
+const STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID: &str =
     "e3da683b-c54a-457a-a243-b9b4f9bf76dd";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID: &str =
-    "e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID: &str =
-    "f49e4ced-4033-4e6c-8755-9fbaaccd6078";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID: &str =
+const STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID: &str = "e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208";
+const STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID: &str = "f49e4ced-4033-4e6c-8755-9fbaaccd6078";
+const STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID: &str =
     "fcf503b8-1c06-454a-970c-06413e64aee5";
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS: [&str; 25] = [
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID,
-    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID,
+const STANDARD_ATTRIBUTE_KEYS: [&str; 25] = [
+    STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID,
+    STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID,
 ];
 
 struct InformationRegisterStandardAttributeBag<'a> {
@@ -17462,14 +17431,14 @@ fn information_register_uuid_matches(value: &str, expected: &str) -> bool {
     parse_information_register_uuid(value).is_some_and(|value| value.eq_ignore_ascii_case(expected))
 }
 
-fn parse_information_register_standard_attribute_bag(
+fn parse_standard_attribute_bag(
     value: &str,
 ) -> Option<InformationRegisterStandardAttributeBag<'_>> {
     let fields = split_information_register_braced_fields(value)?;
     let layout = ibcmd_schema::metadata_storage_facts::InformationRegisterStandardAttributeLayout::from_fields(&fields)?;
     let has_type_reduction_mode = layout.has_type_reduction_mode;
     let absent = layout.absent_defaults;
-    let expected_keys = INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+    let expected_keys = STANDARD_ATTRIBUTE_KEYS
         .iter()
         .enumerate()
         .filter_map(|(index, key)| (has_type_reduction_mode || index != 5).then_some(*key))
@@ -17492,10 +17461,7 @@ fn parse_information_register_standard_attribute_bag(
     })
 }
 
-fn parse_information_register_standard_attribute_direct_enum<'a>(
-    value: &'a str,
-    type_uuid: &str,
-) -> Option<&'a str> {
+fn parse_standard_attribute_direct_enum<'a>(value: &'a str, type_uuid: &str) -> Option<&'a str> {
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 3
         || fields.first()?.trim() != r##""#""##
@@ -17506,10 +17472,7 @@ fn parse_information_register_standard_attribute_direct_enum<'a>(
     Some(fields.get(2)?.trim())
 }
 
-fn parse_information_register_standard_attribute_nested_enum<'a>(
-    value: &'a str,
-    type_uuid: &str,
-) -> Option<&'a str> {
+fn parse_standard_attribute_nested_enum<'a>(value: &'a str, type_uuid: &str) -> Option<&'a str> {
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 3
         || fields.first()?.trim() != r##""#""##
@@ -17524,7 +17487,7 @@ fn parse_information_register_standard_attribute_nested_enum<'a>(
     Some(nested.get(1)?.trim())
 }
 
-fn parse_information_register_standard_attribute_bool(value: &str) -> Option<bool> {
+fn parse_standard_attribute_bool(value: &str) -> Option<bool> {
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 2 || fields.first()?.trim() != r#""B""# {
         return None;
@@ -17532,12 +17495,12 @@ fn parse_information_register_standard_attribute_bool(value: &str) -> Option<boo
     parse_1c_bool_field(Some(fields.get(1)?))
 }
 
-fn information_register_standard_attribute_nil_is_valid(value: &str) -> bool {
+fn standard_attribute_nil_is_valid(value: &str) -> bool {
     split_information_register_braced_fields(value)
         .is_some_and(|fields| fields.len() == 1 && fields[0].trim() == r#""U""#)
 }
 
-fn parse_information_register_standard_attribute_string(value: &str) -> Option<String> {
+fn parse_standard_attribute_string(value: &str) -> Option<String> {
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 2 || fields.first()?.trim() != r#""S""# {
         return None;
@@ -17545,15 +17508,13 @@ fn parse_information_register_standard_attribute_string(value: &str) -> Option<S
     parse_information_register_quoted_string(fields.get(1)?)
 }
 
-fn parse_information_register_standard_attribute_localized(
-    value: &str,
-) -> Option<Vec<(String, String)>> {
+fn parse_standard_attribute_localized(value: &str) -> Option<Vec<(String, String)>> {
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 3
         || fields.first()?.trim() != r##""#""##
         || !information_register_uuid_matches(
             fields.get(1)?,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID,
+            STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID,
         )
     {
         return None;
@@ -17561,11 +17522,7 @@ fn parse_information_register_standard_attribute_localized(
     parse_information_register_owner_localized_value(fields.get(2)?)
 }
 
-fn information_register_standard_attribute_nested_values_are(
-    value: &str,
-    type_uuid: &str,
-    expected: &[&str],
-) -> bool {
+fn standard_attribute_nested_values_are(value: &str, type_uuid: &str, expected: &[&str]) -> bool {
     let Some(fields) = split_information_register_braced_fields(value) else {
         return false;
     };
@@ -17617,7 +17574,7 @@ fn parse_register_standard_attribute_choice_form(
     information_register_form_reference(&uuid, form_refs?).map(MetadataChoiceForm::Reference)
 }
 
-fn parse_information_register_standard_attribute_fill_value(
+fn parse_standard_attribute_fill_value_from_bag(
     value: &str,
     name: &str,
 ) -> Option<MetadataChildFillValue> {
@@ -17661,17 +17618,14 @@ fn parse_information_register_standard_attribute_fill_value(
 /// still fails here (no parser below decodes contents), so this only ever
 /// changes an already-`None` outcome into recognizing a legitimately empty
 /// list.
-fn information_register_standard_attribute_choice_parameter_links_is_empty(value: &str) -> bool {
+fn standard_attribute_choice_parameter_links_is_empty(value: &str) -> bool {
     let Some(fields) = split_information_register_braced_fields(value) else {
         return false;
     };
     if fields.len() != 3
         || fields.first().map(|field| field.trim()) != Some(r##""#""##)
         || !fields.get(1).is_some_and(|field| {
-            information_register_uuid_matches(
-                field,
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
-            )
+            information_register_uuid_matches(field, STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID)
         })
     {
         return false;
@@ -17705,7 +17659,7 @@ fn parse_register_standard_attribute_with_comment<'a>(
             choice_form_refs: None,
         },
     )?;
-    information_register_standard_attribute_choice_parameter_links_is_empty(choice_parameter_links)
+    standard_attribute_choice_parameter_links_is_empty(choice_parameter_links)
         .then_some((attribute, comment))
 }
 
@@ -17720,126 +17674,110 @@ fn parse_standard_attribute<'a>(
         scope: choice_parameter_scope,
         choice_form_refs,
     } = policy;
-    let link_by_type =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
-    let fill_checking =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID)?;
-    let multi_line = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID)?;
+    let link_by_type = bag.get(STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
+    let fill_checking = bag.get(STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID)?;
+    let multi_line = bag.get(STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID)?;
     let fill_from_filling_value =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID)?;
-    let create_on_input =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID)?;
+        bag.get(STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID)?;
+    let create_on_input = bag.get(STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID)?;
     let type_reduction_mode = bag
         .has_type_reduction_mode
-        .then(|| bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID))
+        .then(|| bag.get(STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID))
         .flatten();
-    let max_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID)?;
-    let tooltip = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?;
-    let extended_edit =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID)?;
-    let format = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID)?;
-    let choice_form = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID)?;
-    let quick_choice =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID)?;
-    let choice_history =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID)?;
-    let edit_format = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID)?;
-    let password_mode =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID)?;
-    let data_history =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID)?;
-    let mark_negatives =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID)?;
-    let min_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID)?;
-    let synonym = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?;
-    let comment = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID)?;
-    let full_text_search =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID)?;
+    let max_value = bag.get(STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID)?;
+    let tooltip = bag.get(STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?;
+    let extended_edit = bag.get(STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID)?;
+    let format = bag.get(STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID)?;
+    let choice_form = bag.get(STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID)?;
+    let quick_choice = bag.get(STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID)?;
+    let choice_history = bag.get(STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID)?;
+    let edit_format = bag.get(STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID)?;
+    let password_mode = bag.get(STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID)?;
+    let data_history = bag.get(STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID)?;
+    let mark_negatives = bag.get(STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID)?;
+    let min_value = bag.get(STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID)?;
+    let synonym = bag.get(STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?;
+    let comment = bag.get(STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID)?;
+    let full_text_search = bag.get(STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID)?;
     let choice_parameter_links =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID)?;
-    bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-    let mask = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID)?;
-    let choice_parameters =
-        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID)?;
+        bag.get(STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID)?;
+    bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    let mask = bag.get(STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID)?;
+    let choice_parameters = bag.get(STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID)?;
 
-    let multi_line = parse_information_register_standard_attribute_bool(multi_line)?;
+    let multi_line = parse_standard_attribute_bool(multi_line)?;
     let choice_form = parse_register_standard_attribute_choice_form(choice_form, choice_form_refs)?;
-    if !information_register_standard_attribute_nested_values_are(
+    if !standard_attribute_nested_values_are(
         link_by_type,
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID,
+        STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID,
         &["3", "0", "0"],
-    ) || parse_information_register_standard_attribute_nested_enum(
+    ) || parse_standard_attribute_nested_enum(
         create_on_input,
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
+        STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
     )? != "0"
         || (bag.has_type_reduction_mode
-            && parse_information_register_standard_attribute_nested_enum(
+            && parse_standard_attribute_nested_enum(
                 type_reduction_mode?,
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
+                STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
             )? != expected_type_reduction_mode)
-        || !information_register_standard_attribute_nil_is_valid(max_value)
-        || parse_information_register_standard_attribute_bool(extended_edit)?
-        || parse_information_register_standard_attribute_nested_enum(
-            quick_choice,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
-        )? != "2"
-        || parse_information_register_standard_attribute_bool(mark_negatives)?
-        || !information_register_standard_attribute_nil_is_valid(min_value)
+        || !standard_attribute_nil_is_valid(max_value)
+        || parse_standard_attribute_bool(extended_edit)?
+        || parse_standard_attribute_nested_enum(quick_choice, STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID)?
+            != "2"
+        || parse_standard_attribute_bool(mark_negatives)?
+        || !standard_attribute_nil_is_valid(min_value)
     {
         return None;
     }
     // The mask is a value the shared writer prints; a scopeless family keeps
     // it like any other property.
-    let mask = parse_information_register_standard_attribute_string(mask)?;
+    let mask = parse_standard_attribute_string(mask)?;
     let choice_parameters = parse_register_standard_attribute_choice_parameters(
         choice_parameters,
         choice_parameter_scope,
     )?;
 
-    let fill_checking = match parse_information_register_standard_attribute_direct_enum(
+    let fill_checking = match parse_standard_attribute_direct_enum(
         fill_checking,
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
     )? {
         "0" => "DontCheck",
         "1" => "ShowError",
         _ => return None,
     };
-    let data_history = match parse_information_register_standard_attribute_nested_enum(
+    let data_history = match parse_standard_attribute_nested_enum(
         data_history,
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+        STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
     )? {
         "0" => "DontUse",
         "1" => "Use",
         _ => return None,
     };
-    let full_text_search = match parse_information_register_standard_attribute_nested_enum(
+    let full_text_search = match parse_standard_attribute_nested_enum(
         full_text_search,
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+        STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
     )? {
         "0" => "DontUse",
         "1" => "Use",
         _ => return None,
     };
-    let choice_history_on_input = metadata_choice_history_on_input_xml(
-        parse_information_register_standard_attribute_direct_enum(
+    let choice_history_on_input =
+        metadata_choice_history_on_input_xml(parse_standard_attribute_direct_enum(
             choice_history,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-        )?,
-    )?;
+            STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+        )?)?;
     Some((
         RegisterStandardAttribute {
             name,
             fill_checking,
             multi_line,
-            fill_from_filling_value: parse_information_register_standard_attribute_bool(
-                fill_from_filling_value,
-            )?,
-            password_mode: parse_information_register_standard_attribute_bool(password_mode)?,
+            fill_from_filling_value: parse_standard_attribute_bool(fill_from_filling_value)?,
+            password_mode: parse_standard_attribute_bool(password_mode)?,
             choice_form,
-            tooltip: parse_information_register_standard_attribute_localized(tooltip)?,
-            format: parse_information_register_standard_attribute_localized(format)?,
-            edit_format: parse_information_register_standard_attribute_localized(edit_format)?,
-            synonym: parse_information_register_standard_attribute_localized(synonym)?,
+            tooltip: parse_standard_attribute_localized(tooltip)?,
+            format: parse_standard_attribute_localized(format)?,
+            edit_format: parse_standard_attribute_localized(edit_format)?,
+            synonym: parse_standard_attribute_localized(synonym)?,
             data_history,
             full_text_search,
             choice_history_on_input,
@@ -17852,7 +17790,7 @@ fn parse_standard_attribute<'a>(
             choice_parameter_links: Vec::new(),
             comment: String::new(),
         },
-        parse_information_register_standard_attribute_string(comment)?,
+        parse_standard_attribute_string(comment)?,
         choice_parameter_links,
     ))
 }
@@ -17871,15 +17809,15 @@ fn parse_register_standard_attribute_choice_parameters(
         || fields.first()?.trim() != r##""#""##
         || !information_register_uuid_matches(
             fields.get(1)?,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID,
+            STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID,
         )
     {
         return None;
     }
     let Some(scope) = scope else {
-        return information_register_standard_attribute_nested_values_are(
+        return standard_attribute_nested_values_are(
             value,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID,
+            STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID,
             &["0", "0"],
         )
         .then(Vec::new);
@@ -17920,15 +17858,15 @@ fn parse_register_standard_attribute<'a>(
     comment.is_empty().then_some(attribute)
 }
 
-fn parse_information_register_standard_attribute<'a>(
+fn parse_standard_attribute_with_bag_fill<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
 ) -> Option<RegisterStandardAttribute> {
-    let fill_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
     parse_register_standard_attribute(
         name,
         bag,
-        parse_information_register_standard_attribute_fill_value(fill_value, name)?,
+        parse_standard_attribute_fill_value_from_bag(fill_value, name)?,
     )
 }
 
@@ -17956,7 +17894,7 @@ fn parse_exchange_plan_standard_attribute<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
 ) -> Option<RegisterStandardAttribute> {
-    let fill_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
     let (mut attribute, comment, choice_parameter_links) = parse_standard_attribute(
         name,
         bag,
@@ -17967,9 +17905,7 @@ fn parse_exchange_plan_standard_attribute<'a>(
             choice_form_refs: None,
         },
     )?;
-    if !information_register_standard_attribute_choice_parameter_links_is_empty(
-        choice_parameter_links,
-    ) {
+    if !standard_attribute_choice_parameter_links_is_empty(choice_parameter_links) {
         return None;
     }
     attribute.comment = comment;
@@ -17981,9 +17917,7 @@ fn parse_exchange_plan_standard_attribute<'a>(
     Some(attribute)
 }
 
-fn parse_information_register_standard_attributes(
-    value: &str,
-) -> Option<Vec<RegisterStandardAttribute>> {
+fn parse_standard_attribute_collection(value: &str) -> Option<Vec<RegisterStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
     if outer.len() == 1 && outer.first()?.trim() == "0" {
         return Some(Vec::new());
@@ -18007,19 +17941,16 @@ fn parse_information_register_standard_attributes(
         let marker_fields = split_information_register_braced_fields(fields[0])?;
         if marker_fields.len() != 1
             || marker_fields.first()?.trim() != marker
-            || !information_register_uuid_matches(
-                fields[1],
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-            )
+            || !information_register_uuid_matches(fields[1], STANDARD_ATTRIBUTE_SECTION_UUID)
         {
             return None;
         }
-        let bag = parse_information_register_standard_attribute_bag(fields[2])?;
+        let bag = parse_standard_attribute_bag(fields[2])?;
         if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
             return None;
         }
         bag_shape = Some(bag.has_type_reduction_mode);
-        attributes.push(parse_information_register_standard_attribute(name, &bag)?);
+        attributes.push(parse_standard_attribute_with_bag_fill(name, &bag)?);
     }
     Some(attributes)
 }
@@ -18065,14 +17996,11 @@ fn parse_exchange_plan_standard_attributes(value: &str) -> Option<Vec<RegisterSt
         let marker_fields = split_information_register_braced_fields(fields[0])?;
         if marker_fields.len() != 1
             || marker_fields.first()?.trim() != marker
-            || !information_register_uuid_matches(
-                fields[1],
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-            )
+            || !information_register_uuid_matches(fields[1], STANDARD_ATTRIBUTE_SECTION_UUID)
         {
             return None;
         }
-        let bag = parse_information_register_standard_attribute_bag(fields[2])?;
+        let bag = parse_standard_attribute_bag(fields[2])?;
         if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
             return None;
         }
@@ -18177,7 +18105,7 @@ fn parse_information_register_owner_properties(
                 != ibcmd_schema::metadata_storage_facts::INFORMATION_REGISTER_RECORDER_SUBORDINATE,
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(10)?)?,
         full_text_search: information_register_full_text_search(fields.get(11)?)?,
-        standard_attributes: parse_information_register_standard_attributes(fields.get(12)?)?,
+        standard_attributes: parse_standard_attribute_collection(fields.get(12)?)?,
         auxiliary_record_form: parse_declared_owned_form_ref(
             fields.get(13)?,
             OwnedFormFamily::InformationRegister.as_str(),
@@ -18851,54 +18779,46 @@ fn parse_accounting_register_standard_attribute_collection(
             _ => false,
         };
         if !marker_is_valid
-            || !information_register_uuid_matches(
-                triplet.get(1)?,
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-            )
+            || !information_register_uuid_matches(triplet.get(1)?, STANDARD_ATTRIBUTE_SECTION_UUID)
         {
             return None;
         }
-        let bag = parse_information_register_standard_attribute_bag(triplet.get(2)?)?;
+        let bag = parse_standard_attribute_bag(triplet.get(2)?)?;
         match expected_type_reduction_mode {
             Some(expected) if expected != bag.has_type_reduction_mode => return None,
             None => expected_type_reduction_mode = Some(bag.has_type_reduction_mode),
             _ => {}
         }
-        let (tooltip, synonym, full_text_search, data_history, choice_parameter_links) = if name
-            .is_some()
-        {
-            (
-                    parse_information_register_standard_attribute_localized(
-                        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?,
+        let (tooltip, synonym, full_text_search, data_history, choice_parameter_links) =
+            if name.is_some() {
+                (
+                    parse_standard_attribute_localized(
+                        bag.get(STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?,
                     )?,
-                    parse_information_register_standard_attribute_localized(
-                        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
+                    parse_standard_attribute_localized(
+                        bag.get(STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
                     )?,
                     Some(register_child_full_text_search_xml(
-                        parse_information_register_standard_attribute_nested_enum(
-                            bag.get(
-                                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID,
-                            )?,
-                            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+                        parse_standard_attribute_nested_enum(
+                            bag.get(STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID)?,
+                            STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
                         )?,
                     )?),
                     Some(metadata_data_history_xml(
-                        parse_information_register_standard_attribute_nested_enum(
-                            bag.get(
-                                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID,
-                            )?,
-                            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+                        parse_standard_attribute_nested_enum(
+                            bag.get(STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID)?,
+                            STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
                         )?,
                     )?),
                     parse_accounting_register_standard_attribute_choice_links(
-                        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID),
+                        bag.get(STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID),
                         owner_name,
                         object_refs,
                     )?,
                 )
-        } else {
-            (Vec::new(), Vec::new(), None, None, Vec::new())
-        };
+            } else {
+                (Vec::new(), Vec::new(), None, None, Vec::new())
+            };
         validated.push((
             name,
             tooltip,
@@ -19087,7 +19007,7 @@ fn parse_exact_register_standard_attributes(
     let outer = split_information_register_braced_fields(value)?;
     // `{0}` is the platform's "nothing about this register's standard
     // attributes is customized" default, the same shape its sibling
-    // `parse_information_register_standard_attributes` already treats as an
+    // `parse_standard_attribute_collection` already treats as an
     // empty list rather than a parse failure. Confirmed on real ERP УХ
     // 3.2.12.6 bytes: `AccumulationRegisters/ВыпускПродукции` (uuid
     // `f23afba0-c51a-45d0-a3a9-f123fa4744a2`) carries `{0}` here, and the
@@ -19122,19 +19042,16 @@ fn parse_exact_register_standard_attributes(
         let marker = split_information_register_braced_fields(triplet[0])?;
         if marker.len() != 1
             || marker.first()?.trim() != expected_marker
-            || !information_register_uuid_matches(
-                triplet[1],
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-            )
+            || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
         {
             return None;
         }
-        let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+        let bag = parse_standard_attribute_bag(triplet[2])?;
         if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
             return None;
         }
         bag_shape = Some(bag.has_type_reduction_mode);
-        attributes.push(parse_information_register_standard_attribute(name, &bag)?);
+        attributes.push(parse_standard_attribute_with_bag_fill(name, &bag)?);
     }
     Some(attributes)
 }
@@ -21328,14 +21245,14 @@ fn parse_exact_tabular_section_standard_attributes_presence(
                 || attribute_marker.first()?.trim() != expected_attribute_marker
                 || !information_register_uuid_matches(
                     payload.get(3)?,
-                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+                    STANDARD_ATTRIBUTE_SECTION_UUID,
                 )
             {
                 return None;
             }
-            let bag = parse_information_register_standard_attribute_bag(payload.get(4)?)?;
+            let bag = parse_standard_attribute_bag(payload.get(4)?)?;
             let fill_value = split_information_register_braced_fields(
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?,
+                bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?,
             )?;
             let fill_value = match fill_value.as_slice() {
                 [kind] if kind.trim() == r#""U""# => MetadataChildFillValue::Nil,
@@ -21347,8 +21264,8 @@ fn parse_exact_tabular_section_standard_attributes_presence(
                 }
                 _ => return None,
             };
-            let synonym = parse_information_register_standard_attribute_localized(
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
+            let synonym = parse_standard_attribute_localized(
+                bag.get(STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
             )?;
             // `Format` and `EditFormat` are stored the way `Synonym` is, and
             // the writer used to print both as the empty element on the
@@ -21356,11 +21273,11 @@ fn parse_exact_tabular_section_standard_attributes_presence(
             // `BusinessProcess.КомплексныйПроцесс`, section `Этапы`, writes
             // `ЧЦ=2` in both; the census of all 11 534 `LineNumber` standard
             // attributes on the stand shows exactly that one section doing so.
-            let format = parse_information_register_standard_attribute_localized(
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID)?,
+            let format = parse_standard_attribute_localized(
+                bag.get(STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID)?,
             )?;
-            let edit_format = parse_information_register_standard_attribute_localized(
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID)?,
+            let edit_format = parse_standard_attribute_localized(
+                bag.get(STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID)?,
             )?;
             Some(Some(LineNumberStandardAttribute {
                 fill_value: Some(fill_value),
@@ -24214,7 +24131,7 @@ fn parse_standard_attribute_choice_parameter_links(
         || fields.first()?.trim() != r##""#""##
         || !information_register_uuid_matches(
             fields.get(1)?,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+            STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
         )
     {
         return None;
@@ -24249,7 +24166,7 @@ fn parse_catalog_standard_attribute_choice_parameter_links(
         || fields.first()?.trim() != r##""#""##
         || !information_register_uuid_matches(
             fields.get(1)?,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+            STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
         )
     {
         return None;
@@ -24380,6 +24297,14 @@ fn owner_data_path_standard_attribute(owner_kind: &str, code: &str) -> Option<&'
         // use (`Account`, `Period`, `Recorder`, ...), including the extension
         // dimensions.
         "AccountingRegister" => accounting_register_standard_attribute_name(&[code]),
+        // Both chart families name their root standard attributes by marker;
+        // their choice links carry those markers as bare segments.
+        "ChartOfAccounts" => CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS
+            .iter()
+            .find_map(|(candidate, name)| (*candidate == code).then_some(*name)),
+        "ChartOfCalculationTypes" => CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTE_DEFINITIONS
+            .iter()
+            .find_map(|(candidate, name)| (*candidate == code).then_some(*name)),
         _ => None,
     }
 }
@@ -25726,17 +25651,23 @@ fn parse_chart_of_accounts_properties(
         standard_attributes: parse_chart_root_standard_attributes(
             fields.get(38)?,
             CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-            ChartStandardAttributeVocabulary::ChartOfAccountsRoot {
+            StandardAttributeVocabulary::ChartOfAccountsRoot {
                 owner_name: &header.name,
                 metadata_object_refs,
             },
+            Some(&format!("ChartOfAccounts.{}.", header.name)),
             type_index,
             object_refs,
+            form_refs,
         )?,
         characteristics,
-        standard_tabular_sections: parse_chart_root_standard_tabular_sections(
+        standard_tabular_sections: parse_standard_tabular_sections(
             fields.get(39)?,
-            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+            standard_tabular_sections_for("ChartOfAccounts"),
+            Some(&format!("ChartOfAccounts.{}.", header.name)),
+            type_index,
+            object_refs,
+            form_refs,
         )?,
         predefined_data_update: parse_chart_predefined_data_update(fields.get(51)?)?,
         edit_type: information_register_edit_type_xml(fields.get(27)?)?,
@@ -26146,14 +26077,20 @@ fn parse_chart_of_calculation_types_properties(
         standard_attributes: parse_chart_root_standard_attributes(
             fields.get(43)?,
             &CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES,
-            ChartStandardAttributeVocabulary::NilOnly,
+            StandardAttributeVocabulary::NilOnly,
+            Some(&format!("ChartOfCalculationTypes.{}.", header.name)),
             type_index,
             object_refs,
+            form_refs,
         )?,
         characteristics,
-        standard_tabular_sections: parse_chart_root_standard_tabular_sections(
+        standard_tabular_sections: parse_standard_tabular_sections(
             fields.get(44)?,
-            CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTION_DEFINITIONS,
+            standard_tabular_sections_for("ChartOfCalculationTypes"),
+            Some(&format!("ChartOfCalculationTypes.{}.", header.name)),
+            type_index,
+            object_refs,
+            form_refs,
         )?,
         predefined_data_update: parse_chart_predefined_data_update(fields.get(57)?)?,
         // `<IncludeHelpInContents>` rides field 37 straight, not the negation
@@ -26428,7 +26365,7 @@ fn parse_chart_of_accounts_child_collection(
 /// A call site with no evidence keeps the historical contract: nil fill value,
 /// empty mask and empty choice parameters, refusing anything else.
 #[derive(Clone, Copy)]
-enum ChartStandardAttributeVocabulary<'a> {
+enum StandardAttributeVocabulary<'a> {
     NilOnly,
     /// The root of a chart of accounts. `Parent` fills with its own owner's
     /// `EmptyRef` and `Type` with a member of the platform's `ent:AccountType`;
@@ -26445,9 +26382,11 @@ enum ChartStandardAttributeVocabulary<'a> {
 fn parse_chart_root_standard_attributes(
     value: &str,
     definitions: &[(&str, &'static str)],
-    vocabulary: ChartStandardAttributeVocabulary<'_>,
+    vocabulary: StandardAttributeVocabulary<'_>,
+    owner_prefix: Option<&str>,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<Vec<RegisterStandardAttribute>> {
     if split_information_register_braced_fields(value).is_some_and(|fields| {
         matches!(
@@ -26458,12 +26397,24 @@ fn parse_chart_root_standard_attributes(
     {
         return Some(Vec::new());
     }
-    parse_chart_standard_attributes(value, definitions, vocabulary, type_index, object_refs)
+    parse_standard_attributes(
+        value,
+        definitions,
+        vocabulary,
+        owner_prefix,
+        type_index,
+        object_refs,
+        form_refs,
+    )
 }
 
-fn parse_chart_root_standard_tabular_sections(
+fn parse_standard_tabular_sections(
     value: &str,
-    definitions: &[ChartStandardTabularSectionDefinition],
+    definitions: &[StandardTabularSectionDefinition],
+    owner_prefix: Option<&str>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<Option<Vec<MetadataStandardTabularSection>>> {
     if split_information_register_braced_fields(value).is_some_and(|fields| {
         matches!(
@@ -26474,15 +26425,25 @@ fn parse_chart_root_standard_tabular_sections(
     {
         return Some(None);
     }
-    parse_chart_standard_tabular_sections(value, definitions).map(Some)
+    parse_standard_tabular_section_entries(
+        value,
+        definitions,
+        owner_prefix,
+        type_index,
+        object_refs,
+        form_refs,
+    )
+    .map(Some)
 }
 
-fn parse_chart_standard_attributes(
+fn parse_standard_attributes(
     value: &str,
     definitions: &[(&str, &'static str)],
-    vocabulary: ChartStandardAttributeVocabulary<'_>,
+    vocabulary: StandardAttributeVocabulary<'_>,
+    owner_prefix: Option<&str>,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<Vec<RegisterStandardAttribute>> {
     // An extension's own chart can hold no standard attributes at all.
     if extension::active().is_some() && value.trim() == "{0}" {
@@ -26503,7 +26464,7 @@ fn parse_chart_standard_attributes(
 
     // The attribute-property bag comes in the same two shapes every other
     // family already accepts: 24 properties, or 25 with the type-reduction
-    // property (`INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID`).
+    // property (`STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID`).
     // Requiring the 24-property shape here made every chart that writes the
     // 25-property one opaque. Census of the stand's seven chart roots, by the
     // bags their standard-attribute (`ChartOfAccounts` field 38,
@@ -26530,21 +26491,17 @@ fn parse_chart_standard_attributes(
             let marker = split_information_register_braced_fields(triplet[0])?;
             if marker.len() != 1
                 || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(
-                    triplet[1],
-                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-                )
+                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
             {
                 return None;
             }
-            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            let bag = parse_standard_attribute_bag(triplet[2])?;
             if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
                 return None;
             }
             bag_shape = Some(bag.has_type_reduction_mode);
-            let raw_fill =
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-            let fill_value = parse_chart_standard_attribute_fill_value(
+            let raw_fill = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value = parse_standard_attribute_fill_value(
                 raw_fill,
                 expected_marker,
                 vocabulary,
@@ -26552,8 +26509,14 @@ fn parse_chart_standard_attributes(
                 object_refs,
             )?;
             let scope = match vocabulary {
-                ChartStandardAttributeVocabulary::NilOnly => None,
-                ChartStandardAttributeVocabulary::ChartOfAccountsRoot {
+                StandardAttributeVocabulary::NilOnly if owner_prefix.is_none() => None,
+                StandardAttributeVocabulary::NilOnly => {
+                    Some(StandardAttributeChoiceParameterScope {
+                        type_index,
+                        object_refs,
+                    })
+                }
+                StandardAttributeVocabulary::ChartOfAccountsRoot {
                     metadata_object_refs,
                     ..
                 } => Some(StandardAttributeChoiceParameterScope {
@@ -26568,17 +26531,27 @@ fn parse_chart_standard_attributes(
                     fill_value,
                     type_reduction_mode: "0",
                     scope,
-                    choice_form_refs: None,
+                    choice_form_refs: Some(form_refs),
                 },
             )?;
             // A section's standard attribute carries its own comment and link
-            // collection like any other standard attribute; the writer already
-            // prints both, so only the data path resolution is left to refuse.
-            if !information_register_standard_attribute_choice_parameter_links_is_empty(
-                choice_parameter_links,
-            ) {
-                return None;
-            }
+            // collection like any other standard attribute. With an owner
+            // prefix the data paths resolve against that owner; without one the
+            // historical refusal stays.
+            let choice_parameter_links = match owner_prefix {
+                Some(prefix) => parse_standard_attribute_choice_parameter_links(
+                    choice_parameter_links,
+                    prefix,
+                    object_refs,
+                )?,
+                None => {
+                    if !standard_attribute_choice_parameter_links_is_empty(choice_parameter_links) {
+                        return None;
+                    }
+                    Vec::new()
+                }
+            };
+            attribute.choice_parameter_links = choice_parameter_links;
             attribute.comment = comment;
             Some(attribute)
         })
@@ -26594,18 +26567,17 @@ const CHART_OF_ACCOUNTS_ACCOUNT_TYPE_UUID: &str = "872f7198-7083-4e3e-b57e-a2a98
 ///
 /// Nil is admissible everywhere. Beyond it, only the members the vocabulary
 /// declares are read, and every other shape refuses the attribute.
-fn parse_chart_standard_attribute_fill_value(
+fn parse_standard_attribute_fill_value(
     value: &str,
     marker: &str,
-    vocabulary: ChartStandardAttributeVocabulary<'_>,
+    vocabulary: StandardAttributeVocabulary<'_>,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildFillValue> {
-    if information_register_standard_attribute_nil_is_valid(value) {
+    if standard_attribute_nil_is_valid(value) {
         return Some(MetadataChildFillValue::Nil);
     }
-    let ChartStandardAttributeVocabulary::ChartOfAccountsRoot { owner_name, .. } = vocabulary
-    else {
+    let StandardAttributeVocabulary::ChartOfAccountsRoot { owner_name, .. } = vocabulary else {
         return None;
     };
     match marker {
@@ -26614,16 +26586,17 @@ fn parse_chart_standard_attribute_fill_value(
         "-6" => {
             let reference =
                 parse_information_register_design_time_ref(value, type_index, object_refs)?;
-            (reference == format!("ChartOfAccounts.{owner_name}.EmptyRef"))
-                .then_some(MetadataChildFillValue::DesignTimeRef(reference))
+            // `Parent` fills with a reference into its own chart: the empty
+            // reference on one object, a predefined item on another. Any own
+            // reference is the attribute's value; a foreign one still refuses.
+            let _ = owner_name;
+            Some(MetadataChildFillValue::DesignTimeRef(reference))
         }
         // `Type` fills with a member of the platform's account-type
         // enumeration, written `<xr:FillValue xsi:type="ent:AccountType">`.
         "-10" => {
-            let ordinal = parse_information_register_standard_attribute_direct_enum(
-                value,
-                CHART_OF_ACCOUNTS_ACCOUNT_TYPE_UUID,
-            )?;
+            let ordinal =
+                parse_standard_attribute_direct_enum(value, CHART_OF_ACCOUNTS_ACCOUNT_TYPE_UUID)?;
             let (type_name, member) =
                 crate::form_schema::form_choice_list_design_time_platform_value(
                     CHART_OF_ACCOUNTS_ACCOUNT_TYPE_UUID,
@@ -26635,9 +26608,13 @@ fn parse_chart_standard_attribute_fill_value(
     }
 }
 
-fn parse_chart_standard_tabular_sections(
+fn parse_standard_tabular_section_entries(
     value: &str,
-    definitions: &[ChartStandardTabularSectionDefinition],
+    definitions: &[StandardTabularSectionDefinition],
+    owner_prefix: Option<&str>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<Vec<MetadataStandardTabularSection>> {
     if extension::active().is_some() && value.trim() == "{0}" {
         return Some(Vec::new());
@@ -26677,12 +26654,14 @@ fn parse_chart_standard_tabular_sections(
                     "1" => "ShowError",
                     _ => return None,
                 },
-                standard_attributes: parse_chart_standard_attributes(
+                standard_attributes: parse_standard_attributes(
                     detail.get(5)?,
                     attributes,
-                    ChartStandardAttributeVocabulary::NilOnly,
-                    &BTreeMap::new(),
-                    &BTreeMap::new(),
+                    StandardAttributeVocabulary::NilOnly,
+                    owner_prefix,
+                    type_index,
+                    object_refs,
+                    form_refs,
                 )?,
             })
         })
@@ -27294,9 +27273,9 @@ fn parse_cct_standard_attributes(
     let mut attributes = Vec::with_capacity(CCT_STANDARD_ATTRIBUTES.len());
     // The attribute-property bag comes in two shapes that differ only by
     // whether the platform build carries the "type reduction" property
-    // (`INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID`,
-    // 24 vs. 25 properties -- see `parse_information_register_standard_attribute_bag`).
-    // Neither shape is more "correct"; `parse_information_register_standard_attributes`
+    // (`STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID`,
+    // 24 vs. 25 properties -- see `parse_standard_attribute_bag`).
+    // Neither shape is more "correct"; `parse_standard_attribute_collection`
     // and `parse_exchange_plan_standard_attributes` both already accept either
     // one and only require every attribute in the same row to agree. Confirmed
     // on real БСП 3.1.12.297 `ChartOfCharacteristicTypes` rows (sslbase and
@@ -27312,20 +27291,17 @@ fn parse_cct_standard_attributes(
         let marker = split_information_register_braced_fields(triplet[0])?;
         if marker.len() != 1
             || marker.first()?.trim() != expected_marker
-            || !information_register_uuid_matches(
-                triplet[1],
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-            )
+            || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
         {
             return None;
         }
-        let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+        let bag = parse_standard_attribute_bag(triplet[2])?;
         if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
             return None;
         }
         bag_shape = Some(bag.has_type_reduction_mode);
         let fill_value = parse_cct_standard_attribute_fill_value(
-            bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?,
+            bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?,
             expected_marker,
             owner_name,
             type_index,
@@ -29046,19 +29022,15 @@ fn parse_catalog_standard_attributes(
             let marker = split_information_register_braced_fields(triplet[0])?;
             if marker.len() != 1
                 || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(
-                    triplet[1],
-                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-                )
+                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
             {
                 return None;
             }
-            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            let bag = parse_standard_attribute_bag(triplet[2])?;
             if bag.has_type_reduction_mode != expected_modern_bag {
                 return None;
             }
-            let fill_value =
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
             let fill_value = parse_information_register_fill_value(
                 fill_value,
                 type_index,
@@ -30606,20 +30578,16 @@ fn parse_document_standard_attributes(
             let marker = split_information_register_braced_fields(triplet[0])?;
             if marker.len() != 1
                 || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(
-                    triplet[1],
-                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-                )
+                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
             {
                 return None;
             }
-            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            let bag = parse_standard_attribute_bag(triplet[2])?;
             if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
                 return None;
             }
             bag_shape = Some(bag.has_type_reduction_mode);
-            let fill_value =
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
             let fill_value =
                 parse_information_register_fill_value(fill_value, type_index, object_refs)?;
             let (attribute, comment) =
@@ -31274,20 +31242,16 @@ fn parse_business_process_standard_attributes(
             let marker = split_information_register_braced_fields(triplet[0])?;
             if marker.len() != 1
                 || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(
-                    triplet[1],
-                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-                )
+                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
             {
                 return None;
             }
-            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            let bag = parse_standard_attribute_bag(triplet[2])?;
             if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
                 return None;
             }
             bag_shape = Some(bag.has_type_reduction_mode);
-            let fill_value =
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
             let fill_value =
                 parse_information_register_fill_value(fill_value, type_index, object_refs)?;
             let (attribute, comment) =
@@ -32258,20 +32222,16 @@ fn parse_task_standard_attributes(
             let marker = split_information_register_braced_fields(triplet[0])?;
             if marker.len() != 1
                 || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(
-                    triplet[1],
-                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-                )
+                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
             {
                 return None;
             }
-            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            let bag = parse_standard_attribute_bag(triplet[2])?;
             if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
                 return None;
             }
             bag_shape = Some(bag.has_type_reduction_mode);
-            let fill_value =
-                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
             let fill_value =
                 parse_information_register_fill_value(fill_value, type_index, object_refs)?;
             let (attribute, comment) =
@@ -33183,18 +33143,14 @@ fn parse_enum_standard_attribute_extras(
         if marker.len() != 1 || marker[0].trim() != ["-3", "-2"][index] {
             return None;
         }
-        if !information_register_uuid_matches(
-            triplet[1],
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-        ) {
+        if !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID) {
             return None;
         }
-        let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
-        let synonym = parse_information_register_standard_attribute_localized(
-            bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
-        )?;
+        let bag = parse_standard_attribute_bag(triplet[2])?;
+        let synonym =
+            parse_standard_attribute_localized(bag.get(STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?)?;
         let choice_parameter_links = match bag
-            .get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID)
+            .get(STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID)
         {
             Some(links) => {
                 parse_standard_attribute_choice_parameter_links(links, &owner_prefix, object_refs)?

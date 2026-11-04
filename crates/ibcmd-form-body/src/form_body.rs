@@ -29,9 +29,9 @@ use ibcmd_1c_text::{
     parse_uuid_field, register_brace_jumps, scan_1c_braced_value, split_1c_braced_fields, xml_bool,
 };
 use ibcmd_1c_vocab::{
-    CONSTANTS_SET_TYPE_UUID, ChartStandardTabularSectionDefinition, ConstantValueType,
-    DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME, DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID,
-    DOCUMENT_STANDARD_ATTRIBUTES, accumulation_register_record_set_standard_attribute_name,
+    CONSTANTS_SET_TYPE_UUID, ConstantValueType, DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME,
+    DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID, DOCUMENT_STANDARD_ATTRIBUTES,
+    StandardTabularSectionDefinition, accumulation_register_record_set_standard_attribute_name,
     builtin_type_reference, chart_of_accounts_sole_standard_tabular_section_name,
     chart_of_accounts_standard_attribute_definitions, chart_of_accounts_standard_tabular_section,
     command_interface_standard_command, elapsed_ms, ext_picture_file_name,
@@ -25913,7 +25913,7 @@ fn resolve_form_owner_scoped_standard_tabular_section_path(
 fn form_standard_tabular_section_for_type_reference(
     reference: &str,
     marker: &str,
-) -> Option<&'static ChartStandardTabularSectionDefinition> {
+) -> Option<&'static StandardTabularSectionDefinition> {
     let owner = form_generated_owner_type_from_type_reference(reference)?;
     if !matches!(
         (owner.family(), owner.role()),
@@ -27534,7 +27534,7 @@ fn form_standard_attribute_table_for_type_reference(
         (
             GeneratedMetadataOwnerFamily::InformationRegister,
             GeneratedMetadataOwnerRole::RecordManager | GeneratedMetadataOwnerRole::RecordSet,
-        ) => Some(INFORMATION_REGISTER_STANDARD_ATTRIBUTES),
+        ) => Some(PERIOD_STANDARD_ATTRIBUTES),
         (GeneratedMetadataOwnerFamily::Document, GeneratedMetadataOwnerRole::Ref) => {
             Some(DOCUMENT_REF_STANDARD_ATTRIBUTES)
         }
@@ -27697,7 +27697,7 @@ const EXCHANGE_PLAN_OBJECT_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[
     ("-13", "ThisNode"),
     ("-14", "ExchangeDate"),
 ];
-const INFORMATION_REGISTER_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "Period")];
+const PERIOD_STANDARD_ATTRIBUTES: &[(&str, &str)] = &[("-2", "Period")];
 /// The members a chart of calculation types carries beside its own attributes:
 /// seven standard attributes and three standard tabular sections, all reachable
 /// by marker from a form attribute typed as the object.
