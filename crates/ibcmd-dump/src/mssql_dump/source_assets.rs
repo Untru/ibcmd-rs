@@ -1170,14 +1170,23 @@ pub(super) fn source_asset_paths_with_indexes(
         &declared_form_types(metadata_texts),
     ));
     paths.extend(template_body_asset_paths(template_refs, &file_names));
-    // A dropped common template takes every source file of its own directory
-    // with it (its help pages, its body).
-    for template_ref in template_refs
-        .values()
-        .filter(|template_ref| template_ref.orphaned)
-    {
-        let directory = template_ref.relative_path.with_extension("");
-        paths.retain(|_, asset| !asset.primary_path.starts_with(&directory));
+    // A dropped common template takes every source file of its own record
+    // with it (its help pages, its body). The record is identified by its
+    // uuid: a live template that sanitizes to the same directory name keeps
+    // its files.
+    let orphaned: Vec<&str> = template_refs
+        .iter()
+        .filter(|(_, template_ref)| template_ref.orphaned)
+        .map(|(uuid, _)| uuid.as_str())
+        .collect();
+    if !orphaned.is_empty() {
+        paths.retain(|body_id, _| {
+            !orphaned.iter().any(|uuid| {
+                body_id
+                    .strip_prefix(uuid)
+                    .is_some_and(|rest| rest.starts_with('.'))
+            })
+        });
     }
 
     paths

@@ -1815,7 +1815,7 @@ fn build_task(
     fields[43] = enum_code(
         object,
         "NumberAllowedLength",
-        &[("Variable", "0"), ("Fixed", "1")],
+        &[("Fixed", "0"), ("Variable", "1")],
     )?;
     fields[25] = addressing.clone();
     fields[26] = optional_owned_member_reference(
@@ -1841,7 +1841,8 @@ fn build_task(
         optional_metadata_reference_kind(object, "CurrentPerformer", "SessionParameter", indexes)?;
     fields[30] = metadata_reference_collection_kind(object, "BasedOn", "BusinessProcess", indexes)?;
     fields[31] = token("0");
-    fields[32] = enum_code(
+    fields[32] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[33] = enum_code(
         object,
         "DataLockControlMode",
         &[
@@ -1850,7 +1851,6 @@ fn build_task(
             ("AutomaticAndManaged", "2"),
         ],
     )?;
-    fields[33] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[34] = standard_attributes(&["-10", "-9", "-8", "-7", "-5", "-4", "-3", "-2"])?;
     for (slot, name) in (35..=37).zip([
         "AuxiliaryObjectForm",
@@ -1868,13 +1868,12 @@ fn build_task(
     ]) {
         fields[slot] = localized_value(object, name, "language")?;
     }
-    fields[43] = enum_code(
-        object,
-        "ChoiceHistoryOnInput",
-        &[("Auto", "0"), ("DontUse", "1")],
-    )?;
     fields[44] = list(vec![token("0"), list(vec![token("0")])]);
-    fields[45] = bool_token(object, "IncludeHelpInContents")?;
+    fields[45] = enum_code(
+        object,
+        "CreateOnInput",
+        &[("Auto", "0"), ("DontUse", "1"), ("Use", "2")],
+    )?;
     fields[46] = field_reference_collection(
         object,
         "DataLockFields",
@@ -1882,6 +1881,14 @@ fn build_task(
         indexes,
     )?;
     fields[47] = input_modes(object)?;
+    fields[48] = enum_code(
+        object,
+        "ChoiceHistoryOnInput",
+        &[("Auto", "0"), ("DontUse", "1")],
+    )?;
+    fields[49] = enum_code(object, "DataHistory", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[50] = bool_token(object, "UpdateDataHistoryImmediatelyAfterWrite")?;
+    fields[51] = bool_token(object, "ExecuteAfterWriteDataHistoryVersionProcessing")?;
 
     Ok(list(vec![
         token("1"),

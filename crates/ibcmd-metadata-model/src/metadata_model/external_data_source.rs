@@ -14,7 +14,8 @@ use super::brace::{Brace, NIL_UUID, parse_row};
 use super::common::Header;
 use super::export::values::{attribute_header, header, header_elements, type_element};
 use super::export::{
-    Build, GeneratedTypeName, NameIndex, ObjectNames, atom, el, item, leaf, list, write_document,
+    Build, GeneratedTypeName, NameIndex, ObjectNames, atom, el, item, leaf, list, string,
+    write_document,
 };
 use super::xml::Element;
 use super::{DescriptorContext, ObjectXml};
@@ -317,8 +318,13 @@ fn function_element(node: &Brace, names: &NameIndex) -> Result<Element> {
         bail!("ExternalDataSource invalid Function expression wrapper");
     }
     // `{0,<expression>,<presentation>,{0,0,0}}`: the stored expression is what
-    // the platform writes as `<ExpressionInDataSource>`.
-    let expression = tail.get(1).and_then(Brace::as_str).unwrap_or_default();
+    // the platform writes as `<ExpressionInDataSource>`. A tail without the
+    // expression, or with something that is not a string there, is refused
+    // rather than exported as an empty expression.
+    let expression = match tail.get(1) {
+        Some(text) => string(text)?,
+        None => bail!("ExternalDataSource Function has no expression"),
+    };
     Ok(el("Function").attr("uuid", &head.uuid).child(
         el("Properties")
             .child(name)

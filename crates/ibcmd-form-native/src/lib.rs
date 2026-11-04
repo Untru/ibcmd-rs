@@ -286,7 +286,7 @@ pub const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("MediumSeaGreen", "91"),
     ("MintCream", "97"),
     ("MistyRose", "98"),
-    ("Moccasin", "96"),
+    ("Moccasin", "99"),
     ("NavajoWhite", "100"),
     ("Orange", "105"),
     ("OrangeRed", "106"),

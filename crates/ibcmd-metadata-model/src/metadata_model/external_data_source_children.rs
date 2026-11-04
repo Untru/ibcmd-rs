@@ -630,11 +630,13 @@ fn form_reference(p: &[Brace], slot: usize, name: &str, names: &NameIndex) -> Re
 }
 
 /// `{"U"}` -> `xsi:nil`; `{"S","A"}` -> `xsi:type="xs:string"` with the text.
+/// Any other member count is refused: a wrapper the platform does not write
+/// must not lose its surplus members silently.
 fn unfilled_parent_value(node: &Brace) -> Result<Element> {
     let wrapper = list(node)?;
-    match (wrapper.first().and_then(Brace::as_str), wrapper.get(1)) {
-        (Some("U"), None) => Ok(el("UnfilledParentValue").attr("nil", "true")),
-        (Some("S"), Some(text)) => {
+    match wrapper {
+        [flag] if flag.as_str() == Some("U") => Ok(el("UnfilledParentValue").attr("nil", "true")),
+        [flag, text] if flag.as_str() == Some("S") => {
             Ok(leaf("UnfilledParentValue", xml_text(string(text)?)).attr("type", "xs:string"))
         }
         _ => bail!("unfilled parent value: unmeasured layout"),
