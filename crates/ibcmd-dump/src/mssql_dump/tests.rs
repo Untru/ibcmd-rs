@@ -22,6 +22,28 @@ use ibcmd_metadata_blob::{
 };
 use ibcmd_module_blob::pack_module_blob_bytes;
 
+/// One standard attribute read straight from its bag, with no owner scope: the
+/// shape the register and process families shared before the one collection
+/// reader took over. Kept for the bag-level tests.
+fn parse_standard_attribute_with_bag_fill<'a>(
+    name: &'static str,
+    bag: &InformationRegisterStandardAttributeBag<'a>,
+) -> Option<RegisterStandardAttribute> {
+    let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    let (attribute, comment, links) = parse_standard_attribute(
+        name,
+        bag,
+        StandardAttributePolicy {
+            fill_value: parse_standard_attribute_fill_value_from_bag(fill_value, name)?,
+            type_reduction_mode: "0",
+            scope: None,
+            choice_form_refs: None,
+        },
+    )?;
+    (comment.is_empty() && standard_attribute_choice_parameter_links_is_empty(links))
+        .then_some(attribute)
+}
+
 #[test]
 fn information_register_master_dimension_scan_keeps_only_a_proven_prefix() {
     let complete = vec![
@@ -23799,7 +23821,13 @@ fn accepts_structural_exchange_plan_owner_composites() {
         assert_eq!(owner.get(0), Some(code));
         assert_eq!(owner.physical.len(), if code == "36" { 50 } else { 51 });
 
-        let attributes = parse_exchange_plan_standard_attributes(owner.get(30).unwrap()).unwrap();
+        let attributes = parse_exchange_plan_standard_attributes(
+            owner.get(30).unwrap(),
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         assert_eq!(
             attributes
                 .iter()
@@ -24928,7 +24956,13 @@ fn exchange_plan_standard_attributes_for_test(modern: bool) -> String {
 fn parses_exchange_plan_standard_attributes_by_family_and_marker() {
     for modern in [false, true] {
         let raw = exchange_plan_standard_attributes_for_test(modern);
-        let attributes = parse_exchange_plan_standard_attributes(&raw).unwrap();
+        let attributes = parse_exchange_plan_standard_attributes(
+            &raw,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         assert_eq!(
             attributes
                 .iter()
@@ -24958,32 +24992,80 @@ fn parses_exchange_plan_standard_attributes_by_family_and_marker() {
         ));
     }
     assert_eq!(
-        parse_exchange_plan_standard_attributes("{0}")
-            .unwrap()
-            .len(),
+        parse_exchange_plan_standard_attributes(
+            "{0}",
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .unwrap()
+        .len(),
         0
     );
 
     let valid = exchange_plan_standard_attributes_for_test(true);
-    assert!(parse_exchange_plan_standard_attributes(&format!("{valid} trailing")).is_none());
     assert!(
-        parse_exchange_plan_standard_attributes(&valid.replacen("{-14}", "{-13}", 1)).is_none()
+        parse_exchange_plan_standard_attributes(
+            &format!("{valid} trailing"),
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
     );
     assert!(
-        parse_exchange_plan_standard_attributes(&valid.replacen(
-            "510405d3-2a0c-4fea-960a-7fee59b32f9b",
-            "11111111-1111-4111-8111-111111111111",
-            1,
-        ))
+        parse_exchange_plan_standard_attributes(
+            &valid.replacen("{-14}", "{-13}", 1),
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &valid.replacen(
+                "510405d3-2a0c-4fea-960a-7fee59b32f9b",
+                "11111111-1111-4111-8111-111111111111",
+                1,
+            ),
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
         .is_none()
     );
 
     let description_bool = valid.replacen("{\"S\",\"\"}", "{\"B\",0}", 1);
-    assert!(parse_exchange_plan_standard_attributes(&description_bool).is_none());
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &description_bool,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
     let code_empty_string = valid.replacen("{\"S\",\"   \"}", "{\"S\",\"\"}", 1);
-    assert!(parse_exchange_plan_standard_attributes(&code_empty_string).is_some());
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &code_empty_string,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
+    );
     let first_marker_string = valid.replacen("{\"U\"}", "{\"S\",\"\"}", 1);
-    assert!(parse_exchange_plan_standard_attributes(&first_marker_string).is_none());
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &first_marker_string,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
 
     let legacy = exchange_plan_standard_attributes_for_test(false);
     let mixed_shape = valid.replacen(
@@ -24991,13 +25073,45 @@ fn parses_exchange_plan_standard_attributes_by_family_and_marker() {
         &standard_attribute_bag_for_test("Recorder", false, false),
         1,
     );
-    assert!(parse_exchange_plan_standard_attributes(&mixed_shape).is_none());
-    assert!(parse_exchange_plan_standard_attributes(&legacy).is_some());
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &mixed_shape,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &legacy,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
+    );
 
     let ir = standard_attributes_for_test(true);
-    assert!(parse_standard_attribute_collection(&ir).is_some());
+    assert!(
+        parse_standard_attribute_collection(
+            &ir,
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
+    );
     let ir_with_exchange_plan_string = ir.replacen("{\"U\"}", "{\"S\",\"   \"}", 1);
-    assert!(parse_standard_attribute_collection(&ir_with_exchange_plan_string).is_none());
+    assert!(
+        parse_standard_attribute_collection(
+            &ir_with_exchange_plan_string,
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
 }
 
 fn information_register_owner_tail_with_standard_attributes_for_test(
@@ -25328,7 +25442,13 @@ fn rejects_task_code33_as_information_register_owner_shape() {
 fn parses_standard_attribute_legacy_and_modern_bags() {
     for modern in [false, true] {
         let raw = standard_attributes_for_test(modern);
-        let attributes = parse_standard_attribute_collection(&raw).unwrap();
+        let attributes = parse_standard_attribute_collection(
+            &raw,
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
 
         assert_eq!(
             attributes
@@ -25421,32 +25541,80 @@ fn reads_standard_attribute_bag_revision_9_like_12() {
 #[test]
 fn rejects_malformed_standard_attribute_envelopes_and_bags() {
     let valid = standard_attributes_for_test(true);
-    assert!(parse_standard_attribute_collection("{0}").is_some());
-    assert!(parse_standard_attribute_collection(&format!("{valid} trailing")).is_none());
     assert!(
-        parse_standard_attribute_collection(&valid.replacen("{1,{1,4,", "{1,{1,5,", 1)).is_none()
+        parse_standard_attribute_collection(
+            "{0}",
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
     );
-    assert!(parse_standard_attribute_collection(&valid.replacen("{-5}", "{-4}", 1)).is_none());
     assert!(
-        parse_standard_attribute_collection(&valid.replacen(
-            STANDARD_ATTRIBUTE_SECTION_UUID,
-            "510405d3-2a0c-4fea-960a-7fee59b32f9c",
-            1,
-        ))
+        parse_standard_attribute_collection(
+            &format!("{valid} trailing"),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_standard_attribute_collection(
+            &valid.replacen("{1,{1,4,", "{1,{1,5,", 1),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_standard_attribute_collection(
+            &valid.replacen("{-5}", "{-4}", 1),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_standard_attribute_collection(
+            &valid.replacen(
+                STANDARD_ATTRIBUTE_SECTION_UUID,
+                "510405d3-2a0c-4fea-960a-7fee59b32f9c",
+                1,
+            ),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
         .is_none()
     );
     let modern_bag = standard_attribute_bag_for_test("Active", true, true);
     let legacy_bag = standard_attribute_bag_for_test("Active", false, true);
     assert!(
-        parse_standard_attribute_collection(&valid.replacen(&modern_bag, &legacy_bag, 1,))
-            .is_none()
+        parse_standard_attribute_collection(
+            &valid.replacen(&modern_bag, &legacy_bag, 1,),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
     );
     let wrong_typed_wrapper = valid.replacen(
         STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
         "98ea8e5a-b586-442b-b944-6e3447734aa8",
         1,
     );
-    assert!(parse_standard_attribute_collection(&wrong_typed_wrapper).is_none());
+    assert!(
+        parse_standard_attribute_collection(
+            &wrong_typed_wrapper,
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let tail =
         information_register_owner_tail_with_standard_attributes_for_test(&wrong_typed_wrapper);
@@ -25454,8 +25622,15 @@ fn rejects_malformed_standard_attribute_envelopes_and_bags() {
     let header = parse_metadata_header_from_text(&root, register_uuid).unwrap();
     let owner = parse_information_register_owner_fields(&root, &header).unwrap();
     assert!(
-        parse_information_register_owner_properties(&owner, &header, &BTreeMap::new(), None)
-            .is_none()
+        parse_information_register_owner_properties(
+            &owner,
+            &header,
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
     );
 
     let fields = split_information_register_braced_fields(&modern_bag).unwrap();
@@ -39883,7 +40058,7 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
         Vec::<String>::new()
     );
     assert_eq!(
-        parse_task_standard_attributes(fields[34], &type_index, &BTreeMap::new())
+        parse_task_standard_attributes(fields[34], "Задача1", &type_index, &BTreeMap::new())
             .expect("Task standard attribute envelope")
             .expect("present Task standard attributes")
             .len(),
@@ -47701,7 +47876,7 @@ fn register_standard_attribute_accepts_choice_parameter_links_kind_5004() {
     let bag_text = standard_attribute_bag_from_values_for_test(&values, false);
     let bag = parse_standard_attribute_bag(&bag_text)
         .expect("bag with a 5004 choice-parameter-links kind tag must still parse");
-    let attribute = parse_register_standard_attribute("Active", &bag, MetadataChildFillValue::Nil);
+    let attribute = parse_standard_attribute_with_bag_fill("Active", &bag);
     assert!(
         attribute.is_some(),
         "a standard attribute whose empty ChoiceParameterLinks carries kind tag 5004 \
@@ -51779,8 +51954,8 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
     assert_eq!(parsed[0].value_change, "Clear");
 
     // A path that leaves the owner is written back raw, the way the platform
-    // writes it; a bare standard attribute code is still refused, because only
-    // the catalog table names one.
+    // writes it; a bare standard attribute code names the family's own
+    // attribute.
     let foreign = parse_owner_choice_parameter_links(
         &links,
         "ChartOfCharacteristicTypes",
@@ -51793,15 +51968,17 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
         foreign[0].data_path,
         format!("0:{SECTION_UUID}/0:{ATTRIBUTE_UUID}")
     );
-    assert!(
-        parse_owner_choice_parameter_links(
-            "{5006,1,\"Отбор\",1,{-8},0}",
-            "ChartOfCharacteristicTypes",
-            "СтатьиАктивовПассивов",
-            false,
-            &object_refs,
-        )
-        .is_none()
+    let own = parse_owner_choice_parameter_links(
+        "{5006,1,\"Отбор\",1,{-8},0}",
+        "ChartOfCharacteristicTypes",
+        "СтатьиАктивовПассивов",
+        false,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        own[0].data_path,
+        "ChartOfCharacteristicTypes.СтатьиАктивовПассивов.StandardAttribute.Code"
     );
     assert_eq!(
         parse_catalog_choice_parameter_links(
@@ -52221,18 +52398,33 @@ fn business_process_standard_attribute_slot_admits_the_absent_envelope() {
     // "this object overrides nothing", exactly as it already does on the
     // Catalog root -- it is not a shape this reader may refuse.
     assert!(matches!(
-        parse_business_process_standard_attributes("{0}", &BTreeMap::new(), &BTreeMap::new()),
+        parse_business_process_standard_attributes(
+            "{0}",
+            "БизнесПроцесс1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        ),
         Some(None)
     ));
     // The envelope itself is still verified: a present collection whose
     // declared arity is not this family's is refused, not silently emptied.
     assert!(
-        parse_business_process_standard_attributes("{1,{1,0}}", &BTreeMap::new(), &BTreeMap::new())
-            .is_none()
+        parse_business_process_standard_attributes(
+            "{1,{1,0}}",
+            "БизнесПроцесс1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
     );
     assert!(
-        parse_business_process_standard_attributes("{2}", &BTreeMap::new(), &BTreeMap::new())
-            .is_none()
+        parse_business_process_standard_attributes(
+            "{2}",
+            "БизнесПроцесс1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
     );
 }
 
@@ -52316,8 +52508,8 @@ fn business_process_attribute_choice_parameter_links_resolve_inside_the_owning_p
     assert_eq!(parsed[0].value_change, "Clear");
 
     // A path that leaves the owner is written back raw, exactly as the
-    // platform writes it, and a bare standard attribute code stays unnamed
-    // outside the catalog table.
+    // platform writes it; a bare standard attribute code names the family's
+    // own attribute.
     let foreign = parse_owner_choice_parameter_links(
         &links,
         "BusinessProcess",
@@ -52330,15 +52522,17 @@ fn business_process_attribute_choice_parameter_links_resolve_inside_the_owning_p
         foreign[0].data_path,
         format!("0:{SECTION_UUID}/0:{ATTRIBUTE_UUID}")
     );
-    assert!(
-        parse_owner_choice_parameter_links(
-            "{5006,1,\"Отбор\",1,{-8},0}",
-            "BusinessProcess",
-            "Исполнение",
-            false,
-            &object_refs,
-        )
-        .is_none()
+    let own = parse_owner_choice_parameter_links(
+        "{5006,1,\"Отбор\",1,{-8},0}",
+        "BusinessProcess",
+        "Исполнение",
+        false,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        own[0].data_path,
+        "BusinessProcess.Исполнение.StandardAttribute.HeadTask"
     );
 }
 
@@ -54576,12 +54770,15 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     assert!(
         parse_standard_attributes(
             "{0}",
-            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-            vocabulary(),
-            None,
-            &index,
-            &index,
-            &forms,
+            StandardAttributeReader {
+                definitions: CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+                vocabulary: vocabulary(),
+                owner_prefix: None,
+                type_index: &index,
+                object_refs: &index,
+                choice_form_refs: Some(&forms),
+                clear_links_only: false,
+            },
         )
         .is_none()
     );
@@ -54656,12 +54853,15 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
             assert!(
                 parse_standard_attributes(
                     &numeric_fill,
-                    definitions,
-                    vocabulary(),
-                    None,
-                    &index,
-                    &index,
-                    &forms,
+                    StandardAttributeReader {
+                        definitions,
+                        vocabulary: vocabulary(),
+                        owner_prefix: None,
+                        type_index: &index,
+                        object_refs: &index,
+                        choice_form_refs: Some(&forms),
+                        clear_links_only: false,
+                    },
                 )
                 .is_none(),
                 "nested chart attributes must still refuse numeric LineNumber fill"

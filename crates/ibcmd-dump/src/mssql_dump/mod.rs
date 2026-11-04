@@ -15280,7 +15280,12 @@ fn parse_exchange_plan_properties_from_text_with_refs(
             &header.name,
             form_refs,
         )?,
-        standard_attributes: parse_exchange_plan_standard_attributes(fields.get(30)?)?,
+        standard_attributes: parse_exchange_plan_standard_attributes(
+            fields.get(30)?,
+            &header.name,
+            type_index,
+            metadata_object_refs,
+        )?,
         characteristics,
         based_on: parse_exchange_plan_based_on(fields.get(24)?, object_refs)?,
         distributed_infobase: parse_1c_bool_field(Some(fields.get(26)?))?,
@@ -17652,26 +17657,6 @@ fn standard_attribute_choice_parameter_links_is_empty(value: &str) -> bool {
     })
 }
 
-fn parse_register_standard_attribute_with_comment<'a>(
-    name: &'static str,
-    bag: &InformationRegisterStandardAttributeBag<'a>,
-    fill_value: MetadataChildFillValue,
-    expected_type_reduction_mode: &str,
-) -> Option<(RegisterStandardAttribute, String)> {
-    let (attribute, comment, choice_parameter_links) = parse_standard_attribute(
-        name,
-        bag,
-        StandardAttributePolicy {
-            fill_value,
-            type_reduction_mode: expected_type_reduction_mode,
-            scope: None,
-            choice_form_refs: None,
-        },
-    )?;
-    standard_attribute_choice_parameter_links_is_empty(choice_parameter_links)
-        .then_some((attribute, comment))
-}
-
 fn parse_standard_attribute<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
@@ -17857,28 +17842,6 @@ fn choice_parameter_value_has_nested_empty_design_time_ref(
     }
 }
 
-fn parse_register_standard_attribute<'a>(
-    name: &'static str,
-    bag: &InformationRegisterStandardAttributeBag<'a>,
-    fill_value: MetadataChildFillValue,
-) -> Option<RegisterStandardAttribute> {
-    let (attribute, comment) =
-        parse_register_standard_attribute_with_comment(name, bag, fill_value, "0")?;
-    comment.is_empty().then_some(attribute)
-}
-
-fn parse_standard_attribute_with_bag_fill<'a>(
-    name: &'static str,
-    bag: &InformationRegisterStandardAttributeBag<'a>,
-) -> Option<RegisterStandardAttribute> {
-    let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-    parse_register_standard_attribute(
-        name,
-        bag,
-        parse_standard_attribute_fill_value_from_bag(fill_value, name)?,
-    )
-}
-
 fn parse_exchange_plan_standard_attribute_fill_value(
     value: &str,
     marker: &str,
@@ -17898,73 +17861,57 @@ fn parse_exchange_plan_standard_attribute_fill_value(
     }
 }
 
-fn parse_exchange_plan_standard_attribute<'a>(
-    marker: &str,
-    name: &'static str,
-    bag: &InformationRegisterStandardAttributeBag<'a>,
-) -> Option<RegisterStandardAttribute> {
-    let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-    let (mut attribute, comment, choice_parameter_links) = parse_standard_attribute(
-        name,
-        bag,
-        StandardAttributePolicy {
-            fill_value: parse_exchange_plan_standard_attribute_fill_value(fill_value, marker)?,
-            type_reduction_mode: "0",
-            scope: None,
-            choice_form_refs: None,
-        },
-    )?;
-    if !standard_attribute_choice_parameter_links_is_empty(choice_parameter_links) {
-        return None;
-    }
-    attribute.comment = comment;
-    // Every property the record can vary is printed by the shared
-    // standard-attribute writer: a synonym, a tooltip, a format, a data-history
-    // or fill-checking value it carries is data, not an unknown shape. The
-    // marker-specific fill value above is what stays validated.
-    let _ = marker;
-    Some(attribute)
-}
+/// The standard attributes every information register root declares, in the
+/// order the record stores their markers.
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTES: [(&str, &str); 4] = [
+    ("-5", "Active"),
+    ("-4", "LineNumber"),
+    ("-3", "Recorder"),
+    ("-2", "Period"),
+];
 
-fn parse_standard_attribute_collection(value: &str) -> Option<Vec<RegisterStandardAttribute>> {
+fn parse_standard_attribute_collection(
+    value: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<RegisterStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
     if outer.len() == 1 && outer.first()?.trim() == "0" {
         return Some(Vec::new());
     }
-    if outer.len() != 2 || outer.first()?.trim() != "1" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
-    if payload.len() != 14 || payload.first()?.trim() != "1" || payload.get(1)?.trim() != "4" {
-        return None;
-    }
-    let definitions = [
-        ("-5", "Active"),
-        ("-4", "LineNumber"),
-        ("-3", "Recorder"),
-        ("-2", "Period"),
-    ];
-    let mut attributes = Vec::with_capacity(definitions.len());
-    let mut bag_shape = None;
-    for ((marker, name), fields) in definitions.into_iter().zip(payload[2..].chunks_exact(3)) {
-        let marker_fields = split_information_register_braced_fields(fields[0])?;
-        if marker_fields.len() != 1
-            || marker_fields.first()?.trim() != marker
-            || !information_register_uuid_matches(fields[1], STANDARD_ATTRIBUTE_SECTION_UUID)
-        {
-            return None;
-        }
-        let bag = parse_standard_attribute_bag(fields[2])?;
-        if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
-            return None;
-        }
-        bag_shape = Some(bag.has_type_reduction_mode);
-        attributes.push(parse_standard_attribute_with_bag_fill(name, &bag)?);
-    }
-    Some(attributes)
+    let owner_prefix = format!("InformationRegister.{owner_name}.");
+    parse_standard_attributes(
+        value,
+        StandardAttributeReader {
+            definitions: &INFORMATION_REGISTER_STANDARD_ATTRIBUTES,
+            vocabulary: StandardAttributeVocabulary::ByMarker,
+            owner_prefix: Some(&owner_prefix),
+            type_index,
+            object_refs,
+            choice_form_refs: None,
+            clear_links_only: false,
+        },
+    )
 }
 
-fn parse_exchange_plan_standard_attributes(value: &str) -> Option<Vec<RegisterStandardAttribute>> {
+const EXCHANGE_PLAN_STANDARD_ATTRIBUTES: [(&str, &str); 8] = [
+    ("-14", "ExchangeDate"),
+    ("-13", "ThisNode"),
+    ("-10", "ReceivedNo"),
+    ("-9", "SentNo"),
+    ("-6", "Ref"),
+    ("-4", "DeletionMark"),
+    ("-3", "Description"),
+    ("-2", "Code"),
+];
+
+fn parse_exchange_plan_standard_attributes(
+    value: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<RegisterStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
     if outer.len() == 1 && outer.first()?.trim() == "0" {
         return Some(Vec::new());
@@ -17985,38 +17932,19 @@ fn parse_exchange_plan_standard_attributes(value: &str) -> Option<Vec<RegisterSt
         ("1", "7", 23) => 1,
         _ => return None,
     };
-    let definitions = [
-        ("-14", "ExchangeDate"),
-        ("-13", "ThisNode"),
-        ("-10", "ReceivedNo"),
-        ("-9", "SentNo"),
-        ("-6", "Ref"),
-        ("-4", "DeletionMark"),
-        ("-3", "Description"),
-        ("-2", "Code"),
-    ];
-    let mut attributes = Vec::with_capacity(definitions.len());
-    let mut bag_shape = None;
-    for ((marker, name), fields) in definitions
-        .into_iter()
-        .skip(skip)
-        .zip(payload[2..].chunks_exact(3))
-    {
-        let marker_fields = split_information_register_braced_fields(fields[0])?;
-        if marker_fields.len() != 1
-            || marker_fields.first()?.trim() != marker
-            || !information_register_uuid_matches(fields[1], STANDARD_ATTRIBUTE_SECTION_UUID)
-        {
-            return None;
-        }
-        let bag = parse_standard_attribute_bag(fields[2])?;
-        if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
-            return None;
-        }
-        bag_shape = Some(bag.has_type_reduction_mode);
-        attributes.push(parse_exchange_plan_standard_attribute(marker, name, &bag)?);
-    }
-    Some(attributes)
+    let owner_prefix = format!("ExchangePlan.{owner_name}.");
+    parse_standard_attributes(
+        value,
+        StandardAttributeReader {
+            definitions: &EXCHANGE_PLAN_STANDARD_ATTRIBUTES[skip..],
+            vocabulary: StandardAttributeVocabulary::ExchangePlan,
+            owner_prefix: Some(&owner_prefix),
+            type_index,
+            object_refs,
+            choice_form_refs: None,
+            clear_links_only: false,
+        },
+    )
 }
 
 /// Logical owner-field slot carrying an information register's
@@ -18073,6 +18001,8 @@ fn parse_information_register_owner_properties(
     header: &MetadataHeader,
     form_refs: &BTreeMap<String, FormSourceReference>,
     form_uuids: Option<&[String]>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<InformationRegisterOwnerProperties> {
     let periodicity = information_register_periodicity_xml(
         fields.get(INFORMATION_REGISTER_OWNER_FIELD_PERIODICITY)?,
@@ -18114,7 +18044,12 @@ fn parse_information_register_owner_properties(
                 != ibcmd_schema::metadata_storage_facts::INFORMATION_REGISTER_RECORDER_SUBORDINATE,
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(10)?)?,
         full_text_search: information_register_full_text_search(fields.get(11)?)?,
-        standard_attributes: parse_standard_attribute_collection(fields.get(12)?)?,
+        standard_attributes: parse_standard_attribute_collection(
+            fields.get(12)?,
+            &header.name,
+            type_index,
+            object_refs,
+        )?,
         auxiliary_record_form: parse_declared_owned_form_ref(
             fields.get(13)?,
             OwnedFormFamily::InformationRegister.as_str(),
@@ -18163,10 +18098,21 @@ fn parse_register_properties_from_text(
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
     let form_uuids = parse_register_form_uuids(kind, text)?;
-    let mut exact_accumulation_register =
-        parse_exact_accumulation_register_owner_properties(kind, &fields, &header, form_refs)?;
-    let mut exact_calculation_register =
-        parse_exact_calculation_register_owner_properties(kind, &fields, &header)?;
+    let mut exact_accumulation_register = parse_exact_accumulation_register_owner_properties(
+        kind,
+        &fields,
+        &header,
+        form_refs,
+        type_index,
+        object_refs,
+    )?;
+    let mut exact_calculation_register = parse_exact_calculation_register_owner_properties(
+        kind,
+        &fields,
+        &header,
+        type_index,
+        object_refs,
+    )?;
     let exact_calculation_generated_types = if kind == OwnedFormFamily::CalculationRegister.as_str()
     {
         parse_exact_calculation_register_generated_types(&fields, &header)?
@@ -18259,6 +18205,8 @@ fn parse_register_properties_from_text(
                 &header,
                 form_refs,
                 form_uuids.as_deref(),
+                type_index,
+                object_refs,
             )
         })
     } else {
@@ -19012,6 +18960,9 @@ const CALCULATION_REGISTER_STANDARD_ATTRIBUTES: [(&str, &str); 11] = [
 fn parse_exact_register_standard_attributes(
     value: &str,
     definitions: &[(&'static str, &'static str)],
+    owner_prefix: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<RegisterStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
     // `{0}` is the platform's "nothing about this register's standard
@@ -19030,39 +18981,18 @@ fn parse_exact_register_standard_attributes(
     if outer.len() == 1 && outer.first()?.trim() == "0" {
         return Some(Vec::new());
     }
-    if outer.len() != 2 || outer.first()?.trim() != "1" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
-    if payload.first()?.trim() != "1"
-        || parse_information_register_usize(payload.get(1)?)? != definitions.len()
-        || payload.len() != definitions.len().checked_mul(3)?.checked_add(2)?
-    {
-        return None;
-    }
-
-    let mut attributes = Vec::with_capacity(definitions.len());
-    let mut bag_shape = None;
-    for ((expected_marker, name), triplet) in definitions
-        .iter()
-        .copied()
-        .zip(payload[2..].chunks_exact(3))
-    {
-        let marker = split_information_register_braced_fields(triplet[0])?;
-        if marker.len() != 1
-            || marker.first()?.trim() != expected_marker
-            || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
-        {
-            return None;
-        }
-        let bag = parse_standard_attribute_bag(triplet[2])?;
-        if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
-            return None;
-        }
-        bag_shape = Some(bag.has_type_reduction_mode);
-        attributes.push(parse_standard_attribute_with_bag_fill(name, &bag)?);
-    }
-    Some(attributes)
+    parse_standard_attributes(
+        value,
+        StandardAttributeReader {
+            definitions,
+            vocabulary: StandardAttributeVocabulary::ByMarker,
+            owner_prefix: Some(owner_prefix),
+            type_index,
+            object_refs,
+            choice_form_refs: None,
+            clear_links_only: false,
+        },
+    )
 }
 
 fn parse_exact_register_owned_form_ref(
@@ -19136,6 +19066,8 @@ fn parse_exact_accumulation_register_owner_properties(
     fields: &[&str],
     expected_header: &MetadataHeader,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<ExactAccumulationRegisterOwnerProperties>> {
     if kind != "AccumulationRegister"
         || !validate_exact_accumulation_code28_layout(fields, expected_header)?
@@ -19168,6 +19100,9 @@ fn parse_exact_accumulation_register_owner_properties(
         standard_attributes: parse_exact_register_standard_attributes(
             fields.get(21)?,
             definitions,
+            &format!("{kind}.{}.", expected_header.name),
+            type_index,
+            object_refs,
         )?,
     }))
 }
@@ -19176,6 +19111,8 @@ fn parse_exact_calculation_register_owner_properties(
     kind: &str,
     fields: &[&str],
     expected_header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<ExactCalculationRegisterOwnerProperties>> {
     if kind != "CalculationRegister"
         || !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)?
@@ -19193,6 +19130,9 @@ fn parse_exact_calculation_register_owner_properties(
         standard_attributes: parse_exact_register_standard_attributes(
             fields.get(28)?,
             &CALCULATION_REGISTER_STANDARD_ATTRIBUTES,
+            &format!("{kind}.{}.", expected_header.name),
+            type_index,
+            object_refs,
         )?,
     }))
 }
@@ -24165,29 +24105,6 @@ fn parse_accounting_register_standard_attribute_choice_links(
     )
 }
 
-fn parse_catalog_standard_attribute_choice_parameter_links(
-    value: &str,
-    owner_name: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<MetadataChoiceParameterLink>> {
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 3
-        || fields.first()?.trim() != r##""#""##
-        || !information_register_uuid_matches(
-            fields.get(1)?,
-            STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
-        )
-    {
-        return None;
-    }
-    let links =
-        parse_catalog_choice_parameter_links(fields.get(2)?, owner_name, false, object_refs)?;
-    links
-        .iter()
-        .all(|link| link.value_change == "Clear")
-        .then_some(links)
-}
-
 fn parse_catalog_link_by_type(
     value: &str,
     owner_name: &str,
@@ -24290,22 +24207,49 @@ fn resolve_owner_data_path(
     render_resolved_data_path(resolved)
 }
 
+/// Looks a standard-attribute marker up in one family's declared table. Every
+/// family spells its own table; the lookup itself is the same.
+fn standard_attribute_name(
+    definitions: &[(&'static str, &'static str)],
+    code: &str,
+) -> Option<&'static str> {
+    definitions
+        .iter()
+        .find_map(|(candidate, name)| (*candidate == code).then_some(*name))
+}
+
 /// The negative codes name standard attributes, and the table that maps them is
 /// a property of the owner family. Only the catalog table is evidenced, so any
 /// other family refuses a bare code and admits only resolved child references.
 fn owner_data_path_standard_attribute(owner_kind: &str, code: &str) -> Option<&'static str> {
     match owner_kind {
-        "Catalog" => match code {
-            "-3" => Some("Description"),
-            "-4" => Some("Parent"),
-            "-5" => Some("Owner"),
-            "-8" => Some("Ref"),
-            _ => None,
-        },
+        // The catalog table lists every standard attribute the platform can put
+        // in a choice link; a real catalog links `Отбор.Владелец` of each of its
+        // own standard attributes, so all nine codes must resolve.
+        "Catalog" => standard_attribute_name(&CATALOG_STANDARD_ATTRIBUTES, code),
         // The register's table is the one its own standard attributes already
         // use (`Account`, `Period`, `Recorder`, ...), including the extension
         // dimensions.
         "AccountingRegister" => accounting_register_standard_attribute_name(&[code]),
+        // The other register families, the documents and the process objects
+        // declare their own standard attributes and let a choice link name one
+        // of them by marker, exactly like the catalog does.
+        "InformationRegister" => {
+            standard_attribute_name(&INFORMATION_REGISTER_STANDARD_ATTRIBUTES, code)
+        }
+        "AccumulationRegister" => {
+            standard_attribute_name(&ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES, code)
+        }
+        "CalculationRegister" => {
+            standard_attribute_name(&CALCULATION_REGISTER_STANDARD_ATTRIBUTES, code)
+        }
+        "ChartOfCharacteristicTypes" => standard_attribute_name(&CCT_STANDARD_ATTRIBUTES, code),
+        "BusinessProcess" => standard_attribute_name(&BUSINESS_PROCESS_STANDARD_ATTRIBUTES, code),
+        "Document" => standard_attribute_name(&DOCUMENT_STANDARD_ATTRIBUTES, code),
+        "DocumentJournal" => standard_attribute_name(&DOCUMENT_JOURNAL_STANDARD_ATTRIBUTES, code),
+        "Enum" => standard_attribute_name(&ENUM_STANDARD_ATTRIBUTES, code),
+        "ExchangePlan" => standard_attribute_name(&EXCHANGE_PLAN_STANDARD_ATTRIBUTES, code),
+        "Task" => standard_attribute_name(&TASK_STANDARD_ATTRIBUTES, code),
         // Both chart families name their root standard attributes by marker;
         // their choice links carry those markers as bare segments.
         "ChartOfAccounts" => CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS
@@ -26376,6 +26320,24 @@ fn parse_chart_of_accounts_child_collection(
 #[derive(Clone, Copy)]
 enum StandardAttributeVocabulary<'a> {
     NilOnly,
+    /// The owner families whose record carries the same typed fill value an
+    /// ordinary child attribute does: documents, business processes, tasks and
+    /// catalogs.
+    SharedFill,
+    /// The register families, whose `Active`, `LineNumber`, `Recorder` and
+    /// `Period` each carry their own form of fill value.
+    ByMarker,
+    /// An exchange plan: nil, or the string `Description`/`Code` carry.
+    ExchangePlan,
+    /// A characteristic-type chart fills `ValueType` with a type description.
+    ChartOfCharacteristicTypes {
+        owner_name: &'a str,
+    },
+    /// A catalog root keeps one bag revision (56 without, 57 with the
+    /// type-reduction property) for every attribute of the row.
+    Catalog {
+        modern_bag: bool,
+    },
     /// The root of a chart of accounts. `Parent` fills with its own owner's
     /// `EmptyRef` and `Type` with a member of the platform's `ent:AccountType`;
     /// `Code` carries a mask and `Parent` a choice parameter.
@@ -26385,17 +26347,31 @@ enum StandardAttributeVocabulary<'a> {
     },
 }
 
+/// Everything the one standard-attribute collection reader needs besides the
+/// stored value. Every owner family differs only in these fields.
+struct StandardAttributeReader<'a> {
+    definitions: &'a [(&'static str, &'static str)],
+    vocabulary: StandardAttributeVocabulary<'a>,
+    owner_prefix: Option<&'a str>,
+    type_index: &'a BTreeMap<String, String>,
+    object_refs: &'a BTreeMap<String, String>,
+    choice_form_refs: Option<&'a BTreeMap<String, FormSourceReference>>,
+    /// A catalog's links are `Clear` in every measured row; any other value
+    /// change stays refused there.
+    clear_links_only: bool,
+}
+
 // The ordinary chart roots store `{0}` when no standard properties are
 // overridden. Keep this admission local to the two measured owner roots;
 // the shared nested attribute parser retains its existing contract.
-fn parse_chart_root_standard_attributes(
+fn parse_chart_root_standard_attributes<'a>(
     value: &str,
-    definitions: &[(&str, &'static str)],
-    vocabulary: StandardAttributeVocabulary<'_>,
-    owner_prefix: Option<&str>,
-    type_index: &BTreeMap<String, String>,
-    object_refs: &BTreeMap<String, String>,
-    form_refs: &BTreeMap<String, FormSourceReference>,
+    definitions: &'a [(&'static str, &'static str)],
+    vocabulary: StandardAttributeVocabulary<'a>,
+    owner_prefix: Option<&'a str>,
+    type_index: &'a BTreeMap<String, String>,
+    object_refs: &'a BTreeMap<String, String>,
+    form_refs: &'a BTreeMap<String, FormSourceReference>,
 ) -> Option<Vec<RegisterStandardAttribute>> {
     if split_information_register_braced_fields(value).is_some_and(|fields| {
         matches!(
@@ -26408,12 +26384,15 @@ fn parse_chart_root_standard_attributes(
     }
     parse_standard_attributes(
         value,
-        definitions,
-        vocabulary,
-        owner_prefix,
-        type_index,
-        object_refs,
-        form_refs,
+        StandardAttributeReader {
+            definitions,
+            vocabulary,
+            owner_prefix,
+            type_index,
+            object_refs,
+            choice_form_refs: Some(form_refs),
+            clear_links_only: false,
+        },
     )
 }
 
@@ -26447,13 +26426,17 @@ fn parse_standard_tabular_sections(
 
 fn parse_standard_attributes(
     value: &str,
-    definitions: &[(&str, &'static str)],
-    vocabulary: StandardAttributeVocabulary<'_>,
-    owner_prefix: Option<&str>,
-    type_index: &BTreeMap<String, String>,
-    object_refs: &BTreeMap<String, String>,
-    form_refs: &BTreeMap<String, FormSourceReference>,
+    reader: StandardAttributeReader<'_>,
 ) -> Option<Vec<RegisterStandardAttribute>> {
+    let StandardAttributeReader {
+        definitions,
+        vocabulary,
+        owner_prefix,
+        type_index,
+        object_refs,
+        choice_form_refs,
+        clear_links_only,
+    } = reader;
     // An extension's own chart can hold no standard attributes at all.
     if extension::active().is_some() && value.trim() == "{0}" {
         return Some(Vec::new());
@@ -26509,22 +26492,24 @@ fn parse_standard_attributes(
                 return None;
             }
             bag_shape = Some(bag.has_type_reduction_mode);
+            // A catalog root keeps one bag revision for the whole row; the
+            // revision is the owner record's, not a per-attribute choice.
+            if let StandardAttributeVocabulary::Catalog { modern_bag } = vocabulary
+                && bag.has_type_reduction_mode != modern_bag
+            {
+                return None;
+            }
             let raw_fill = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
             let fill_value = parse_standard_attribute_fill_value(
                 raw_fill,
                 expected_marker,
+                name,
                 vocabulary,
                 type_index,
                 object_refs,
             )?;
             let scope = match vocabulary {
                 StandardAttributeVocabulary::NilOnly if owner_prefix.is_none() => None,
-                StandardAttributeVocabulary::NilOnly => {
-                    Some(StandardAttributeChoiceParameterScope {
-                        type_index,
-                        object_refs,
-                    })
-                }
                 StandardAttributeVocabulary::ChartOfAccountsRoot {
                     metadata_object_refs,
                     ..
@@ -26532,27 +26517,57 @@ fn parse_standard_attributes(
                     type_index,
                     object_refs: metadata_object_refs,
                 }),
+                _ => Some(StandardAttributeChoiceParameterScope {
+                    type_index,
+                    object_refs,
+                }),
+            };
+            // A catalog's `Owner` is the one standard attribute whose stored
+            // type-reduction is `2` (rendered `Deny`); every other attribute of
+            // every family stores `0`.
+            let expected_type_reduction = match vocabulary {
+                StandardAttributeVocabulary::Catalog { .. } if name == "Owner" => "2",
+                _ => "0",
             };
             let (mut attribute, comment, choice_parameter_links) = parse_standard_attribute(
                 name,
                 &bag,
                 StandardAttributePolicy {
                     fill_value,
-                    type_reduction_mode: "0",
+                    type_reduction_mode: expected_type_reduction,
                     scope,
-                    choice_form_refs: Some(form_refs),
+                    choice_form_refs,
                 },
             )?;
+            // A register's standard attribute carries no comment in any
+            // measured row; the process-like families keep one.
+            if matches!(vocabulary, StandardAttributeVocabulary::ByMarker) && !comment.is_empty() {
+                return None;
+            }
             // A section's standard attribute carries its own comment and link
             // collection like any other standard attribute. With an owner
             // prefix the data paths resolve against that owner; without one the
             // historical refusal stays.
             let choice_parameter_links = match owner_prefix {
-                Some(prefix) => parse_standard_attribute_choice_parameter_links(
-                    choice_parameter_links,
-                    prefix,
-                    object_refs,
-                )?,
+                Some(prefix) => {
+                    // An empty link collection keeps the shape the platform
+                    // chose for it (`{5006,0}` in most corpora, `{5004,0}` in
+                    // some), which the link reader below does not decode.
+                    if standard_attribute_choice_parameter_links_is_empty(choice_parameter_links) {
+                        Vec::new()
+                    } else {
+                        let links = parse_standard_attribute_choice_parameter_links(
+                            choice_parameter_links,
+                            prefix,
+                            object_refs,
+                        )?;
+                        if clear_links_only && links.iter().any(|link| link.value_change != "Clear")
+                        {
+                            return None;
+                        }
+                        links
+                    }
+                }
                 None => {
                     if !standard_attribute_choice_parameter_links_is_empty(choice_parameter_links) {
                         return None;
@@ -26561,6 +26576,11 @@ fn parse_standard_attributes(
                 }
             };
             attribute.choice_parameter_links = choice_parameter_links;
+            // Every property the record can vary is printed by the shared
+            // standard-attribute writer: a synonym, a tooltip, a format, a
+            // data-history or fill-checking value it carries is data, not an
+            // unknown shape. The family-specific fill value is what stays
+            // validated.
             attribute.comment = comment;
             Some(attribute)
         })
@@ -26579,10 +26599,37 @@ const CHART_OF_ACCOUNTS_ACCOUNT_TYPE_UUID: &str = "872f7198-7083-4e3e-b57e-a2a98
 fn parse_standard_attribute_fill_value(
     value: &str,
     marker: &str,
+    name: &str,
     vocabulary: StandardAttributeVocabulary<'_>,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildFillValue> {
+    match vocabulary {
+        // The owner families share the typed-value reader a child attribute
+        // uses; a catalog root does too.
+        StandardAttributeVocabulary::SharedFill | StandardAttributeVocabulary::Catalog { .. } => {
+            return parse_information_register_fill_value(value, type_index, object_refs);
+        }
+        // A register's four standard attributes each carry their own form,
+        // keyed by the attribute's name rather than by its marker.
+        StandardAttributeVocabulary::ByMarker => {
+            return parse_standard_attribute_fill_value_from_bag(value, name);
+        }
+        StandardAttributeVocabulary::ExchangePlan => {
+            return parse_exchange_plan_standard_attribute_fill_value(value, marker);
+        }
+        StandardAttributeVocabulary::ChartOfCharacteristicTypes { owner_name } => {
+            return parse_cct_standard_attribute_fill_value(
+                value,
+                marker,
+                owner_name,
+                type_index,
+                object_refs,
+            );
+        }
+        StandardAttributeVocabulary::NilOnly
+        | StandardAttributeVocabulary::ChartOfAccountsRoot { .. } => {}
+    }
     if standard_attribute_nil_is_valid(value) {
         return Some(MetadataChildFillValue::Nil);
     }
@@ -26665,12 +26712,15 @@ fn parse_standard_tabular_section_entries(
                 },
                 standard_attributes: parse_standard_attributes(
                     detail.get(5)?,
-                    attributes,
-                    StandardAttributeVocabulary::NilOnly,
-                    owner_prefix,
-                    type_index,
-                    object_refs,
-                    form_refs,
+                    StandardAttributeReader {
+                        definitions: attributes,
+                        vocabulary: StandardAttributeVocabulary::NilOnly,
+                        owner_prefix,
+                        type_index,
+                        object_refs,
+                        choice_form_refs: Some(form_refs),
+                        clear_links_only: false,
+                    },
                 )?,
             })
         })
@@ -27264,70 +27314,34 @@ fn parse_cct_standard_attributes(
     if matches!(outer.as_slice(), [marker] if marker.trim() == "0") {
         return Some(Vec::new());
     }
-    if outer.len() != 2 || outer.first()?.trim() != "1" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
-    if payload.first()?.trim() != "1"
-        || parse_information_register_usize(payload.get(1)?)? != CCT_STANDARD_ATTRIBUTES.len()
-        || payload.len()
-            != CCT_STANDARD_ATTRIBUTES
-                .len()
-                .checked_mul(3)?
-                .checked_add(2)?
-    {
-        return None;
-    }
-
-    let mut attributes = Vec::with_capacity(CCT_STANDARD_ATTRIBUTES.len());
     // The attribute-property bag comes in two shapes that differ only by
     // whether the platform build carries the "type reduction" property
     // (`STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID`,
     // 24 vs. 25 properties -- see `parse_standard_attribute_bag`).
-    // Neither shape is more "correct"; `parse_standard_attribute_collection`
-    // and `parse_exchange_plan_standard_attributes` both already accept either
-    // one and only require every attribute in the same row to agree. Confirmed
+    // Neither shape is more "correct"; the shared reader accepts either one
+    // and only requires every attribute in the same row to agree. Confirmed
     // on real БСП 3.1.12.297 `ChartOfCharacteristicTypes` rows (sslbase and
     // ssl demo): all nine standard attributes uniformly carry the 24-property
     // (no type-reduction) bag, so hard-requiring `has_type_reduction_mode`
     // here made every one of them opaque.
-    let mut bag_shape = None;
-    for ((expected_marker, name), triplet) in CCT_STANDARD_ATTRIBUTES
-        .iter()
-        .copied()
-        .zip(payload[2..].chunks_exact(3))
-    {
-        let marker = split_information_register_braced_fields(triplet[0])?;
-        if marker.len() != 1
-            || marker.first()?.trim() != expected_marker
-            || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
-        {
-            return None;
-        }
-        let bag = parse_standard_attribute_bag(triplet[2])?;
-        if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
-            return None;
-        }
-        bag_shape = Some(bag.has_type_reduction_mode);
-        let fill_value = parse_cct_standard_attribute_fill_value(
-            bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?,
-            expected_marker,
-            owner_name,
+    //
+    // A characteristic-type plan is the one family observed to carry a
+    // design-time comment on a standard attribute
+    // (`КатегорииНовостей.Code`); the shared reader keeps it instead of
+    // demanding that it be empty.
+    let owner_prefix = format!("ChartOfCharacteristicTypes.{owner_name}.");
+    parse_standard_attributes(
+        value,
+        StandardAttributeReader {
+            definitions: &CCT_STANDARD_ATTRIBUTES,
+            vocabulary: StandardAttributeVocabulary::ChartOfCharacteristicTypes { owner_name },
+            owner_prefix: Some(&owner_prefix),
             type_index,
             object_refs,
-        )?;
-        // A characteristic-type plan is the one family observed to carry a
-        // design-time comment on a standard attribute
-        // (`КатегорииНовостей.Code`), so this reader keeps it instead of
-        // demanding that it be empty.
-        let (attribute, comment) =
-            parse_register_standard_attribute_with_comment(name, &bag, fill_value, "0")?;
-        attributes.push(RegisterStandardAttribute {
-            comment,
-            ..attribute
-        });
-    }
-    Some(attributes)
+            choice_form_refs: None,
+            clear_links_only: false,
+        },
+    )
 }
 
 fn parse_cct_standard_attribute_fill_value(
@@ -28391,7 +28405,6 @@ fn parse_strict_catalog_properties_from_text(
             &header.name,
             type_index,
             metadata_object_refs,
-            object_refs,
             form_refs,
         )?,
         characteristics,
@@ -28997,86 +29010,49 @@ fn parse_catalog_standard_attributes(
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
-    object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<Option<Vec<MetadataStandardAttribute>>> {
     let outer = split_information_register_braced_fields(value)?;
     if outer.len() == 1 && outer.first()?.trim() == "0" {
         return Some(None);
     }
-    if outer.len() != 2 || outer.first()?.trim() != "1" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
-    if payload.first()?.trim() != "1"
-        || parse_information_register_usize(payload.get(1)?)? != CATALOG_STANDARD_ATTRIBUTES.len()
-        || payload.len()
-            != CATALOG_STANDARD_ATTRIBUTES
-                .len()
-                .checked_mul(3)?
-                .checked_add(2)?
-    {
-        return None;
-    }
     let expected_modern_bag = match owner_code {
         "56" => false,
         "57" => true,
         _ => return None,
     };
-    CATALOG_STANDARD_ATTRIBUTES
-        .iter()
-        .copied()
-        .zip(payload[2..].chunks_exact(3))
-        .map(|((expected_marker, name), triplet)| {
-            let marker = split_information_register_braced_fields(triplet[0])?;
-            if marker.len() != 1
-                || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
-            {
-                return None;
-            }
-            let bag = parse_standard_attribute_bag(triplet[2])?;
-            if bag.has_type_reduction_mode != expected_modern_bag {
-                return None;
-            }
-            let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-            let fill_value = parse_information_register_fill_value(
-                fill_value,
-                type_index,
-                metadata_object_refs,
-            )?;
-            let expected_raw_reduction = if name == "Owner" { "2" } else { "0" };
-            let (attribute, comment, choice_parameter_links) = parse_standard_attribute(
-                name,
-                &bag,
-                StandardAttributePolicy {
-                    fill_value,
-                    type_reduction_mode: expected_raw_reduction,
-                    scope: Some(StandardAttributeChoiceParameterScope {
-                        type_index,
-                        object_refs: metadata_object_refs,
-                    }),
-                    choice_form_refs: Some(form_refs),
-                },
-            )?;
-            let choice_parameter_links = parse_catalog_standard_attribute_choice_parameter_links(
-                choice_parameter_links,
-                owner_name,
-                object_refs,
-            )?;
-            Some(MetadataStandardAttribute {
-                attribute,
-                comment,
-                type_reduction_mode: if name == "Owner" {
+    let owner_prefix = format!("Catalog.{owner_name}.");
+    let attributes = parse_standard_attributes(
+        value,
+        StandardAttributeReader {
+            definitions: &CATALOG_STANDARD_ATTRIBUTES,
+            vocabulary: StandardAttributeVocabulary::Catalog {
+                modern_bag: expected_modern_bag,
+            },
+            owner_prefix: Some(&owner_prefix),
+            type_index,
+            object_refs: metadata_object_refs,
+            choice_form_refs: Some(form_refs),
+            clear_links_only: true,
+        },
+    )?;
+    Some(Some(
+        attributes
+            .into_iter()
+            .map(|attribute| MetadataStandardAttribute {
+                // The platform writes `Deny` for the catalog's own owner link
+                // and `TransformValues` for every other standard attribute.
+                type_reduction_mode: if attribute.name == "Owner" {
                     "Deny"
                 } else {
                     "TransformValues"
                 },
-                choice_parameter_links,
+                comment: attribute.comment.clone(),
+                choice_parameter_links: attribute.choice_parameter_links.clone(),
+                attribute,
             })
-        })
-        .collect::<Option<Vec<_>>>()
-        .map(Some)
+            .collect(),
+    ))
 }
 
 /// Version 56 with exactly 61 Catalog owner fields has two explicit input
@@ -29762,6 +29738,7 @@ fn parse_document_properties_from_text(
         },
         standard_attributes: parse_document_standard_attributes(
             fields.get(32)?,
+            &header.name,
             type_index,
             metadata_object_refs,
         )?,
@@ -30555,61 +30532,54 @@ const METADATA_BASED_ON_PREFIXES: [&str; 4] = [
     "Task.",
 ];
 
+/// The process-like families (documents, business processes, tasks) print every
+/// standard attribute with the same `TransformValues` reduction and its own link
+/// collection; `{0}` means the object overrides nothing.
+fn parse_owner_standard_attributes(
+    value: &str,
+    reader: StandardAttributeReader<'_>,
+) -> Option<Option<Vec<MetadataStandardAttribute>>> {
+    if split_information_register_braced_fields(value).is_some_and(|fields| {
+        matches!(
+            ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::from_fields(&fields),
+            Some(ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::Absent)
+        )
+    }) {
+        return Some(None);
+    }
+    let attributes = parse_standard_attributes(value, reader)?;
+    Some(Some(
+        attributes
+            .into_iter()
+            .map(|attribute| MetadataStandardAttribute {
+                comment: attribute.comment.clone(),
+                choice_parameter_links: attribute.choice_parameter_links.clone(),
+                type_reduction_mode: "TransformValues",
+                attribute,
+            })
+            .collect(),
+    ))
+}
+
 fn parse_document_standard_attributes(
     value: &str,
+    owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<Vec<MetadataStandardAttribute>>> {
-    let outer = split_information_register_braced_fields(value)?;
-    if outer.len() == 1 && outer.first()?.trim() == "0" {
-        return Some(None);
-    }
-    if outer.len() != 2 || outer.first()?.trim() != "1" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
-    if payload.first()?.trim() != "1"
-        || parse_information_register_usize(payload.get(1)?)? != DOCUMENT_STANDARD_ATTRIBUTES.len()
-        || payload.len()
-            != DOCUMENT_STANDARD_ATTRIBUTES
-                .len()
-                .checked_mul(3)?
-                .checked_add(2)?
-    {
-        return None;
-    }
-    let mut bag_shape = None;
-    let attributes = DOCUMENT_STANDARD_ATTRIBUTES
-        .iter()
-        .copied()
-        .zip(payload[2..].chunks_exact(3))
-        .map(|((expected_marker, name), triplet)| {
-            let marker = split_information_register_braced_fields(triplet[0])?;
-            if marker.len() != 1
-                || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
-            {
-                return None;
-            }
-            let bag = parse_standard_attribute_bag(triplet[2])?;
-            if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
-                return None;
-            }
-            bag_shape = Some(bag.has_type_reduction_mode);
-            let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-            let fill_value =
-                parse_information_register_fill_value(fill_value, type_index, object_refs)?;
-            let (attribute, comment) =
-                parse_register_standard_attribute_with_comment(name, &bag, fill_value, "0")?;
-            Some(MetadataStandardAttribute {
-                attribute,
-                comment,
-                type_reduction_mode: "TransformValues",
-                choice_parameter_links: Vec::new(),
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some(Some(attributes))
+    let owner_prefix = format!("Document.{owner_name}.");
+    parse_owner_standard_attributes(
+        value,
+        StandardAttributeReader {
+            definitions: &DOCUMENT_STANDARD_ATTRIBUTES,
+            vocabulary: StandardAttributeVocabulary::SharedFill,
+            owner_prefix: Some(&owner_prefix),
+            type_index,
+            object_refs,
+            choice_form_refs: None,
+            clear_links_only: false,
+        },
+    )
 }
 
 #[expect(
@@ -30969,6 +30939,7 @@ fn parse_business_process_properties_from_text(
         check_unique: parse_1c_bool_field(Some(fields.get(19)?))?,
         standard_attributes: parse_business_process_standard_attributes(
             fields.get(30)?,
+            &header.name,
             type_index,
             metadata_object_refs,
         )?,
@@ -31220,60 +31191,23 @@ const BUSINESS_PROCESS_STANDARD_ATTRIBUTES: [(&str, &str); 7] = [
 /// match byte for byte through this reader.
 fn parse_business_process_standard_attributes(
     value: &str,
+    owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<Vec<MetadataStandardAttribute>>> {
-    let outer = split_information_register_braced_fields(value)?;
-    if outer.len() == 1 && outer.first()?.trim() == "0" {
-        return Some(None);
-    }
-    if outer.len() != 2 || outer.first()?.trim() != "1" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
-    if payload.first()?.trim() != "1"
-        || parse_information_register_usize(payload.get(1)?)?
-            != BUSINESS_PROCESS_STANDARD_ATTRIBUTES.len()
-        || payload.len()
-            != BUSINESS_PROCESS_STANDARD_ATTRIBUTES
-                .len()
-                .checked_mul(3)?
-                .checked_add(2)?
-    {
-        return None;
-    }
-    let mut bag_shape = None;
-    BUSINESS_PROCESS_STANDARD_ATTRIBUTES
-        .iter()
-        .copied()
-        .zip(payload[2..].chunks_exact(3))
-        .map(|((expected_marker, name), triplet)| {
-            let marker = split_information_register_braced_fields(triplet[0])?;
-            if marker.len() != 1
-                || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
-            {
-                return None;
-            }
-            let bag = parse_standard_attribute_bag(triplet[2])?;
-            if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
-                return None;
-            }
-            bag_shape = Some(bag.has_type_reduction_mode);
-            let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-            let fill_value =
-                parse_information_register_fill_value(fill_value, type_index, object_refs)?;
-            let (attribute, comment) =
-                parse_register_standard_attribute_with_comment(name, &bag, fill_value, "0")?;
-            Some(MetadataStandardAttribute {
-                attribute,
-                comment,
-                type_reduction_mode: "TransformValues",
-                choice_parameter_links: Vec::new(),
-            })
-        })
-        .collect::<Option<Vec<_>>>()
-        .map(Some)
+    let owner_prefix = format!("BusinessProcess.{owner_name}.");
+    parse_owner_standard_attributes(
+        value,
+        StandardAttributeReader {
+            definitions: &BUSINESS_PROCESS_STANDARD_ATTRIBUTES,
+            vocabulary: StandardAttributeVocabulary::SharedFill,
+            owner_prefix: Some(&owner_prefix),
+            type_index,
+            object_refs,
+            choice_form_refs: None,
+            clear_links_only: false,
+        },
+    )
 }
 
 fn parse_business_process_tabular_sections_indexed(
@@ -31706,6 +31640,7 @@ fn parse_task_properties_from_text(
         based_on: parse_task_based_on(fields.get(30)?, object_refs)?,
         standard_attributes: parse_task_standard_attributes(
             fields.get(34)?,
+            &header.name,
             type_index,
             metadata_object_refs,
         )?,
@@ -32201,59 +32136,23 @@ const TASK_STANDARD_ATTRIBUTES: [(&str, &str); 8] = [
 
 fn parse_task_standard_attributes(
     value: &str,
+    owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<Vec<MetadataStandardAttribute>>> {
-    let outer = split_information_register_braced_fields(value)?;
-    use ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection;
-    let payload = match NativeOptionalMetadataCollection::from_fields(&outer)? {
-        NativeOptionalMetadataCollection::Absent => return Some(None),
-        NativeOptionalMetadataCollection::Present(payload) => payload,
-    };
-    let payload = split_information_register_braced_fields(payload)?;
-    if payload.first()?.trim() != "1"
-        || parse_information_register_usize(payload.get(1)?)? != TASK_STANDARD_ATTRIBUTES.len()
-        || payload.len()
-            != TASK_STANDARD_ATTRIBUTES
-                .len()
-                .checked_mul(3)?
-                .checked_add(2)?
-    {
-        return None;
-    }
-
-    let mut bag_shape = None;
-    TASK_STANDARD_ATTRIBUTES
-        .iter()
-        .copied()
-        .zip(payload[2..].chunks_exact(3))
-        .map(|((expected_marker, name), triplet)| {
-            let marker = split_information_register_braced_fields(triplet[0])?;
-            if marker.len() != 1
-                || marker.first()?.trim() != expected_marker
-                || !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID)
-            {
-                return None;
-            }
-            let bag = parse_standard_attribute_bag(triplet[2])?;
-            if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
-                return None;
-            }
-            bag_shape = Some(bag.has_type_reduction_mode);
-            let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-            let fill_value =
-                parse_information_register_fill_value(fill_value, type_index, object_refs)?;
-            let (attribute, comment) =
-                parse_register_standard_attribute_with_comment(name, &bag, fill_value, "0")?;
-            Some(MetadataStandardAttribute {
-                attribute,
-                comment,
-                type_reduction_mode: "TransformValues",
-                choice_parameter_links: Vec::new(),
-            })
-        })
-        .collect::<Option<Vec<_>>>()
-        .map(Some)
+    let owner_prefix = format!("Task.{owner_name}.");
+    parse_owner_standard_attributes(
+        value,
+        StandardAttributeReader {
+            definitions: &TASK_STANDARD_ATTRIBUTES,
+            vocabulary: StandardAttributeVocabulary::SharedFill,
+            owner_prefix: Some(&owner_prefix),
+            type_index,
+            object_refs,
+            choice_form_refs: None,
+            clear_links_only: false,
+        },
+    )
 }
 
 fn parse_task_commands(
@@ -32660,7 +32559,12 @@ fn parse_document_journal_properties_from_text(
     )?;
     let registered_documents =
         parse_document_journal_registered_documents(owner_fields.get(6)?, object_refs)?;
-    let standard_attributes = parse_document_journal_standard_attributes(owner_fields.get(12)?)?;
+    let standard_attributes = parse_document_journal_standard_attributes(
+        owner_fields.get(12)?,
+        &header.name,
+        type_index,
+        object_refs,
+    )?;
     let columns =
         parse_document_journal_columns(root_fields.get(4)?, object_refs, &registered_documents)?;
     let child_commands = parse_document_journal_commands(
@@ -32691,12 +32595,21 @@ fn parse_document_journal_properties_from_text(
 
 fn parse_document_journal_standard_attributes(
     value: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<RegisterStandardAttribute>> {
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() == 1 && fields.first()?.trim() == "0" {
         return Some(Vec::new());
     }
-    parse_exact_register_standard_attributes(value, &DOCUMENT_JOURNAL_STANDARD_ATTRIBUTES)
+    parse_exact_register_standard_attributes(
+        value,
+        &DOCUMENT_JOURNAL_STANDARD_ATTRIBUTES,
+        &format!("DocumentJournal.{owner_name}."),
+        type_index,
+        object_refs,
+    )
 }
 
 fn parse_document_journal_child_forms(
@@ -33118,6 +33031,10 @@ fn parse_data_processor_properties_from_text(
 /// The record keeps them as `{<count>,{-3},<section>,<bag>,{-2},<section>,<bag>}`
 /// in exactly that order; only the properties a record can vary are read here.
 /// A different marker order is refused instead of being mapped by guess.
+/// The two standard attributes every enumeration declares; the record stores
+/// `Order` and `Ref` in that order under these markers.
+const ENUM_STANDARD_ATTRIBUTES: [(&str, &str); 2] = [("-3", "Order"), ("-2", "Ref")];
+
 fn parse_enum_standard_attribute_extras(
     value: Option<&str>,
     owner_name: &str,
@@ -33149,7 +33066,7 @@ fn parse_enum_standard_attribute_extras(
     let mut extras = Vec::with_capacity(count);
     for (index, triplet) in items[2..].chunks_exact(3).enumerate() {
         let marker = split_information_register_braced_fields(triplet[0])?;
-        if marker.len() != 1 || marker[0].trim() != ["-3", "-2"][index] {
+        if marker.len() != 1 || marker[0].trim() != ENUM_STANDARD_ATTRIBUTES[index].0 {
             return None;
         }
         if !information_register_uuid_matches(triplet[1], STANDARD_ATTRIBUTE_SECTION_UUID) {
