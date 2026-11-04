@@ -150,7 +150,7 @@ pub(crate) fn attribute_properties(
     if with_fill {
         properties = properties
             .child(leaf("FillFromFillingValue", bool_text(&slots[20])?))
-            .child(value_element("FillValue", &slots[19], names)?);
+            .child(fill_value_element(&slots[19], item(typed, 2)?, names)?);
     }
     properties = properties
         .child(leaf("FillChecking", code_text(&slots[13], FILL_CHECKING)?))
@@ -189,6 +189,27 @@ pub(crate) fn attribute_properties(
             code_text(&slots[22], CHOICE_HISTORY_ON_INPUT)?,
         ));
     Ok(properties.children(tail))
+}
+
+/// `FillValue` of a stored empty string. The platform publishes `xs:string`
+/// only when the declared type has a string member: an attribute typed by a
+/// reference (an external-data-source dimension) stores `{"S",""}` but writes
+/// `xsi:nil`.
+fn fill_value_element(node: &Brace, type_pattern: &Brace, names: &NameIndex) -> Result<Element> {
+    let fields = list(node)?;
+    if fields.first().and_then(Brace::as_str) == Some("S") && string(item(fields, 1)?)?.is_empty() {
+        let pattern = list(type_pattern)?;
+        let has_string = pattern.iter().skip(1).any(|entry| {
+            list(entry)
+                .ok()
+                .and_then(|fields| fields.first().and_then(Brace::as_str))
+                == Some("S")
+        });
+        if !has_string {
+            return Ok(el("FillValue").attr("nil", "true"));
+        }
+    }
+    value_element("FillValue", node, names)
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +319,10 @@ pub(crate) fn attribute_elements(
             "FillFromFillingValue",
             leaf("FillFromFillingValue", bool_text(&slots[20])?),
         ),
-        ("FillValue", value_element("FillValue", &slots[19], names)?),
+        (
+            "FillValue",
+            fill_value_element(&slots[19], item(typed, 2)?, names)?,
+        ),
         (
             "FillChecking",
             leaf("FillChecking", code_text(&slots[13], FILL_CHECKING)?),
