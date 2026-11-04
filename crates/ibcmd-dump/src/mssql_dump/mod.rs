@@ -11229,6 +11229,11 @@ struct RegisterStandardAttribute {
     link_by_type: Option<RegisterStandardAttributeLinkByType>,
     mask: String,
     choice_parameters: Vec<MetadataChoiceParameter>,
+    /// `<xr:ChoiceParameterLinks>` of the standard attribute itself. The bag
+    /// stores one `{5006,<count>,...}` record per attribute under the shared
+    /// property uuid; the matrix of one real configuration carries a non-empty
+    /// link on `Account`, `RecordType`, `Active`, `Order` and `Ref`.
+    choice_parameter_links: Vec<MetadataChoiceParameterLink>,
     /// Design-time comment. Only the families whose reader keeps it can ever
     /// carry a non-empty value; the rest still refuse an attribute that has one.
     comment: String,
@@ -11714,10 +11719,20 @@ impl FilterCriterionDecodeError {
     }
 }
 
+/// Per-attribute properties of an enumeration's two standard attributes. The
+/// writer prints the attribute set itself from the fixed name table; only the
+/// values a record can vary are carried here.
+#[derive(Default)]
+struct EnumStandardAttributeExtras {
+    synonym: Vec<(String, String)>,
+    choice_parameter_links: Vec<MetadataChoiceParameterLink>,
+}
+
 struct EnumProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
     has_standard_attributes: bool,
+    standard_attribute_extras: Vec<EnumStandardAttributeExtras>,
     characteristics: Characteristics,
     quick_choice: bool,
     choice_mode: &'static str,
@@ -17816,6 +17831,9 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             link_by_type: None,
             mask,
             choice_parameters,
+            // Owner-specific readers fill this once they know how to resolve the
+            // data path (the accounting register and the catalog do).
+            choice_parameter_links: Vec::new(),
             comment: String::new(),
         },
         parse_information_register_standard_attribute_string(comment)?,
@@ -18367,7 +18385,14 @@ fn parse_register_properties_from_text(
     } else if let Some(properties) = exact_calculation_register.as_mut() {
         std::mem::take(&mut properties.standard_attributes)
     } else {
-        register_standard_attributes(kind, &header.name, register_type, &fields, uuid)
+        register_standard_attributes(
+            kind,
+            &header.name,
+            register_type,
+            &fields,
+            uuid,
+            object_refs,
+        )
     };
     let accumulation_presentations =
         parse_accumulation_register_presentations(kind, &fields, &header)?;
@@ -18598,9 +18623,11 @@ fn register_standard_attributes(
     register_type: Option<&'static str>,
     fields: &[&str],
     uuid: &str,
+    object_refs: &BTreeMap<String, String>,
 ) -> Vec<RegisterStandardAttribute> {
     let mut attributes = Vec::new();
-    let accounting_attributes = parse_accounting_register_standard_attributes(kind, fields, uuid);
+    let accounting_attributes =
+        parse_accounting_register_standard_attributes(kind, owner_name, fields, uuid, object_refs);
     let accounting_overrides = &accounting_attributes.overrides;
     if kind == "AccumulationRegister" && register_type == Some("Balance") {
         attributes.push(register_standard_attribute(
@@ -18695,6 +18722,7 @@ struct RegisterStandardAttributeOverrides {
     /// the same family -- which writes `Use`.
     full_text_search: Option<&'static str>,
     data_history: Option<&'static str>,
+    choice_parameter_links: Vec<MetadataChoiceParameterLink>,
 }
 
 #[derive(Default)]
@@ -18739,14 +18767,19 @@ fn register_standard_attribute(
         link_by_type,
         mask: String::new(),
         choice_parameters: Vec::new(),
+        choice_parameter_links: override_values
+            .map(|values| values.choice_parameter_links.clone())
+            .unwrap_or_default(),
         comment: String::new(),
     }
 }
 
 fn parse_accounting_register_standard_attributes(
     kind: &str,
+    owner_name: &str,
     fields: &[&str],
     uuid: &str,
+    object_refs: &BTreeMap<String, String>,
 ) -> AccountingRegisterStandardAttributes {
     if kind != "AccountingRegister" {
         return AccountingRegisterStandardAttributes::default();
@@ -18756,12 +18789,16 @@ fn parse_accounting_register_standard_attributes(
     };
     fields
         .get(header_index + 9)
-        .and_then(|field| parse_accounting_register_standard_attribute_collection(field))
+        .and_then(|field| {
+            parse_accounting_register_standard_attribute_collection(field, owner_name, object_refs)
+        })
         .unwrap_or_default()
 }
 
 fn parse_accounting_register_standard_attribute_collection(
     value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<AccountingRegisterStandardAttributes> {
     let outer = split_information_register_braced_fields(value)?;
     use ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection;
@@ -18810,39 +18847,55 @@ fn parse_accounting_register_standard_attribute_collection(
             None => expected_type_reduction_mode = Some(bag.has_type_reduction_mode),
             _ => {}
         }
-        let (tooltip, synonym, full_text_search, data_history) = if name.is_some() {
+        let (tooltip, synonym, full_text_search, data_history, choice_parameter_links) = if name
+            .is_some()
+        {
             (
-                parse_information_register_standard_attribute_localized(
-                    bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?,
-                )?,
-                parse_information_register_standard_attribute_localized(
-                    bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
-                )?,
-                Some(register_child_full_text_search_xml(
-                    parse_information_register_standard_attribute_nested_enum(
-                        bag.get(
-                            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID,
-                        )?,
-                        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+                    parse_information_register_standard_attribute_localized(
+                        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?,
                     )?,
-                )?),
-                Some(metadata_data_history_xml(
-                    parse_information_register_standard_attribute_nested_enum(
-                        bag.get(
-                            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID,
-                        )?,
-                        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+                    parse_information_register_standard_attribute_localized(
+                        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
                     )?,
-                )?),
-            )
+                    Some(register_child_full_text_search_xml(
+                        parse_information_register_standard_attribute_nested_enum(
+                            bag.get(
+                                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID,
+                            )?,
+                            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+                        )?,
+                    )?),
+                    Some(metadata_data_history_xml(
+                        parse_information_register_standard_attribute_nested_enum(
+                            bag.get(
+                                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID,
+                            )?,
+                            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+                        )?,
+                    )?),
+                    parse_accounting_register_standard_attribute_choice_links(
+                        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID),
+                        owner_name,
+                        object_refs,
+                    )?,
+                )
         } else {
-            (Vec::new(), Vec::new(), None, None)
+            (Vec::new(), Vec::new(), None, None, Vec::new())
         };
-        validated.push((name, tooltip, synonym, full_text_search, data_history));
+        validated.push((
+            name,
+            tooltip,
+            synonym,
+            full_text_search,
+            data_history,
+            choice_parameter_links,
+        ));
     }
 
     let mut attributes = AccountingRegisterStandardAttributes::default();
-    for (name, tooltip, synonym, full_text_search, data_history) in validated {
+    for (name, tooltip, synonym, full_text_search, data_history, choice_parameter_links) in
+        validated
+    {
         let Some(name) = name else {
             continue;
         };
@@ -18854,6 +18907,7 @@ fn parse_accounting_register_standard_attribute_collection(
                 synonym,
                 full_text_search,
                 data_history,
+                choice_parameter_links,
             },
         );
     }
@@ -21497,9 +21551,14 @@ fn parse_metadata_child_properties(
     if owner_kind == "AccountingRegister" {
         for fields in metadata_object_field_candidates_around_header(text, marker_start, child_uuid)
         {
-            if let Some(properties) =
-                parse_accounting_register_child_properties_from_fields(&fields, child_uuid)
-            {
+            if let Some(properties) = parse_accounting_register_child_properties_from_fields(
+                &fields,
+                child_uuid,
+                owner_name,
+                type_index,
+                object_refs,
+                metadata_object_refs,
+            ) {
                 return Some(properties);
             }
         }
@@ -22876,36 +22935,66 @@ fn parse_information_register_choice_parameter_links(
     object_refs: &BTreeMap<String, String>,
     preserve_raw_data_paths: bool,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
-    let fields = split_1c_braced_fields(value, 0)?;
-    if !is_choice_parameter_links_container_marker(fields.first()?) {
+    parse_choice_parameter_link_records(value, None)?
+        .into_iter()
+        .map(|record| {
+            Some(MetadataChoiceParameterLink {
+                name: record.name,
+                data_path: parse_information_register_data_path(
+                    &record.segments,
+                    owner_kind,
+                    owner_name,
+                    object_refs,
+                    preserve_raw_data_paths,
+                )?,
+                value_change: record.value_change,
+            })
+        })
+        .collect()
+}
+
+/// One syntactic choice-parameter-link record, before the owner family resolves
+/// its data path:
+///
+/// ```text
+/// {5006, <count>, (<name>, <path-count>, <segment>..., <value-change>)...}
+/// ```
+///
+/// `5006` and `5004` are the two evidenced container codes (see
+/// [`is_choice_parameter_links_container_marker`]). Every owner family walks the
+/// record the same way; only the data-path resolution and the admitted segment
+/// count differ, so they share this walker and keep their own resolver.
+struct ChoiceParameterLinkRecord<'a> {
+    name: String,
+    segments: Vec<&'a str>,
+    value_change: &'static str,
+}
+
+fn parse_choice_parameter_link_records(
+    value: &str,
+    max_segments: Option<usize>,
+) -> Option<Vec<ChoiceParameterLinkRecord<'_>>> {
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.len() < 2 || !is_choice_parameter_links_container_marker(fields.first()?) {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    let remaining = fields.len().checked_sub(2)?;
-    if remaining < count.checked_mul(4)? {
+    let minimum_len = count.checked_mul(4)?.checked_add(2)?;
+    if fields.len() < minimum_len {
         return None;
     }
+    let mut records = Vec::with_capacity(count);
     let mut index = 2usize;
-    let mut result = Vec::with_capacity(count);
     for _ in 0..count {
         let name = parse_1c_quoted_string(fields.get(index)?.trim())?;
-        let path_count = fields
-            .get(index.checked_add(1)?)?
-            .trim()
-            .parse::<usize>()
-            .ok()?;
-        if path_count == 0 {
+        index = index.checked_add(1)?;
+        let path_count = fields.get(index)?.trim().parse::<usize>().ok()?;
+        index = index.checked_add(1)?;
+        if path_count == 0 || max_segments.is_some_and(|limit| path_count > limit) {
             return None;
         }
-        index = index.checked_add(2)?;
         let path_end = index.checked_add(path_count)?;
-        let path = parse_information_register_data_path(
-            fields.get(index..path_end)?,
-            owner_kind,
-            owner_name,
-            object_refs,
-            preserve_raw_data_paths,
-        )?;
+        let segments = fields.get(index..path_end)?.to_vec();
         index = path_end;
         let value_change = match fields.get(index)?.trim() {
             "0" => "Clear",
@@ -22913,13 +23002,13 @@ fn parse_information_register_choice_parameter_links(
             _ => return None,
         };
         index = index.checked_add(1)?;
-        result.push(MetadataChoiceParameterLink {
+        records.push(ChoiceParameterLinkRecord {
             name,
-            data_path: path,
+            segments,
             value_change,
         });
     }
-    (index == fields.len()).then_some(result)
+    (index == fields.len()).then_some(records)
 }
 
 fn parse_information_register_link_by_type(
@@ -23837,54 +23926,26 @@ fn parse_document_choice_parameter_links(
     object_refs: &BTreeMap<String, String>,
     data_path_owner_proof: &DocumentDataPathOwnerProof,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
-    let fields = split_1c_braced_fields(value.trim(), 0)?;
-    if fields.len() < 2 || !is_choice_parameter_links_container_marker(fields.first()?) {
-        return None;
-    }
-    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    let minimum_len = count.checked_mul(4)?.checked_add(2)?;
-    if fields.len() < minimum_len {
-        return None;
-    }
-    let mut links = Vec::with_capacity(count);
-    let mut index = 2usize;
-    for _ in 0..count {
-        let name = parse_1c_quoted_string(fields.get(index)?.trim())?;
-        index = index.checked_add(1)?;
-        let path_count = fields.get(index)?.trim().parse::<usize>().ok()?;
-        index = index.checked_add(1)?;
-        // A direct attribute links to another document's tabular-section
-        // attribute with two segments too (a real extension); `nested` no
-        // longer narrows the count.
-        let _ = nested;
-        if !matches!(path_count, 1 | 2) {
-            return None;
-        }
-        let path_end = index.checked_add(path_count)?;
-        if path_end >= fields.len() {
-            return None;
-        }
-        let data_path = resolve_document_data_path(
-            fields.get(index..path_end)?,
-            owner_name,
-            object_refs,
-            data_path_owner_proof,
-            true,
-        )?;
-        index = path_end;
-        let value_change = match fields.get(index)?.trim() {
-            "0" => "Clear",
-            "1" => "DontChange",
-            _ => return None,
-        };
-        index = index.checked_add(1)?;
-        links.push(MetadataChoiceParameterLink {
-            name,
-            data_path,
-            value_change,
-        });
-    }
-    (index == fields.len()).then_some(links)
+    // A direct attribute links to another document's tabular-section attribute
+    // with two segments too (a real extension); `nested` no longer narrows the
+    // count.
+    let _ = nested;
+    parse_choice_parameter_link_records(value, Some(2))?
+        .into_iter()
+        .map(|record| {
+            Some(MetadataChoiceParameterLink {
+                name: record.name,
+                data_path: resolve_document_data_path(
+                    &record.segments,
+                    owner_name,
+                    object_refs,
+                    data_path_owner_proof,
+                    true,
+                )?,
+                value_change: record.value_change,
+            })
+        })
+        .collect()
 }
 
 fn parse_document_link_by_type(
@@ -24105,53 +24166,60 @@ fn parse_owner_choice_parameter_links(
     nested: bool,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<MetadataChoiceParameterLink>> {
-    let fields = split_1c_braced_fields(value.trim(), 0)?;
-    if fields.len() < 2 || !is_choice_parameter_links_container_marker(fields.first()?) {
+    let max_segments = if nested { 2 } else { 1 };
+    parse_choice_parameter_link_records(value, Some(max_segments))?
+        .into_iter()
+        .map(|record| {
+            Some(MetadataChoiceParameterLink {
+                name: record.name,
+                data_path: resolve_owner_data_path(
+                    &record.segments,
+                    owner_kind,
+                    owner_name,
+                    object_refs,
+                )?,
+                value_change: record.value_change,
+            })
+        })
+        .collect()
+}
+
+/// Reads the `ChoiceParameterLinks` property of one standard attribute. The
+/// owner bag stores it as `{"#",<marker>,<choice-parameter-link record>}`, the
+/// same wrapper every standard-attribute family writes.
+fn parse_standard_attribute_choice_parameter_links(
+    value: &str,
+    owner_prefix: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameterLink>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3
+        || fields.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(
+            fields.get(1)?,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+        )
+    {
         return None;
     }
-    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    let minimum_len = count.checked_mul(4)?.checked_add(2)?;
-    if fields.len() < minimum_len {
-        return None;
-    }
-    let mut links = Vec::with_capacity(count);
-    let mut index = 2usize;
-    for _ in 0..count {
-        let name = parse_1c_quoted_string(fields.get(index)?.trim())?;
-        index = index.checked_add(1)?;
-        let path_count = fields.get(index)?.trim().parse::<usize>().ok()?;
-        index = index.checked_add(1)?;
-        if if nested {
-            !matches!(path_count, 1 | 2)
-        } else {
-            path_count != 1
-        } {
-            return None;
-        }
-        let path_end = index.checked_add(path_count)?;
-        if path_end >= fields.len() {
-            return None;
-        }
-        let data_path = resolve_owner_data_path(
-            &fields[index..path_end],
-            owner_kind,
-            owner_name,
-            object_refs,
-        )?;
-        index = path_end;
-        let value_change = match fields.get(index)?.trim() {
-            "0" => "Clear",
-            "1" => "DontChange",
-            _ => return None,
-        };
-        index = index.checked_add(1)?;
-        links.push(MetadataChoiceParameterLink {
-            name,
-            data_path,
-            value_change,
-        });
-    }
-    (index == fields.len()).then_some(links)
+    parse_metadata_child_choice_parameter_links(Some(fields.get(2)?), object_refs, owner_prefix)
+}
+
+/// The standard attributes of an accounting register resolve their links
+/// against the register itself: `{-10}` names `StandardAttribute.Account`.
+fn parse_accounting_register_standard_attribute_choice_links(
+    value: Option<&str>,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameterLink>> {
+    let Some(value) = value else {
+        return Some(Vec::new());
+    };
+    parse_standard_attribute_choice_parameter_links(
+        value,
+        &format!("AccountingRegister.{owner_name}."),
+        object_refs,
+    )
 }
 
 fn parse_catalog_standard_attribute_choice_parameter_links(
@@ -24283,16 +24351,28 @@ fn resolve_owner_data_path(
 /// a property of the owner family. Only the catalog table is evidenced, so any
 /// other family refuses a bare code and admits only resolved child references.
 fn owner_data_path_standard_attribute(owner_kind: &str, code: &str) -> Option<&'static str> {
-    if owner_kind != "Catalog" {
-        return None;
-    }
-    match code {
-        "-3" => Some("Description"),
-        "-4" => Some("Parent"),
-        "-5" => Some("Owner"),
-        "-8" => Some("Ref"),
+    match owner_kind {
+        "Catalog" => match code {
+            "-3" => Some("Description"),
+            "-4" => Some("Parent"),
+            "-5" => Some("Owner"),
+            "-8" => Some("Ref"),
+            _ => None,
+        },
+        // The register's table is the one its own standard attributes already
+        // use (`Account`, `Period`, `Recorder`, ...), including the extension
+        // dimensions.
+        "AccountingRegister" => accounting_register_standard_attribute_name(&[code]),
         _ => None,
     }
+}
+
+/// Families whose choice-link records carry a bare standard-attribute code the
+/// platform writes back verbatim instead of naming the attribute. Measured on
+/// the data-processor attribute and tabular section of a real configuration,
+/// which store `{-8}` and publish `<xr:DataPath>-8</xr:DataPath>`.
+fn owner_data_path_publishes_raw_code(owner_kind: &str) -> bool {
+    matches!(owner_kind, "Document" | "DataProcessor")
 }
 
 fn resolve_owner_data_path_segment(
@@ -24309,10 +24389,18 @@ fn resolve_owner_data_path_segment(
         // `Documents/ПризнаниеРасходовПоАмортизацииНСБУ` writes `0/0`).
         [code] if code.trim() == "0" => Some(ResolvedDataPathSegment::Foreign("0".to_string())),
         [code] => {
-            let standard_attribute = owner_data_path_standard_attribute(owner_kind, code.trim())?;
-            Some(ResolvedDataPathSegment::Own(format!(
-                "{owner_kind}.{owner_name}.StandardAttribute.{standard_attribute}"
-            )))
+            let code = code.trim();
+            if let Some(standard_attribute) = owner_data_path_standard_attribute(owner_kind, code) {
+                return Some(ResolvedDataPathSegment::Own(format!(
+                    "{owner_kind}.{owner_name}.StandardAttribute.{standard_attribute}"
+                )));
+            }
+            // A family without a standard-attribute table publishes the raw
+            // code the record carries when the platform does the same.
+            code.parse::<i64>()
+                .ok()
+                .filter(|_| owner_data_path_publishes_raw_code(owner_kind))?;
+            Some(ResolvedDataPathSegment::Foreign(code.to_string()))
         }
         [kind, uuid] if kind.trim() == "0" => {
             let uuid = parse_uuid_field(uuid.trim())?;
@@ -24479,6 +24567,10 @@ fn parse_accounting_register_common_child_properties(
 fn parse_accounting_register_child_properties_from_fields(
     fields: &[&str],
     child_uuid: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChildProperties> {
     if fields.first().map(|field| field.trim()) != Some("27")
         || metadata_header_field_index(fields, child_uuid).is_none()
@@ -24486,6 +24578,7 @@ fn parse_accounting_register_child_properties_from_fields(
     {
         return None;
     }
+    let owner_prefix = format!("AccountingRegister.{owner_name}.");
     Some(MetadataChildProperties {
         password_mode: parse_1c_bool_field(fields.get(2).copied()).unwrap_or(false),
         format: parse_1c_synonyms(fields.get(3).copied().unwrap_or("{0}")),
@@ -24506,14 +24599,26 @@ fn parse_accounting_register_child_properties_from_fields(
         emit_fill_value: false,
         fill_checking: metadata_fill_checking_xml(fields.get(13).copied()),
         choice_folders_and_items: Some("Items"),
-        choice_parameter_links: Some(Vec::new()),
-        choice_parameters: Some(Vec::new()),
+        choice_parameter_links: parse_metadata_child_choice_parameter_links(
+            fields.get(14).copied(),
+            object_refs,
+            &owner_prefix,
+        ),
+        choice_parameters: parse_metadata_child_choice_parameters(
+            fields.get(16).copied(),
+            type_index,
+            metadata_object_refs,
+        ),
         self_close_empty_choice_parameter_refs: false,
         quick_choice: Some("Auto"),
         create_on_input: Some("Auto"),
         choice_form: Some(MetadataChoiceForm::Empty),
-        link_by_type_empty: true,
-        link_by_type: None,
+        link_by_type_empty: metadata_child_collection_is_empty(fields.get(15).copied()),
+        link_by_type: parse_metadata_child_link_by_type(
+            fields.get(15).copied(),
+            object_refs,
+            &owner_prefix,
+        ),
         choice_history_on_input: Some("Auto"),
         master: None,
         main_filter: None,
@@ -33035,6 +33140,71 @@ fn parse_data_processor_properties_from_text(
     })
 }
 
+/// The enumeration's standard attributes are the fixed pair `Order`, `Ref`.
+///
+/// The record keeps them as `{<count>,{-3},<section>,<bag>,{-2},<section>,<bag>}`
+/// in exactly that order; only the properties a record can vary are read here.
+/// A different marker order is refused instead of being mapped by guess.
+fn parse_enum_standard_attribute_extras(
+    value: Option<&str>,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<EnumStandardAttributeExtras>> {
+    let Some(value) = value else {
+        return Some(Vec::new());
+    };
+    let outer = split_information_register_braced_fields(value)?;
+    use ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection;
+    let payload = match NativeOptionalMetadataCollection::from_fields(&outer) {
+        Some(NativeOptionalMetadataCollection::Present(payload)) => payload.to_owned(),
+        _ => value.to_owned(),
+    };
+    let items = split_information_register_braced_fields(&payload)?;
+    if items.first()?.trim() == "0" {
+        // Present but empty: the attribute set is still printed from the name
+        // table, there is simply nothing the record varies.
+        return Some(Vec::new());
+    }
+    if items.first()?.trim() != "1" {
+        return None;
+    }
+    let count = parse_information_register_usize(items.get(1)?)?;
+    if count != 2 || items.len() != count.checked_mul(3)?.checked_add(2)? {
+        return None;
+    }
+    let owner_prefix = format!("Enum.{owner_name}.");
+    let mut extras = Vec::with_capacity(count);
+    for (index, triplet) in items[2..].chunks_exact(3).enumerate() {
+        let marker = split_information_register_braced_fields(triplet[0])?;
+        if marker.len() != 1 || marker[0].trim() != ["-3", "-2"][index] {
+            return None;
+        }
+        if !information_register_uuid_matches(
+            triplet[1],
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+        ) {
+            return None;
+        }
+        let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+        let synonym = parse_information_register_standard_attribute_localized(
+            bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
+        )?;
+        let choice_parameter_links = match bag
+            .get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID)
+        {
+            Some(links) => {
+                parse_standard_attribute_choice_parameter_links(links, &owner_prefix, object_refs)?
+            }
+            None => Vec::new(),
+        };
+        extras.push(EnumStandardAttributeExtras {
+            synonym,
+            choice_parameter_links,
+        });
+    }
+    Some(extras)
+}
+
 fn parse_enum_properties_from_text(
     text: &str,
     uuid: &str,
@@ -33091,6 +33261,11 @@ fn parse_enum_properties_from_text(
         generated_types,
         use_standard_commands: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(true),
         has_standard_attributes: braced_field_has_entries(fields.get(18).copied()),
+        standard_attribute_extras: parse_enum_standard_attribute_extras(
+            fields.get(18).copied(),
+            &header.name,
+            object_refs,
+        )?,
         characteristics,
         quick_choice: parse_1c_bool_field(fields.get(12).copied()).unwrap_or(true),
         choice_mode: enum_choice_mode_xml(parse_1c_u32_field(fields.get(11).copied()).unwrap_or(2)),
@@ -34082,98 +34257,62 @@ fn parse_metadata_child_choice_parameter_links(
     if metadata_child_collection_is_empty(Some(field)) {
         return Some(Vec::new());
     }
-    let fields = split_1c_braced_fields(field, 0)?;
-    if !fields
-        .first()
-        .is_some_and(|value| is_choice_parameter_links_container_marker(value))
-    {
-        return None;
-    }
-    let count = fields
-        .get(1)
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .unwrap_or(0);
-    if count == 0 {
+    let records = parse_choice_parameter_link_records(field, None)?;
+    if records.is_empty() {
         return Some(Vec::new());
     }
-
-    let mut links = Vec::new();
-    let mut index = 2usize;
-    for _ in 0..count {
-        let Some(name) = fields
-            .get(index)
-            .and_then(|field| parse_1c_quoted_string(field.trim()))
-        else {
-            break;
-        };
-        // A link is written as `<name>, <segment-count>, <segment>..., <value-change>`.
-        // The atom that follows the name is the data-path segment count, and the
-        // change mode is the trailing atom, encoded the same way the proven form
-        // dialect encodes it (`0` = Clear, `1` = DontChange).
-        index += 2;
-
-        // A segment that names a child of a *foreign* object is written back
-        // as the raw `0:<uuid>` the record carries -- resolving it by name is
-        // what the platform never does. See
-        // `classify_resolved_data_path_reference` for the corpus-wide perepis.
-        let mut segments = Vec::new();
-        while let Some(field) = fields.get(index) {
-            let trimmed = field.trim();
-            if trimmed.chars().all(|ch| ch.is_ascii_digit()) {
-                break;
-            }
-            // A one-member `{0}` segment names no metadata child at all, and
-            // the platform writes the atom back as the data path itself --
-            // the same reading `parse_information_register_data_path` already
-            // gives this segment. `uh`
-            // `DataProcessors/КорректировкиЗначенийПоказателей` stores
-            // `{5006,1,"Отбор.Владелец",1,{0},0}` on its
-            // `ПодразделениеОрганизации` attribute and the platform publishes
-            // `<xr:DataPath xsi:type="xs:string">0</xr:DataPath>`.
-            if split_1c_braced_fields(trimmed, 0)
-                .is_some_and(|segment| segment.len() == 1 && segment[0].trim() == "0")
-            {
-                segments.push(ResolvedDataPathSegment::Foreign("0".to_string()));
-                index += 1;
-                continue;
-            }
-            let Some(uuid) = uuid_like_values(trimmed).into_iter().next_back() else {
-                break;
-            };
-            segments.push(classify_resolved_data_path_reference(
-                object_refs.get(&uuid),
-                &uuid,
-                owner_prefix,
-            ));
-            index += 1;
-        }
-        let Some(data_path) = render_resolved_data_path(segments) else {
-            break;
-        };
-        let mut value_change = "Clear";
-        if let Some(field) = fields
-            .get(index)
-            .map(|field| field.trim())
-            .filter(|field| field.chars().all(|ch| ch.is_ascii_digit()))
-        {
-            value_change = metadata_choice_link_value_change_xml(field);
-            index += 1;
-        }
-        links.push(MetadataChoiceParameterLink {
-            name,
-            data_path,
-            value_change,
-        });
-    }
-
-    Some(links)
+    let (owner_kind, owner_name) = split_owner_prefix(owner_prefix)?;
+    records
+        .into_iter()
+        .map(|record| {
+            Some(MetadataChoiceParameterLink {
+                name: record.name,
+                data_path: resolve_choice_link_segments(
+                    &record.segments,
+                    owner_kind,
+                    owner_name,
+                    object_refs,
+                )?,
+                value_change: record.value_change,
+            })
+        })
+        .collect()
 }
 
-fn metadata_choice_link_value_change_xml(value: &str) -> &'static str {
-    match value {
-        "1" => "DontChange",
-        _ => "Clear",
+/// Splits the `Kind.Name.` prefix the child readers carry into the owner family
+/// and the owner name. A metadata name never contains a dot, so the first
+/// segment is the family.
+fn split_owner_prefix(owner_prefix: &str) -> Option<(&str, &str)> {
+    let rest = owner_prefix.strip_suffix('.')?;
+    let (kind, name) = rest.split_once('.')?;
+    (!kind.is_empty() && !name.is_empty()).then_some((kind, name))
+}
+
+/// Resolves the data-path segments of a choice-parameter link against the owner.
+///
+/// A bare integer segment names a standard attribute of the owner family
+/// ([`owner_data_path_standard_attribute`]); `{0,<uuid>}` names a child of the
+/// owner; `{0}` is written back verbatim. A family without a standard-attribute
+/// table publishes the raw code the record carries -- the platform does exactly
+/// that for a data-processor attribute that links to `-8`.
+fn resolve_choice_link_segments(
+    segments: &[&str],
+    owner_kind: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let owner_prefix = format!("{owner_kind}.{owner_name}.");
+    let mut resolved = Vec::with_capacity(segments.len());
+    for segment in segments {
+        resolved.push(resolve_owner_data_path_segment(
+            segment,
+            owner_kind,
+            owner_name,
+            object_refs,
+            &owner_prefix,
+        )?);
     }
+    render_resolved_data_path(resolved)
 }
 
 /// The reference a design-time value names when its own bytes spell the owner.
@@ -40303,6 +40442,7 @@ fn push_metadata_standard_attributes_xml(
         ));
         push_metadata_standard_attribute_choice_parameter_links_xml(
             xml,
+            "\t\t\t\t\t",
             &parsed_attribute.choice_parameter_links,
         );
         xml.push_str(&format!(
@@ -40321,26 +40461,27 @@ fn push_metadata_standard_attributes_xml(
 
 fn push_metadata_standard_attribute_choice_parameter_links_xml(
     xml: &mut String,
+    indent: &str,
     links: &[MetadataChoiceParameterLink],
 ) {
     if links.is_empty() {
-        xml.push_str("\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n");
+        xml.push_str(&format!("{indent}<xr:ChoiceParameterLinks/>\r\n"));
         return;
     }
-    xml.push_str("\t\t\t\t\t<xr:ChoiceParameterLinks>\r\n");
+    xml.push_str(&format!("{indent}<xr:ChoiceParameterLinks>\r\n"));
     for link in links {
         xml.push_str(&format!(
-            "\t\t\t\t\t\t<xr:Link>\r\n\
-\t\t\t\t\t\t\t<xr:Name>{}</xr:Name>\r\n\
-\t\t\t\t\t\t\t<xr:DataPath xsi:type=\"xs:string\">{}</xr:DataPath>\r\n\
-\t\t\t\t\t\t\t<xr:ValueChange>{}</xr:ValueChange>\r\n\
-\t\t\t\t\t\t</xr:Link>\r\n",
+            "{indent}\t<xr:Link>\r\n\
+{indent}\t\t<xr:Name>{}</xr:Name>\r\n\
+{indent}\t\t<xr:DataPath xsi:type=\"xs:string\">{}</xr:DataPath>\r\n\
+{indent}\t\t<xr:ValueChange>{}</xr:ValueChange>\r\n\
+{indent}\t</xr:Link>\r\n",
             escape_xml_element_text(&link.name),
             escape_xml_element_text(&link.data_path),
             link.value_change,
         ));
     }
-    xml.push_str("\t\t\t\t\t</xr:ChoiceParameterLinks>\r\n");
+    xml.push_str(&format!("{indent}</xr:ChoiceParameterLinks>\r\n"));
 }
 
 fn push_task_addressing_attribute_xml(
@@ -40710,7 +40851,7 @@ fn format_enum_source_xml(
         xml_bool(enumeration.use_standard_commands)
     ));
     if enumeration.has_standard_attributes {
-        push_enum_standard_attributes_xml(&mut xml);
+        push_enum_standard_attributes_xml(&mut xml, &enumeration.standard_attribute_extras);
     }
     if let Ok(characteristics) = render_metadata_characteristics_xml(&enumeration.characteristics) {
         xml.push_str(&characteristics);
@@ -40888,39 +41029,47 @@ fn push_header_synonym_xml(xml: &mut String, indent: &str, synonyms: &[(String, 
     xml.push_str(&format!("{indent}</Synonym>\r\n"));
 }
 
-fn push_enum_standard_attributes_xml(xml: &mut String) {
+fn push_enum_standard_attributes_xml(xml: &mut String, extras: &[EnumStandardAttributeExtras]) {
     xml.push_str("\t\t\t<StandardAttributes>\r\n");
-    for name in ["Order", "Ref"] {
+    for (index, name) in ["Order", "Ref"].into_iter().enumerate() {
+        let extra = extras.get(index);
+        let synonym = extra.map(|value| value.synonym.as_slice()).unwrap_or(&[]);
         xml.push_str(&format!(
-            "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
-\t\t\t\t\t<xr:LinkByType/>\r\n\
-\t\t\t\t\t<xr:FillChecking>DontCheck</xr:FillChecking>\r\n\
-\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
-\t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
-\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
-\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
-\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
-\t\t\t\t\t<xr:ToolTip/>\r\n\
-\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
-\t\t\t\t\t<xr:Format/>\r\n\
-\t\t\t\t\t<xr:ChoiceForm/>\r\n\
-\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
-\t\t\t\t\t<xr:EditFormat/>\r\n\
-\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
-\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
-\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
-\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
-\t\t\t\t\t<xr:Synonym/>\r\n\
-\t\t\t\t\t<xr:Comment/>\r\n\
-\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
-\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n\
-\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n\
-\t\t\t\t\t<xr:Mask/>\r\n\
-\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
-\t\t\t\t</xr:StandardAttribute>\r\n",
+            "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n",
             escape_xml_text(name)
         ));
+        xml.push_str("\t\t\t\t\t<xr:LinkByType/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:FillChecking>DontCheck</xr:FillChecking>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:ToolTip/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:Format/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:ChoiceForm/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:EditFormat/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n");
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Synonym", synonym);
+        xml.push_str("\t\t\t\t\t<xr:Comment/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n");
+        push_metadata_standard_attribute_choice_parameter_links_xml(
+            xml,
+            "\t\t\t\t\t",
+            extra
+                .map(|value| value.choice_parameter_links.as_slice())
+                .unwrap_or(&[]),
+        );
+        xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:Mask/>\r\n");
+        xml.push_str("\t\t\t\t\t<xr:ChoiceParameters/>\r\n");
+        xml.push_str("\t\t\t\t</xr:StandardAttribute>\r\n");
     }
     xml.push_str("\t\t\t</StandardAttributes>\r\n");
 }
@@ -41006,11 +41155,14 @@ fn push_register_standard_attributes_xml_with_indent(
             ));
         }
         xml.push_str(&format!(
-            "{property_indent}<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n\
-{property_indent}<xr:ChoiceParameterLinks/>\r\n\
-",
+            "{property_indent}<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n",
             attribute.full_text_search,
         ));
+        push_metadata_standard_attribute_choice_parameter_links_xml(
+            xml,
+            &property_indent,
+            &attribute.choice_parameter_links,
+        );
         xml.push_str(&property_indent);
         xml.push_str(&format_register_standard_attribute_fill_value_xml(
             &attribute.fill_value,
@@ -44907,11 +45059,23 @@ fn format_constant_type_member_xml(value_type: &ConstantValueType) -> String {
 }
 
 fn constant_reference_type_tag(reference: &str) -> &'static str {
-    if reference.starts_with("cfg:DefinedType.") || reference == "cfg:ExchangePlanRef" {
-        "TypeSet"
-    } else {
-        "Type"
+    // A defined type names a type set outright; so does a bare `cfg:<Kind>Ref`
+    // without an object name. A reference that names an object
+    // (`cfg:CatalogRef.Сотрудники`) is a concrete type, and a non-`cfg`
+    // reference (XDTO, platform types) is always a concrete type. Measured over
+    // the three reference configurations: every named reference is written as
+    // `<v8:Type>`, and every `<v8:TypeSet>` is either a defined type or a bare
+    // reference set.
+    if reference.starts_with("cfg:DefinedType.") {
+        return "TypeSet";
     }
+    if let Some(rest) = reference.strip_prefix("cfg:")
+        && !rest.contains('.')
+        && rest.ends_with("Ref")
+    {
+        return "TypeSet";
+    }
+    "Type"
 }
 
 fn return_values_reuse_xml(value: ReturnValuesReuseValue) -> &'static str {

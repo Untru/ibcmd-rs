@@ -13807,6 +13807,68 @@ fn parses_metadata_child_choice_parameter_links_from_wrapped_collection() {
     assert_eq!(links[2].value_change, "DontChange");
 }
 
+#[test]
+fn accounting_register_choice_link_publishes_the_raw_standard_attribute_code() {
+    let links = parse_metadata_child_choice_parameter_links(
+        Some(r##"{5006,1,"Отбор.Владелец",1,{-10},0}"##),
+        &BTreeMap::new(),
+        "AccountingRegister.РегистрБухгалтерии1.",
+    )
+    .unwrap();
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(
+        links[0].data_path,
+        "AccountingRegister.РегистрБухгалтерии1.StandardAttribute.Account"
+    );
+}
+
+#[test]
+fn data_processor_choice_link_publishes_the_raw_code_the_record_carries() {
+    // The platform writes `<xr:DataPath>-8</xr:DataPath>` for this attribute:
+    // the family has no standard-attribute table, so the code stays verbatim.
+    let links = parse_metadata_child_choice_parameter_links(
+        Some(r##"{5006,1,"Отбор.Владелец",1,{-8},0}"##),
+        &BTreeMap::new(),
+        "DataProcessor.Обработка1.",
+    )
+    .unwrap();
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].data_path, "-8");
+}
+
+#[test]
+fn accounting_register_dimension_reads_its_choice_parameter_links() {
+    // The register dimension keeps its properties in the wrapped `{27,...}`
+    // record, where the link collection sits at slot 14.
+    const DIMENSION: &str = "ad6bc590-c3e3-4a14-8a96-13f28bbb5925";
+    let object_refs = BTreeMap::from([(
+        "3af87d95-73ae-4eae-b5b6-90169cd8a068".to_string(),
+        "AccountingRegister.РегистрБухгалтерии1.Dimension.Организация".to_string(),
+    )]);
+    let text = r##"{27,{2,{3,{1,0,ad6bc590-c3e3-4a14-8a96-13f28bbb5925},"Измерение",{1,"ru","Измерение"},"",0,0,00000000-0000-0000-0000-000000000000,0},{"Pattern",{"#",7c6a7e8d-9204-47b1-8619-ea42fa2be95b}}},0,{0},{0},0,"",0,{"U"},{"U"},0,00000000-0000-0000-0000-000000000000,2,1,{5006,1,"Отбор.Владелец",1,{0,3af87d95-73ae-4eae-b5b6-90169cd8a068},0},{3,0,0},{0,0},0,{0},{"S",""},0,0,0}"##;
+    let fields = split_1c_braced_fields(text, 0).unwrap();
+    let properties = parse_accounting_register_child_properties_from_fields(
+        &fields,
+        DIMENSION,
+        "РегистрБухгалтерии1",
+        &BTreeMap::new(),
+        &object_refs,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    let links = properties.choice_parameter_links.unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].name, "Отбор.Владелец");
+    assert_eq!(
+        links[0].data_path,
+        "AccountingRegister.РегистрБухгалтерии1.Dimension.Организация"
+    );
+    assert_eq!(links[0].value_change, "Clear");
+}
+
 /// A wrapped pair whose type the configuration does not carry keeps both
 /// identifiers, and the same record shape with two *objects* stays the fixed
 /// array it is.
@@ -28859,6 +28921,7 @@ fn formats_enum_with_empty_child_objects_as_self_closing_node() {
         generated_types: Vec::new(),
         use_standard_commands: true,
         has_standard_attributes: true,
+        standard_attribute_extras: Vec::new(),
         characteristics: Default::default(),
         quick_choice: true,
         choice_mode: "BothWays",
