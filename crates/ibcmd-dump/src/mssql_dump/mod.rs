@@ -34,8 +34,10 @@ use ibcmd_1c_vocab::{
     ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES,
     ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES,
     CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS, ChartStandardTabularSectionDefinition,
-    DCS_BUILTIN_REFERENCE_TYPE_SETS, DOCUMENT_STANDARD_ATTRIBUTES, TYPE_DESCRIPTION_TYPE_UUID,
+    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+    CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTION_DEFINITIONS,
+    ChartStandardTabularSectionDefinition, DCS_BUILTIN_REFERENCE_TYPE_SETS,
+    DOCUMENT_STANDARD_ATTRIBUTES, TYPE_DESCRIPTION_TYPE_UUID,
     data_processor_builtin_type_reference, elapsed_ms, ext_picture_file_name,
     format_type_description_value_types_xml, inflate_raw_deflate,
     information_register_decimal_is_valid, metadata_choice_folders_and_items_xml,
@@ -26136,35 +26138,7 @@ fn parse_chart_of_calculation_types_properties(
         characteristics,
         standard_tabular_sections: parse_chart_root_standard_tabular_sections(
             fields.get(44)?,
-            &[
-                (
-                    "-30",
-                    "LeadingCalculationTypes",
-                    &[
-                        ("-102", "Predefined"),
-                        ("-101", "CalculationType"),
-                        ("-100", "LineNumber"),
-                    ],
-                ),
-                (
-                    "-20",
-                    "DisplacingCalculationTypes",
-                    &[
-                        ("-102", "Predefined"),
-                        ("-101", "CalculationType"),
-                        ("-100", "LineNumber"),
-                    ],
-                ),
-                (
-                    "-10",
-                    "BaseCalculationTypes",
-                    &[
-                        ("-102", "Predefined"),
-                        ("-101", "CalculationType"),
-                        ("-100", "LineNumber"),
-                    ],
-                ),
-            ],
+            CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTION_DEFINITIONS,
         )?,
         predefined_data_update: parse_chart_predefined_data_update(fields.get(57)?)?,
         // `<IncludeHelpInContents>` rides field 37 straight, not the negation

@@ -18,6 +18,41 @@ pub const CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS: &[(&str, &str)] = &[
 /// `<xr:StandardTabularSection name="ExtDimensionTypes">` and its four
 /// `<xr:StandardAttribute>` children, and a form's bound slot names the very
 /// same members by the very same markers.
+/// The three standard tabular sections a `ChartOfCalculationTypes` declares and
+/// the standard attributes each of them owns. Measured on the platform's own CF
+/// of the calculation-type matrix: the sections are written in this order and
+/// carry the same three-attribute vocabulary.
+pub const CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTION_DEFINITIONS:
+    &[ChartStandardTabularSectionDefinition] = &[
+    (
+        "-30",
+        "LeadingCalculationTypes",
+        &[
+            ("-102", "Predefined"),
+            ("-101", "CalculationType"),
+            ("-100", "LineNumber"),
+        ],
+    ),
+    (
+        "-20",
+        "DisplacingCalculationTypes",
+        &[
+            ("-102", "Predefined"),
+            ("-101", "CalculationType"),
+            ("-100", "LineNumber"),
+        ],
+    ),
+    (
+        "-10",
+        "BaseCalculationTypes",
+        &[
+            ("-102", "Predefined"),
+            ("-101", "CalculationType"),
+            ("-100", "LineNumber"),
+        ],
+    ),
+];
+
 pub const CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS:
     &[ChartStandardTabularSectionDefinition] = &[(
     "-12",
