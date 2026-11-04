@@ -738,6 +738,7 @@ fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
         };
         let file_names = BTreeSet::from([body_id.as_str()]);
         let rows_by_file_name = BTreeMap::from([(body_id.as_str(), &body_row)]);
+        let eds_dirs = BTreeMap::new();
         let indexed = source_assets_from_metadata_text_inner(
             &metadata,
             &file_names,
@@ -748,6 +749,7 @@ fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &eds_dirs,
         )
         .unwrap();
         assert!(indexed.misses.is_empty());
@@ -1212,7 +1214,11 @@ fn maps_additional_object_family_module_suffixes_to_source_layout() {
 
     for (kind, folder, name, suffix, expected) in cases {
         assert_eq!(
-            module_owner_source_path(kind, folder, name, suffix),
+            module_owner_source_path(
+                &PathBuf::from(folder).join(sanitize_source_path_segment(name)),
+                kind,
+                suffix
+            ),
             Some(expected)
         );
     }
@@ -2351,6 +2357,7 @@ fn owned_form_and_template_duplicate_names_report_second_item_as_ambiguous() {
                 relative_path: PathBuf::from("Documents/Owner/Templates/Duplicate.xml"),
                 kind: "Template",
                 template_type: "SpreadsheetDocument",
+                orphaned: false,
             },
         ),
         (
@@ -2359,6 +2366,7 @@ fn owned_form_and_template_duplicate_names_report_second_item_as_ambiguous() {
                 relative_path: PathBuf::from("Documents/Owner/Templates/dUpLiCaTe.xml"),
                 kind: "Template",
                 template_type: "SpreadsheetDocument",
+                orphaned: false,
             },
         ),
     ]);
@@ -2591,6 +2599,7 @@ fn parse_cct_child_templates_validates_paths_identity_and_names() {
         )),
         kind: "Template",
         template_type: "SpreadsheetDocument",
+        orphaned: false,
     };
     let refs = BTreeMap::from([
         (first.clone(), template("First")),
@@ -3341,6 +3350,7 @@ fn owner_graph_owned_child_failures_are_typed_for_form_template_and_command() {
             relative_path: PathBuf::from("Documents/Other/Templates/Foreign.xml"),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
     assert!(
@@ -28912,6 +28922,7 @@ fn extracts_enum_child_form_and_template_refs_from_current_indexes() {
             relative_path: PathBuf::from("Enums/Status/Templates/ExtraTemplate.xml"),
             kind: "Template",
             template_type: "TextDocument",
+            orphaned: false,
         },
     );
 
@@ -37424,6 +37435,7 @@ fn report_template_refs_for_test(
                         .with_extension("xml"),
                     kind: "Template",
                     template_type: "DataCompositionSchema",
+                    orphaned: false,
                 },
             )
         })
@@ -37751,6 +37763,7 @@ fn fails_report_child_template_cohort_closed_on_resolution_collisions() {
             relative_path: PathBuf::from("Reports/ResolutionReport/Templates/First.xml"),
             kind: "Template",
             template_type: "DataCompositionSchema",
+            orphaned: false,
         },
     );
 
@@ -37974,6 +37987,7 @@ fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
             relative_path: PathBuf::from("Reports/SalesReport/Templates/MainSchema.xml"),
             kind: "Template",
             template_type: "DataCompositionSchema",
+            orphaned: false,
         },
     )]);
     let object_refs = BTreeMap::from([(
@@ -39562,6 +39576,7 @@ fn extracts_document_child_forms_and_templates_to_metadata_xml() {
             relative_path: PathBuf::from("Documents/Invoice/Templates/Print.xml"),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
 
@@ -40468,6 +40483,7 @@ fn extracts_data_processor_child_forms_and_templates_to_metadata_xml() {
             relative_path: PathBuf::from("DataProcessors/Loader/Templates/Settings.xml"),
             kind: "Template",
             template_type: "TextDocument",
+            orphaned: false,
         },
     )]);
 
@@ -43821,6 +43837,7 @@ fn extracts_catalog_child_forms_and_templates_to_metadata_xml() {
             relative_path: PathBuf::from("Catalogs/Products/Templates/Print.xml"),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
 
@@ -52235,6 +52252,7 @@ fn business_process_owned_templates_resolve_like_every_other_owner_family() {
             )),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
     assert_eq!(
@@ -52253,6 +52271,7 @@ fn business_process_owned_templates_resolve_like_every_other_owner_family() {
             relative_path: PathBuf::from(format!("Documents/Ознакомление/Templates/{NAME}.xml")),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
     assert_eq!(

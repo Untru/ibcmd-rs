@@ -197,6 +197,14 @@ pub const fn categories(kind: &str) -> &'static [GeneratedCategory] {
     }
 }
 
+/// Whether a kind names an external data source child (`Cube`, `Table`,
+/// `DimensionTable`): the families whose forms and templates are separate
+/// descriptor rows of a nested owner.
+#[must_use]
+pub const fn is_child_kind(kind: &str) -> bool {
+    matches!(kind.as_bytes(), b"Cube" | b"Table" | b"DimensionTable")
+}
+
 /// `Cube` -> `Cubes`, ...
 #[must_use]
 pub const fn collection(kind: &str) -> &'static str {
@@ -230,6 +238,28 @@ pub const fn record_code(kind: &str) -> &'static str {
     }
 }
 
+/// `Cube` -> the collection its forms are separate rows in, ...
+#[must_use]
+pub const fn forms_collection(kind: &str) -> &'static str {
+    match kind.as_bytes() {
+        b"Cube" => CUBE_FORMS_COLLECTION,
+        b"Table" => TABLE_FORMS_COLLECTION,
+        b"DimensionTable" => DIMENSION_TABLE_FORMS_COLLECTION,
+        _ => "",
+    }
+}
+
+/// `Cube` -> the collection its inline command records live in, ...
+#[must_use]
+pub const fn commands_collection(kind: &str) -> &'static str {
+    match kind.as_bytes() {
+        b"Cube" => CUBE_COMMANDS_COLLECTION,
+        b"Table" => TABLE_COMMANDS_COLLECTION,
+        b"DimensionTable" => DIMENSION_TABLE_COMMANDS_COLLECTION,
+        _ => "",
+    }
+}
+
 /// Unrendered body properties. The exact defaults are shared by the public
 /// eds-matrix/eds-corpus2 rows and the independent eds-branch table.
 /// A one-member brace wrapper retains scalar/string/list distinctions.
@@ -241,14 +271,18 @@ pub struct UnmodeledDefault {
 pub const TABLE_PRESENTATION_SLOT: usize = 32;
 pub const TABLE_KEY_FIELDS_SLOT: usize = 18;
 pub const TABLE_INPUT_BY_STRING_SLOT: usize = 33;
+/// Cube `DefaultListForm` reference. Measured: the only form reference the
+/// platform writes for a cube whose form collection is non-empty sits here;
+/// `18` stays the nil `DefaultRecordForm` default. The stored order is the
+/// reverse of the XML order.
+pub const CUBE_DEFAULT_LIST_FORM_SLOT: usize = 17;
+/// DimensionTable `DefaultObjectForm` reference. Measured the same way; its
+/// neighbours `10`/`11` are the nil `DefaultChoiceForm`/`DefaultListForm`.
+pub const DIMENSION_DEFAULT_OBJECT_FORM_SLOT: usize = 12;
 pub const CUBE_UNMODELED_DEFAULTS: &[UnmodeledDefault] = &[
     UnmodeledDefault {
         body_slot: 15,
         wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 17,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
     },
     UnmodeledDefault {
         body_slot: 18,
@@ -401,10 +435,6 @@ pub const DIMENSION_TABLE_UNMODELED_DEFAULTS: &[UnmodeledDefault] = &[
         wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
     },
     UnmodeledDefault {
-        body_slot: 12,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
         body_slot: 15,
         wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
     },
@@ -479,7 +509,10 @@ pub const KEY_FIELD_REF_TYPE: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
 pub const INPUT_BY_STRING_REF_TYPE: &str = "60ea359f-3a6e-48bb-8e71-d2a457572918";
 pub const INPUT_BY_STRING_ITEMS_SLOT: usize = 1;
 
-/// Known collections and whether their members can be rendered.
+/// Known collections and whether their members are rendered inline in the
+/// owner's own XML. `false` means the members are separate descriptor rows
+/// written as their own files (`Forms/*.xml`, `Templates/*.xml`,
+/// `Commands`), so a non-empty collection of that kind is expected.
 #[must_use]
 pub fn collection_is_rendered(kind: &str, id: &str) -> Option<bool> {
     let collections: &[(&str, bool)] = match kind {

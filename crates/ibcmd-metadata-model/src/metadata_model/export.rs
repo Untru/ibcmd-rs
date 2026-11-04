@@ -144,6 +144,15 @@ impl NameIndex {
                 .insert(generated.type_id.clone(), generated.name.clone());
         }
     }
+
+    /// Adds one child object of an already named owner (`Catalog.X.Form.F`).
+    /// A row whose collection names a child the platform writes as its own
+    /// descriptor needs this without a second `ObjectNames`.
+    pub fn add_named_child(&mut self, full_name: impl Into<String>, uuid: impl Into<String>) {
+        self.names
+            .entry(uuid.into())
+            .or_insert_with(|| full_name.into());
+    }
 }
 
 fn collect_predefined(element: &Element, out: &mut Vec<(String, String)>) {

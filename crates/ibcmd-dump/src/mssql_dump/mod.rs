@@ -9756,9 +9756,11 @@ fn module_body_paths_from_texts_with_forms(
     }
 
     // Read in parallel, added in row order.
+    // EDS children have a nested owner directory their folder does not name.
+    let eds_dirs = eds_export::owner_dirs(metadata_texts);
     let per_row = |row: &MetadataTextRow| {
         let _brace_jumps = register_brace_jumps([row.text.as_str()]);
-        parse_module_body_source_paths_from_metadata_text(row, &file_names)
+        parse_module_body_source_paths_from_metadata_text(row, &file_names, &eds_dirs)
     };
     let found = parallel::install(|| metadata_texts.par_iter().map(per_row).collect::<Vec<_>>())
         .unwrap_or_else(|_| metadata_texts.iter().map(per_row).collect());
@@ -9879,36 +9881,39 @@ fn parse_module_body_source_paths_from_metadata_blob(
     blob: &[u8],
     uuid: &str,
     file_names: &BTreeSet<&str>,
+    eds_dirs: &BTreeMap<String, PathBuf>,
 ) -> Option<BTreeMap<String, PathBuf>> {
     let row = metadata_text_row_from_blob(uuid, blob)?;
-    parse_module_body_source_paths_from_metadata_text(&row, file_names)
+    parse_module_body_source_paths_from_metadata_text(&row, file_names, eds_dirs)
 }
 
 fn parse_module_body_source_paths_from_metadata_text(
     row: &MetadataTextRow,
     file_names: &BTreeSet<&str>,
+    eds_dirs: &BTreeMap<String, PathBuf>,
 ) -> Option<BTreeMap<String, PathBuf>> {
     let uuid = row.file_name.as_str();
     let kind = row.kind.as_deref()?;
     let folder = row.folder?;
     let header = row.header.as_ref()?;
+    // An EDS child's modules and commands live under its nested owner
+    // directory, not under the top-level `Cubes`/`Tables` folder.
+    let owner_dir = eds_dirs
+        .get(uuid)
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from(folder).join(sanitize_source_path_segment(&header.name)));
     let mut paths = BTreeMap::new();
     for suffix in MODULE_BODY_SUFFIXES {
         let body_id = format!("{uuid}.{suffix}");
         if !file_names.contains(body_id.as_str()) {
             continue;
         }
-        if let Some(path) = module_owner_source_path(kind, folder, &header.name, suffix) {
+        if let Some(path) = module_owner_source_path(&owner_dir, kind, suffix) {
             paths.insert(body_id, path);
         }
     }
     paths.extend(nested_command_module_source_paths(
-        kind,
-        folder,
-        &header.name,
-        uuid,
-        &row.text,
-        file_names,
+        kind, &owner_dir, uuid, &row.text, file_names,
     ));
 
     Some(paths)
@@ -9916,8 +9921,7 @@ fn parse_module_body_source_paths_from_metadata_text(
 
 fn nested_command_module_source_paths(
     kind: &str,
-    folder: &str,
-    owner_name: &str,
+    owner_dir: &Path,
     owner_uuid: &str,
     text: &str,
     file_names: &BTreeSet<&str>,
@@ -9938,8 +9942,7 @@ fn nested_command_module_source_paths(
                 ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::CommandModule,
             )
             .expect("nested-command module route is registered");
-        let path = PathBuf::from(folder)
-            .join(sanitize_source_path_segment(owner_name))
+        let path = owner_dir
             .join("Commands")
             .join(sanitize_source_path_segment(&command.name))
             .join(route.relative_path());
@@ -10004,7 +10007,7 @@ fn metadata_kind_can_own_forms(kind: &str) -> bool {
             | "Report"
             | "SettingsStorage"
             | "Task"
-    )
+    ) || ibcmd_schema::external_data_source_children::is_child_kind(kind)
 }
 
 fn metadata_kind_can_own_templates(kind: &str) -> bool {
@@ -10027,7 +10030,7 @@ fn metadata_kind_can_own_templates(kind: &str) -> bool {
             | "Report"
             | "SettingsStorage"
             | "Task"
-    )
+    ) || ibcmd_schema::external_data_source_children::is_child_kind(kind)
 }
 
 fn metadata_kind_needs_form_template_reference_indexes(kind: &str) -> bool {
@@ -10564,12 +10567,10 @@ fn contains_metadata_header_name_between(text: &str, start: usize, end: usize, n
     false
 }
 
-fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
-    module_owner_route(kind, suffix).map(|route| {
-        PathBuf::from(folder)
-            .join(sanitize_source_path_segment(name))
-            .join(route.relative_path())
-    })
+/// The route of a module whose owner directory is already known, so a nested
+/// child (an EDS cube or table) keeps its owner chain.
+fn module_owner_source_path(owner_dir: &Path, kind: &str, suffix: &str) -> Option<PathBuf> {
+    module_owner_route(kind, suffix).map(|route| owner_dir.join(route.relative_path()))
 }
 
 fn module_owner_route(
@@ -10625,6 +10626,9 @@ struct TemplateSourceReference {
     relative_path: PathBuf,
     kind: &'static str,
     template_type: &'static str,
+    /// A common-template row the configuration root does not name: the
+    /// platform drops such a stale store record instead of exporting it.
+    orphaned: bool,
 }
 
 struct SubsystemSourceReference {
@@ -13909,6 +13913,11 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     if is_template_metadata_text(text, uuid) {
         let header = row.header.as_ref()?;
         let template_ref = template_refs.get(uuid);
+        // A common-template row the configuration root does not name is a
+        // stale store record: the platform exports the root inventory only.
+        if template_ref.is_some_and(|template_ref| template_ref.orphaned) {
+            return None;
+        }
         let relative_path = template_ref
             .map(|template_ref| template_ref.relative_path.clone())
             .unwrap_or_else(|| {

@@ -5,7 +5,7 @@
 //! names and generated types the child writers need; every other kind keeps
 //! its existing path.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use ibcmd_metadata_model::metadata_model::brace::parse_row;
@@ -55,6 +55,28 @@ pub(crate) fn build(rows: &[MetadataTextRow], version: &str) -> Option<EdsExport
             let dimensions = external_data_source_children::dimension_table_refs(cube_text).ok()?;
             for dimension in dimensions {
                 add_child(&mut names, &mut kinds, &by_name, &dimension, &cube_full)?;
+            }
+        }
+    }
+    // Forms, templates and commands of an EDS child are descriptor rows of
+    // their own; the child's XML references them by full name, so it needs
+    // their names even though it does not render them inline.
+    for (uuid, kind) in &kinds {
+        let Some(row) = by_name.get(uuid.as_str()) else {
+            continue;
+        };
+        let Some(owner_full) = names.name(uuid).map(str::to_string) else {
+            continue;
+        };
+        let Ok(members) = external_data_source_children::owned_source_members(kind, &row.text)
+        else {
+            continue;
+        };
+        for (tag, member) in members {
+            if let Some(member_row) = by_name.get(member.as_str())
+                && let Some(header) = member_row.header.as_ref()
+            {
+                names.add_named_child(format!("{owner_full}.{tag}.{}", header.name), member);
             }
         }
     }
@@ -123,6 +145,12 @@ impl EdsExport {
 }
 
 fn path_from_full(full: &str) -> Option<PathBuf> {
+    dir_from_full(full).map(|path| path.with_extension("xml"))
+}
+
+/// The owner directory an EDS full name stands for: the descriptor XML and
+/// every child source (forms, templates, commands, modules, help) live there.
+fn dir_from_full(full: &str) -> Option<PathBuf> {
     let parts = full.split('.').collect::<Vec<_>>();
     if parts.len() < 2 || parts.len() % 2 != 0 {
         return None;
@@ -139,7 +167,84 @@ fn path_from_full(full: &str) -> Option<PathBuf> {
         path.push(folder);
         path.push(pair[1]);
     }
-    Some(path.with_extension("xml"))
+    Some(path)
+}
+
+/// Owner directories of every EDS child, keyed by the child's row file name.
+///
+/// The native tree nests cubes and tables under their external data source and
+/// dimension tables under their cube; forms, templates, commands and modules
+/// of those children hang off the same directory. Readers that build a child
+/// source path from the row's own folder have no owner chain, so they consult
+/// this map instead of writing the child at the top level.
+pub(crate) fn owner_dirs(rows: &[MetadataTextRow]) -> BTreeMap<String, PathBuf> {
+    owner_names(rows)
+        .into_iter()
+        .filter_map(|(uuid, full)| Some((uuid, dir_from_full(&full)?)))
+        .collect()
+}
+
+/// Owner full names of every EDS child, keyed by the child's row file name.
+///
+/// A reference to a cube, table or dimension table is spelled with its whole
+/// chain (`ExternalDataSource.<root>.Cube.<cube>`), which the row's own kind
+/// and name alone cannot produce.
+pub(crate) fn owner_names(rows: &[MetadataTextRow]) -> BTreeMap<String, String> {
+    let by_name = rows
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<HashMap<_, _>>();
+    let mut names = BTreeMap::new();
+    for row in rows {
+        if external_data_source::source_family(&row.text, &row.file_name).is_none() {
+            continue;
+        }
+        let Ok(tree) = parse_row(row.text.as_bytes()) else {
+            continue;
+        };
+        let Ok(root) = external_data_source::names(&tree) else {
+            continue;
+        };
+        names.insert(row.file_name.clone(), root.full_name.clone());
+        let Ok((cubes, tables)) = external_data_source_children::root_children(&row.text) else {
+            continue;
+        };
+        for uuid in tables {
+            child_full_name(&mut names, &by_name, &uuid, &root.full_name);
+        }
+        for uuid in cubes {
+            let Some(cube_full) = child_full_name(&mut names, &by_name, &uuid, &root.full_name)
+            else {
+                continue;
+            };
+            let Some(cube_row) = by_name.get(uuid.as_str()) else {
+                continue;
+            };
+            let Ok(dimensions) =
+                external_data_source_children::dimension_table_refs(&cube_row.text)
+            else {
+                continue;
+            };
+            for dimension in dimensions {
+                child_full_name(&mut names, &by_name, &dimension, &cube_full);
+            }
+        }
+    }
+    names
+}
+
+fn child_full_name(
+    names: &mut BTreeMap<String, String>,
+    by_name: &HashMap<&str, &MetadataTextRow>,
+    uuid: &str,
+    owner: &str,
+) -> Option<String> {
+    let row = by_name.get(uuid)?;
+    let (kind, _) = external_data_source_children::family(&row.text, uuid)?;
+    let tree = parse_row(row.text.as_bytes()).ok()?;
+    let object = external_data_source_children::owned_names(kind, &tree, owner).ok()?;
+    names.insert(uuid.to_string(), object.full_name.clone());
+    Some(object.full_name)
 }
 
 #[cfg(test)]
@@ -183,6 +288,63 @@ mod tests {
             assert_eq!(out.xml, expected, "{uuid} differs from the platform");
             assert_eq!(out.relative_path, PathBuf::from(expected_path), "{uuid}");
         }
+    }
+
+    #[test]
+    fn owner_names_carry_the_whole_external_data_source_chain() {
+        let rows = vec![
+            row("35f0f3eb-6bc6-455e-8200-2a8c1664122b", ROOT),
+            row("959bb0a7-39af-49f7-97cd-b9702bcf6cf0", CUBE),
+            row("87f7ae12-3120-4257-92a1-11beacd7b790", TABLE),
+            row("79581bb0-b72d-43bb-b988-8f45c602139a", DIMENSION),
+        ];
+        let names = owner_names(&rows);
+        assert_eq!(
+            names
+                .get("959bb0a7-39af-49f7-97cd-b9702bcf6cf0")
+                .map(String::as_str),
+            Some("ExternalDataSource.ВнешнийИсточникДанных1.Cube.Куб1")
+        );
+        assert_eq!(
+            names
+                .get("87f7ae12-3120-4257-92a1-11beacd7b790")
+                .map(String::as_str),
+            Some("ExternalDataSource.ВнешнийИсточникДанных1.Table.Таблица1")
+        );
+        assert_eq!(
+            names
+                .get("79581bb0-b72d-43bb-b988-8f45c602139a")
+                .map(String::as_str),
+            Some(
+                "ExternalDataSource.ВнешнийИсточникДанных1.Cube.Куб1.DimensionTable.ТаблицаИзмерения1"
+            )
+        );
+    }
+
+    /// A cube that carries forms, templates or commands keeps its owner chain:
+    /// those collections name separate descriptor rows, so their being non-empty
+    /// is not content this row fails to render.
+    #[test]
+    fn nonempty_forms_collection_does_not_hide_the_owner_chain() {
+        let cube = CUBE.replace(
+            "{3448e506-5add-4fce-a604-7305466b2d8e,0}",
+            "{3448e506-5add-4fce-a604-7305466b2d8e,1,11111111-1111-4111-8111-111111111111}",
+        );
+        assert_ne!(cube, CUBE, "the forms collection spelling moved");
+        let rows = vec![
+            row("35f0f3eb-6bc6-455e-8200-2a8c1664122b", ROOT),
+            row("959bb0a7-39af-49f7-97cd-b9702bcf6cf0", &cube),
+            row("87f7ae12-3120-4257-92a1-11beacd7b790", TABLE),
+            row("79581bb0-b72d-43bb-b988-8f45c602139a", DIMENSION),
+        ];
+        let names = owner_names(&rows);
+        assert_eq!(
+            names
+                .get("959bb0a7-39af-49f7-97cd-b9702bcf6cf0")
+                .map(String::as_str),
+            Some("ExternalDataSource.ВнешнийИсточникДанных1.Cube.Куб1")
+        );
+        assert!(build(&rows, "2.20").is_some());
     }
 
     #[test]

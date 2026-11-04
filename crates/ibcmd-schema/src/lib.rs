@@ -19188,6 +19188,7 @@ pub mod metadata_child_storage_facts {
     }
 }
 /// Closed legacy record revisions and normalized configuration coordinates.
+pub mod metadata_kind;
 pub mod metadata_record_upgrades;
 
 /// Canonical storage admission for source-asset bodies.

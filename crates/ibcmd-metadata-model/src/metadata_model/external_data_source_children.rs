@@ -78,11 +78,12 @@ impl<'a> Row<'a> {
             if fields.len() != end {
                 bail!("{id} count does not match its members");
             }
-            let rendered = schema::collection_is_rendered(parsed_kind(self.payload)?, id)
+            // A non-inline collection (forms, templates, commands) holds its
+            // members as separate descriptor rows; being non-empty is the
+            // normal case, not content this row must render. Only a collection
+            // the schema does not know at all is refused.
+            schema::collection_is_rendered(parsed_kind(self.payload)?, id)
                 .ok_or_else(|| anyhow!("unknown {id} child collection"))?;
-            if count != 0 && !rendered {
-                bail!("nonempty {id} child collection is not supported");
-            }
             if id == collection {
                 found = Some(&fields[schema::COLLECTION_ITEMS_START..]);
             }
@@ -214,7 +215,7 @@ fn bool_element(name: &str, node: &Brace) -> Result<Element> {
 
 /// Cube properties, in Designer order. Every value except NameInDataSource is
 /// the measured default of both corpora; the row shape is checked first.
-fn cube_properties(row: &Row<'_>, head: &Header) -> Result<Element> {
+fn cube_properties(row: &Row<'_>, head: &Header, context: &ExportContext) -> Result<Element> {
     let p = row.payload;
     let [name, synonym, comment] = header_elements(head)?;
     check_row_shape(row, "Cube")?;
@@ -226,7 +227,13 @@ fn cube_properties(row: &Row<'_>, head: &Header) -> Result<Element> {
         .child(el("Characteristics"))
         .child(bool_element("UseStandardCommands", item(p, 16)?)?)
         .child(el("DefaultRecordForm"))
-        .child(el("DefaultListForm"))
+        .child(leaf(
+            "DefaultListForm",
+            reference_name(
+                atom(item(p, schema::CUBE_DEFAULT_LIST_FORM_SLOT)?)?,
+                &context.names,
+            )?,
+        ))
         .child(el("RecordPresentation"))
         .child(el("ExtendedRecordPresentation"))
         .child(el("ListPresentation"))
@@ -386,7 +393,7 @@ fn typed_ref_list(node: &Brace, type_id: &str, reference_kind: &str) -> Result<V
 
 /// DimensionTable properties, in Designer order. Every value except
 /// NameInDataSource is the measured default of both corpora.
-fn dimension_properties(row: &Row<'_>, head: &Header) -> Result<Element> {
+fn dimension_properties(row: &Row<'_>, head: &Header, context: &ExportContext) -> Result<Element> {
     let p = row.payload;
     let [name, synonym, comment] = header_elements(head)?;
     check_row_shape(row, "DimensionTable")?;
@@ -405,7 +412,13 @@ fn dimension_properties(row: &Row<'_>, head: &Header) -> Result<Element> {
         .child(el("UnfilledParentValue").attr("nil", "true"))
         .child(leaf("UseStandardCommands", "false"))
         .child(leaf("QuickChoice", "false"))
-        .child(el("DefaultObjectForm"))
+        .child(leaf(
+            "DefaultObjectForm",
+            reference_name(
+                atom(item(p, schema::DIMENSION_DEFAULT_OBJECT_FORM_SLOT)?)?,
+                &context.names,
+            )?,
+        ))
         .child(el("DefaultListForm"))
         .child(el("DefaultChoiceForm"))
         .child(el("ObjectPresentation"))
@@ -595,9 +608,9 @@ pub fn decode_row(kind: &str, row: &Brace, context: &ExportContext) -> Result<El
     let path = Path::from_full(kind, &full)?;
     let internal = internal_info(kind, &path, parsed.payload)?;
     let properties = match kind {
-        schema::CUBE_KIND => cube_properties(&parsed, &head)?,
+        schema::CUBE_KIND => cube_properties(&parsed, &head, context)?,
         schema::TABLE_KIND => table_properties(&parsed, &head, &full)?,
-        schema::DIMENSION_TABLE_KIND => dimension_properties(&parsed, &head)?,
+        schema::DIMENSION_TABLE_KIND => dimension_properties(&parsed, &head, context)?,
         other => bail!("unknown EDS child kind {other}"),
     };
     let children = child_objects(kind, &parsed, &head, &full, context)?;
@@ -677,8 +690,68 @@ fn child_objects(
         }
         other => bail!("unknown EDS child kind {other}"),
     }
+    // Forms and templates are separate descriptor rows named by full name;
+    // commands are inline records of this row. Both follow the fields.
+    for member in row
+        .optional_items(schema::forms_collection(kind))?
+        .unwrap_or_default()
+    {
+        objects
+            .children
+            .push(leaf("Form", short_name(&context.names, atom(member)?)?));
+    }
+    for member in row
+        .optional_items(schema::commands_collection(kind))?
+        .unwrap_or_default()
+    {
+        let wrapper = list(member)?;
+        let record = list(item(wrapper, 0)?)?;
+        let command = item(list(item(record, 1)?)?, 3)?;
+        objects
+            .children
+            .push(super::objects::export::command(command, context)?);
+    }
+    for member in row
+        .optional_items(schema::TEMPLATES_COLLECTION)?
+        .unwrap_or_default()
+    {
+        objects
+            .children
+            .push(leaf("Template", short_name(&context.names, atom(member)?)?));
+    }
     let _ = head;
     Ok(objects)
+}
+
+/// The separate-file child rows of one EDS child descriptor, as
+/// `(XML tag, uuid)`: its forms, templates and commands. Each of those is its
+/// own row, so the owner needs only their names to spell references.
+#[doc(hidden)]
+pub fn owned_source_members(kind: &str, text: &str) -> Result<Vec<(&'static str, String)>> {
+    let row = parse_row(text.as_bytes())?;
+    let parsed = Row::parse(&row, kind)?;
+    let collections: &[(&str, &str)] = match kind {
+        schema::CUBE_KIND => &[
+            (schema::CUBE_FORMS_COLLECTION, "Form"),
+            (schema::TEMPLATES_COLLECTION, "Template"),
+        ],
+        schema::TABLE_KIND => &[
+            (schema::TABLE_FORMS_COLLECTION, "Form"),
+            (schema::TEMPLATES_COLLECTION, "Template"),
+        ],
+        schema::DIMENSION_TABLE_KIND => &[
+            (schema::DIMENSION_TABLE_FORMS_COLLECTION, "Form"),
+            (schema::TEMPLATES_COLLECTION, "Template"),
+        ],
+        other => bail!("unknown EDS child kind {other}"),
+    };
+    let mut members = Vec::new();
+    for (collection, tag) in collections {
+        for member in parsed.optional_items(collection)?.unwrap_or_default() {
+            members.push((*tag, atom(member)?.to_string()));
+        }
+    }
+    Ok(members)
 }
 
 /// The name index contribution of an owned child row.
