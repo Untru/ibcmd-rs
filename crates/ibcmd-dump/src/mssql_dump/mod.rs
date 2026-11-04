@@ -17952,18 +17952,11 @@ fn parse_exchange_plan_standard_attribute<'a>(
         bag,
         parse_exchange_plan_standard_attribute_fill_value(fill_value, marker)?,
     )?;
-    if attribute.fill_from_filling_value
-        || attribute.data_history != "Use"
-        || !attribute.format.is_empty()
-        || !attribute.edit_format.is_empty()
-        || (matches!(marker, "-14" | "-13" | "-10" | "-9" | "-6" | "-4")
-            && (attribute.fill_checking != "DontCheck"
-                || !attribute.tooltip.is_empty()
-                || !attribute.synonym.is_empty()))
-        || (marker == "-3" && attribute.full_text_search != "Use")
-    {
-        return None;
-    }
+    // Every property the record can vary is printed by the shared
+    // standard-attribute writer: a synonym, a tooltip, a format, a data-history
+    // or fill-checking value it carries is data, not an unknown shape. The
+    // marker-specific fill value above is what stays validated.
+    let _ = marker;
     Some(attribute)
 }
 
@@ -26546,15 +26539,20 @@ fn parse_chart_standard_attributes(
                     object_refs: metadata_object_refs,
                 }),
             };
-            let (attribute, comment, choice_parameter_links) =
+            let (mut attribute, comment, choice_parameter_links) =
                 parse_register_standard_attribute_with_comment_and_choice_parameter_links(
                     name, &bag, fill_value, "0", scope, None,
                 )?;
-            (comment.is_empty()
-                && information_register_standard_attribute_choice_parameter_links_is_empty(
-                    choice_parameter_links,
-                ))
-            .then_some(attribute)
+            // A section's standard attribute carries its own comment and link
+            // collection like any other standard attribute; the writer already
+            // prints both, so only the data path resolution is left to refuse.
+            if !information_register_standard_attribute_choice_parameter_links_is_empty(
+                choice_parameter_links,
+            ) {
+                return None;
+            }
+            attribute.comment = comment;
+            Some(attribute)
         })
         .collect()
 }
