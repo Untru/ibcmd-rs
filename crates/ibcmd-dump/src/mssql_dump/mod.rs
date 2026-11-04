@@ -11254,6 +11254,16 @@ struct StandardAttributeChoiceParameterScope<'r> {
     object_refs: &'r BTreeMap<String, String>,
 }
 
+/// Everything the shared standard-attribute parser takes besides the record:
+/// the fill value, the admitted type-reduction mode and the reference indexes.
+/// Family readers differ only in these fields, so one parser serves them all.
+struct StandardAttributePolicy<'a> {
+    fill_value: MetadataChildFillValue,
+    type_reduction_mode: &'a str,
+    scope: Option<StandardAttributeChoiceParameterScope<'a>>,
+    choice_form_refs: Option<&'a BTreeMap<String, FormSourceReference>>,
+}
+
 struct RegisterStandardAttributeLinkByType {
     data_path: String,
     link_item: u32,
@@ -17685,27 +17695,31 @@ fn parse_register_standard_attribute_with_comment<'a>(
     fill_value: MetadataChildFillValue,
     expected_type_reduction_mode: &str,
 ) -> Option<(RegisterStandardAttribute, String)> {
-    let (attribute, comment, choice_parameter_links) =
-        parse_register_standard_attribute_with_comment_and_choice_parameter_links(
-            name,
-            bag,
+    let (attribute, comment, choice_parameter_links) = parse_standard_attribute(
+        name,
+        bag,
+        StandardAttributePolicy {
             fill_value,
-            expected_type_reduction_mode,
-            None,
-            None,
-        )?;
+            type_reduction_mode: expected_type_reduction_mode,
+            scope: None,
+            choice_form_refs: None,
+        },
+    )?;
     information_register_standard_attribute_choice_parameter_links_is_empty(choice_parameter_links)
         .then_some((attribute, comment))
 }
 
-fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>(
+fn parse_standard_attribute<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
-    fill_value: MetadataChildFillValue,
-    expected_type_reduction_mode: &str,
-    choice_parameter_scope: Option<StandardAttributeChoiceParameterScope<'_>>,
-    choice_form_refs: Option<&BTreeMap<String, FormSourceReference>>,
+    policy: StandardAttributePolicy<'_>,
 ) -> Option<(RegisterStandardAttribute, String, &'a str)> {
+    let StandardAttributePolicy {
+        fill_value,
+        type_reduction_mode: expected_type_reduction_mode,
+        scope: choice_parameter_scope,
+        choice_form_refs,
+    } = policy;
     let link_by_type =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
     let fill_checking =
@@ -17943,15 +17957,16 @@ fn parse_exchange_plan_standard_attribute<'a>(
     bag: &InformationRegisterStandardAttributeBag<'a>,
 ) -> Option<RegisterStandardAttribute> {
     let fill_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-    let (mut attribute, comment, choice_parameter_links) =
-        parse_register_standard_attribute_with_comment_and_choice_parameter_links(
-            name,
-            bag,
-            parse_exchange_plan_standard_attribute_fill_value(fill_value, marker)?,
-            "0",
-            None,
-            None,
-        )?;
+    let (mut attribute, comment, choice_parameter_links) = parse_standard_attribute(
+        name,
+        bag,
+        StandardAttributePolicy {
+            fill_value: parse_exchange_plan_standard_attribute_fill_value(fill_value, marker)?,
+            type_reduction_mode: "0",
+            scope: None,
+            choice_form_refs: None,
+        },
+    )?;
     if !information_register_standard_attribute_choice_parameter_links_is_empty(
         choice_parameter_links,
     ) {
@@ -26546,10 +26561,16 @@ fn parse_chart_standard_attributes(
                     object_refs: metadata_object_refs,
                 }),
             };
-            let (mut attribute, comment, choice_parameter_links) =
-                parse_register_standard_attribute_with_comment_and_choice_parameter_links(
-                    name, &bag, fill_value, "0", scope, None,
-                )?;
+            let (mut attribute, comment, choice_parameter_links) = parse_standard_attribute(
+                name,
+                &bag,
+                StandardAttributePolicy {
+                    fill_value,
+                    type_reduction_mode: "0",
+                    scope,
+                    choice_form_refs: None,
+                },
+            )?;
             // A section's standard attribute carries its own comment and link
             // collection like any other standard attribute; the writer already
             // prints both, so only the data path resolution is left to refuse.
@@ -29044,18 +29065,19 @@ fn parse_catalog_standard_attributes(
                 metadata_object_refs,
             )?;
             let expected_raw_reduction = if name == "Owner" { "2" } else { "0" };
-            let (attribute, comment, choice_parameter_links) =
-                parse_register_standard_attribute_with_comment_and_choice_parameter_links(
-                    name,
-                    &bag,
+            let (attribute, comment, choice_parameter_links) = parse_standard_attribute(
+                name,
+                &bag,
+                StandardAttributePolicy {
                     fill_value,
-                    expected_raw_reduction,
-                    Some(StandardAttributeChoiceParameterScope {
+                    type_reduction_mode: expected_raw_reduction,
+                    scope: Some(StandardAttributeChoiceParameterScope {
                         type_index,
                         object_refs: metadata_object_refs,
                     }),
-                    Some(form_refs),
-                )?;
+                    choice_form_refs: Some(form_refs),
+                },
+            )?;
             let choice_parameter_links = parse_catalog_standard_attribute_choice_parameter_links(
                 choice_parameter_links,
                 owner_name,
