@@ -11230,6 +11230,9 @@ struct RegisterStandardAttribute {
     fill_value: MetadataChildFillValue,
     link_by_type: Option<RegisterStandardAttributeLinkByType>,
     mask: String,
+    /// `<xr:PasswordMode>`. Parsed, refused by no family: the writer prints
+    /// the value the record carries.
+    password_mode: bool,
     choice_parameters: Vec<MetadataChoiceParameter>,
     /// `<xr:ChoiceParameterLinks>` of the standard attribute itself. The bag
     /// stores one `{5006,<count>,...}` record per attribute under the shared
@@ -17766,18 +17769,14 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             quick_choice,
             INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
         )? != "2"
-        || parse_information_register_standard_attribute_bool(password_mode)?
         || parse_information_register_standard_attribute_bool(mark_negatives)?
         || !information_register_standard_attribute_nil_is_valid(min_value)
     {
         return None;
     }
+    // The mask is a value the shared writer prints; a scopeless family keeps
+    // it like any other property.
     let mask = parse_information_register_standard_attribute_string(mask)?;
-    // A non-empty mask is evidenced only on the catalog families that pass a
-    // resolution scope; every scopeless family keeps its historical refusal.
-    if choice_parameter_scope.is_none() && !mask.is_empty() {
-        return None;
-    }
     let choice_parameters = parse_register_standard_attribute_choice_parameters(
         choice_parameters,
         choice_parameter_scope,
@@ -17821,6 +17820,7 @@ fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>
             fill_from_filling_value: parse_information_register_standard_attribute_bool(
                 fill_from_filling_value,
             )?,
+            password_mode: parse_information_register_standard_attribute_bool(password_mode)?,
             choice_form,
             tooltip: parse_information_register_standard_attribute_localized(tooltip)?,
             format: parse_information_register_standard_attribute_localized(format)?,
@@ -17926,17 +17926,13 @@ fn parse_exchange_plan_standard_attribute_fill_value(
     if fields.len() == 1 && fields.first()?.trim() == r#""U""# {
         return Some(MetadataChildFillValue::Nil);
     }
-    match (marker, fields.first()?.trim(), fields.len()) {
-        ("-3", r#""S""#, 2) => {
-            let value = parse_information_register_quoted_string(fields.get(1)?)?;
-            value
-                .is_empty()
-                .then_some(MetadataChildFillValue::String(value))
-        }
-        ("-2", r#""S""#, 2) => {
-            let value = parse_information_register_quoted_string(fields.get(1)?)?;
-            (value == "   ").then_some(MetadataChildFillValue::String(value))
-        }
+    // `Description` and `Code` may carry any string; the platform writes it
+    // back as `<FillValue xsi:type="xs:string">`, which the shared writer
+    // prints for every family.
+    match (fields.first()?.trim(), fields.len()) {
+        (r#""S""#, 2) if matches!(marker, "-3" | "-2") => Some(MetadataChildFillValue::String(
+            parse_information_register_quoted_string(fields.get(1)?)?,
+        )),
         _ => None,
     }
 }
@@ -17947,11 +17943,21 @@ fn parse_exchange_plan_standard_attribute<'a>(
     bag: &InformationRegisterStandardAttributeBag<'a>,
 ) -> Option<RegisterStandardAttribute> {
     let fill_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
-    let attribute = parse_register_standard_attribute(
-        name,
-        bag,
-        parse_exchange_plan_standard_attribute_fill_value(fill_value, marker)?,
-    )?;
+    let (mut attribute, comment, choice_parameter_links) =
+        parse_register_standard_attribute_with_comment_and_choice_parameter_links(
+            name,
+            bag,
+            parse_exchange_plan_standard_attribute_fill_value(fill_value, marker)?,
+            "0",
+            None,
+            None,
+        )?;
+    if !information_register_standard_attribute_choice_parameter_links_is_empty(
+        choice_parameter_links,
+    ) {
+        return None;
+    }
+    attribute.comment = comment;
     // Every property the record can vary is printed by the shared
     // standard-attribute writer: a synonym, a tooltip, a format, a data-history
     // or fill-checking value it carries is data, not an unknown shape. The
@@ -18761,6 +18767,7 @@ fn register_standard_attribute(
         fill_value: MetadataChildFillValue::Nil,
         link_by_type,
         mask: String::new(),
+        password_mode: false,
         choice_parameters: Vec::new(),
         choice_parameter_links: override_values
             .map(|values| values.choice_parameter_links.clone())
@@ -26633,7 +26640,10 @@ fn parse_chart_standard_tabular_sections(
                 return None;
             }
             let detail = split_information_register_braced_fields(pair.get(1)?)?;
-            if detail.len() != 7 || detail.first()?.trim() != "3" || detail.get(3)?.trim() != "0" {
+            // Slot 3 is the section's own `FillChecking`, slot 4 the trailing
+            // zero every measured record carries. Reading FillChecking from
+            // slot 4 refused a section that declared ShowError.
+            if detail.len() != 7 || detail.first()?.trim() != "3" || detail.get(4)?.trim() != "0" {
                 return None;
             }
             Some(MetadataStandardTabularSection {
@@ -26641,7 +26651,7 @@ fn parse_chart_standard_tabular_sections(
                 synonym: parse_information_register_owner_localized_value(detail.get(1)?)?,
                 comment: parse_information_register_quoted_string(detail.get(2)?)?,
                 tooltip: parse_information_register_owner_localized_value(detail.get(6)?)?,
-                fill_checking: match detail.get(4)?.trim() {
+                fill_checking: match detail.get(3)?.trim() {
                     "0" => "DontCheck",
                     "1" => "ShowError",
                     _ => return None,
@@ -40398,10 +40408,11 @@ fn push_standard_attribute_xml(
     ));
     push_xr_localized_property_xml(xml, property_indent, "EditFormat", &attribute.edit_format);
     xml.push_str(&format!(
-        "{property_indent}<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+        "{property_indent}<xr:PasswordMode>{}</xr:PasswordMode>\r\n\
 {property_indent}<xr:DataHistory>{}</xr:DataHistory>\r\n\
 {property_indent}<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
 {property_indent}<xr:MinValue xsi:nil=\"true\"/>\r\n",
+        xml_bool(attribute.password_mode),
         attribute.data_history,
     ));
     push_xr_localized_property_xml(xml, property_indent, "Synonym", &attribute.synonym);

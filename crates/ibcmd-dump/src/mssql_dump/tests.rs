@@ -25019,7 +25019,7 @@ fn parses_exchange_plan_standard_attributes_by_family_and_marker() {
     let description_bool = valid.replacen("{\"S\",\"\"}", "{\"B\",0}", 1);
     assert!(parse_exchange_plan_standard_attributes(&description_bool).is_none());
     let code_empty_string = valid.replacen("{\"S\",\"   \"}", "{\"S\",\"\"}", 1);
-    assert!(parse_exchange_plan_standard_attributes(&code_empty_string).is_none());
+    assert!(parse_exchange_plan_standard_attributes(&code_empty_string).is_some());
     let first_marker_string = valid.replacen("{\"U\"}", "{\"S\",\"\"}", 1);
     assert!(parse_exchange_plan_standard_attributes(&first_marker_string).is_none());
 
@@ -25561,7 +25561,6 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
                 "1",
             ),
         ),
-        (14, "{\"B\",1}".to_string()),
         (16, "{\"B\",1}".to_string()),
         (17, "{\"N\",0}".to_string()),
         (19, "{\"S\",\"comment\"}".to_string()),
@@ -25571,7 +25570,6 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
                 "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,1}}}}"
             ),
         ),
-        (23, "{\"S\",\"mask\"}".to_string()),
         (
             24,
             format!(
