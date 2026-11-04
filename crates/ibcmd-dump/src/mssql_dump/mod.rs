@@ -40375,84 +40375,109 @@ fn push_xr_standard_attribute_choice_form_xml(
     }
 }
 
+/// One `<xr:StandardAttribute>` body: the 25 properties every standard-attribute
+/// family writes, in the platform's order.
+///
+/// The three families differ only in where `TypeReductionMode`, the comment and
+/// the choice-parameter links come from, so the caller passes them in and keeps
+/// ownership of the opening and closing tag (its indent differs).
+fn push_standard_attribute_xml(
+    xml: &mut String,
+    property_indent: &str,
+    attribute: &RegisterStandardAttribute,
+    type_reduction_mode: &str,
+    comment: &str,
+    choice_parameter_links: &[MetadataChoiceParameterLink],
+) {
+    if let Some(link_by_type) = &attribute.link_by_type {
+        xml.push_str(&format!(
+            "{property_indent}<xr:LinkByType>\r\n\
+{property_indent}\t<xr:DataPath>{}</xr:DataPath>\r\n\
+{property_indent}\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
+{property_indent}</xr:LinkByType>\r\n",
+            escape_xml_element_text(&link_by_type.data_path),
+            link_by_type.link_item
+        ));
+    } else {
+        xml.push_str(&format!("{property_indent}<xr:LinkByType/>\r\n"));
+    }
+    xml.push_str(&format!(
+        "{property_indent}<xr:FillChecking>{}</xr:FillChecking>\r\n\
+{property_indent}<xr:MultiLine>{}</xr:MultiLine>\r\n\
+{property_indent}<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
+{property_indent}<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+{property_indent}<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
+{property_indent}<xr:MaxValue xsi:nil=\"true\"/>\r\n",
+        attribute.fill_checking,
+        xml_bool(attribute.multi_line),
+        xml_bool(attribute.fill_from_filling_value),
+        type_reduction_mode,
+    ));
+    push_xr_localized_property_xml(xml, property_indent, "ToolTip", &attribute.tooltip);
+    xml.push_str(&format!(
+        "{property_indent}<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n"
+    ));
+    push_xr_localized_property_xml(xml, property_indent, "Format", &attribute.format);
+    push_xr_standard_attribute_choice_form_xml(xml, property_indent, &attribute.choice_form);
+    xml.push_str(&format!(
+        "{property_indent}<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+{property_indent}<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
+        attribute.choice_history_on_input,
+    ));
+    push_xr_localized_property_xml(xml, property_indent, "EditFormat", &attribute.edit_format);
+    xml.push_str(&format!(
+        "{property_indent}<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+{property_indent}<xr:DataHistory>{}</xr:DataHistory>\r\n\
+{property_indent}<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+{property_indent}<xr:MinValue xsi:nil=\"true\"/>\r\n",
+        attribute.data_history,
+    ));
+    push_xr_localized_property_xml(xml, property_indent, "Synonym", &attribute.synonym);
+    if comment.is_empty() {
+        xml.push_str(&format!("{property_indent}<xr:Comment/>\r\n"));
+    } else {
+        xml.push_str(&format!(
+            "{property_indent}<xr:Comment>{}</xr:Comment>\r\n",
+            escape_xml_element_text(comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "{property_indent}<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n",
+        attribute.full_text_search,
+    ));
+    push_metadata_standard_attribute_choice_parameter_links_xml(
+        xml,
+        property_indent,
+        choice_parameter_links,
+    );
+    xml.push_str(&format!(
+        "{property_indent}{}\r\n",
+        format_register_standard_attribute_fill_value_xml(&attribute.fill_value),
+    ));
+    push_register_standard_attribute_mask_and_choice_parameters_xml(
+        xml,
+        property_indent,
+        attribute,
+    );
+}
+
 fn push_metadata_standard_attributes_xml(
     xml: &mut String,
     attributes: &[MetadataStandardAttribute],
 ) {
     xml.push_str("\t\t\t<StandardAttributes>\r\n");
     for parsed_attribute in attributes {
-        let attribute = &parsed_attribute.attribute;
         xml.push_str(&format!(
             "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n",
-            escape_xml_text(attribute.name),
+            escape_xml_text(parsed_attribute.attribute.name),
         ));
-        if let Some(link_by_type) = &attribute.link_by_type {
-            xml.push_str(&format!(
-                "\t\t\t\t\t<xr:LinkByType>\r\n\
-\t\t\t\t\t\t<xr:DataPath>{}</xr:DataPath>\r\n\
-\t\t\t\t\t\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
-\t\t\t\t\t</xr:LinkByType>\r\n",
-                escape_xml_element_text(&link_by_type.data_path),
-                link_by_type.link_item
-            ));
-        } else {
-            xml.push_str("\t\t\t\t\t<xr:LinkByType/>\r\n");
-        }
-        xml.push_str(&format!(
-            "\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
-\t\t\t\t\t<xr:MultiLine>{}</xr:MultiLine>\r\n\
-\t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
-\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
-\t\t\t\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
-\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
-            attribute.fill_checking,
-            xml_bool(attribute.multi_line),
-            xml_bool(attribute.fill_from_filling_value),
+        push_standard_attribute_xml(
+            xml,
+            "\t\t\t\t\t",
+            &parsed_attribute.attribute,
             parsed_attribute.type_reduction_mode,
-        ));
-        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
-        xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
-        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Format", &attribute.format);
-        push_xr_standard_attribute_choice_form_xml(xml, "\t\t\t\t\t", &attribute.choice_form);
-        xml.push_str(&format!(
-            "\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-\t\t\t\t\t<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
-            attribute.choice_history_on_input,
-        ));
-        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "EditFormat", &attribute.edit_format);
-        xml.push_str(&format!(
-            "\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
-\t\t\t\t\t<xr:DataHistory>{}</xr:DataHistory>\r\n\
-\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
-\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
-            attribute.data_history,
-        ));
-        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Synonym", &attribute.synonym);
-        if parsed_attribute.comment.is_empty() {
-            xml.push_str("\t\t\t\t\t<xr:Comment/>\r\n");
-        } else {
-            xml.push_str(&format!(
-                "\t\t\t\t\t<xr:Comment>{}</xr:Comment>\r\n",
-                escape_xml_element_text(&parsed_attribute.comment)
-            ));
-        }
-        xml.push_str(&format!(
-            "\t\t\t\t\t<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n",
-            attribute.full_text_search,
-        ));
-        push_metadata_standard_attribute_choice_parameter_links_xml(
-            xml,
-            "\t\t\t\t\t",
+            &parsed_attribute.comment,
             &parsed_attribute.choice_parameter_links,
-        );
-        xml.push_str(&format!(
-            "\t\t\t\t\t{}\r\n",
-            format_register_standard_attribute_fill_value_xml(&attribute.fill_value),
-        ));
-        push_register_standard_attribute_mask_and_choice_parameters_xml(
-            xml,
-            "\t\t\t\t\t",
-            attribute,
         );
         xml.push_str("\t\t\t\t</xr:StandardAttribute>\r\n");
     }
@@ -41103,75 +41128,15 @@ fn push_register_standard_attributes_xml_with_indent(
             "{attribute_indent}<xr:StandardAttribute name=\"{}\">\r\n",
             escape_xml_text(attribute.name),
         ));
-        if let Some(link_by_type) = &attribute.link_by_type {
-            xml.push_str(&format!(
-                "{property_indent}<xr:LinkByType>\r\n\
-{property_indent}\t<xr:DataPath>{}</xr:DataPath>\r\n\
-{property_indent}\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
-{property_indent}</xr:LinkByType>\r\n",
-                escape_xml_element_text(&link_by_type.data_path),
-                link_by_type.link_item
-            ));
-        } else {
-            xml.push_str(&format!("{property_indent}<xr:LinkByType/>\r\n"));
-        }
-        xml.push_str(&format!(
-            "{property_indent}<xr:FillChecking>{}</xr:FillChecking>\r\n\
-{property_indent}<xr:MultiLine>{}</xr:MultiLine>\r\n\
-{property_indent}<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
-{property_indent}<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
-{property_indent}<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
-{property_indent}<xr:MaxValue xsi:nil=\"true\"/>\r\n",
-            attribute.fill_checking,
-            xml_bool(attribute.multi_line),
-            xml_bool(attribute.fill_from_filling_value),
-        ));
-        push_xr_localized_property_xml(xml, &property_indent, "ToolTip", &attribute.tooltip);
-        xml.push_str(&format!(
-            "{property_indent}<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n"
-        ));
-        push_xr_localized_property_xml(xml, &property_indent, "Format", &attribute.format);
-        push_xr_standard_attribute_choice_form_xml(xml, &property_indent, &attribute.choice_form);
-        xml.push_str(&format!(
-            "{property_indent}<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-{property_indent}<xr:ChoiceHistoryOnInput>{}</xr:ChoiceHistoryOnInput>\r\n",
-            attribute.choice_history_on_input,
-        ));
-        push_xr_localized_property_xml(xml, &property_indent, "EditFormat", &attribute.edit_format);
-        xml.push_str(&format!(
-            "{property_indent}<xr:PasswordMode>false</xr:PasswordMode>\r\n\
-{property_indent}<xr:DataHistory>{}</xr:DataHistory>\r\n\
-{property_indent}<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
-{property_indent}<xr:MinValue xsi:nil=\"true\"/>\r\n",
-            attribute.data_history,
-        ));
-        push_xr_localized_property_xml(xml, &property_indent, "Synonym", &attribute.synonym);
-        if attribute.comment.is_empty() {
-            xml.push_str(&format!("{property_indent}<xr:Comment/>\r\n"));
-        } else {
-            xml.push_str(&format!(
-                "{property_indent}<xr:Comment>{}</xr:Comment>\r\n",
-                escape_xml_element_text(&attribute.comment)
-            ));
-        }
-        xml.push_str(&format!(
-            "{property_indent}<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n",
-            attribute.full_text_search,
-        ));
-        push_metadata_standard_attribute_choice_parameter_links_xml(
-            xml,
-            &property_indent,
-            &attribute.choice_parameter_links,
-        );
-        xml.push_str(&property_indent);
-        xml.push_str(&format_register_standard_attribute_fill_value_xml(
-            &attribute.fill_value,
-        ));
-        xml.push_str("\r\n");
-        push_register_standard_attribute_mask_and_choice_parameters_xml(
+        // This family keeps the reduction mode out of the record: every
+        // register standard attribute of the stand writes TransformValues.
+        push_standard_attribute_xml(
             xml,
             &property_indent,
             attribute,
+            "TransformValues",
+            &attribute.comment,
+            &attribute.choice_parameter_links,
         );
         xml.push_str(&format!("{attribute_indent}</xr:StandardAttribute>\r\n"));
     }
