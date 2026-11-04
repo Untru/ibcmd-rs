@@ -54848,7 +54848,7 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     assert!(
         parse_standard_tabular_sections(
             "{0}",
-            standard_tabular_sections_for("ChartOfAccounts"),
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
             None,
             &index,
             &index,
@@ -54860,7 +54860,7 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     assert!(
         parse_standard_tabular_sections(
             "{1,{0,0}}",
-            standard_tabular_sections_for("ChartOfAccounts"),
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
             None,
             &index,
             &index,
@@ -54870,11 +54870,11 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     );
     let mut payload = vec![
         "0".to_owned(),
-        standard_tabular_sections_for("ChartOfAccounts")
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS
             .len()
             .to_string(),
     ];
-    for (marker, _, definitions) in standard_tabular_sections_for("ChartOfAccounts") {
+    for (marker, _, definitions) in CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS {
         payload.push((*marker).to_owned());
         if definitions.iter().any(|(_, name)| *name == "LineNumber") {
             let numeric_fill = exact_register_standard_attributes_for_test(definitions);
@@ -54903,7 +54903,7 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     }
     let present = parse_standard_tabular_sections(
         &format!("{{1,{{{}}}}}", payload.join(",")),
-        standard_tabular_sections_for("ChartOfAccounts"),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
         None,
         &index,
         &index,
@@ -54913,7 +54913,7 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     .expect("a complete native section remains present");
     assert_eq!(
         present.len(),
-        standard_tabular_sections_for("ChartOfAccounts").len()
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS.len()
     );
     let mut xml = String::new();
     push_chart_standard_tabular_sections_xml(&mut xml, &present);

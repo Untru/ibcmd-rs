@@ -34,22 +34,24 @@ pub const CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS: &[(&str, &str)] = &[
 /// `<xr:StandardTabularSection name="ExtDimensionTypes">` and its four
 /// `<xr:StandardAttribute>` children, and a form's bound slot names the very
 /// same members by the very same markers.
-/// Every standard tabular section the two chart families declare, in the order
-/// the platform writes them: the chart of accounts first, then the calculation
-/// chart's three. One table for both families -- a family is only a window into
-/// it ([`standard_tabular_sections_for`]) -- because the entries differ in
-/// nothing but their membership.
-pub const STANDARD_TABULAR_SECTION_DEFINITIONS: &[StandardTabularSectionDefinition] = &[
-    (
-        "-12",
-        "ExtDimensionTypes",
-        &[
-            ("-15", "TurnoversOnly"),
-            ("-14", "Predefined"),
-            ("-13", "ExtDimensionType"),
-            ("-12", "LineNumber"),
-        ],
-    ),
+pub const CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS: &[StandardTabularSectionDefinition] = &[(
+    "-12",
+    "ExtDimensionTypes",
+    &[
+        ("-15", "TurnoversOnly"),
+        ("-14", "Predefined"),
+        ("-13", "ExtDimensionType"),
+        ("-12", "LineNumber"),
+    ],
+)];
+
+/// The standard tabular sections a `ChartOfCalculationTypes` carries, in the
+/// order the platform writes them, with the standard attributes each declares.
+/// A separate table rather than a window into a shared one: the family is
+/// known at the call site, and decoding it from a string would put a name
+/// decision where the caller already holds the answer.
+pub const CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTIONS:
+    &[StandardTabularSectionDefinition] = &[
     (
         "-30",
         "LeadingCalculationTypes",
@@ -78,15 +80,6 @@ pub const STANDARD_TABULAR_SECTION_DEFINITIONS: &[StandardTabularSectionDefiniti
         ],
     ),
 ];
-
-/// The sections one chart family owns: a window into the single table above.
-pub fn standard_tabular_sections_for(kind: &str) -> &'static [StandardTabularSectionDefinition] {
-    match kind {
-        "ChartOfAccounts" => &STANDARD_TABULAR_SECTION_DEFINITIONS[..1],
-        "ChartOfCalculationTypes" => &STANDARD_TABULAR_SECTION_DEFINITIONS[1..],
-        _ => &[],
-    }
-}
 
 pub const ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
     ("-9", "RecordType"),
@@ -135,7 +128,7 @@ pub const fn chart_of_accounts_standard_attribute_definitions()
 pub fn chart_of_accounts_standard_tabular_section(
     marker: &str,
 ) -> Option<&'static StandardTabularSectionDefinition> {
-    standard_tabular_sections_for("ChartOfAccounts")
+    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS
         .iter()
         .find(|(candidate, _, _)| *candidate == marker)
 }
@@ -146,7 +139,7 @@ pub fn chart_of_accounts_standard_tabular_section(
 /// family ever to declare a second section, the flag's owning section would no
 /// longer follow from the family alone and this refuses rather than guesses.
 pub fn chart_of_accounts_sole_standard_tabular_section_name() -> Option<&'static str> {
-    match standard_tabular_sections_for("ChartOfAccounts") {
+    match CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS {
         [(_, name, _)] => Some(name),
         _ => None,
     }

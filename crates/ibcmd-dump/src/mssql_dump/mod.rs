@@ -33,8 +33,9 @@ pub(crate) use ibcmd_1c_vocab::style_web_color_name;
 use ibcmd_1c_vocab::{
     ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES,
     ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES,
-    CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-    CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTE_DEFINITIONS, DCS_BUILTIN_REFERENCE_TYPE_SETS,
+    CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS, CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
+    CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTE_DEFINITIONS,
+    CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTIONS, DCS_BUILTIN_REFERENCE_TYPE_SETS,
     DOCUMENT_STANDARD_ATTRIBUTES, StandardTabularSectionDefinition, TYPE_DESCRIPTION_TYPE_UUID,
     data_processor_builtin_type_reference, elapsed_ms, ext_picture_file_name,
     format_type_description_value_types_xml, inflate_raw_deflate,
@@ -43,8 +44,8 @@ use ibcmd_1c_vocab::{
     metadata_type_xml_namespace_attr, number_allowed_sign_xml, parse_common_command_picture_value,
     parse_common_command_shortcut_value, parse_design_time_reference,
     platform_reference_family_type_reference, push_binary_data_qualifiers_xml, scoped_value_type,
-    standard_style_item_for_code, standard_tabular_sections_for, string_allowed_length_xml,
-    style_win_color_name, unique_metadata_type_reference,
+    standard_style_item_for_code, string_allowed_length_xml, style_win_color_name,
+    unique_metadata_type_reference,
 };
 pub(super) use ibcmd_1c_vocab::{
     ConstantValueType, DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME,
@@ -25669,7 +25670,7 @@ fn parse_chart_of_accounts_properties(
         characteristics,
         standard_tabular_sections: parse_standard_tabular_sections(
             fields.get(39)?,
-            standard_tabular_sections_for("ChartOfAccounts"),
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
             Some(&format!("ChartOfAccounts.{}.", header.name)),
             type_index,
             object_refs,
@@ -26092,7 +26093,7 @@ fn parse_chart_of_calculation_types_properties(
         characteristics,
         standard_tabular_sections: parse_standard_tabular_sections(
             fields.get(44)?,
-            standard_tabular_sections_for("ChartOfCalculationTypes"),
+            CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTIONS,
             Some(&format!("ChartOfCalculationTypes.{}.", header.name)),
             type_index,
             object_refs,
