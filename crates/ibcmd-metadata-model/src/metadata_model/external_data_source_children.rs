@@ -213,8 +213,7 @@ fn bool_element(name: &str, node: &Brace) -> Result<Element> {
     Ok(leaf(name, bool_text(node)?))
 }
 
-/// Cube properties, in Designer order. Every value except NameInDataSource is
-/// the measured default of both corpora; the row shape is checked first.
+/// Cube properties, in Designer order, from the slots measured on the matrix.
 fn cube_properties(row: &Row<'_>, head: &Header, context: &ExportContext) -> Result<Element> {
     let p = row.payload;
     let [name, synonym, comment] = header_elements(head)?;
@@ -223,83 +222,423 @@ fn cube_properties(row: &Row<'_>, head: &Header, context: &ExportContext) -> Res
         .child(name)
         .child(synonym)
         .child(comment)
-        .child(leaf("NameInDataSource", xml_text(string(item(p, 14)?)?)))
-        .child(el("Characteristics"))
-        .child(bool_element("UseStandardCommands", item(p, 16)?)?)
-        .child(el("DefaultRecordForm"))
         .child(leaf(
-            "DefaultListForm",
-            reference_name(
-                atom(item(p, schema::CUBE_DEFAULT_LIST_FORM_SLOT)?)?,
-                &context.names,
-            )?,
+            "NameInDataSource",
+            xml_text(string(item(p, schema::CUBE_NAME_IN_DATA_SOURCE_SLOT)?)?),
         ))
-        .child(el("RecordPresentation"))
-        .child(el("ExtendedRecordPresentation"))
-        .child(el("ListPresentation"))
-        .child(el("ExtendedListPresentation"))
-        .child(el("Explanation"))
-        .child(leaf("IncludeHelpInContents", "false")))
+        .child(characteristics(
+            p,
+            schema::CUBE_CHARACTERISTICS_SLOT,
+            &context.names,
+        )?)
+        .child(bool_element(
+            "UseStandardCommands",
+            item(p, schema::CUBE_USE_STANDARD_COMMANDS_SLOT)?,
+        )?)
+        .child(form_reference(
+            p,
+            schema::CUBE_DEFAULT_RECORD_FORM_SLOT,
+            "DefaultRecordForm",
+            &context.names,
+        )?)
+        .child(form_reference(
+            p,
+            schema::CUBE_DEFAULT_LIST_FORM_SLOT,
+            "DefaultListForm",
+            &context.names,
+        )?)
+        .child(localized(
+            p,
+            schema::CUBE_RECORD_PRESENTATION_SLOT,
+            "RecordPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::CUBE_EXTENDED_RECORD_PRESENTATION_SLOT,
+            "ExtendedRecordPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::CUBE_LIST_PRESENTATION_SLOT,
+            "ListPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::CUBE_EXTENDED_LIST_PRESENTATION_SLOT,
+            "ExtendedListPresentation",
+        )?)
+        .child(localized(p, schema::CUBE_EXPLANATION_SLOT, "Explanation")?)
+        .child(bool_element(
+            "IncludeHelpInContents",
+            item(p, schema::CUBE_INCLUDE_HELP_IN_CONTENTS_SLOT)?,
+        )?))
 }
 
-/// Table properties, in Designer order. Values that are not decoded below are
-/// the measured default of both corpora; `check_row_shape` refuses others.
-fn table_properties(row: &Row<'_>, head: &Header, full: &str) -> Result<Element> {
+/// Table properties, in Designer order, from the slots measured on the matrix.
+fn table_properties(
+    row: &Row<'_>,
+    head: &Header,
+    full: &str,
+    context: &ExportContext,
+) -> Result<Element> {
     let p = row.payload;
     let [name, synonym, comment] = header_elements(head)?;
     check_row_shape(row, "Table")?;
-    // Two native layouts are measured: the matrix stores `1` (8.3.27), the
-    // ServiceDesk row stores `0` (8.5.1). Both are the `Table` value; the
-    // `Expression` code is not measured and is refused.
-    let table_type = match atom(item(p, 16)?)? {
-        "0" | "1" => "Table",
-        other => bail!("Table: unknown TableType code {other}"),
-    };
-    let table_data_type = match atom(item(p, 20)?)? {
-        "0" => "NonobjectData",
-        "1" => "ObjectData",
-        other => bail!("Table: unknown TableDataType code {other}"),
-    };
+    let table_type = code_text(
+        item(p, schema::TABLE_TYPE_SLOT)?,
+        &[("Table", 0), ("Expression", 1)],
+    )?;
+    // The stored code is the *inverse* of the published name: `1` is the plain
+    // table, `0` the object-data one (the matrix measures `1`; the stepwise
+    // corpus and the branch row carry it the same way).
+    let table_data_type = code_text(
+        item(p, schema::TABLE_TABLE_DATA_TYPE_SLOT)?,
+        &[("NonobjectData", 1), ("ObjectData", 0)],
+    )?;
     let (key_fields, input_by_string) = table_ref_lists(row)?;
+    let modes = list(item(p, schema::TABLE_SEARCH_MODES_SLOT)?)?;
+    if modes.len() != 3 || atom(item(modes, 1)?)? != "2" {
+        bail!("Table: invalid input-by-string mode bag");
+    }
+    let search_mode = code_text(item(modes, 0)?, &[("Begin", 1), ("AnyPart", 2)])?;
+    let choice_data_mode = code_text(item(modes, 2)?, &[("Directly", 0), ("Background", 1)])?;
     Ok(el("Properties")
         .child(name)
         .child(synonym)
         .child(comment)
         .child(leaf("TableType", table_type))
-        .child(leaf("NameInDataSource", xml_text(string(item(p, 17)?)?)))
-        .child(el("ExpressionInDataSource"))
+        .child(leaf(
+            "NameInDataSource",
+            xml_text(string(item(p, schema::TABLE_NAME_IN_DATA_SOURCE_SLOT)?)?),
+        ))
+        .child(expression_in_data_source(
+            p,
+            schema::TABLE_EXPRESSION_IN_DATA_SOURCE_SLOT,
+        )?)
         .child(leaf("TableDataType", table_data_type))
         .child(el("KeyFields").children(key_field_elements(full, &key_fields)))
-        .child(el("PresentationField"))
-        .child(el("ParentField"))
-        .child(el("UnfilledParentValue").attr("nil", "true"))
-        .child(el("Characteristics"))
-        .child(bool_element("UseStandardCommands", item(p, 21)?)?)
-        .child(bool_element("QuickChoice", item(p, 22)?)?)
+        .child(leaf(
+            "PresentationField",
+            reference_name(
+                atom(item(p, schema::TABLE_PRESENTATION_FIELD_SLOT)?)?,
+                &context.names,
+            )?,
+        ))
+        .child(leaf(
+            "ParentField",
+            reference_name(
+                atom(item(p, schema::TABLE_PARENT_FIELD_SLOT)?)?,
+                &context.names,
+            )?,
+        ))
+        .child(unfilled_parent_value(item(
+            p,
+            schema::TABLE_UNFILLED_PARENT_VALUE_SLOT,
+        )?)?)
+        .child(characteristics(
+            p,
+            schema::TABLE_CHARACTERISTICS_SLOT,
+            &context.names,
+        )?)
+        .child(bool_element(
+            "UseStandardCommands",
+            item(p, schema::TABLE_USE_STANDARD_COMMANDS_SLOT)?,
+        )?)
+        .child(bool_element(
+            "QuickChoice",
+            item(p, schema::TABLE_QUICK_CHOICE_SLOT)?,
+        )?)
         .child(el("InputByString").children(key_field_elements(full, &input_by_string)))
-        .child(leaf("CreateOnInput", "Auto"))
-        .child(leaf("SearchStringModeOnInputByString", "Begin"))
-        .child(leaf("ChoiceDataGetModeOnInputByString", "Directly"))
-        .child(leaf("ChoiceHistoryOnInput", "Auto"))
-        .child(el("DefaultObjectForm"))
-        .child(el("DefaultRecordForm"))
-        .child(el("DefaultListForm"))
-        .child(el("DefaultChoiceForm"))
-        .child(el("ObjectPresentation"))
-        .child(el("ExtendedObjectPresentation"))
-        .child(el("RecordPresentation"))
-        .child(el("ExtendedRecordPresentation"))
-        .child(el("ListPresentation"))
-        .child(el("ExtendedListPresentation"))
-        .child(el("Explanation"))
-        .child(leaf("IncludeHelpInContents", "false"))
-        .child(leaf("ReadOnly", "false"))
-        .child(leaf("TransactionsIsolationLevel", "Auto"))
-        .child(el("DataVersionField"))
-        .child(leaf("EditType", "InDialog"))
-        .child(el("BasedOn"))
-        .child(el("DataLockFields"))
-        .child(leaf("DataLockControlMode", "Automatic")))
+        .child(leaf(
+            "CreateOnInput",
+            code_text(
+                item(p, schema::TABLE_CREATE_ON_INPUT_SLOT)?,
+                &[("Auto", 0), ("DontUse", 1), ("Use", 2)],
+            )?,
+        ))
+        .child(leaf("SearchStringModeOnInputByString", search_mode))
+        .child(leaf("ChoiceDataGetModeOnInputByString", choice_data_mode))
+        .child(leaf(
+            "ChoiceHistoryOnInput",
+            code_text(
+                item(p, schema::TABLE_CHOICE_HISTORY_ON_INPUT_SLOT)?,
+                &[("Auto", 0), ("DontUse", 1)],
+            )?,
+        ))
+        .child(form_reference(
+            p,
+            schema::TABLE_DEFAULT_OBJECT_FORM_SLOT,
+            "DefaultObjectForm",
+            &context.names,
+        )?)
+        .child(form_reference(
+            p,
+            schema::TABLE_DEFAULT_RECORD_FORM_SLOT,
+            "DefaultRecordForm",
+            &context.names,
+        )?)
+        .child(form_reference(
+            p,
+            schema::TABLE_DEFAULT_LIST_FORM_SLOT,
+            "DefaultListForm",
+            &context.names,
+        )?)
+        .child(form_reference(
+            p,
+            schema::TABLE_DEFAULT_CHOICE_FORM_SLOT,
+            "DefaultChoiceForm",
+            &context.names,
+        )?)
+        .child(localized(
+            p,
+            schema::TABLE_OBJECT_PRESENTATION_SLOT,
+            "ObjectPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::TABLE_EXTENDED_OBJECT_PRESENTATION_SLOT,
+            "ExtendedObjectPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::TABLE_RECORD_PRESENTATION_SLOT,
+            "RecordPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::TABLE_EXTENDED_RECORD_PRESENTATION_SLOT,
+            "ExtendedRecordPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::TABLE_LIST_PRESENTATION_SLOT,
+            "ListPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::TABLE_EXTENDED_LIST_PRESENTATION_SLOT,
+            "ExtendedListPresentation",
+        )?)
+        .child(localized(p, schema::TABLE_EXPLANATION_SLOT, "Explanation")?)
+        .child(bool_element(
+            "IncludeHelpInContents",
+            item(p, schema::TABLE_INCLUDE_HELP_IN_CONTENTS_SLOT)?,
+        )?)
+        .child(bool_element(
+            "ReadOnly",
+            item(p, schema::TABLE_READ_ONLY_SLOT)?,
+        )?)
+        .child(leaf(
+            "TransactionsIsolationLevel",
+            code_text(
+                item(p, schema::TABLE_TRANSACTIONS_ISOLATION_LEVEL_SLOT)?,
+                &[
+                    ("Auto", 0),
+                    ("ReadUncommitted", 1),
+                    ("ReadCommitted", 2),
+                    ("RepeatableRead", 3),
+                    ("Serializable", 4),
+                ],
+            )?,
+        ))
+        .child(leaf(
+            "DataVersionField",
+            reference_name(
+                atom(item(p, schema::TABLE_DATA_VERSION_FIELD_SLOT)?)?,
+                &context.names,
+            )?,
+        ))
+        .child(leaf(
+            "EditType",
+            code_text(
+                item(p, schema::TABLE_EDIT_TYPE_SLOT)?,
+                &[("InList", 0), ("InDialog", 1), ("BothWays", 2)],
+            )?,
+        ))
+        .child(based_on(p, schema::TABLE_BASED_ON_SLOT, &context.names)?)
+        .child(el("DataLockFields").children(key_field_elements(
+            full,
+            &field_list_names(row, schema::TABLE_DATA_LOCK_FIELDS_SLOT)?,
+        )))
+        .child(leaf(
+            "DataLockControlMode",
+            code_text(
+                item(p, schema::TABLE_DATA_LOCK_CONTROL_MODE_SLOT)?,
+                &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)],
+            )?,
+        )))
+}
+
+/// `{0,source,presentation,{0,0,0}}` -> `<ExpressionInDataSource>`.
+fn expression_in_data_source(p: &[Brace], slot: usize) -> Result<Element> {
+    let bag = list(item(p, slot)?)?;
+    if bag.len() != 4 || atom(item(bag, 0)?)? != "0" {
+        bail!("Table: invalid ExpressionInDataSource bag");
+    }
+    Ok(leaf(
+        "ExpressionInDataSource",
+        xml_text(string(item(bag, 1)?)?),
+    ))
+}
+
+/// `{0,N,{"#",<ref>,{1,<uuid>}}...}` -> `<BasedOn>` with object references.
+fn based_on(p: &[Brace], slot: usize, names: &NameIndex) -> Result<Element> {
+    let outer = list(item(p, slot)?)?;
+    if atom(item(outer, 0)?)? != "0" {
+        bail!("BasedOn: unexpected wrapper");
+    }
+    let count = usize::try_from(super::export::number(item(outer, 1)?)?)
+        .map_err(|_| anyhow!("BasedOn: count does not fit"))?;
+    if outer.len() != count + 2 {
+        bail!("BasedOn: count does not match its members");
+    }
+    let mut element = el("BasedOn");
+    for entry in &outer[2..] {
+        let fields = list(entry)?;
+        if string(item(fields, 0)?)? != "#" {
+            bail!("BasedOn: not an object reference");
+        }
+        let typed = list(item(fields, 2)?)?;
+        if typed.len() != 2 || atom(item(typed, 0)?)? != "1" {
+            bail!("BasedOn: not a typed reference");
+        }
+        element.children.push(
+            leaf("xr:Item", reference_name(atom(item(typed, 1)?)?, names)?)
+                .attr("type", "xr:MDObjectRef"),
+        );
+    }
+    Ok(element)
+}
+
+/// `{0,{1,{"#",<class>,{4,<types from>,<values from>,...}}}}` -> `<Characteristics>`.
+///
+/// The matrix measures the all-unset characteristic; its field order beyond the
+/// two `from` references is only partly recovered, so any assigned field is
+/// refused rather than written into the wrong element.
+fn characteristics(p: &[Brace], slot: usize, names: &NameIndex) -> Result<Element> {
+    let outer = list(item(p, slot)?)?;
+    if atom(item(outer, 0)?)? != "0" {
+        bail!("Characteristics: unexpected wrapper");
+    }
+    let items = list(item(outer, 1)?)?;
+    let count = usize::try_from(super::export::number(item(items, 0)?)?)
+        .map_err(|_| anyhow!("Characteristics: count does not fit"))?;
+    if items.len() != count + 1 {
+        bail!("Characteristics: count does not match its members");
+    }
+    let mut element = el("Characteristics");
+    for entry in &items[1..] {
+        let fields = list(entry)?;
+        if string(item(fields, 0)?)? != "#" {
+            bail!("Characteristics: not a characteristic record");
+        }
+        let record = list(item(fields, 2)?)?;
+        if record.len() != 13 || atom(item(record, 0)?)? != "4" {
+            bail!("Characteristics: unmeasured characteristic layout");
+        }
+        let reference = |index: usize| -> Result<String> {
+            let wrapper = list(item(record, index)?)?;
+            if wrapper.len() != 2 || atom(item(wrapper, 0)?)? != "1" {
+                bail!("Characteristics: not a reference wrapper");
+            }
+            reference_name(atom(item(wrapper, 1)?)?, names)
+        };
+        let number = |index: usize| -> Result<i64> {
+            let wrapper = list(item(record, index)?)?;
+            if wrapper.len() != 3 || atom(item(wrapper, 0)?)? != "1" {
+                bail!("Characteristics: not a field-reference wrapper");
+            }
+            super::export::number(item(list(item(wrapper, 1)?)?, 0)?)
+        };
+        let undefined = |index: usize| -> Result<bool> {
+            let wrapper = list(item(record, index)?)?;
+            Ok(wrapper.len() == 1
+                && (wrapper[0].as_atom() == Some("U") || wrapper[0].as_str() == Some("U")))
+        };
+        // Field references the matrix leaves unset. A set one would need the
+        // stored order of these slots, which no corpus has measured yet.
+        let key_field = number(3)?;
+        let types_filter_field = number(4)?;
+        let data_path_field = number(5)?;
+        let multiple_values_use_field = number(6)?;
+        let types_filter_value_unset = undefined(7)?;
+        let object_field = number(8)?;
+        let type_field = number(9)?;
+        let value_field = number(10)?;
+        let multiple_values_key_field = number(11)?;
+        let multiple_values_order_field = number(12)?;
+        for assigned in [
+            key_field,
+            types_filter_field,
+            data_path_field,
+            multiple_values_use_field,
+            object_field,
+            type_field,
+            value_field,
+            multiple_values_key_field,
+            multiple_values_order_field,
+        ] {
+            if assigned != -1 {
+                bail!("Characteristics: assigned field reference {assigned} is not measured");
+            }
+        }
+        if !types_filter_value_unset {
+            bail!("Characteristics: assigned types filter value is not measured");
+        }
+        element.children.push(
+            el("xr:Characteristic")
+                .child(
+                    el("xr:CharacteristicTypes")
+                        .attr("from", reference(1)?)
+                        .child(leaf("xr:KeyField", key_field.to_string()))
+                        .child(leaf("xr:TypesFilterField", types_filter_field.to_string()))
+                        .child(el("xr:TypesFilterValue").attr("nil", "true"))
+                        .child(leaf("xr:DataPathField", data_path_field.to_string()))
+                        .child(leaf(
+                            "xr:MultipleValuesUseField",
+                            multiple_values_use_field.to_string(),
+                        )),
+                )
+                .child(
+                    el("xr:CharacteristicValues")
+                        .attr("from", reference(2)?)
+                        .child(leaf("xr:ObjectField", object_field.to_string()))
+                        .child(leaf("xr:TypeField", type_field.to_string()))
+                        .child(leaf("xr:ValueField", value_field.to_string()))
+                        .child(leaf(
+                            "xr:MultipleValuesKeyField",
+                            multiple_values_key_field.to_string(),
+                        ))
+                        .child(leaf(
+                            "xr:MultipleValuesOrderField",
+                            multiple_values_order_field.to_string(),
+                        )),
+                ),
+        );
+    }
+    Ok(element)
+}
+
+/// A localized string property (`{N,"lang","text",...}`).
+fn localized(p: &[Brace], slot: usize, name: &str) -> Result<Element> {
+    localized_element(name, item(p, slot)?)
+}
+
+/// A form reference property: nil uuid becomes an empty element.
+fn form_reference(p: &[Brace], slot: usize, name: &str, names: &NameIndex) -> Result<Element> {
+    Ok(leaf(name, reference_name(atom(item(p, slot)?)?, names)?))
+}
+
+/// `{"U"}` -> `xsi:nil`; `{"S","A"}` -> `xsi:type="xs:string"` with the text.
+fn unfilled_parent_value(node: &Brace) -> Result<Element> {
+    let wrapper = list(node)?;
+    match (wrapper.first().and_then(Brace::as_str), wrapper.get(1)) {
+        (Some("U"), None) => Ok(el("UnfilledParentValue").attr("nil", "true")),
+        (Some("S"), Some(text)) => {
+            Ok(leaf("UnfilledParentValue", xml_text(string(text)?)).attr("type", "xs:string"))
+        }
+        _ => bail!("unfilled parent value: unmeasured layout"),
+    }
 }
 
 fn key_field_elements(full: &str, fields: &[String]) -> Vec<Element> {
@@ -337,6 +676,28 @@ fn table_ref_lists(row: &Row<'_>) -> Result<(Vec<String>, Vec<String>)> {
         "0",
     )?)?;
     Ok((key_fields, input_by_string))
+}
+
+/// A `{1,{0,N,{"#",<ref>,{0,<field>}}...}}` field list as field names.
+fn field_list_names(row: &Row<'_>, slot: usize) -> Result<Vec<String>> {
+    let names = field_names(row)?;
+    let wrapper = list(item(row.payload, slot)?)?;
+    if wrapper.len() != 2 || atom(item(wrapper, 0)?)? != "1" {
+        bail!("Table: invalid field-list wrapper at slot {slot}");
+    }
+    typed_ref_list(
+        item(wrapper, schema::INPUT_BY_STRING_ITEMS_SLOT)?,
+        schema::INPUT_BY_STRING_REF_TYPE,
+        "0",
+    )?
+    .into_iter()
+    .map(|id| {
+        names
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow!("Table: field list names unknown field {id}"))
+    })
+    .collect()
 }
 
 fn field_names(row: &Row<'_>) -> Result<std::collections::BTreeMap<String, String>> {
@@ -391,51 +752,114 @@ fn typed_ref_list(node: &Brace, type_id: &str, reference_kind: &str) -> Result<V
         .collect()
 }
 
-/// DimensionTable properties, in Designer order. Every value except
-/// NameInDataSource is the measured default of both corpora.
+/// DimensionTable properties, in Designer order, from the slots measured on
+/// the matrix.
 fn dimension_properties(row: &Row<'_>, head: &Header, context: &ExportContext) -> Result<Element> {
     let p = row.payload;
     let [name, synonym, comment] = header_elements(head)?;
     check_row_shape(row, "DimensionTable")?;
+    // The stored text is what the platform publishes: `-1` is kept as the
+    // unsigned maximum rather than rescaled in the XML.
+    let level_text = atom(item(p, schema::DIMENSION_LEVEL_NUMBER_SLOT)?)?;
+    if level_text.parse::<u64>().is_err() {
+        bail!("DimensionTable: unmeasured LevelNumber {level_text}");
+    }
     Ok(el("Properties")
         .child(name)
         .child(synonym)
         .child(comment)
-        .child(leaf("NameInDataSource", xml_text(string(item(p, 13)?)?)))
-        .child(el("PresentationField"))
-        .child(el("HierarchyNameInDataSource"))
         .child(leaf(
-            "LevelNumber",
-            super::export::number(item(p, 16)?)?.to_string(),
+            "NameInDataSource",
+            xml_text(string(item(
+                p,
+                schema::DIMENSION_NAME_IN_DATA_SOURCE_SLOT,
+            )?)?),
         ))
-        .child(bool_element("Hierarchical", item(p, 17)?)?)
-        .child(el("UnfilledParentValue").attr("nil", "true"))
-        .child(leaf("UseStandardCommands", "false"))
-        .child(leaf("QuickChoice", "false"))
         .child(leaf(
-            "DefaultObjectForm",
+            "PresentationField",
             reference_name(
-                atom(item(p, schema::DIMENSION_DEFAULT_OBJECT_FORM_SLOT)?)?,
+                atom(item(p, schema::DIMENSION_PRESENTATION_FIELD_SLOT)?)?,
                 &context.names,
             )?,
         ))
-        .child(el("DefaultListForm"))
-        .child(el("DefaultChoiceForm"))
-        .child(el("ObjectPresentation"))
-        .child(el("ExtendedObjectPresentation"))
-        .child(el("ListPresentation"))
-        .child(el("ExtendedListPresentation"))
-        .child(el("Explanation"))
-        .child(leaf("IncludeHelpInContents", "false")))
+        .child(leaf(
+            "HierarchyNameInDataSource",
+            xml_text(string(item(
+                p,
+                schema::DIMENSION_HIERARCHY_NAME_IN_DATA_SOURCE_SLOT,
+            )?)?),
+        ))
+        .child(leaf("LevelNumber", level_text.to_string()))
+        .child(bool_element(
+            "Hierarchical",
+            item(p, schema::DIMENSION_HIERARCHICAL_SLOT)?,
+        )?)
+        .child(unfilled_parent_value(item(
+            p,
+            schema::DIMENSION_UNFILLED_PARENT_VALUE_SLOT,
+        )?)?)
+        .child(bool_element(
+            "UseStandardCommands",
+            item(p, schema::DIMENSION_USE_STANDARD_COMMANDS_SLOT)?,
+        )?)
+        .child(bool_element(
+            "QuickChoice",
+            item(p, schema::DIMENSION_QUICK_CHOICE_SLOT)?,
+        )?)
+        .child(form_reference(
+            p,
+            schema::DIMENSION_DEFAULT_OBJECT_FORM_SLOT,
+            "DefaultObjectForm",
+            &context.names,
+        )?)
+        .child(form_reference(
+            p,
+            schema::DIMENSION_DEFAULT_LIST_FORM_SLOT,
+            "DefaultListForm",
+            &context.names,
+        )?)
+        .child(form_reference(
+            p,
+            schema::DIMENSION_DEFAULT_CHOICE_FORM_SLOT,
+            "DefaultChoiceForm",
+            &context.names,
+        )?)
+        .child(localized(
+            p,
+            schema::DIMENSION_OBJECT_PRESENTATION_SLOT,
+            "ObjectPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::DIMENSION_EXTENDED_OBJECT_PRESENTATION_SLOT,
+            "ExtendedObjectPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::DIMENSION_LIST_PRESENTATION_SLOT,
+            "ListPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::DIMENSION_EXTENDED_LIST_PRESENTATION_SLOT,
+            "ExtendedListPresentation",
+        )?)
+        .child(localized(
+            p,
+            schema::DIMENSION_EXPLANATION_SLOT,
+            "Explanation",
+        )?)
+        .child(bool_element(
+            "IncludeHelpInContents",
+            item(p, schema::DIMENSION_INCLUDE_HELP_IN_CONTENTS_SLOT)?,
+        )?))
 }
 
 /// Refuse a row whose un-decoded property slots are not the measured defaults.
 /// This keeps the exporter from silently publishing a default where the source
-/// held something else until the slot is evidenced.
+/// held something else until the slot is evidenced. A kind with every property
+/// decoded (the cube) has no defaults to guard.
 fn check_row_shape(row: &Row<'_>, kind: &str) -> Result<()> {
-    if schema::unmodeled_defaults(kind).is_empty() {
-        bail!("unknown EDS child kind {kind}");
-    }
     for expected in schema::unmodeled_defaults(kind) {
         let wrapped = parse_row(expected.wrapped_value.as_bytes())?;
         let expected_value = item(list(&wrapped)?, 0)?;
@@ -445,18 +869,6 @@ fn check_row_shape(row: &Row<'_>, kind: &str) -> Result<()> {
                 expected.body_slot
             );
         }
-    }
-    if kind == schema::DIMENSION_TABLE_KIND
-        && (list(item(
-            row.payload,
-            schema::DIMENSION_PRESENTATION_FIELD_SLOT,
-        )?)?
-        .len()
-            != 3
-            || list(item(row.payload, schema::DIMENSION_MEMBER_FIELD_SLOT)?)?.len() != 2
-            || list(item(row.payload, schema::DIMENSION_PARENT_FIELD_SLOT)?)?.len() != 2)
-    {
-        bail!("DimensionTable: unverified structural slots changed");
     }
     // A malformed optional collection must not become an absent collection.
     let _ = row.optional_items(schema::FIELDS_COLLECTION)?;
@@ -609,7 +1021,7 @@ pub fn decode_row(kind: &str, row: &Brace, context: &ExportContext) -> Result<El
     let internal = internal_info(kind, &path, parsed.payload)?;
     let properties = match kind {
         schema::CUBE_KIND => cube_properties(&parsed, &head, context)?,
-        schema::TABLE_KIND => table_properties(&parsed, &head, &full)?,
+        schema::TABLE_KIND => table_properties(&parsed, &head, &full, context)?,
         schema::DIMENSION_TABLE_KIND => dimension_properties(&parsed, &head, context)?,
         other => bail!("unknown EDS child kind {other}"),
     };
@@ -974,23 +1386,49 @@ mod eds_guard_regressions {
     const TABLE: &[u8] =
         include_bytes!("../../../../tests/fixtures/eds-branch/external_data_source_table_row.txt");
 
+    fn export_context() -> ExportContext {
+        ExportContext {
+            names: NameIndex::default(),
+            version: "2.20".to_string(),
+            compat: super::super::objects::parts::Compat(8, 3, 27),
+        }
+    }
+
     #[test]
-    fn eds_guard_refuses_nonempty_presentation() {
+    fn eds_guard_refuses_malformed_presentation() {
         let mut row = parse_row(TABLE).unwrap();
-        row.as_list_mut().unwrap()[1].as_list_mut().unwrap()[schema::TABLE_PRESENTATION_SLOT] =
-            parse_row(br#"{1,{"ru","Changed presentation"}}"#).unwrap();
+        row.as_list_mut().unwrap()[1].as_list_mut().unwrap()
+            [schema::TABLE_OBJECT_PRESENTATION_SLOT] =
+            parse_row(br#"{2,"ru","only one pair"}"#).unwrap();
         let parsed = Row::parse(&row, schema::TABLE_KIND).unwrap();
         let head = parsed.header(schema::TABLE_KIND).unwrap();
-        assert!(table_properties(&parsed, &head, "ExternalDataSource.Review.Table.T").is_err());
+        assert!(
+            table_properties(
+                &parsed,
+                &head,
+                "ExternalDataSource.Review.Table.T",
+                &export_context()
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn eds_guard_refuses_changed_unmodeled_scalar() {
         let mut row = parse_row(TABLE).unwrap();
-        row.as_list_mut().unwrap()[1].as_list_mut().unwrap()[40] = Brace::num(1);
+        row.as_list_mut().unwrap()[1].as_list_mut().unwrap()[38] =
+            parse_row(br#"{11111111-1111-4111-8111-111111111111}"#).unwrap();
         let parsed = Row::parse(&row, schema::TABLE_KIND).unwrap();
         let head = parsed.header(schema::TABLE_KIND).unwrap();
-        assert!(table_properties(&parsed, &head, "ExternalDataSource.Review.Table.T").is_err());
+        assert!(
+            table_properties(
+                &parsed,
+                &head,
+                "ExternalDataSource.Review.Table.T",
+                &export_context()
+            )
+            .is_err()
+        );
     }
 
     #[test]

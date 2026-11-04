@@ -80,6 +80,16 @@ pub(crate) fn build(rows: &[MetadataTextRow], version: &str) -> Option<EdsExport
             }
         }
     }
+    // A reference from an EDS descriptor can name any configuration object
+    // (a common form, a document in `BasedOn`). Those names are spelled
+    // `Kind.Name`, and the EDS entries above keep their owner-qualified form
+    // because they were inserted first.
+    for row in rows {
+        let (Some(kind), Some(header)) = (row.kind.as_deref(), row.header.as_ref()) else {
+            continue;
+        };
+        names.add_named_child(format!("{kind}.{}", header.name), header.uuid.clone());
+    }
     Some(EdsExport {
         names,
         kinds,

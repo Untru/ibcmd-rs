@@ -260,231 +260,103 @@ pub const fn commands_collection(kind: &str) -> &'static str {
     }
 }
 
-/// Unrendered body properties. The exact defaults are shared by the public
-/// eds-matrix/eds-corpus2 rows and the independent eds-branch table.
-/// A one-member brace wrapper retains scalar/string/list distinctions.
+/// Unrendered body properties. A slot listed here still holds the measured
+/// default of every corpus; any other value is refused instead of silently
+/// rewritten. A one-member brace wrapper keeps scalar/string/list distinct.
 pub struct UnmodeledDefault {
     pub body_slot: usize,
     pub wrapped_value: &'static str,
 }
 
-pub const TABLE_PRESENTATION_SLOT: usize = 32;
-pub const TABLE_KEY_FIELDS_SLOT: usize = 18;
-pub const TABLE_INPUT_BY_STRING_SLOT: usize = 33;
-/// Cube `DefaultListForm` reference. Measured: the only form reference the
-/// platform writes for a cube whose form collection is non-empty sits here;
-/// `18` stays the nil `DefaultRecordForm` default. The stored order is the
-/// reverse of the XML order.
-pub const CUBE_DEFAULT_LIST_FORM_SLOT: usize = 17;
-/// DimensionTable `DefaultObjectForm` reference. Measured the same way; its
-/// neighbours `10`/`11` are the nil `DefaultChoiceForm`/`DefaultListForm`.
-pub const DIMENSION_DEFAULT_OBJECT_FORM_SLOT: usize = 12;
-pub const CUBE_UNMODELED_DEFAULTS: &[UnmodeledDefault] = &[
-    UnmodeledDefault {
-        body_slot: 15,
-        wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 18,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 19,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 20,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 21,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 22,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 23,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 24,
-        wrapped_value: r#"{{0,{0}}}"#,
-    },
-];
+// Slot map measured on the external-data-source matrix: 162 controlled
+// variants, one property each, rows extracted from the platform-saved CF and
+// paired with the platform XML. The stored order differs from the Designer
+// order, so every property keeps its own named slot.
 
-pub const TABLE_UNMODELED_DEFAULTS: &[UnmodeledDefault] = &[
-    UnmodeledDefault {
-        body_slot: 19,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 23,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 24,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 25,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 26,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 27,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 28,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 29,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 30,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 31,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: TABLE_PRESENTATION_SLOT,
-        wrapped_value: r#"{{0,{0}}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 34,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 35,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 38,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 39,
-        wrapped_value: r#"{{"U"}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 40,
-        wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 41,
-        wrapped_value: r#"{{1,2,0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 42,
-        wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 43,
-        wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 44,
-        wrapped_value: r#"{{0,"","",{0,0,0}}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 45,
-        wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 46,
-        wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 47,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 48,
-        wrapped_value: r#"{1}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 49,
-        wrapped_value: r#"{{0,0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 50,
-        wrapped_value: r#"{{1,{0,0}}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 51,
-        wrapped_value: r#"{0}"#,
-    },
-];
+pub const CUBE_NAME_IN_DATA_SOURCE_SLOT: usize = 14;
+pub const CUBE_USE_STANDARD_COMMANDS_SLOT: usize = 15;
+pub const CUBE_INCLUDE_HELP_IN_CONTENTS_SLOT: usize = 16;
+pub const CUBE_DEFAULT_LIST_FORM_SLOT: usize = 17;
+pub const CUBE_DEFAULT_RECORD_FORM_SLOT: usize = 18;
+pub const CUBE_RECORD_PRESENTATION_SLOT: usize = 19;
+pub const CUBE_EXTENDED_RECORD_PRESENTATION_SLOT: usize = 20;
+pub const CUBE_LIST_PRESENTATION_SLOT: usize = 21;
+pub const CUBE_EXTENDED_LIST_PRESENTATION_SLOT: usize = 22;
+pub const CUBE_EXPLANATION_SLOT: usize = 23;
+pub const CUBE_CHARACTERISTICS_SLOT: usize = 24;
+
+pub const TABLE_TABLE_DATA_TYPE_SLOT: usize = 16;
+pub const TABLE_NAME_IN_DATA_SOURCE_SLOT: usize = 17;
+/// Public PresentationField reference (a bare field uuid).
+pub const TABLE_PRESENTATION_FIELD_SLOT: usize = 19;
+pub const TABLE_KEY_FIELDS_SLOT: usize = 18;
+pub const TABLE_QUICK_CHOICE_SLOT: usize = 20;
+pub const TABLE_USE_STANDARD_COMMANDS_SLOT: usize = 21;
+pub const TABLE_INCLUDE_HELP_IN_CONTENTS_SLOT: usize = 22;
+pub const TABLE_DEFAULT_CHOICE_FORM_SLOT: usize = 23;
+pub const TABLE_DEFAULT_LIST_FORM_SLOT: usize = 24;
+pub const TABLE_DEFAULT_RECORD_FORM_SLOT: usize = 25;
+pub const TABLE_DEFAULT_OBJECT_FORM_SLOT: usize = 26;
+pub const TABLE_RECORD_PRESENTATION_SLOT: usize = 27;
+pub const TABLE_EXTENDED_RECORD_PRESENTATION_SLOT: usize = 28;
+pub const TABLE_LIST_PRESENTATION_SLOT: usize = 29;
+pub const TABLE_EXTENDED_LIST_PRESENTATION_SLOT: usize = 30;
+pub const TABLE_EXPLANATION_SLOT: usize = 31;
+pub const TABLE_CHARACTERISTICS_SLOT: usize = 32;
+pub const TABLE_INPUT_BY_STRING_SLOT: usize = 33;
+pub const TABLE_PARENT_FIELD_SLOT: usize = 38;
+pub const TABLE_UNFILLED_PARENT_VALUE_SLOT: usize = 39;
+pub const TABLE_OBJECT_PRESENTATION_SLOT: usize = 34;
+pub const TABLE_EXTENDED_OBJECT_PRESENTATION_SLOT: usize = 35;
+pub const TABLE_CREATE_ON_INPUT_SLOT: usize = 40;
+/// `{search,2,choiceDataGet}`: the two input-by-string modes share one bag.
+pub const TABLE_SEARCH_MODES_SLOT: usize = 41;
+pub const TABLE_CHOICE_HISTORY_ON_INPUT_SLOT: usize = 42;
+pub const TABLE_TYPE_SLOT: usize = 43;
+/// `{0,expression,presentation,{0,0,0}}`: the expression source of a table.
+pub const TABLE_EXPRESSION_IN_DATA_SOURCE_SLOT: usize = 44;
+pub const TABLE_READ_ONLY_SLOT: usize = 45;
+pub const TABLE_TRANSACTIONS_ISOLATION_LEVEL_SLOT: usize = 46;
+pub const TABLE_DATA_VERSION_FIELD_SLOT: usize = 47;
+pub const TABLE_EDIT_TYPE_SLOT: usize = 48;
+pub const TABLE_BASED_ON_SLOT: usize = 49;
+/// Typed field list, the same wrapper shape as InputByString.
+pub const TABLE_DATA_LOCK_FIELDS_SLOT: usize = 50;
+pub const TABLE_DATA_LOCK_CONTROL_MODE_SLOT: usize = 51;
+
+pub const DIMENSION_DEFAULT_CHOICE_FORM_SLOT: usize = 10;
+pub const DIMENSION_DEFAULT_LIST_FORM_SLOT: usize = 11;
+pub const DIMENSION_DEFAULT_OBJECT_FORM_SLOT: usize = 12;
+pub const DIMENSION_NAME_IN_DATA_SOURCE_SLOT: usize = 13;
+/// The public PresentationField reference (the internal member-field typed
+/// reference sits at 14 and is never rendered).
+pub const DIMENSION_PRESENTATION_FIELD_SLOT: usize = 15;
+pub const DIMENSION_QUICK_CHOICE_SLOT: usize = 16;
+pub const DIMENSION_USE_STANDARD_COMMANDS_SLOT: usize = 17;
+pub const DIMENSION_LIST_PRESENTATION_SLOT: usize = 18;
+pub const DIMENSION_EXTENDED_LIST_PRESENTATION_SLOT: usize = 19;
+pub const DIMENSION_OBJECT_PRESENTATION_SLOT: usize = 20;
+pub const DIMENSION_EXTENDED_OBJECT_PRESENTATION_SLOT: usize = 21;
+pub const DIMENSION_EXPLANATION_SLOT: usize = 23;
+pub const DIMENSION_INCLUDE_HELP_IN_CONTENTS_SLOT: usize = 24;
+pub const DIMENSION_HIERARCHY_NAME_IN_DATA_SOURCE_SLOT: usize = 26;
+pub const DIMENSION_LEVEL_NUMBER_SLOT: usize = 27;
+pub const DIMENSION_HIERARCHICAL_SLOT: usize = 30;
+pub const DIMENSION_UNFILLED_PARENT_VALUE_SLOT: usize = 29;
+
+/// Every slot of a cube is decoded; the list stays for the shape guard.
+pub const CUBE_UNMODELED_DEFAULTS: &[UnmodeledDefault] = &[];
+
+pub const TABLE_UNMODELED_DEFAULTS: &[UnmodeledDefault] = &[];
 
 pub const DIMENSION_TABLE_UNMODELED_DEFAULTS: &[UnmodeledDefault] = &[
     UnmodeledDefault {
-        body_slot: 10,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 11,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 15,
-        wrapped_value: r#"{00000000-0000-0000-0000-000000000000}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 18,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 19,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 20,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 21,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
         body_slot: 22,
         wrapped_value: r#"{{0,{0}}}"#,
     },
     UnmodeledDefault {
-        body_slot: 23,
-        wrapped_value: r#"{{0}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 24,
-        wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
         body_slot: 25,
         wrapped_value: r#"{{0,{0}}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 26,
-        wrapped_value: r#"{""}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 27,
-        wrapped_value: r#"{0}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 29,
-        wrapped_value: r#"{{"U"}}"#,
-    },
-    UnmodeledDefault {
-        body_slot: 30,
-        wrapped_value: r#"{0}"#,
     },
 ];
 
@@ -502,7 +374,9 @@ pub const ROW_COLLECTION_COUNT_SLOT: usize = 2;
 pub const ROW_COLLECTIONS_START: usize = 3;
 pub const COLLECTION_COUNT_SLOT: usize = 1;
 pub const COLLECTION_ITEMS_START: usize = 2;
-pub const DIMENSION_PRESENTATION_FIELD_SLOT: usize = 14;
+/// The internal typed reference to the `MEMBER_UNIQUE_NAME` field. The
+/// platform never writes it into the XML.
+pub const DIMENSION_MEMBER_TYPED_REF_SLOT: usize = 14;
 pub const DIMENSION_MEMBER_FIELD_SLOT: usize = 31;
 pub const DIMENSION_PARENT_FIELD_SLOT: usize = 32;
 pub const KEY_FIELD_REF_TYPE: &str = "157fa490-4ce9-11d4-9415-008048da11f9";

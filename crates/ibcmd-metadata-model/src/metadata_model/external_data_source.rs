@@ -313,18 +313,12 @@ fn function_element(node: &Brace, names: &NameIndex) -> Result<Element> {
     let typed = list(item(list(body)?, 1)?)?;
     let [name, synonym, comment] = header_elements(&head)?;
     let tail = list(item(record, 3)?)?;
-    if tail.first().and_then(Brace::as_atom) != Some("0")
-        || tail
-            .get(1)
-            .and_then(Brace::as_str)
-            .is_some_and(|text| !text.is_empty())
-        || tail
-            .get(2)
-            .and_then(Brace::as_str)
-            .is_some_and(|text| !text.is_empty())
-    {
-        bail!("ExternalDataSource non-empty ExpressionInDataSource is not supported yet");
+    if tail.first().and_then(Brace::as_atom) != Some("0") {
+        bail!("ExternalDataSource invalid Function expression wrapper");
     }
+    // `{0,<expression>,<presentation>,{0,0,0}}`: the stored expression is what
+    // the platform writes as `<ExpressionInDataSource>`.
+    let expression = tail.get(1).and_then(Brace::as_str).unwrap_or_default();
     Ok(el("Function").attr("uuid", &head.uuid).child(
         el("Properties")
             .child(name)
@@ -335,7 +329,10 @@ fn function_element(node: &Brace, names: &NameIndex) -> Result<Element> {
                 super::export::values::bool_text(item(record, 2)?)?,
             ))
             .child(type_element("Type", item(typed, 2)?, names)?)
-            .child(el("ExpressionInDataSource")),
+            .child(leaf(
+                "ExpressionInDataSource",
+                super::export::xml_text(expression),
+            )),
     ))
 }
 
