@@ -11162,6 +11162,7 @@ struct MetadataTabularSectionProperties {
     line_number_synonym: Vec<(String, String)>,
     line_number_format: Vec<(String, String)>,
     line_number_edit_format: Vec<(String, String)>,
+    line_number_type_reduction_mode: &'static str,
     use_mode: Option<&'static str>,
     line_number_length: Option<u32>,
 }
@@ -11174,6 +11175,9 @@ struct LineNumberStandardAttribute {
     synonym: Vec<(String, String)>,
     format: Vec<(String, String)>,
     edit_format: Vec<(String, String)>,
+    /// `<xr:TypeReductionMode>`: `0` is `TransformValues`, `1` `DeleteData`,
+    /// `2` `Deny`. A bag that carries no such property keeps the default.
+    type_reduction_mode: Option<&'static str>,
 }
 
 struct ExactMetadataTabularSection {
@@ -19236,6 +19240,21 @@ fn parse_calculation_register_fixed_schedule(
         return Some(None);
     }
 
+    // A register that names neither a schedule nor a chart stores four nil
+    // slots; the platform still writes the four properties, empty.
+    if (19..=22).all(|index| {
+        fields
+            .get(index)
+            .is_some_and(|field| parse_information_register_non_zero_uuid(field).is_none())
+    }) {
+        return Some(Some(CalculationRegisterScheduleProperties {
+            schedule: None,
+            schedule_value: None,
+            schedule_date: None,
+            chart_of_calculation_types: String::new(),
+        }));
+    }
+
     let resolved = (|| {
         let chart_uuid = parse_information_register_non_zero_uuid(fields.get(22)?)?;
         let chart_of_calculation_types =
@@ -21142,10 +21161,31 @@ fn parse_exact_metadata_tabular_section(
             line_number_synonym: line_number.synonym,
             line_number_format: line_number.format,
             line_number_edit_format: line_number.edit_format,
+            line_number_type_reduction_mode: line_number
+                .type_reduction_mode
+                .unwrap_or("TransformValues"),
             use_mode,
             line_number_length,
         },
     }))
+}
+
+/// `<xr:TypeReductionMode>` of a tabular section's `LineNumber` standard
+/// attribute. The record stores the enum code: `0` is `TransformValues`, `1`
+/// `DeleteData`, `2` `Deny`. A bag without the property keeps the default the
+/// platform writes for every unmodified section.
+fn line_number_type_reduction_mode_xml(
+    bag: &InformationRegisterStandardAttributeBag<'_>,
+) -> Option<&'static str> {
+    let Some(value) = bag.get(STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID) else {
+        return Some("TransformValues");
+    };
+    match parse_standard_attribute_nested_enum(value, STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID)? {
+        "0" => Some("TransformValues"),
+        "1" => Some("DeleteData"),
+        "2" => Some("Deny"),
+        _ => None,
+    }
 }
 
 fn parse_exact_tabular_section_standard_attributes_presence(
@@ -21233,6 +21273,7 @@ fn parse_exact_tabular_section_standard_attributes_presence(
                 synonym,
                 format,
                 edit_format,
+                type_reduction_mode: Some(line_number_type_reduction_mode_xml(&bag)?),
             }))
         }
         _ => None,
@@ -23053,6 +23094,15 @@ fn parse_information_register_data_path(
                         ))
                     })
                 }
+                // Every other family names its own standard attributes through
+                // the one code table: a chart of accounts links its accounting
+                // flags to `{-2}` (`Ref`), and the chart's `Ref` table entry is
+                // the same one its standard attributes already use.
+                (marker, 1) => owner_data_path_standard_attribute(owner_kind, marker).map(|name| {
+                    ResolvedDataPathSegment::Own(format!(
+                        "{owner_kind}.{owner_name}.StandardAttribute.{name}"
+                    ))
+                }),
                 _ => None,
             }
         })
@@ -24977,6 +25027,7 @@ fn parse_metadata_tabular_section_properties(
             line_number_synonym: Vec::new(),
             line_number_format: Vec::new(),
             line_number_edit_format: Vec::new(),
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: fields
                 .get(header_index + 4)
                 .and_then(|field| metadata_attribute_use_mode_xml(field.trim())),
@@ -24995,6 +25046,7 @@ fn parse_metadata_tabular_section_properties(
             line_number_synonym: Vec::new(),
             line_number_format: Vec::new(),
             line_number_edit_format: Vec::new(),
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: None,
         });
@@ -25021,6 +25073,7 @@ fn parse_data_processor_tabular_section_properties_from_fields(
         line_number_synonym: Vec::new(),
         line_number_format: Vec::new(),
         line_number_edit_format: Vec::new(),
+        line_number_type_reduction_mode: "TransformValues",
         use_mode: None,
         line_number_length: None,
     })
@@ -27952,6 +28005,9 @@ fn parse_cct_tabular_sections_indexed(
                 line_number_synonym: line_number.synonym,
                 line_number_format: line_number.format,
                 line_number_edit_format: line_number.edit_format,
+                line_number_type_reduction_mode: line_number
+                    .type_reduction_mode
+                    .unwrap_or("TransformValues"),
                 use_mode: section_envelope.use_mode,
                 line_number_length: section_envelope.line_number_length,
             }),
@@ -35118,9 +35174,11 @@ fn parse_web_service_properties_from_text(
     );
 
     Some(WebServiceProperties {
-        namespace: parse_web_service_nonempty_quoted_string(fields.get(1)?)?,
+        // A minimal service stores an empty namespace and descriptor name; the
+        // platform writes both as empty elements.
+        namespace: parse_web_service_quoted_string(fields.get(1)?)?,
         xdto_packages,
-        descriptor_file_name: parse_web_service_nonempty_quoted_string(fields.get(4)?)?,
+        descriptor_file_name: parse_web_service_quoted_string(fields.get(4)?)?,
         reuse_sessions: parse_web_service_reuse_sessions(fields.get(6)?)?,
         session_max_age: parse_web_service_u64(fields.get(7)?)?,
         operations: parse_web_service_operations(root.get(3)?, &mut seen_uuids)?,
@@ -36462,15 +36520,24 @@ fn parse_scheduled_job_properties_from_text(
     let use_job = parse_1c_bool_field(fields.get(4).copied())?;
     let predefined = parse_1c_bool_field(fields.get(5).copied())?;
     let module_uuid = parse_uuid_field(fields.get(6)?.trim())?;
-    let module_ref = object_refs.get(&module_uuid)?;
     let method = fields
         .get(7)
         .and_then(|field| parse_1c_quoted_string(field.trim()))?;
+    // A job without a method stores a zero module and an empty method name; the
+    // platform writes `<MethodName/>`.
+    let method_name = if information_register_uuid_is_zero(&module_uuid) {
+        if !method.is_empty() {
+            return None;
+        }
+        String::new()
+    } else {
+        format!("{}.{method}", object_refs.get(&module_uuid)?)
+    };
     let restart_count_on_failure = parse_1c_u32_field(fields.get(8).copied())?;
     let restart_interval_on_failure = parse_1c_u32_field(fields.get(9).copied())?;
 
     Some(ScheduledJobProperties {
-        method_name: format!("{module_ref}.{method}"),
+        method_name,
         description,
         key,
         use_job,
@@ -38493,6 +38560,10 @@ fn format_register_source_xml(
                 );
                 xml.insert_str(index, &properties);
                 return if register.child_objects.is_empty() {
+                    // The platform always declares the collection.
+                    if let Some(index) = xml.find(&format!("\t</{kind}>")) {
+                        xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+                    }
                     xml
                 } else {
                     let mut child_objects = String::new();
@@ -38552,25 +38623,35 @@ fn format_register_source_xml(
                     &mut properties,
                     "\t\t\t",
                     "Schedule",
-                    schedule.schedule.as_deref(),
+                    schedule
+                        .schedule
+                        .as_deref()
+                        .filter(|value| !value.is_empty()),
                 );
                 push_optional_text_element(
                     &mut properties,
                     "\t\t\t",
                     "ScheduleValue",
-                    schedule.schedule_value.as_deref(),
+                    schedule
+                        .schedule_value
+                        .as_deref()
+                        .filter(|value| !value.is_empty()),
                 );
                 push_optional_text_element(
                     &mut properties,
                     "\t\t\t",
                     "ScheduleDate",
-                    schedule.schedule_date.as_deref(),
+                    schedule
+                        .schedule_date
+                        .as_deref()
+                        .filter(|value| !value.is_empty()),
                 );
                 push_optional_text_element(
                     &mut properties,
                     "\t\t\t",
                     OwnedFormFamily::ChartOfCalculationTypes.as_str(),
-                    Some(schedule.chart_of_calculation_types.as_str()),
+                    Some(schedule.chart_of_calculation_types.as_str())
+                        .filter(|value| !value.is_empty()),
                 );
             }
             if let Some(register_type) = register.register_type {
@@ -38630,9 +38711,6 @@ fn format_register_source_xml(
             xml.insert_str(index, &properties);
         }
     }
-    if register.child_objects.is_empty() && register.recalculations.is_empty() {
-        return xml;
-    }
     let mut child_objects = String::new();
     for child in &register.child_objects {
         push_metadata_child_object_xml(&mut child_objects, child, type_set_leaves);
@@ -38642,6 +38720,14 @@ fn format_register_source_xml(
             "\t\t\t<Recalculation>{}</Recalculation>\r\n",
             escape_xml_element_text(recalculation)
         ));
+    }
+    if child_objects.is_empty() {
+        // A childless register still declares the collection; the platform
+        // writes `<ChildObjects/>`.
+        if let Some(index) = xml.find(&format!("\t</{kind}>")) {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        }
+        return xml;
     }
     insert_metadata_child_objects_xml(&mut xml, kind, &child_objects);
     xml
@@ -41197,12 +41283,11 @@ fn format_functional_option_source_xml(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("FunctionalOption", header, source_version);
     let mut insert = String::new();
-    if let Some(location) = &properties.location {
-        insert.push_str(&format!(
-            "\t\t\t<Location>{}</Location>\r\n",
-            escape_xml_text(location)
-        ));
-    }
+    // The element is always declared; a disabled option writes `<Location/>`.
+    insert.push_str(&format!(
+        "\t\t\t{}\r\n",
+        format_simple_property_xml("Location", properties.location.as_deref().unwrap_or(""))
+    ));
     insert.push_str(&format!(
         "\t\t\t<PrivilegedGetMode>{}</PrivilegedGetMode>\r\n",
         xml_bool(properties.privileged_get_mode)
@@ -41337,9 +41422,11 @@ fn push_metadata_child_command_properties_xml(
     xml: &mut String,
     properties: &CommonCommandProperties,
 ) {
+    // No group is `None`; the platform writes an empty `<Group/>`, not the
+    // panel default.
     xml.push_str(&format!(
-        "\t\t\t\t\t<Group>{}</Group>\r\n",
-        escape_xml_text(properties.group.as_deref().unwrap_or("ActionsPanelTools"))
+        "\t\t\t\t\t{}\r\n",
+        format_simple_property_xml("Group", properties.group.as_deref().unwrap_or(""))
     ));
     format_common_command_parameter_type_xml_with_indent(
         xml,
@@ -42021,10 +42108,11 @@ fn push_metadata_line_number_standard_attribute_xml(
 {indent}\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
 {indent}\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
 {indent}\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
-{indent}\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
+{indent}\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
 {indent}\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
 {indent}\t\t<xr:ToolTip/>\r\n\
-{indent}\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n"
+{indent}\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n",
+        properties.line_number_type_reduction_mode,
     ));
     push_xr_localized_property_xml(xml, &child_indent, "Format", &properties.line_number_format);
     xml.push_str(&format!(
@@ -42144,9 +42232,9 @@ fn format_common_command_source_xml_native(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("CommonCommand", header, source_version);
     let mut insert = format!(
-        "\t\t\t<Group>{}</Group>\r\n\
+        "\t\t\t{}\r\n\
 \t\t\t<Representation>{}</Representation>\r\n",
-        escape_xml_text(properties.group.as_deref().unwrap_or("ActionsPanelTools")),
+        format_simple_property_xml("Group", properties.group.as_deref().unwrap_or("")),
         properties.representation
     );
     push_common_command_tooltip_xml(&mut insert, &properties.tooltip);
@@ -42543,14 +42631,14 @@ fn format_scheduled_job_source_xml(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("ScheduledJob", header, source_version);
     let insert = format!(
-        "\t\t\t<MethodName>{}</MethodName>\r\n\
+        "\t\t\t{}\r\n\
 \t\t\t{}\r\n\
 \t\t\t{}\r\n\
 \t\t\t<Use>{}</Use>\r\n\
 \t\t\t<Predefined>{}</Predefined>\r\n\
 \t\t\t<RestartCountOnFailure>{}</RestartCountOnFailure>\r\n\
 \t\t\t<RestartIntervalOnFailure>{}</RestartIntervalOnFailure>\r\n",
-        escape_xml_element_text(&scheduled_job.method_name),
+        format_simple_property_xml("MethodName", &scheduled_job.method_name),
         format_simple_property_xml("Description", &scheduled_job.description),
         format_simple_property_xml("Key", &scheduled_job.key),
         xml_bool(scheduled_job.use_job),
@@ -42571,28 +42659,33 @@ fn format_event_subscription_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("EventSubscription", header, source_version);
-    let mut insert = String::from("\t\t\t<Source>\r\n");
+    let mut insert = String::new();
     let source_types = sorted_event_subscription_source_types(&event_subscription.source_types);
     let type_indent = "\t\t\t\t";
-    for source_type in source_types {
-        let source_type = scoped_value_type(source_type, type_indent.matches('\t').count() + 1);
-        let reference = metadata_type_xml_name(&source_type);
-        let tag = match &source_type {
-            ConstantValueType::TypeId { .. } => metadata_type_xml_tag(&source_type),
-            _ => event_subscription_source_type_tag(&reference),
-        };
-        let namespace_attr = metadata_type_xml_namespace_attr(&source_type);
-        insert.push_str(&format!(
-            "{type_indent}<v8:{tag}{namespace_attr}>{}</v8:{tag}>\r\n",
-            escape_xml_element_text(&reference)
-        ));
+    if source_types.is_empty() {
+        // A subscription without sources still declares the element.
+        insert.push_str("\t\t\t<Source/>\r\n");
+    } else {
+        insert.push_str("\t\t\t<Source>\r\n");
+        for source_type in source_types {
+            let source_type = scoped_value_type(source_type, type_indent.matches('\t').count() + 1);
+            let reference = metadata_type_xml_name(&source_type);
+            let tag = match &source_type {
+                ConstantValueType::TypeId { .. } => metadata_type_xml_tag(&source_type),
+                _ => event_subscription_source_type_tag(&reference),
+            };
+            let namespace_attr = metadata_type_xml_namespace_attr(&source_type);
+            insert.push_str(&format!(
+                "{type_indent}<v8:{tag}{namespace_attr}>{}</v8:{tag}>\r\n",
+                escape_xml_element_text(&reference)
+            ));
+        }
+        insert.push_str("\t\t\t</Source>\r\n");
     }
-    insert.push_str("\t\t\t</Source>\r\n");
     insert.push_str(&format!(
-        "\t\t\t<Event>{}</Event>\r\n\
-\t\t\t<Handler>{}</Handler>\r\n",
-        escape_xml_element_text(&event_subscription.event),
-        escape_xml_element_text(&event_subscription.handler)
+        "\t\t\t{}\r\n\t\t\t{}\r\n",
+        format_simple_property_xml("Event", &event_subscription.event),
+        format_simple_property_xml("Handler", &event_subscription.handler)
     ));
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
@@ -44452,10 +44545,10 @@ fn format_http_service_source_xml(
 ) -> String {
     let mut xml = format_full_metadata_source_xml("HTTPService", header, source_version);
     let insert = format!(
-        "\t\t\t<RootURL>{}</RootURL>\r\n\
+        "\t\t\t{}\r\n\
 \t\t\t<ReuseSessions>{}</ReuseSessions>\r\n\
 \t\t\t<SessionMaxAge>{}</SessionMaxAge>\r\n",
-        escape_xml_element_text(&service.root_url),
+        format_simple_property_xml("RootURL", &service.root_url),
         escape_xml_text(service.reuse_sessions),
         service.session_max_age
     );

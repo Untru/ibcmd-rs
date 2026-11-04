@@ -2260,6 +2260,7 @@ fn catalog_and_document_validators_keep_second_tabular_property_failure_location
         line_number_synonym: Vec::new(),
         line_number_format: Vec::new(),
         line_number_edit_format: Vec::new(),
+        line_number_type_reduction_mode: "TransformValues",
         use_mode: None,
         line_number_length: Some(5),
     };
@@ -13483,6 +13484,7 @@ fn formats_data_processor_tabular_section_defaults_without_use_or_line_number_le
             line_number_synonym: Vec::new(),
             line_number_format: Vec::new(),
             line_number_edit_format: Vec::new(),
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: None,
         },
@@ -13509,6 +13511,7 @@ fn formats_tabular_section_with_distinct_line_number_fill_checking() {
             line_number_synonym: Vec::new(),
             line_number_format: Vec::new(),
             line_number_edit_format: Vec::new(),
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: None,
         },
@@ -46920,8 +46923,6 @@ fn rejects_empty_or_path_ambiguous_web_service_names_and_required_text() {
     );
 
     let cases = [
-        valid.replacen("\"http://example.com/service\"", "\"\"", 1),
-        valid.replacen("\"RemoteApi.1cws\"", "\"\"", 1),
         valid.replacen("\"HandlePing\"", "\"\"", 1),
         valid.replacen(
             "\"RemoteApi\",{1,\"en\",\"RemoteApi\"}",
@@ -46969,6 +46970,19 @@ fn rejects_empty_or_path_ambiguous_web_service_names_and_required_text() {
             extract_web_service_fixture_for_test(&raw, &BTreeMap::new()).is_none(),
             "accepted empty/path-ambiguous WebService field: {raw}"
         );
+    }
+
+    // An empty namespace and an empty descriptor file name are the platform's
+    // own minimal service (TEST123/1); both are accepted and print empty.
+    for (from, tag) in [
+        ("\"http://example.com/service\"", "<Namespace/>"),
+        ("\"RemoteApi.1cws\"", "<DescriptorFileName/>"),
+    ] {
+        let raw = valid.replacen(from, "\"\"", 1);
+        let extracted = extract_web_service_fixture_for_test(&raw, &BTreeMap::new())
+            .unwrap_or_else(|| panic!("rejected an empty {tag}"));
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        assert!(xml.contains(tag), "{tag} is not empty in {xml}");
     }
 }
 
@@ -49750,11 +49764,19 @@ fn calculation_schedule_resolver_alternatives_omit_the_whole_tuple() {
         for field in &mut baseline.fields[19..=22] {
             *field = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
         }
-        assert_eq!(
-            xml,
-            baseline.xml_with_object_refs(&refs).unwrap(),
-            "{label}"
-        );
+        // A register that names neither a schedule nor a chart still declares
+        // the four properties, empty (TEST123/1, platform 8.3.27.2214); a
+        // partial tuple stays an omission and is not equal to that baseline.
+        let baseline_xml = baseline.xml_with_object_refs(&refs).unwrap();
+        for property in [
+            "<Schedule/>",
+            "<ScheduleValue/>",
+            "<ScheduleDate/>",
+            "<ChartOfCalculationTypes/>",
+        ] {
+            assert!(baseline_xml.contains(property), "{label}: {property}");
+        }
+        assert_ne!(xml, baseline_xml, "{label}");
     }
 }
 
@@ -52009,6 +52031,10 @@ fn line_number_standard_attributes_for_test(
             STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID => localized(edit_format),
             STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => localized(synonym),
             STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID => r#"{"U"}"#.to_owned(),
+            // The measured default: `TransformValues`.
+            STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID => format!(
+                "{{\"#\",{STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID},{{{STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID},0}}}}"
+            ),
             _ => "{0}".to_owned(),
         };
         pairs.push(format!("{key},{value}"));
@@ -52052,6 +52078,7 @@ fn tabular_section_line_number_format_and_edit_format_are_read_not_assumed_empty
             line_number_synonym: line_number.synonym,
             line_number_format: line_number.format,
             line_number_edit_format: line_number.edit_format,
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: Some(5),
         },
@@ -52090,6 +52117,7 @@ fn tabular_section_line_number_format_and_edit_format_are_read_not_assumed_empty
             line_number_synonym: line_number.synonym,
             line_number_format: line_number.format,
             line_number_edit_format: line_number.edit_format,
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: Some(5),
         },
