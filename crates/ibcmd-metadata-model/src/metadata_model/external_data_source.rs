@@ -14,7 +14,8 @@ use super::brace::{Brace, NIL_UUID, parse_row};
 use super::common::Header;
 use super::export::values::{attribute_header, header, header_elements, type_element};
 use super::export::{
-    Build, GeneratedTypeName, NameIndex, ObjectNames, atom, el, item, leaf, list, write_document,
+    Build, GeneratedTypeName, NameIndex, ObjectNames, atom, el, item, leaf, list, string,
+    write_document,
 };
 use super::xml::Element;
 use super::{DescriptorContext, ObjectXml};
@@ -313,18 +314,17 @@ fn function_element(node: &Brace, names: &NameIndex) -> Result<Element> {
     let typed = list(item(list(body)?, 1)?)?;
     let [name, synonym, comment] = header_elements(&head)?;
     let tail = list(item(record, 3)?)?;
-    if tail.first().and_then(Brace::as_atom) != Some("0")
-        || tail
-            .get(1)
-            .and_then(Brace::as_str)
-            .is_some_and(|text| !text.is_empty())
-        || tail
-            .get(2)
-            .and_then(Brace::as_str)
-            .is_some_and(|text| !text.is_empty())
-    {
-        bail!("ExternalDataSource non-empty ExpressionInDataSource is not supported yet");
+    if tail.first().and_then(Brace::as_atom) != Some("0") {
+        bail!("ExternalDataSource invalid Function expression wrapper");
     }
+    // `{0,<expression>,<presentation>,{0,0,0}}`: the stored expression is what
+    // the platform writes as `<ExpressionInDataSource>`. A tail without the
+    // expression, or with something that is not a string there, is refused
+    // rather than exported as an empty expression.
+    let expression = match tail.get(1) {
+        Some(text) => string(text)?,
+        None => bail!("ExternalDataSource Function has no expression"),
+    };
     Ok(el("Function").attr("uuid", &head.uuid).child(
         el("Properties")
             .child(name)
@@ -335,7 +335,10 @@ fn function_element(node: &Brace, names: &NameIndex) -> Result<Element> {
                 super::export::values::bool_text(item(record, 2)?)?,
             ))
             .child(type_element("Type", item(typed, 2)?, names)?)
-            .child(el("ExpressionInDataSource")),
+            .child(leaf(
+                "ExpressionInDataSource",
+                super::export::xml_text(expression),
+            )),
     ))
 }
 
@@ -361,6 +364,7 @@ pub fn names(row: &Brace) -> Result<ObjectNames> {
                 value_id: value_id.clone(),
             })
             .collect(),
+        string_types: Vec::new(),
     })
 }
 

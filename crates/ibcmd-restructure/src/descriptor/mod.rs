@@ -159,7 +159,12 @@ pub const EDIT_TYPE: Codes = &[("InList", 0), ("InDialog", 1), ("BothWays", 2)];
 pub const CHOICE_MODE: Codes = &[("FromForm", 0), ("QuickChoice", 1), ("BothWays", 2)];
 pub const CODE_TYPE: Codes = &[("Number", 0), ("String", 1)];
 pub const DEFAULT_PRESENTATION: Codes = &[("AsCode", 0), ("AsDescription", 1)];
-pub const DATA_LOCK_CONTROL_MODE: Codes = &[("Automatic", 0), ("Managed", 1)];
+/// A Task has no code, so its own set is `AsNumber`, `AsDescription`, and its
+/// stored codes follow that order. The first value is therefore kind-specific:
+/// a catalog's `0` is `AsCode`, a task's is `AsNumber`.
+pub const TASK_DEFAULT_PRESENTATION: Codes = &[("AsNumber", 0), ("AsDescription", 1)];
+pub const DATA_LOCK_CONTROL_MODE: Codes =
+    &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)];
 pub const USE: Codes = &[("DontUse", 0), ("Use", 1)];
 pub const ALLOWED_LENGTH: Codes = &[("Fixed", 0), ("Variable", 1)];
 pub const CREATE_ON_INPUT: Codes = &[("Auto", 0), ("DontUse", 1), ("Use", 2)];
@@ -189,18 +194,12 @@ pub const NUMBER_PERIODICITY: Codes = &[
     ("Month", 3),
     ("Day", 4),
 ];
-/// A business process spells its number type and periodicity its own way.
-pub const BP_NUMBER_TYPE: Codes = &[("String", 0), ("Number", 1)];
-pub const BP_NUMBER_PERIODICITY: Codes = &[
-    ("Year", 0),
-    ("Nonperiodical", 1),
-    ("Quarter", 2),
-    ("Month", 3),
-    ("Day", 4),
-];
 pub const TASK_NUMBER_AUTO_PREFIX: Codes = &[("BusinessProcessNumber", 0), ("DontUse", 1)];
-pub const DEPENDENCE_ON_CALCULATION_TYPES: Codes =
-    &[("DontUse", 0), ("OnActionPeriod", 1), ("OnBasePeriod", 2)];
+pub const DEPENDENCE_ON_CALCULATION_TYPES: Codes = &[
+    ("DontUse", 0),
+    ("OnActionPeriod", 1),
+    ("OnRegistrationPeriod", 2),
+];
 
 // Standard-attribute markers per family, root level.
 pub const CATALOG_STANDARD: Codes =
@@ -745,13 +744,16 @@ static CHART_OF_CALCULATION_TYPES: Layout = Layout {
         Generated("BaseCalculationTypesRow"),
         Generated("LeadingCalculationTypes"),
         Generated("LeadingCalculationTypesRow"),
-        Flag("UseStandardCommands"),
+        // The platform stores `EditType` in this slot (field 24) and
+        // `UseStandardCommands` in the one the reader reads as field 35; the
+        // earlier pair had these two swapped.
+        Code("EditType", EDIT_TYPE),
         Number("CodeLength"),
         Code("CodeType", CODE_TYPE),
         // The chart of an extension separates slot 27 from EditType
         // (DependenceOnCalculationTypes DontUse, EditType InDialog): the
-        // dependence rides slot 27 and the edit type slot 35, `1` (InDialog)
-        // on every chart on record.
+        // dependence rides slot 27 and the edit type the slot above
+        // (field 24), `1` (InDialog) on every chart on record.
         Code(
             "DependenceOnCalculationTypes",
             DEPENDENCE_ON_CALCULATION_TYPES,
@@ -763,7 +765,7 @@ static CHART_OF_CALCULATION_TYPES: Layout = Layout {
         Reference("DefaultObjectForm"),
         Reference("DefaultListForm"),
         Reference("DefaultChoiceForm"),
-        Code("EditType", EDIT_TYPE),
+        Flag("UseStandardCommands"),
         References("BasedOn"),
         Flag("IncludeHelpInContents"),
         Code("ChoiceMode", CHOICE_MODE),
@@ -826,12 +828,12 @@ static BUSINESS_PROCESS: Layout = Layout {
         Generated("Manager"),
         Generated("RoutePointRef"),
         References("BasedOn"),
-        Code("EditType", EDIT_TYPE),
-        Code("NumberType", BP_NUMBER_TYPE),
+        Code("NumberType", CODE_TYPE),
+        Code("NumberPeriodicity", NUMBER_PERIODICITY),
         Number("NumberLength"),
-        Code("CreateOnInput", CREATE_ON_INPUT),
         Flag("CheckUnique"),
         Flag("Autonumbering"),
+        Code("EditType", EDIT_TYPE),
         Reference("DefaultObjectForm"),
         Reference("DefaultListForm"),
         Reference("DefaultChoiceForm"),
@@ -839,9 +841,9 @@ static BUSINESS_PROCESS: Layout = Layout {
         Flag("IncludeHelpInContents"),
         Fields("InputByString"),
         Code("DataLockControlMode", DATA_LOCK_CONTROL_MODE),
-        Flag("CreateTaskInPrivilegedMode"),
+        Code("FullTextSearch", USE),
         StandardAttributes(BUSINESS_PROCESS_STANDARD),
-        Code("NumberPeriodicity", BP_NUMBER_PERIODICITY),
+        Flag("CreateTaskInPrivilegedMode"),
         Reference("AuxiliaryObjectForm"),
         Reference("AuxiliaryListForm"),
         Reference("AuxiliaryChoiceForm"),
@@ -852,7 +854,7 @@ static BUSINESS_PROCESS: Layout = Layout {
         Localized("Explanation"),
         Code("NumberAllowedLength", ALLOWED_LENGTH),
         Characteristics,
-        Code("FullTextSearch", USE),
+        Code("CreateOnInput", CREATE_ON_INPUT),
         Fields("DataLockFields"),
         InputModes,
         Code("ChoiceHistoryOnInput", CHOICE_HISTORY_ON_INPUT),
@@ -897,14 +899,14 @@ static TASK: Layout = Layout {
         Reference("DefaultChoiceForm"),
         Code("NumberType", CODE_TYPE),
         Number("NumberLength"),
-        Code("EditType", EDIT_TYPE),
         Flag("CheckUnique"),
-        Number("DescriptionLength"),
         Flag("Autonumbering"),
+        Number("DescriptionLength"),
+        Code("EditType", EDIT_TYPE),
         Flag("IncludeHelpInContents"),
         Reference("Addressing"),
         Reference("MainAddressingAttribute"),
-        Code("DefaultPresentation", DEFAULT_PRESENTATION),
+        Code("DefaultPresentation", TASK_DEFAULT_PRESENTATION),
         Fields("InputByString"),
         Reference("CurrentPerformer"),
         References("BasedOn"),

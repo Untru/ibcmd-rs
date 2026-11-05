@@ -138,12 +138,12 @@ fn constant(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Brace
     ]))
 }
 
-/// `Automatic` 0, `Managed` 1.
+/// `Automatic` 0, `Managed` 1, `AutomaticAndManaged` 2.
 pub fn data_lock_control_mode(value: Option<&str>) -> Result<Brace> {
     enumerated(
         Some(value.unwrap_or("Automatic")),
         "DataLockControlMode",
-        &[("Automatic", 0), ("Managed", 1)],
+        &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)],
     )
 }
 

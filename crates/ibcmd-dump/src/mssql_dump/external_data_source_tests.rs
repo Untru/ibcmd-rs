@@ -210,24 +210,25 @@ fn shared_code_two_scheduled_job_still_uses_its_existing_route() {
         let text = serialize(&job_row);
         let row = metadata_text_row_from_text(fixture::JOB_UUID, text.clone()).unwrap();
         assert_eq!(row.kind.as_deref(), Some("ScheduledJob"));
-        // Neither an absent current module nor an unbound empty handler is a
-        // positive witness for this physical route.
+        // An unbound empty handler is still a job the platform writes: its
+        // `<MethodName/>` is empty (TEST123/1, 8.3.27.2214). It is not a
+        // witness for this physical route, but it must not be refused either.
         assert!(extract(&text, fixture::JOB_UUID, "ScheduledJob.Job435", version).is_err());
         let empty_handler = serialize(&compiled(
             "ScheduledJob",
             &fixture::scheduled_job(dialect),
             dialect,
         ));
-        assert!(
-            extract_with_current_refs(
-                &empty_handler,
-                fixture::JOB_UUID,
-                "ScheduledJob.Job435",
-                version,
-                &refs
-            )
-            .is_err()
-        );
+        let empty_output = extract_with_current_refs(
+            &empty_handler,
+            fixture::JOB_UUID,
+            "ScheduledJob.Job435",
+            version,
+            &refs,
+        )
+        .expect("a job without a method is a valid record");
+        let empty_xml = std::str::from_utf8(&empty_output.xml).unwrap();
+        assert!(empty_xml.contains("<MethodName/>"), "{empty_xml}");
         let output = extract_with_current_refs(
             &text,
             fixture::JOB_UUID,

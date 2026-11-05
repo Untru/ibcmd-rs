@@ -579,6 +579,8 @@ pub enum CharacteristicsOwnerFamily {
     Task,
     ChartOfAccounts,
     ChartOfCalculationTypes,
+    ExchangePlan,
+    Enum,
 }
 
 impl CharacteristicsOwnerFamily {
@@ -591,6 +593,8 @@ impl CharacteristicsOwnerFamily {
             Self::Task => "Task",
             Self::ChartOfAccounts => "ChartOfAccounts",
             Self::ChartOfCalculationTypes => "ChartOfCalculationTypes",
+            Self::ExchangePlan => "ExchangePlan",
+            Self::Enum => "Enum",
         }
     }
 }

@@ -242,7 +242,11 @@ const COT_SCHEMA: &[&str] = &[
 // Enumerations as the stored rows spell them. The codes are the metadata
 // model's (`metadata_model::objects`), measured on the four corpora the lab
 // holds (ERP УХ 8.3.27, БСП 8.3.27 and 8.5, an extension).
-const DATA_LOCK_CONTROL_MODE: &[(&str, &str)] = &[("Automatic", "0"), ("Managed", "1")];
+const DATA_LOCK_CONTROL_MODE: &[(&str, &str)] = &[
+    ("Automatic", "0"),
+    ("Managed", "1"),
+    ("AutomaticAndManaged", "2"),
+];
 const FULL_TEXT_SEARCH: &[(&str, &str)] = &[("DontUse", "0"), ("Use", "1")];
 const DATA_HISTORY: &[(&str, &str)] = &[("DontUse", "0"), ("Use", "1")];
 const EDIT_TYPE: &[(&str, &str)] = &[("InList", "0"), ("InDialog", "1"), ("BothWays", "2")];
@@ -257,7 +261,7 @@ const CODE_TYPE: &[(&str, &str)] = &[("Number", "0"), ("String", "1")];
 const DEPENDENCE_ON_CALCULATION_TYPES: &[(&str, &str)] = &[
     ("DontUse", "0"),
     ("OnActionPeriod", "1"),
-    ("OnBasePeriod", "2"),
+    ("OnRegistrationPeriod", "2"),
 ];
 const CCT_CODE_SERIES: &[(&str, &str)] = &[
     ("WholeCharacteristicKind", "0"),
@@ -453,7 +457,11 @@ fn build_information(
     fields[24] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[25] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[26] = standard_attributes(&["-5", "-4", "-3", "-2"])?;
@@ -531,7 +539,11 @@ fn build_accumulation(
     fields[18] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[19] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[20] = bool_token(object, "EnableTotalsSplitting")?;
@@ -772,7 +784,11 @@ fn build_calculation(
     fields[26] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[27] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[28] = standard_attributes(&[
@@ -1203,7 +1219,7 @@ fn build_cot(
         &[2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22],
         &generated,
     );
-    fields[24] = bool_token(object, "UseStandardCommands")?;
+    fields[24] = enum_code(object, "EditType", EDIT_TYPE)?;
     fields[25] = token(u32_property(object, "CodeLength")?.to_string());
     fields[26] = enum_code(object, "CodeType", CODE_TYPE)?;
     // The property slots were measured on five charts of the four corpora
@@ -1211,9 +1227,9 @@ fn build_cot(
     // is slot 27 (`0` DontUse on the extension's chart, `1` OnActionPeriod on
     // the other four), IncludeHelpInContents 37 (direct: `1` on the two ERP УХ
     // charts), DataLockControlMode 41, CodeAllowedLength 53 (`0` on ERP УХ
-    // `Начисления`), ChoiceHistoryOnInput 59. EditType (35, `1` InDialog),
-    // ChoiceMode (38, `2` BothWays), QuickChoice (39, `0`) and CreateOnInput
-    // (55, `1` DontUse) are held by their constant values alone.
+    // `Начисления`), ChoiceHistoryOnInput 59. `UseStandardCommands` rides slot
+    // 35 and `EditType` slot 24 -- the two the reader reads -- so both are
+    // written from the object; the earlier constant pair had them swapped.
     fields[27] = enum_code(
         object,
         "DependenceOnCalculationTypes",
@@ -1235,7 +1251,7 @@ fn build_cot(
     {
         fields[slot] = form_slot(object, name, &forms, indexes)?;
     }
-    fields[35] = enum_code(object, "EditType", EDIT_TYPE)?;
+    fields[35] = bool_token(object, "UseStandardCommands")?;
     fields[36] = list(vec![token("0"), token("0")]);
     fields[37] = bool_token(object, "IncludeHelpInContents")?;
     fields[38] = enum_code(object, "ChoiceMode", CHOICE_MODE)?;
@@ -1525,7 +1541,7 @@ fn decode_recalculation(
         "0",
         "Recalculation header wrapper discriminator",
     )?;
-    if !matches!(&fields[8], NativeValue::Token(mode) if matches!(mode.as_str(), "0" | "1")) {
+    if !matches!(&fields[8], NativeValue::Token(mode) if matches!(mode.as_str(), "0" | "1" | "2")) {
         return native("Recalculation lock mode is not a known code");
     }
     let uuid = parse_header_uuid(&wrapper[1])?;

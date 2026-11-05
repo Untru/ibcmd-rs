@@ -474,7 +474,7 @@ fn command(stored: &Brace, context: &ExportContext) -> Result<Element> {
         .child(code(
             "OnMainServerUnavalableBehavior",
             item(record, 12)?,
-            &[("Auto", 0)],
+            crate::metadata_model::common::MAIN_SERVER_UNAVAILABLE_BEHAVIORS,
         )?);
     Ok(el("Command").attr("uuid", uuid).child(properties))
 }
@@ -1170,6 +1170,7 @@ pub(crate) fn owned_names(kind: &str, row: &Brace, owner: &str) -> Result<Object
         full_name: full_name.clone(),
         children: Vec::new(),
         types: Vec::new(),
+        string_types: Vec::new(),
     };
     for (category, position) in [("Record", 1), ("Manager", 3), ("RecordSet", 5)] {
         out.types.push(GeneratedTypeName {
@@ -1202,6 +1203,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
             uuid: head.uuid,
             children: Vec::new(),
             types: Vec::new(),
+            string_types: Vec::new(),
         });
     }
     if kind == "Recalculation" {
@@ -1305,6 +1307,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         full_name: full_name.clone(),
         children: Vec::new(),
         types: Vec::new(),
+        string_types: Vec::new(),
     };
     for (category, position) in generated {
         let position = position + shift;

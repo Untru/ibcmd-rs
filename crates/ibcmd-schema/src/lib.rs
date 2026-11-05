@@ -4073,6 +4073,7 @@ pub fn parse_task_include_help_in_contents_slot(value: &str) -> Option<bool> {
 pub enum TaskDataLockControlMode {
     Managed,
     Automatic,
+    AutomaticAndManaged,
 }
 
 impl TaskDataLockControlMode {
@@ -4080,6 +4081,7 @@ impl TaskDataLockControlMode {
         match self {
             Self::Managed => "Managed",
             Self::Automatic => "Automatic",
+            Self::AutomaticAndManaged => "AutomaticAndManaged",
         }
     }
 }
@@ -4103,6 +4105,7 @@ pub fn parse_task_data_lock_control_mode_slot(value: &str) -> Option<TaskDataLoc
     match value.trim() {
         "0" => Some(TaskDataLockControlMode::Automatic),
         "1" => Some(TaskDataLockControlMode::Managed),
+        "2" => Some(TaskDataLockControlMode::AutomaticAndManaged),
         _ => None,
     }
 }
@@ -15264,7 +15267,12 @@ mod tests {
 
         assert!(parse_task_choice_history_on_input_slot("2").is_none());
         assert!(parse_task_include_help_in_contents_slot("2").is_none());
-        assert!(parse_task_data_lock_control_mode_slot("2").is_none());
+        assert_eq!(
+            parse_task_data_lock_control_mode_slot("2")
+                .unwrap()
+                .xml_value(),
+            "AutomaticAndManaged"
+        );
         assert!(parse_task_full_text_search_slot("2").is_none());
     }
 
@@ -18278,6 +18286,46 @@ mod tests {
 /// Closed physical layouts and platform type names shared by metadata readers.
 /// These are schema identifiers/revisions, never configuration object UUIDs.
 pub mod metadata_storage_facts {
+    /// Metadata families whose owned forms and field references share one
+    /// physical reader. The spelling is the platform family name used in
+    /// XML references and diagnostics.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum OwnedFormFamily {
+        Catalog,
+        Document,
+        BusinessProcess,
+        Task,
+        ChartOfAccounts,
+        ChartOfCalculationTypes,
+        ChartOfCharacteristicTypes,
+        ExchangePlan,
+        InformationRegister,
+        AccumulationRegister,
+        CalculationRegister,
+        SettingsStorage,
+        DocumentJournal,
+    }
+
+    impl OwnedFormFamily {
+        pub const fn as_str(self) -> &'static str {
+            match self {
+                Self::Catalog => "Catalog",
+                Self::Document => "Document",
+                Self::BusinessProcess => "BusinessProcess",
+                Self::Task => "Task",
+                Self::ChartOfAccounts => "ChartOfAccounts",
+                Self::ChartOfCalculationTypes => "ChartOfCalculationTypes",
+                Self::ChartOfCharacteristicTypes => "ChartOfCharacteristicTypes",
+                Self::ExchangePlan => "ExchangePlan",
+                Self::InformationRegister => "InformationRegister",
+                Self::AccumulationRegister => "AccumulationRegister",
+                Self::CalculationRegister => "CalculationRegister",
+                Self::SettingsStorage => "SettingsStorage",
+                Self::DocumentJournal => "DocumentJournal",
+            }
+        }
+    }
+
     /// Platform type names a data processor attribute can carry, keyed by the
     /// type ID the stored pattern holds. The third column is the namespace the
     /// name is declared in at a metadata root (`d7p1`; `fd`, `pdfdoc` and `pl`
@@ -18582,6 +18630,208 @@ pub mod metadata_storage_facts {
             ("Dimension", &["{13134203-f60b-11d5-a3c7-0050bae0a776,"]),
             ("Attribute", &["{a2207540-1400-11d6-a3c7-0050bae0a776,"]),
         ]
+    }
+
+    /// Family name of an information register.
+    pub const INFORMATION_REGISTER_KIND: &str = "InformationRegister";
+
+    /// Family name of a settings storage.
+    pub const SETTINGS_STORAGE_KIND: &str = "SettingsStorage";
+
+    /// XML spelling of a nonperiodical information register.
+    pub const INFORMATION_REGISTER_NONPERIODICAL: &str = "Nonperiodical";
+
+    /// XML spelling of a recorder-subordinate information register write mode.
+    pub const INFORMATION_REGISTER_RECORDER_SUBORDINATE: &str = "RecorderSubordinate";
+
+    /// An owned-child record with this kind stores a UUID reference.
+    pub fn owned_child_kind_is_reference(kind: &str) -> bool {
+        kind.trim() == "0"
+    }
+
+    /// Root collection that holds an ExchangePlan's owned forms.
+    pub fn exchange_plan_form_collection_uuid() -> &'static str {
+        "87c509ab-3d38-4d67-b379-aca796298578"
+    }
+
+    /// Root collection that holds a register's owned forms.
+    pub fn register_form_collection_uuid(kind: &str) -> Option<&'static str> {
+        match kind {
+            "InformationRegister" => Some("13134204-f60b-11d5-a3c7-0050bae0a776"),
+            "CalculationRegister" => Some("a2cb086c-db98-43e4-a1a9-0760ab048f8d"),
+            _ => None,
+        }
+    }
+
+    /// The order in which a chart of characteristic types may write its
+    /// `InputByString` standard attributes. The corpus contains all four
+    /// observed orders, including `Code,Description`.
+    pub fn chart_of_characteristic_types_input_by_string_order_is_valid(names: &[&str]) -> bool {
+        matches!(
+            names,
+            ["Description"] | ["Description", "Code"] | ["Code", "Description"] | ["Code"]
+        )
+    }
+
+    /// Stored control border style to XML spelling.
+    pub fn border_style_xml(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("WithoutBorder"),
+            "1" => Some("Single"),
+            "2" => Some("Embossed"),
+            "3" => Some("Indented"),
+            "4" => Some("Underline"),
+            "5" => Some("DoubleUnderline"),
+            "6" => Some("Rounded"),
+            "7" => Some("Overline"),
+            "200" => Some("Double"),
+            _ => None,
+        }
+    }
+
+    /// Stored font kind that names the automatic GUI font.
+    pub fn font_kind_is_auto(kind: &str) -> bool {
+        kind == "3"
+    }
+
+    /// Boolean value of a common attribute fill value.
+    pub fn common_attribute_boolean_xml(tag: &str, value: bool) -> String {
+        format!(
+            "<{tag} xsi:type=\"xs:boolean\">{}</{tag}>",
+            if value { "true" } else { "false" }
+        )
+    }
+
+    /// Reference to an owner's standard attribute.
+    pub fn standard_attribute_reference(family: &str, owner_name: &str, name: &str) -> String {
+        format!("{family}.{owner_name}.StandardAttribute.{name}")
+    }
+
+    /// The nil UUID stored in empty reference slots.
+    pub const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
+
+    /// Stored type UUID of a style color value.
+    pub const STYLE_COLOR_TYPE_UUID: &str = "9cd510c7-abfc-11d4-9434-004095e12fc7";
+
+    /// Stored type UUID of a style font value.
+    pub const STYLE_FONT_TYPE_UUID: &str = "9cd510c8-abfc-11d4-9434-004095e12fc7";
+
+    /// Stored type UUID of a style border value.
+    pub const STYLE_BORDER_TYPE_UUID: &str = "4d10ca00-111a-4d43-9c96-92cd773716de";
+
+    /// XML tag of an attribute inside an owner's child collection.
+    pub const ATTRIBUTE_TAG: &str = "Attribute";
+
+    /// XML tag of a tabular section inside an owner's child collection.
+    pub const TABULAR_SECTION_TAG: &str = "TabularSection";
+
+    /// Stored numeric code is the zero value.
+    pub fn stored_code_is_zero(value: &str) -> bool {
+        value.trim() == "0"
+    }
+
+    /// Border record carries its own style rather than a standard style item.
+    pub fn border_carries_own_style(value: &str) -> bool {
+        value.trim() == "1"
+    }
+
+    /// Chart of characteristic types precondition code is one of the stored values.
+    pub fn chart_characteristics_precondition_code_is_valid(value: &str) -> bool {
+        matches!(value.trim(), "0" | "1" | "2")
+    }
+
+    /// Auto/DontUse/Use mode code to XML spelling.
+    pub fn auto_use_mode_xml(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("Auto"),
+            "1" => Some("DontUse"),
+            "2" => Some("Use"),
+            _ => None,
+        }
+    }
+
+    /// Code or number type code to XML spelling.
+    pub fn number_type_xml(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("Number"),
+            "1" => Some("String"),
+            _ => None,
+        }
+    }
+
+    /// Task default presentation code to XML spelling.
+    pub fn task_default_presentation(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("AsNumber"),
+            "1" => Some("AsDescription"),
+            _ => None,
+        }
+    }
+
+    /// Attribute edit type code to XML spelling.
+    pub fn edit_type_xml(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("InList"),
+            "1" => Some("InDialog"),
+            "2" => Some("BothWays"),
+            _ => None,
+        }
+    }
+
+    /// Attribute choice mode code to XML spelling.
+    pub fn choice_mode_xml(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("FromForm"),
+            "1" => Some("QuickChoice"),
+            "2" => Some("BothWays"),
+            _ => None,
+        }
+    }
+
+    /// Information register periodicity code to XML spelling.
+    pub fn information_register_periodicity_xml(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("Nonperiodical"),
+            "1" => Some("Year"),
+            "2" => Some("Quarter"),
+            "3" => Some("Month"),
+            "4" => Some("Day"),
+            "5" => Some("Second"),
+            "6" => Some("RecorderPosition"),
+            _ => None,
+        }
+    }
+
+    /// Calculation register periodicity code to XML spelling.
+    pub fn calculation_register_periodicity_xml(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("Year"),
+            "1" => Some("Quarter"),
+            "2" => Some("Month"),
+            "3" => Some("Day"),
+            _ => None,
+        }
+    }
+
+    /// Calculation register dependence on calculation types.
+    pub fn calculation_register_dependence_on_calculation_types(
+        value: &str,
+    ) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("DontUse"),
+            "1" => Some("OnActionPeriod"),
+            "2" => Some("OnRegistrationPeriod"),
+            _ => None,
+        }
+    }
+
+    /// Default presentation of a chart code/description pair.
+    pub fn chart_default_presentation(value: &str) -> Option<&'static str> {
+        match value.trim() {
+            "0" => Some("AsCode"),
+            "1" => Some("AsDescription"),
+            _ => None,
+        }
     }
 
     pub fn document_number_periodicity(code: &str) -> Option<&'static str> {
@@ -18938,6 +19188,7 @@ pub mod metadata_child_storage_facts {
     }
 }
 /// Closed legacy record revisions and normalized configuration coordinates.
+pub mod metadata_kind;
 pub mod metadata_record_upgrades;
 
 /// Canonical storage admission for source-asset bodies.

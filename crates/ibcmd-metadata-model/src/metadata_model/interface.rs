@@ -180,6 +180,33 @@ impl Interface {
         Ok(())
     }
 
+    /// Whether a stored row uses the Interface descriptor layout. Legacy
+    /// configurations keep the root record of a form under the same numeric
+    /// class, so a row that is not declared as an Interface counts as one only
+    /// when its layout matches this profile.
+    #[doc(hidden)]
+    pub fn matches_descriptor_layout(row: &Brace) -> bool {
+        let Ok(outer) = list(row) else {
+            return false;
+        };
+        if outer.len() != Layout::OUTER_ARITY
+            || !Self::atom_equals(&outer[0], "1")
+            || !Self::atom_equals(&outer[Layout::CHILD_COUNT], "0")
+        {
+            return false;
+        }
+        let Ok(body) = list(&outer[Layout::PAYLOAD]) else {
+            return false;
+        };
+        body.len() == Layout::BODY_ARITY
+            && Self::atom_equals(&body[0], &Layout::RECORD_CODE.to_string())
+            && Self::atom_equals(&body[Layout::RESERVED], "1")
+    }
+
+    fn atom_equals(node: &Brace, expected: &str) -> bool {
+        atom(node).map(|value| value == expected).unwrap_or(false)
+    }
+
     #[doc(hidden)]
     pub fn from_brace(row: &Brace) -> Result<Self> {
         (|| {
@@ -250,6 +277,7 @@ impl Interface {
             full_name: format!("Interface.{}", self.head.name),
             children: Vec::new(),
             types: Vec::new(),
+            string_types: Vec::new(),
         }
     }
 }

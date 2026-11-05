@@ -2,7 +2,7 @@
 //! since an older platform beside the newer ones, or in an order the
 //! platform does not print.
 
-use super::{catalog_wrapper_code_matches, parse_information_register_standard_attribute_bag};
+use super::{catalog_wrapper_code_matches, parse_standard_attribute_bag};
 
 /// The 25-key bag a tabular section's `LineNumber` stores, at `revision`.
 fn bag(revision: &str) -> String {
@@ -86,7 +86,7 @@ fn bag(revision: &str) -> String {
 #[test]
 fn revision_14_with_type_reduction_reads() {
     let text = bag("14");
-    let parsed = parse_information_register_standard_attribute_bag(&text).unwrap();
+    let parsed = parse_standard_attribute_bag(&text).unwrap();
     assert!(parsed.has_type_reduction_mode);
 }
 
@@ -96,7 +96,7 @@ fn revision_13_with_the_type_reduction_key_reads_like_revision_14() {
     // 8.3.27.2214 prints their `LineNumber` with `TypeReductionMode`, and the
     // whole catalog used to be refused.
     let text = bag("13");
-    let parsed = parse_information_register_standard_attribute_bag(&text).unwrap();
+    let parsed = parse_standard_attribute_bag(&text).unwrap();
     assert!(parsed.has_type_reduction_mode);
 }
 
@@ -178,5 +178,5 @@ fn configuration_mode_rights_print_in_canonical_order_whatever_the_stored_one() 
 
 #[test]
 fn an_unknown_revision_is_refused() {
-    assert!(parse_information_register_standard_attribute_bag(&bag("12")).is_none());
+    assert!(parse_standard_attribute_bag(&bag("12")).is_none());
 }

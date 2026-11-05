@@ -57,12 +57,24 @@ pub(super) fn build_body_owner_source_index_from_texts(
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> BTreeMap<String, BodyOwnerSourceReference> {
     let mut index = BTreeMap::new();
+    // An EDS child's source tree hangs off `ExternalDataSources/<root>/...`,
+    // which its own folder does not name.
+    let eds_dirs = super::eds_export::owner_dirs(rows);
+    // A common template the configuration root does not name is a stale store
+    // record; neither its descriptor nor its own body and help are exported.
+    let root_order = super::build_configuration_root_child_order_from_texts(rows);
     for row in rows {
         let (Some(kind), Some(folder), Some(header)) =
             (row.kind.as_deref(), row.folder, row.header.as_ref())
         else {
             continue;
         };
+        if ibcmd_schema::metadata_kind::is_common_template_kind(kind)
+            && !root_order.is_empty()
+            && !root_order.contains_key(&row.file_name)
+        {
+            continue;
+        }
         let object_path = if kind == "Subsystem" {
             subsystem_refs
                 .get(&row.file_name)
@@ -70,6 +82,8 @@ pub(super) fn build_body_owner_source_index_from_texts(
                 .unwrap_or_else(|| {
                     PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
                 })
+        } else if let Some(dir) = eds_dirs.get(&header.uuid) {
+            dir.clone()
         } else {
             PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
         };
@@ -650,6 +664,9 @@ pub(super) fn colliding_reference_output_paths(
         );
     }
     for (uuid, template_ref) in template_refs {
+        if template_ref.orphaned {
+            continue;
+        }
         record_output_claim(
             &mut claimants,
             OutputWriteRoute::MetadataXml,
@@ -1000,6 +1017,9 @@ pub(super) fn source_asset_paths_with_indexes(
             .insert(row_id.suffix_component());
     }
     let role_rights_object_refs = build_role_rights_object_reference_index(object_refs, form_refs);
+    // An EDS child's assets hang off `ExternalDataSources/<root>/...`, which
+    // its own folder does not name.
+    let eds_dirs = super::eds_export::owner_dirs(metadata_texts);
 
     let mut paths = BTreeMap::new();
     for (metadata_id, suffixes) in suffixes_by_id {
@@ -1114,6 +1134,7 @@ pub(super) fn source_asset_paths_with_indexes(
                     field_refs,
                     type_index,
                     subsystem_refs,
+                    &eds_dirs,
                 )
             })
             .collect::<Vec<_>>()
@@ -1132,6 +1153,7 @@ pub(super) fn source_asset_paths_with_indexes(
                     field_refs,
                     type_index,
                     subsystem_refs,
+                    &eds_dirs,
                 )
             })
             .collect()
@@ -1148,6 +1170,24 @@ pub(super) fn source_asset_paths_with_indexes(
         &declared_form_types(metadata_texts),
     ));
     paths.extend(template_body_asset_paths(template_refs, &file_names));
+    // A dropped common template takes every source file of its own record
+    // with it (its help pages, its body). The record is identified by its
+    // uuid: a live template that sanitizes to the same directory name keeps
+    // its files.
+    let orphaned: Vec<&str> = template_refs
+        .iter()
+        .filter(|(_, template_ref)| template_ref.orphaned)
+        .map(|(uuid, _)| uuid.as_str())
+        .collect();
+    if !orphaned.is_empty() {
+        paths.retain(|body_id, _| {
+            !orphaned.iter().any(|uuid| {
+                body_id
+                    .strip_prefix(uuid)
+                    .is_some_and(|rest| rest.starts_with('.'))
+            })
+        });
+    }
 
     paths
 }
@@ -1166,6 +1206,8 @@ pub(super) fn source_asset_discovery_misses(
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> BTreeMap<String, String> {
+    // The diagnostics use the same owner directories as the paths themselves.
+    let eds_dirs = super::eds_export::owner_dirs(metadata_texts);
     let row_misses = parallel::install(|| {
         metadata_texts
             .par_iter()
@@ -1181,6 +1223,7 @@ pub(super) fn source_asset_discovery_misses(
                     field_refs,
                     type_index,
                     subsystem_refs,
+                    &eds_dirs,
                 )
             })
             .collect::<Vec<_>>()
@@ -1200,6 +1243,7 @@ pub(super) fn source_asset_discovery_misses(
                     field_refs,
                     type_index,
                     subsystem_refs,
+                    &eds_dirs,
                 )
             })
             .collect()
@@ -1255,6 +1299,9 @@ pub(super) fn source_asset_discovery_misses(
         }
     }
     for (uuid, template_ref) in template_refs {
+        if template_ref.orphaned {
+            continue;
+        }
         let body_id = format!("{uuid}.0");
         if file_names.contains(body_id.as_str())
             && template_body_source_asset(template_ref.template_type).is_none()
@@ -1279,6 +1326,7 @@ fn source_asset_discovery_misses_for_metadata_row(
     field_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    eds_dirs: &BTreeMap<String, PathBuf>,
 ) -> BTreeMap<String, String> {
     match source_assets_from_metadata_text_inner(
         row,
@@ -1290,6 +1338,7 @@ fn source_asset_discovery_misses_for_metadata_row(
         field_refs,
         type_index,
         subsystem_refs,
+        eds_dirs,
     ) {
         Some(discovery) => discovery.misses,
         None => BTreeMap::from([(
@@ -1305,6 +1354,9 @@ pub(super) fn template_body_asset_paths(
 ) -> BTreeMap<String, SourceAsset> {
     let mut paths = BTreeMap::new();
     for (uuid, template_ref) in template_refs {
+        if template_ref.orphaned {
+            continue;
+        }
         let body_id = format!("{uuid}.0");
         if !file_names.contains(body_id.as_str()) {
             continue;
@@ -1521,6 +1573,8 @@ pub(super) fn source_assets_from_metadata_blob(
     type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Vec<(String, SourceAsset)> {
+    // The blob entry point does not carry the row set an EDS chain needs.
+    let eds_dirs = BTreeMap::new();
     metadata_text_row_from_blob(uuid, blob)
         .and_then(|row| {
             source_assets_from_metadata_text_inner(
@@ -1533,6 +1587,7 @@ pub(super) fn source_assets_from_metadata_blob(
                 field_refs,
                 type_index,
                 subsystem_refs,
+                &eds_dirs,
             )
         })
         .map(|discovery| discovery.assets)
@@ -1555,6 +1610,8 @@ pub(super) fn source_assets_from_metadata_text(
     type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Vec<(String, SourceAsset)> {
+    // The unused-owner helper has no row set to derive an EDS chain from.
+    let eds_dirs = BTreeMap::new();
     source_assets_from_metadata_text_inner(
         row,
         file_names,
@@ -1565,6 +1622,7 @@ pub(super) fn source_assets_from_metadata_text(
         field_refs,
         type_index,
         subsystem_refs,
+        &eds_dirs,
     )
     .map(|discovery| discovery.assets)
     .unwrap_or_default()
@@ -1589,6 +1647,7 @@ pub(super) fn source_assets_from_metadata_text_inner(
     field_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    eds_dirs: &BTreeMap<String, PathBuf>,
 ) -> Option<SourceAssetDiscovery> {
     let uuid = row.file_name.as_str();
     let kind = row.kind.as_deref()?;
@@ -1603,6 +1662,8 @@ pub(super) fn source_assets_from_metadata_text_inner(
             .unwrap_or_else(|| {
                 PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
             })
+    } else if let Some(dir) = eds_dirs.get(uuid) {
+        dir.clone()
     } else {
         PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
     };

@@ -120,7 +120,8 @@ fn language(payload: &Brace) -> Result<Element> {
     ))
 }
 
-const DATA_LOCK_CONTROL_MODE: &[(&str, i64)] = &[("Automatic", 0), ("Managed", 1)];
+const DATA_LOCK_CONTROL_MODE: &[(&str, i64)] =
+    &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)];
 const DATA_HISTORY: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1)];
 
 /// The properties a constant writes, in order.
@@ -623,6 +624,7 @@ fn generated(
 pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     let root = list(row)?;
     let fields = list(item(root, 1)?)?;
+    let mut string_types = Vec::new();
     let (head, types, children) = match kind {
         "Language"
         | "FunctionalOption"
@@ -671,6 +673,11 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
                 item(fields, 1)?,
                 item(fields, 2)?,
             )?];
+            // A defined type over a string writes an empty string fill value
+            // as `xs:string`; the index keeps which type ids those are.
+            if super::super::export::defined_type_pattern_has_string(row) {
+                string_types.extend(types.iter().map(|generated| generated.type_id.clone()));
+            }
             (head, types, Vec::new())
         }
         "SettingsStorage" => {
@@ -722,6 +729,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         full_name: format!("{kind}.{}", head.name),
         children,
         types,
+        string_types,
     })
 }
 
@@ -786,6 +794,18 @@ mod tests {
             "Constant",
             r##"<Constant uuid="63eb6a1b-5f48-461a-9a6f-821db663c9d3"><InternalInfo><xr:GeneratedType name="ConstantManager.Валюта" category="Manager"><xr:TypeId>82211c3a-a0cd-4ac5-8106-193203e97955</xr:TypeId><xr:ValueId>72acea06-1205-4b0c-8db0-969d6002a9c9</xr:ValueId></xr:GeneratedType><xr:GeneratedType name="ConstantValueManager.Валюта" category="ValueManager"><xr:TypeId>49501720-15c0-4497-88d5-4d7a8a778371</xr:TypeId><xr:ValueId>32b6a40a-64a5-424d-bba3-2fad12699c8d</xr:ValueId></xr:GeneratedType><xr:GeneratedType name="ConstantValueKey.Валюта" category="ValueKey"><xr:TypeId>0f5a15f4-3580-52e6-99e1-8d4ccc66a3ff</xr:TypeId><xr:ValueId>80b42169-11c7-51db-8032-3520f0fc9f4b</xr:ValueId></xr:GeneratedType></InternalInfo><Properties><Name>Валюта</Name><Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Валюта
 учета</v8:content></v8:item></Synonym><Comment/><Type><v8:Type>cfg:CatalogRef.Валюты</v8:Type></Type><UseStandardCommands>true</UseStandardCommands><DefaultForm/><ExtendedPresentation/><Explanation/><PasswordMode>false</PasswordMode><Format/><EditFormat/><ToolTip/><MarkNegatives>false</MarkNegatives><Mask/><MultiLine>false</MultiLine><ExtendedEdit>false</ExtendedEdit><MinValue xsi:nil="true"/><MaxValue xsi:nil="true"/><FillChecking>ShowError</FillChecking><ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems><ChoiceParameterLinks/><ChoiceParameters><app:item name="Отбор.ПометкаУдаления"><app:value xsi:type="xs:boolean">false</app:value></app:item></ChoiceParameters><QuickChoice>Auto</QuickChoice><ChoiceForm/><LinkByType/><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><DataLockControlMode>Managed</DataLockControlMode><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing></Properties></Constant>"##,
+        );
+    }
+
+    #[test]
+    fn a_constant_keeps_automatic_and_managed_through_the_round_trip() {
+        // `AutomaticAndManaged` is the platform's third `<DataLockControlMode>`
+        // value; the compile table used to stop at `Managed`, so a tree that
+        // carried it was refused and the property could not round-trip.
+        round_trip(
+            "Constant",
+            r##"<Constant uuid="63eb6a1b-5f48-461a-9a6f-821db663c9d3"><InternalInfo><xr:GeneratedType name="ConstantManager.Валюта" category="Manager"><xr:TypeId>82211c3a-a0cd-4ac5-8106-193203e97955</xr:TypeId><xr:ValueId>72acea06-1205-4b0c-8db0-969d6002a9c9</xr:ValueId></xr:GeneratedType><xr:GeneratedType name="ConstantValueManager.Валюта" category="ValueManager"><xr:TypeId>49501720-15c0-4497-88d5-4d7a8a778371</xr:TypeId><xr:ValueId>32b6a40a-64a5-424d-bba3-2fad12699c8d</xr:ValueId></xr:GeneratedType><xr:GeneratedType name="ConstantValueKey.Валюта" category="ValueKey"><xr:TypeId>0f5a15f4-3580-52e6-99e1-8d4ccc66a3ff</xr:TypeId><xr:ValueId>80b42169-11c7-51db-8032-3520f0fc9f4b</xr:ValueId></xr:GeneratedType></InternalInfo><Properties><Name>Валюта</Name><Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Валюта
+учета</v8:content></v8:item></Synonym><Comment/><Type><v8:Type>cfg:CatalogRef.Валюты</v8:Type></Type><UseStandardCommands>true</UseStandardCommands><DefaultForm/><ExtendedPresentation/><Explanation/><PasswordMode>false</PasswordMode><Format/><EditFormat/><ToolTip/><MarkNegatives>false</MarkNegatives><Mask/><MultiLine>false</MultiLine><ExtendedEdit>false</ExtendedEdit><MinValue xsi:nil="true"/><MaxValue xsi:nil="true"/><FillChecking>ShowError</FillChecking><ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems><ChoiceParameterLinks/><ChoiceParameters><app:item name="Отбор.ПометкаУдаления"><app:value xsi:type="xs:boolean">false</app:value></app:item></ChoiceParameters><QuickChoice>Auto</QuickChoice><ChoiceForm/><LinkByType/><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><DataLockControlMode>AutomaticAndManaged</DataLockControlMode><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing></Properties></Constant>"##,
         );
     }
 

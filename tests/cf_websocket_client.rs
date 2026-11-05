@@ -149,7 +149,7 @@ fn websocket_all_boolean_slots_and_authored_pairs_roundtrip_both_profiles() {
 #[test]
 fn websocket_empty_pairs_duplicate_keys_and_integer_range_are_not_capped() {
     for version in ["2.20", "2.21"] {
-        for timeout in [i64::MIN, 0, 30, i64::MAX] {
+        for timeout in [0u64, 30, i64::MAX as u64, u64::MAX] {
             for headers in [
                 Vec::new(),
                 vec![

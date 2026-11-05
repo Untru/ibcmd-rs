@@ -1,5 +1,21 @@
 //! Standard attributes the native records name by negative markers.
 
+/// The root standard attributes of a `ChartOfCalculationTypes` and the markers
+/// its choice links name them by. The link names measured on the matrix
+/// (`Отбор.ИмяПредопределенныхДанных`, `Отбор.Код`, `Отбор.Наименование`,
+/// `Отбор.ПометкаУдаления`, `Отбор.Предопределенный`) pin `-11`, `-2`, `-3`,
+/// `-5` and `-8`; `-6` and `-4` come from the same family's table in an
+/// independent reader.
+pub const CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTE_DEFINITIONS: &[(&str, &str)] = &[
+    ("-11", "PredefinedDataName"),
+    ("-8", "Predefined"),
+    ("-6", "Ref"),
+    ("-5", "DeletionMark"),
+    ("-4", "ActionPeriodIsBasic"),
+    ("-3", "Description"),
+    ("-2", "Code"),
+];
+
 pub const CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS: &[(&str, &str)] = &[
     ("-28", "PredefinedDataName"),
     ("-17", "Order"),
@@ -18,8 +34,7 @@ pub const CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS: &[(&str, &str)] = &[
 /// `<xr:StandardTabularSection name="ExtDimensionTypes">` and its four
 /// `<xr:StandardAttribute>` children, and a form's bound slot names the very
 /// same members by the very same markers.
-pub const CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS:
-    &[ChartStandardTabularSectionDefinition] = &[(
+pub const CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS: &[StandardTabularSectionDefinition] = &[(
     "-12",
     "ExtDimensionTypes",
     &[
@@ -29,6 +44,42 @@ pub const CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS:
         ("-12", "LineNumber"),
     ],
 )];
+
+/// The standard tabular sections a `ChartOfCalculationTypes` carries, in the
+/// order the platform writes them, with the standard attributes each declares.
+/// A separate table rather than a window into a shared one: the family is
+/// known at the call site, and decoding it from a string would put a name
+/// decision where the caller already holds the answer.
+pub const CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTIONS:
+    &[StandardTabularSectionDefinition] = &[
+    (
+        "-30",
+        "LeadingCalculationTypes",
+        &[
+            ("-102", "Predefined"),
+            ("-101", "CalculationType"),
+            ("-100", "LineNumber"),
+        ],
+    ),
+    (
+        "-20",
+        "DisplacingCalculationTypes",
+        &[
+            ("-102", "Predefined"),
+            ("-101", "CalculationType"),
+            ("-100", "LineNumber"),
+        ],
+    ),
+    (
+        "-10",
+        "BaseCalculationTypes",
+        &[
+            ("-102", "Predefined"),
+            ("-101", "CalculationType"),
+            ("-100", "LineNumber"),
+        ],
+    ),
+];
 
 pub const ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
     ("-9", "RecordType"),
@@ -76,8 +127,8 @@ pub const fn chart_of_accounts_standard_attribute_definitions()
 /// `marker`, with the standard attributes that section declares.
 pub fn chart_of_accounts_standard_tabular_section(
     marker: &str,
-) -> Option<&'static ChartStandardTabularSectionDefinition> {
-    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS
+) -> Option<&'static StandardTabularSectionDefinition> {
+    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS
         .iter()
         .find(|(candidate, _, _)| *candidate == marker)
 }
@@ -88,13 +139,13 @@ pub fn chart_of_accounts_standard_tabular_section(
 /// family ever to declare a second section, the flag's owning section would no
 /// longer follow from the family alone and this refuses rather than guesses.
 pub fn chart_of_accounts_sole_standard_tabular_section_name() -> Option<&'static str> {
-    match CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS {
+    match CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS {
         [(_, name, _)] => Some(name),
         _ => None,
     }
 }
 
-pub type ChartStandardTabularSectionDefinition = (
+pub type StandardTabularSectionDefinition = (
     &'static str,
     &'static str,
     &'static [(&'static str, &'static str)],

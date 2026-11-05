@@ -32,3 +32,4 @@ tests/fixtures/native-export-commands/**/*.gz binary
 # Native EDS oracle bytes must be identical on every checkout platform.
 tests/fixtures/eds-matrix/**/*.xml -text whitespace=cr-at-eol
 tests/fixtures/eds-corpus2/*.xml -text whitespace=cr-at-eol
+tests/fixtures/full-matrix/configuration.cf binary

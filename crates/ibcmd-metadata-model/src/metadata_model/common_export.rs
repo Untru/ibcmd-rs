@@ -385,6 +385,8 @@ const BORDER_STYLES: &[(&str, i64)] = &[
     ("Embossed", 2),
     ("Indented", 3),
     ("Underline", 4),
+    ("DoubleUnderline", 5),
+    ("Rounded", 6),
     ("Overline", 7),
     ("Double", 200),
 ];
@@ -910,6 +912,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         full_name: format!("{kind}.{}", head.name),
         children,
         types,
+        string_types: Vec::new(),
     })
 }
 

@@ -22,6 +22,28 @@ use ibcmd_metadata_blob::{
 };
 use ibcmd_module_blob::pack_module_blob_bytes;
 
+/// One standard attribute read straight from its bag, with no owner scope: the
+/// shape the register and process families shared before the one collection
+/// reader took over. Kept for the bag-level tests.
+fn parse_standard_attribute_with_bag_fill<'a>(
+    name: &'static str,
+    bag: &InformationRegisterStandardAttributeBag<'a>,
+) -> Option<RegisterStandardAttribute> {
+    let fill_value = bag.get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    let (attribute, comment, links) = parse_standard_attribute(
+        name,
+        bag,
+        StandardAttributePolicy {
+            fill_value: parse_standard_attribute_fill_value_from_bag(fill_value, name)?,
+            type_reduction_mode: "0",
+            scope: None,
+            choice_form_refs: None,
+        },
+    )?;
+    (comment.is_empty() && standard_attribute_choice_parameter_links_is_empty(links))
+        .then_some(attribute)
+}
+
 #[test]
 fn information_register_master_dimension_scan_keeps_only_a_proven_prefix() {
     let complete = vec![
@@ -738,6 +760,7 @@ fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
         };
         let file_names = BTreeSet::from([body_id.as_str()]);
         let rows_by_file_name = BTreeMap::from([(body_id.as_str(), &body_row)]);
+        let eds_dirs = BTreeMap::new();
         let indexed = source_assets_from_metadata_text_inner(
             &metadata,
             &file_names,
@@ -748,6 +771,7 @@ fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &eds_dirs,
         )
         .unwrap();
         assert!(indexed.misses.is_empty());
@@ -1212,7 +1236,11 @@ fn maps_additional_object_family_module_suffixes_to_source_layout() {
 
     for (kind, folder, name, suffix, expected) in cases {
         assert_eq!(
-            module_owner_source_path(kind, folder, name, suffix),
+            module_owner_source_path(
+                &PathBuf::from(folder).join(sanitize_source_path_segment(name)),
+                kind,
+                suffix
+            ),
             Some(expected)
         );
     }
@@ -2232,6 +2260,7 @@ fn catalog_and_document_validators_keep_second_tabular_property_failure_location
         line_number_synonym: Vec::new(),
         line_number_format: Vec::new(),
         line_number_edit_format: Vec::new(),
+        line_number_type_reduction_mode: "TransformValues",
         use_mode: None,
         line_number_length: Some(5),
     };
@@ -2351,6 +2380,7 @@ fn owned_form_and_template_duplicate_names_report_second_item_as_ambiguous() {
                 relative_path: PathBuf::from("Documents/Owner/Templates/Duplicate.xml"),
                 kind: "Template",
                 template_type: "SpreadsheetDocument",
+                orphaned: false,
             },
         ),
         (
@@ -2359,6 +2389,7 @@ fn owned_form_and_template_duplicate_names_report_second_item_as_ambiguous() {
                 relative_path: PathBuf::from("Documents/Owner/Templates/dUpLiCaTe.xml"),
                 kind: "Template",
                 template_type: "SpreadsheetDocument",
+                orphaned: false,
             },
         ),
     ]);
@@ -2591,6 +2622,7 @@ fn parse_cct_child_templates_validates_paths_identity_and_names() {
         )),
         kind: "Template",
         template_type: "SpreadsheetDocument",
+        orphaned: false,
     };
     let refs = BTreeMap::from([
         (first.clone(), template("First")),
@@ -3341,6 +3373,7 @@ fn owner_graph_owned_child_failures_are_typed_for_form_template_and_command() {
             relative_path: PathBuf::from("Documents/Other/Templates/Foreign.xml"),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
     assert!(
@@ -3485,15 +3518,17 @@ fn catalog_field_references_report_unknown_second_item_without_payload() {
     let mut fields = vec![""; 43];
     fields[42] = &collection;
 
-    let diagnostic = parse_catalog_field_references(
+    let error = parse_field_reference_collection(
         &fields,
         42,
+        "Catalog",
         "Owner",
         &BTreeMap::new(),
         &BTreeSet::new(),
         &[("-3", "Description"), ("-2", "Code")],
     )
     .unwrap_err();
+    let diagnostic = field_reference_diagnostic(owner_graph::OwnerGraphFamily::Catalog, 42, error);
 
     assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
     assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
@@ -3518,15 +3553,17 @@ fn catalog_field_references_report_duplicate_second_item() {
     let mut fields = vec![""; 55];
     fields[54] = &collection;
 
-    let diagnostic = parse_catalog_field_references(
+    let error = parse_field_reference_collection(
         &fields,
         54,
+        "Catalog",
         "Owner",
         &BTreeMap::new(),
         &BTreeSet::new(),
         &CATALOG_STANDARD_ATTRIBUTES,
     )
     .unwrap_err();
+    let diagnostic = field_reference_diagnostic(owner_graph::OwnerGraphFamily::Catalog, 54, error);
 
     assert_eq!(diagnostic.structural_signature, "ambiguous");
     assert_eq!(diagnostic.field_index, Some(54));
@@ -3534,6 +3571,110 @@ fn catalog_field_references_report_duplicate_second_item() {
     assert_eq!(
         diagnostic.collection_role.as_deref(),
         Some("direct_attribute")
+    );
+}
+
+#[test]
+fn field_reference_collection_rejects_a_leading_zero_kind() {
+    let uuid = "44444444-4444-4444-8444-444444444444";
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{00,{uuid}}}}}");
+    let collection = format!("{{1,{{0,1,{item}}}}}");
+    let fields = [collection.as_str()];
+    let object_refs = BTreeMap::from([(
+        uuid.to_owned(),
+        "ChartOfAccounts.Owner.Attribute.КодБыстрогоВыбора".to_owned(),
+    )]);
+    let attribute_references =
+        BTreeSet::from(["ChartOfAccounts.Owner.Attribute.КодБыстрогоВыбора".to_owned()]);
+
+    let error = parse_field_reference_collection(
+        &fields,
+        0,
+        "ChartOfAccounts",
+        "Owner",
+        &object_refs,
+        &attribute_references,
+        &[],
+    )
+    .unwrap_err();
+
+    assert_eq!(error.1, owner_graph::OwnerGraphOwnedChildReason::WrongKind);
+}
+
+#[test]
+fn field_reference_collection_resolves_a_chart_of_accounts_own_attribute() {
+    let uuid = "44444444-4444-4444-8444-444444444444";
+    let reference = "ChartOfAccounts.Owner.Attribute.КодБыстрогоВыбора";
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{uuid}}}}}");
+    let collection = format!("{{1,{{0,1,{item}}}}}");
+    let fields = [collection.as_str()];
+    let object_refs = BTreeMap::from([(uuid.to_owned(), reference.to_owned())]);
+    let attribute_references = BTreeSet::from([reference.to_owned()]);
+
+    assert_eq!(
+        parse_field_reference_collection(
+            &fields,
+            0,
+            "ChartOfAccounts",
+            "Owner",
+            &object_refs,
+            &attribute_references,
+            &[],
+        )
+        .unwrap(),
+        vec![reference.to_owned()]
+    );
+}
+
+#[test]
+fn field_reference_collection_resolves_an_exchange_plan_own_attribute() {
+    let uuid = "44444444-4444-4444-8444-444444444444";
+    let reference = "ExchangePlan.Owner.Attribute.Очередь";
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{uuid}}}}}");
+    let collection = format!("{{1,{{0,1,{item}}}}}");
+    let fields = [collection.as_str()];
+    let object_refs = BTreeMap::from([(uuid.to_owned(), reference.to_owned())]);
+    let attribute_references = BTreeSet::from([reference.to_owned()]);
+
+    assert_eq!(
+        parse_field_reference_collection(
+            &fields,
+            0,
+            "ExchangePlan",
+            "Owner",
+            &object_refs,
+            &attribute_references,
+            &[],
+        )
+        .unwrap(),
+        vec![reference.to_owned()]
+    );
+}
+
+#[test]
+fn declared_form_collection_must_name_the_form() {
+    let uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    let forms = BTreeMap::from([(
+        uuid.to_owned(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Products/Forms/Item.xml"),
+            kind: "Form",
+        },
+    )]);
+    let declared = [uuid.to_owned()];
+    let foreign = ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2".to_owned()];
+
+    assert_eq!(
+        parse_owned_form_ref(uuid, "Catalog", &declared, "Products", &forms),
+        Some(Some("Catalog.Products.Form.Item".to_owned()))
+    );
+    assert!(
+        parse_owned_form_ref(uuid, "Catalog", &[], "Products", &forms).is_none(),
+        "an empty declared collection names no form"
+    );
+    assert!(
+        parse_owned_form_ref(uuid, "Catalog", &foreign, "Products", &forms).is_none(),
+        "a non-member uuid must not resolve"
     );
 }
 
@@ -3558,15 +3699,17 @@ fn document_field_references_report_second_foreign_attribute() {
     ]);
     let attribute_references = BTreeSet::from(["Document.Owner.Attribute.First".to_owned()]);
 
-    let diagnostic = parse_document_field_references(
+    let error = parse_field_reference_collection(
         &fields,
         47,
+        "Document",
         "Owner",
         &object_refs,
         &attribute_references,
         &[],
     )
     .unwrap_err();
+    let diagnostic = field_reference_diagnostic(owner_graph::OwnerGraphFamily::Document, 47, error);
 
     assert_eq!(diagnostic.structural_signature, "wrong_owner");
     assert_eq!(diagnostic.field_index, Some(47));
@@ -3587,15 +3730,21 @@ fn business_process_field_references_keep_fields_27_and_43_typed() {
         let collection = format!("{{1,{{0,2,{item},{item}}}}}");
         let mut fields = vec![""; field_index + 1];
         fields[field_index] = &collection;
-        let diagnostic = parse_business_process_field_references(
+        let error = parse_field_reference_collection(
             &fields,
             field_index,
+            "BusinessProcess",
             "Owner",
             &BTreeMap::new(),
             &BTreeSet::new(),
             &[(marker, name)],
         )
         .unwrap_err();
+        let diagnostic = field_reference_diagnostic(
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            field_index,
+            error,
+        );
         assert_eq!(diagnostic.family, "BusinessProcess");
         assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
         assert_eq!(diagnostic.structural_signature, "ambiguous");
@@ -3619,15 +3768,18 @@ fn business_process_field_references_keep_fields_27_and_43_typed() {
     )]);
     let attribute_references =
         BTreeSet::from([format!("BusinessProcess.Owner.Attribute.{declared}")]);
-    let diagnostic = parse_business_process_field_references(
+    let error = parse_field_reference_collection(
         &fields,
         27,
+        "BusinessProcess",
         "Owner",
         &object_refs,
         &attribute_references,
         &[("-2", "Number")],
     )
     .unwrap_err();
+    let diagnostic =
+        field_reference_diagnostic(owner_graph::OwnerGraphFamily::BusinessProcess, 27, error);
     assert_eq!(diagnostic.structural_signature, "wrong_owner");
     assert_eq!(diagnostic.collection_index, Some(0));
     let serialized = serde_json::to_string(&diagnostic).unwrap();
@@ -10560,11 +10712,10 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
         .copied()
         .zip(standard_payload[2..].chunks_exact(3))
     {
-        let bag = parse_information_register_standard_attribute_bag(triplet[2])
-            .unwrap_or_else(|| panic!("{name}: bag"));
+        let bag = parse_standard_attribute_bag(triplet[2]).unwrap_or_else(|| panic!("{name}: bag"));
         assert!(bag.has_type_reduction_mode, "{name}: reduction mode");
         let fill = bag
-            .get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)
+            .get(STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)
             .unwrap_or_else(|| panic!("{name}: fill property"));
         assert!(
             parse_cct_standard_attribute_fill_value(
@@ -10608,8 +10759,18 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
             .is_some(),
         "standard attributes"
     );
+    let input_by_string = [fields[33]];
     assert!(
-        parse_cct_input_by_string(fields[33], &header.name).is_some(),
+        parse_field_reference_collection(
+            &input_by_string,
+            0,
+            "ChartOfCharacteristicTypes",
+            &header.name,
+            &object_refs,
+            &BTreeSet::new(),
+            &[("-9", "Description"), ("-8", "Code")],
+        )
+        .is_ok(),
         "input by string"
     );
     let extracted = extract_metadata_source_xml_from_text_row_audited(
@@ -11505,6 +11666,7 @@ fn constant_record_for_test(
     extended: &str,
 ) -> String {
     RECORD_LITERAL
+        .replace("{LOCK}", "1")
         .replace("{MULTILINE}", multi_line)
         .replace("{FOLDERS}", folders)
         .replace("{QUICK}", quick)
@@ -11513,7 +11675,19 @@ fn constant_record_for_test(
         .replace("{EXTENDED}", extended)
 }
 
-const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},{NEGATIVES},\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},{EXTENDED},\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,1,1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
+/// The same record with a chosen stored `<DataLockControlMode>` code.
+fn constant_record_with_lock(lock: &str) -> String {
+    RECORD_LITERAL
+        .replace("{LOCK}", lock)
+        .replace("{MULTILINE}", "0")
+        .replace("{FOLDERS}", "0")
+        .replace("{QUICK}", "2")
+        .replace("{HISTORY}", "0")
+        .replace("{NEGATIVES}", "0")
+        .replace("{EXTENDED}", "0")
+}
+
+const RECORD_LITERAL: &str = "{1,\r\n{16,\r\n{27,\r\n{2,\r\n{3,\r\n{1,0,1d3d0d77-e5da-484f-9bb6-f25b74778d2f},\"ИспользоватьСинхронизациюКалендарей\",\r\n{1,\"ru\",\"Использовать синхронизацию календарей\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n{\"Pattern\",\r\n{\"B\"}\r\n}\r\n},0,\r\n{0},\r\n{0},{NEGATIVES},\"\",{MULTILINE},\r\n{\"U\"},\r\n{\"U\"},{FOLDERS},00000000-0000-0000-0000-000000000000,{QUICK},0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},{EXTENDED},\r\n{0},\r\n{\"S\",\"\"},0,0,0},9b8809f9-4d93-4ce7-a22f-6260b4ee79e1,fdf4c338-647a-4b9f-a4e3-41ef1cdcac5f,32fc8242-6142-4b63-b1e0-6876cb459a27,353606e0-5425-4f65-9741-8798a050ffcf,{LOCK},1,\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,{HISTORY},7f042bcc-a493-5225-957c-e053d66501be,6ffb2cde-5407-5bed-82ee-3d454b299d37,0,0},0}";
 
 #[test]
 fn common_attribute_indexing_names_every_code_the_corpus_stores() {
@@ -11665,6 +11839,44 @@ fn constant_reads_the_four_properties_the_writer_used_to_pin() {
 }
 
 #[test]
+fn constant_keeps_automatic_and_managed_and_refuses_an_unknown_mode() {
+    // The platform stores `DataLockControlMode` as a code and writes it back by
+    // name: `0` `Automatic`, `1` `Managed`, `2` `AutomaticAndManaged`. The
+    // constant converter used to read "anything but 0" as `Managed`, so a
+    // constant that stored `2` was written as `Managed` and differed from the
+    // platform's own XML for the same row.
+    const UUID: &str = "1d3d0d77-e5da-484f-9bb6-f25b74778d2f";
+    let parse = |lock: &str| {
+        parse_constant_properties_from_text(
+            &constant_record_with_lock(lock),
+            UUID,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+    };
+    assert_eq!(
+        parse("0")
+            .expect("automatic constant")
+            .data_lock_control_mode,
+        "Automatic"
+    );
+    assert_eq!(
+        parse("1").expect("managed constant").data_lock_control_mode,
+        "Managed"
+    );
+    assert_eq!(
+        parse("2")
+            .expect("automatic-and-managed constant")
+            .data_lock_control_mode,
+        "AutomaticAndManaged"
+    );
+    // A code outside the platform's set refuses the object instead of
+    // degrading to a neighbouring mode.
+    assert!(parse("3").is_none());
+}
+
+#[test]
 fn detects_style_colors_the_document_management_objects_attest() {
     let web: &[(&str, i32, &str)] = &[
         ("ИзбранныйЭлемент", 43, "web:DodgerBlue"),
@@ -11701,18 +11913,23 @@ fn detects_style_colors_the_document_management_objects_attest() {
     // `web:LemonChiffon`, not the `web:LightCoral` the table already gives 66,
     // and `-7` is `style:ButtonBackColor`, not `FieldBackColor`.
     assert_eq!(style_web_color_name(64), Some("web:LemonChiffon"));
-    assert_eq!(style_system_color_name(-7), Some("style:ButtonBackColor"));
+    assert_eq!(
+        standard_style_item_for_code(-7).map(|(_, name)| name),
+        Some("ButtonBackColor")
+    );
     // Every style-palette index the style items of the stand exercise agrees
     // with the form palette.
     for code in [-3, -7, -11, -16, -21, -23, -42] {
         assert_eq!(
-            style_system_color_name(code),
+            standard_style_item_for_code(code)
+                .map(|(_, name)| format!("style:{name}"))
+                .as_deref(),
             form_body::form_control_system_color_name(code),
             "style index {code}"
         );
     }
     // An index neither palette names still refuses the whole object.
-    assert_eq!(style_system_color_name(-99), None);
+    assert_eq!(standard_style_item_for_code(-99), None);
     assert_eq!(style_web_color_name(9_999), None);
 }
 
@@ -13043,11 +13260,11 @@ fn writes_graphical_scheme_template_body_to_ext_template_xml() {
     // The `template_type_code` slot (the "5" below) is deliberately a value
     // `template_type_from_code` does not map (`refs.rs`'s only mapped codes
     // are 0/1/3/4/6/7/9): this test is about body-content sniffing picking
-    // `GraphicalSchema` for the brace-tuple body, which only runs when the
-    // header carries no recognized type hint.
+    // The brace-tuple body is written as `GraphicalSchema`, which is the
+    // type the stored code states outright.
     let template_metadata = deflate_for_test(
         format!(
-            "{{1,\r\n{{2,5,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Scheme\",{{1,\"en\",\"Scheme\"}},\"\"}}\r\n,0}}\r\n}}"
+            "{{1,\r\n{{2,8,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Scheme\",{{1,\"en\",\"Scheme\"}},\"\"}}\r\n,0}}\r\n}}"
         )
         .as_bytes(),
     );
@@ -13267,6 +13484,7 @@ fn formats_data_processor_tabular_section_defaults_without_use_or_line_number_le
             line_number_synonym: Vec::new(),
             line_number_format: Vec::new(),
             line_number_edit_format: Vec::new(),
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: None,
         },
@@ -13293,6 +13511,7 @@ fn formats_tabular_section_with_distinct_line_number_fill_checking() {
             line_number_synonym: Vec::new(),
             line_number_format: Vec::new(),
             line_number_edit_format: Vec::new(),
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: None,
         },
@@ -13620,6 +13839,68 @@ fn parses_metadata_child_choice_parameter_links_from_wrapped_collection() {
         "DataProcessor.ЗагрузкаТоваровИзВнешнихФайлов.TabularSection.Товары.Attribute.Характеристика"
     );
     assert_eq!(links[2].value_change, "DontChange");
+}
+
+#[test]
+fn accounting_register_choice_link_publishes_the_raw_standard_attribute_code() {
+    let links = parse_metadata_child_choice_parameter_links(
+        Some(r##"{5006,1,"Отбор.Владелец",1,{-10},0}"##),
+        &BTreeMap::new(),
+        "AccountingRegister.РегистрБухгалтерии1.",
+    )
+    .unwrap();
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(
+        links[0].data_path,
+        "AccountingRegister.РегистрБухгалтерии1.StandardAttribute.Account"
+    );
+}
+
+#[test]
+fn data_processor_choice_link_publishes_the_raw_code_the_record_carries() {
+    // The platform writes `<xr:DataPath>-8</xr:DataPath>` for this attribute:
+    // the family has no standard-attribute table, so the code stays verbatim.
+    let links = parse_metadata_child_choice_parameter_links(
+        Some(r##"{5006,1,"Отбор.Владелец",1,{-8},0}"##),
+        &BTreeMap::new(),
+        "DataProcessor.Обработка1.",
+    )
+    .unwrap();
+
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].data_path, "-8");
+}
+
+#[test]
+fn accounting_register_dimension_reads_its_choice_parameter_links() {
+    // The register dimension keeps its properties in the wrapped `{27,...}`
+    // record, where the link collection sits at slot 14.
+    const DIMENSION: &str = "ad6bc590-c3e3-4a14-8a96-13f28bbb5925";
+    let object_refs = BTreeMap::from([(
+        "3af87d95-73ae-4eae-b5b6-90169cd8a068".to_string(),
+        "AccountingRegister.РегистрБухгалтерии1.Dimension.Организация".to_string(),
+    )]);
+    let text = r##"{27,{2,{3,{1,0,ad6bc590-c3e3-4a14-8a96-13f28bbb5925},"Измерение",{1,"ru","Измерение"},"",0,0,00000000-0000-0000-0000-000000000000,0},{"Pattern",{"#",7c6a7e8d-9204-47b1-8619-ea42fa2be95b}}},0,{0},{0},0,"",0,{"U"},{"U"},0,00000000-0000-0000-0000-000000000000,2,1,{5006,1,"Отбор.Владелец",1,{0,3af87d95-73ae-4eae-b5b6-90169cd8a068},0},{3,0,0},{0,0},0,{0},{"S",""},0,0,0}"##;
+    let fields = split_1c_braced_fields(text, 0).unwrap();
+    let properties = parse_accounting_register_child_properties_from_fields(
+        &fields,
+        DIMENSION,
+        "РегистрБухгалтерии1",
+        &BTreeMap::new(),
+        &object_refs,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    let links = properties.choice_parameter_links.unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].name, "Отбор.Владелец");
+    assert_eq!(
+        links[0].data_path,
+        "AccountingRegister.РегистрБухгалтерии1.Dimension.Организация"
+    );
+    assert_eq!(links[0].value_change, "Clear");
 }
 
 /// A wrapped pair whose type the configuration does not carry keeps both
@@ -23501,7 +23782,7 @@ fn exact_exchange_plan_root_for_test(
             "{1a1b4fea-e093-470d-94ff-1d2f16cda2ab,0}",
             "{3daea016-69b7-4ed4-9453-127911372fe6,0}",
             "{52293f4b-f98c-43ea-a80f-41047ae7ab58,0}",
-            "{87c509ab-3d38-4d67-b379-aca796298578,0}",
+            "{87c509ab-3d38-4d67-b379-aca796298578,7,70000000-0000-4000-8000-000000000001,70000000-0000-4000-8000-000000000002,70000000-0000-4000-8000-000000000003,70000000-0000-4000-8000-000000000004,70000000-0000-4000-8000-000000000005,70000000-0000-4000-8000-000000000006,77777777-7777-4777-8777-777777777777}",
             "{d5207c64-11d5-4d46-bba2-55b7b07ff4eb,0}",
         ],
     )
@@ -23543,7 +23824,13 @@ fn accepts_structural_exchange_plan_owner_composites() {
         assert_eq!(owner.get(0), Some(code));
         assert_eq!(owner.physical.len(), if code == "36" { 50 } else { 51 });
 
-        let attributes = parse_exchange_plan_standard_attributes(owner.get(30).unwrap()).unwrap();
+        let attributes = parse_exchange_plan_standard_attributes(
+            owner.get(30).unwrap(),
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         assert_eq!(
             attributes
                 .iter()
@@ -23630,14 +23917,24 @@ fn accepts_leaf_sanitized_captured_exchange_plan_owner_tails() {
             },
         ),
     ]);
+    let form_uuids = form_refs.keys().cloned().collect::<Vec<_>>();
     let make_root = |code: &str, tail: &str| {
         let tail = split_information_register_braced_fields(tail).unwrap();
         let owner = format!(
             "{{{code},22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{{3,{{1,0,11111111-1111-4111-8111-111111111111}},\"Captured\",{{1,\"en\",\"Captured\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{}}}",
             tail.join(",")
         );
+        let form_collection = if form_uuids.is_empty() {
+            "{87c509ab-3d38-4d67-b379-aca796298578,0}".to_string()
+        } else {
+            format!(
+                "{{87c509ab-3d38-4d67-b379-aca796298578,{},{}}}",
+                form_uuids.len(),
+                form_uuids.join(",")
+            )
+        };
         format!(
-            "{{1,{owner},5,{{1a1b4fea-e093-470d-94ff-1d2f16cda2ab,0}},{{3daea016-69b7-4ed4-9453-127911372fe6,0}},{{52293f4b-f98c-43ea-a80f-41047ae7ab58,0}},{{87c509ab-3d38-4d67-b379-aca796298578,0}},{{d5207c64-11d5-4d46-bba2-55b7b07ff4eb,0}}}}"
+            "{{1,{owner},5,{{1a1b4fea-e093-470d-94ff-1d2f16cda2ab,0}},{{3daea016-69b7-4ed4-9453-127911372fe6,0}},{{52293f4b-f98c-43ea-a80f-41047ae7ab58,0}},{form_collection},{{d5207c64-11d5-4d46-bba2-55b7b07ff4eb,0}}}}"
         )
     };
 
@@ -23691,8 +23988,7 @@ fn accepts_leaf_sanitized_captured_exchange_plan_owner_tails() {
         let standard_outer =
             split_information_register_braced_fields(owner.get(30).unwrap()).unwrap();
         let standard_payload = split_information_register_braced_fields(standard_outer[1]).unwrap();
-        let first_bag =
-            parse_information_register_standard_attribute_bag(standard_payload[4]).unwrap();
+        let first_bag = parse_standard_attribute_bag(standard_payload[4]).unwrap();
         assert_eq!(first_bag.has_type_reduction_mode, code == "37");
 
         if code == "36" {
@@ -24177,31 +24473,31 @@ fn extracts_exact_exchange_plan_owner_properties_atomically_and_in_native_order(
     let invalid_slots = [
         (13, "2"),
         (14, "not-a-uuid"),
-        (15, "-1"),
+        (15, "not-a-length"),
         (16, "1"),
         (17, "bad"),
         (18, "2"),
-        (21, "0"),
-        (22, "1"),
+        (21, "3"),
+        (22, "3"),
         (23, "2"),
         (24, "{0,2}"),
-        (25, "0"),
+        (25, "2"),
         (26, "2"),
         (27, "{1,{0,0}}"),
-        (28, "2"),
+        (28, "3"),
         (29, "2"),
         (30, "{1,{1,8}}"),
         (34, "{1,\"en\"}"),
         (39, "2"),
-        (40, "{0}"),
-        (41, "0"),
+        (40, "{1}"),
+        (41, "3"),
         (42, "{1,{0,1}}"),
-        (43, "{1,2,1}"),
+        (43, "{9,2,0}"),
         (44, "2"),
         (45, "2"),
-        (46, "1"),
-        (47, "1"),
-        (48, "1"),
+        (46, "2"),
+        (47, "2"),
+        (48, "2"),
         (49, "1"),
     ];
     for (slot, invalid) in invalid_slots {
@@ -24451,31 +24747,22 @@ fn information_register_default_owner_tail_for_test() -> &'static str {
 {0},{0},{0},{0},{0},0,0,0,0,0"
 }
 
-fn information_register_standard_attribute_direct_enum_for_test(
-    type_uuid: &str,
-    code: &str,
-) -> String {
+fn standard_attribute_direct_enum_for_test(type_uuid: &str, code: &str) -> String {
     format!("{{\"#\",{type_uuid},{code}}}")
 }
 
-fn information_register_standard_attribute_nested_enum_for_test(
-    type_uuid: &str,
-    code: &str,
-) -> String {
+fn standard_attribute_nested_enum_for_test(type_uuid: &str, code: &str) -> String {
     format!("{{\"#\",{type_uuid},{{{type_uuid},{code}}}}}")
 }
 
-fn information_register_standard_attribute_localized_for_test(content: Option<&str>) -> String {
+fn standard_attribute_localized_for_test(content: Option<&str>) -> String {
     let value = content
         .map(|content| format!("{{1,\"en\",\"{content}\"}}"))
         .unwrap_or_else(|| "{0}".to_string());
-    format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{value}}}")
+    format!("{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{value}}}")
 }
 
-fn information_register_standard_attribute_values_for_test(
-    name: &str,
-    non_modal: bool,
-) -> Vec<String> {
+fn standard_attribute_values_for_test(name: &str, non_modal: bool) -> Vec<String> {
     let fill_value = match name {
         "Active" if non_modal => "{\"B\",1}",
         "LineNumber" => "{\"N\",0}",
@@ -24483,81 +24770,56 @@ fn information_register_standard_attribute_values_for_test(
         _ => "{\"U\"}",
     };
     vec![
-        format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,0}}}}"),
-        information_register_standard_attribute_direct_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        format!("{{\"#\",{STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,0}}}}"),
+        standard_attribute_direct_enum_for_test(
+            STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
             if non_modal { "1" } else { "0" },
         ),
         "{\"B\",0}".to_string(),
         format!("{{\"B\",{}}}", u8::from(non_modal)),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
-            "0",
-        ),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
-            "0",
-        ),
+        standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID, "0"),
+        standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID, "0"),
         "{\"U\"}".to_string(),
-        information_register_standard_attribute_localized_for_test(non_modal.then_some("Tooltip")),
+        standard_attribute_localized_for_test(non_modal.then_some("Tooltip")),
         "{\"B\",0}".to_string(),
-        information_register_standard_attribute_localized_for_test(non_modal.then_some("Format")),
+        standard_attribute_localized_for_test(non_modal.then_some("Format")),
         format!(
             "{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,00000000-0000-0000-0000-000000000000}}}}"
         ),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
-            "2",
-        ),
-        information_register_standard_attribute_direct_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-            "0",
-        ),
-        information_register_standard_attribute_localized_for_test(
-            non_modal.then_some("Edit format"),
-        ),
+        standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID, "2"),
+        standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID, "0"),
+        standard_attribute_localized_for_test(non_modal.then_some("Edit format")),
         "{\"B\",0}".to_string(),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+        standard_attribute_nested_enum_for_test(
+            STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
             if non_modal { "0" } else { "1" },
         ),
         "{\"B\",0}".to_string(),
         "{\"U\"}".to_string(),
-        information_register_standard_attribute_localized_for_test(non_modal.then_some("Caption")),
+        standard_attribute_localized_for_test(non_modal.then_some("Caption")),
         "{\"S\",\"\"}".to_string(),
-        information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+        standard_attribute_nested_enum_for_test(
+            STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
             if non_modal { "0" } else { "1" },
         ),
-        format!(
-            "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,0}}}}"
-        ),
+        format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,0}}}}"),
         fill_value.to_string(),
         "{\"S\",\"\"}".to_string(),
-        format!(
-            "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,0}}}}"
-        ),
+        format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,0}}}}"),
     ]
 }
 
-fn information_register_standard_attribute_bag_for_test(
-    name: &str,
-    modern: bool,
-    non_modal: bool,
-) -> String {
-    let values = information_register_standard_attribute_values_for_test(name, non_modal);
-    information_register_standard_attribute_bag_from_values_for_test(&values, modern)
+fn standard_attribute_bag_for_test(name: &str, modern: bool, non_modal: bool) -> String {
+    let values = standard_attribute_values_for_test(name, non_modal);
+    standard_attribute_bag_from_values_for_test(&values, modern)
 }
 
-fn information_register_standard_attribute_bag_from_values_for_test(
-    values: &[String],
-    modern: bool,
-) -> String {
+fn standard_attribute_bag_from_values_for_test(values: &[String], modern: bool) -> String {
     let mut fields = vec![
         if modern { "14" } else { "13" }.to_string(),
         if modern { "25" } else { "24" }.to_string(),
     ];
-    for (index, key) in INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+    for (index, key) in STANDARD_ATTRIBUTE_KEYS
         .iter()
         .enumerate()
         .filter(|(index, _)| modern || *index != 5)
@@ -24594,7 +24856,7 @@ impl Default for CatalogStandardAttributeOverrideForTest<'_> {
 /// Builds a schema-exact, 9-entry Catalog `StandardAttributes` payload
 /// (field 45 of `parse_strict_catalog_properties_from_text`). The bag wire
 /// format is shared with InformationRegister standard attributes
-/// (`INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS`); this reuses that proven
+/// (`STANDARD_ATTRIBUTE_KEYS`); this reuses that proven
 /// builder and only overrides the slots (fill checking/value, tooltip,
 /// synonym, type reduction) that a given test cares about, per marker.
 fn catalog_standard_attributes_payload_for_test(
@@ -24615,27 +24877,25 @@ fn catalog_standard_attributes_payload_for_test(
         let default_type_reduction = if name == "Owner" { "2" } else { "0" };
         let over = overrides.get(marker).copied().unwrap_or_default();
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
-        let mut values = information_register_standard_attribute_values_for_test(name, true);
-        values[1] = information_register_standard_attribute_direct_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = standard_attribute_values_for_test(name, true);
+        values[1] = standard_attribute_direct_enum_for_test(
+            STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
             over.fill_checking,
         );
-        values[5] = information_register_standard_attribute_nested_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
+        values[5] = standard_attribute_nested_enum_for_test(
+            STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
             over.type_reduction.unwrap_or(default_type_reduction),
         );
-        values[7] = information_register_standard_attribute_localized_for_test(over.tooltip);
-        values[18] = information_register_standard_attribute_localized_for_test(over.synonym);
+        values[7] = standard_attribute_localized_for_test(over.tooltip);
+        values[18] = standard_attribute_localized_for_test(over.synonym);
         values[22] = over.fill_value.to_string();
-        payload.push(
-            information_register_standard_attribute_bag_from_values_for_test(&values, modern),
-        );
+        payload.push(standard_attribute_bag_from_values_for_test(&values, modern));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
 
-fn information_register_standard_attributes_for_test(modern: bool) -> String {
+fn standard_attributes_for_test(modern: bool) -> String {
     let definitions = [
         ("-5", "Active", true),
         ("-4", "LineNumber", false),
@@ -24645,43 +24905,35 @@ fn information_register_standard_attributes_for_test(modern: bool) -> String {
     let mut payload = vec!["1".to_string(), "4".to_string()];
     for (marker, name, non_modal) in definitions {
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
-        payload.push(information_register_standard_attribute_bag_for_test(
-            name, modern, non_modal,
-        ));
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        payload.push(standard_attribute_bag_for_test(name, modern, non_modal));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
 
 fn exchange_plan_standard_attribute_values_for_test(marker: &str) -> Vec<String> {
-    let mut values = information_register_standard_attribute_values_for_test("Recorder", false);
+    let mut values = standard_attribute_values_for_test("Recorder", false);
     match marker {
         "-14" => {
-            values[20] = information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+            values[20] = standard_attribute_nested_enum_for_test(
+                STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
                 "0",
             );
         }
         "-3" => {
-            values[1] = information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-                "1",
-            );
-            values[7] = information_register_standard_attribute_localized_for_test(Some("Tip"));
-            values[18] =
-                information_register_standard_attribute_localized_for_test(Some("Description"));
+            values[1] =
+                standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "1");
+            values[7] = standard_attribute_localized_for_test(Some("Tip"));
+            values[18] = standard_attribute_localized_for_test(Some("Description"));
             values[22] = "{\"S\",\"\"}".to_string();
         }
         "-2" => {
-            values[1] = information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-                "1",
-            );
-            values[7] =
-                information_register_standard_attribute_localized_for_test(Some("Code tip"));
-            values[18] = information_register_standard_attribute_localized_for_test(Some("Code"));
-            values[20] = information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+            values[1] =
+                standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "1");
+            values[7] = standard_attribute_localized_for_test(Some("Code tip"));
+            values[18] = standard_attribute_localized_for_test(Some("Code"));
+            values[20] = standard_attribute_nested_enum_for_test(
+                STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
                 "0",
             );
             values[22] = "{\"S\",\"   \"}".to_string();
@@ -24698,9 +24950,7 @@ fn exchange_plan_standard_attributes_for_test(modern: bool) -> String {
         let values = exchange_plan_standard_attribute_values_for_test(marker);
         payload.push(format!("{{{marker}}}"));
         payload.push("510405d3-2a0c-4fea-960a-7fee59b32f9b".to_string());
-        payload.push(
-            information_register_standard_attribute_bag_from_values_for_test(&values, modern),
-        );
+        payload.push(standard_attribute_bag_from_values_for_test(&values, modern));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
@@ -24709,7 +24959,13 @@ fn exchange_plan_standard_attributes_for_test(modern: bool) -> String {
 fn parses_exchange_plan_standard_attributes_by_family_and_marker() {
     for modern in [false, true] {
         let raw = exchange_plan_standard_attributes_for_test(modern);
-        let attributes = parse_exchange_plan_standard_attributes(&raw).unwrap();
+        let attributes = parse_exchange_plan_standard_attributes(
+            &raw,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         assert_eq!(
             attributes
                 .iter()
@@ -24739,47 +24995,125 @@ fn parses_exchange_plan_standard_attributes_by_family_and_marker() {
         ));
     }
     assert_eq!(
-        parse_exchange_plan_standard_attributes("{0}")
-            .unwrap()
-            .len(),
+        parse_exchange_plan_standard_attributes(
+            "{0}",
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .unwrap()
+        .len(),
         0
     );
 
     let valid = exchange_plan_standard_attributes_for_test(true);
-    assert!(parse_exchange_plan_standard_attributes(&format!("{valid} trailing")).is_none());
     assert!(
-        parse_exchange_plan_standard_attributes(&valid.replacen("{-14}", "{-13}", 1)).is_none()
+        parse_exchange_plan_standard_attributes(
+            &format!("{valid} trailing"),
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
     );
     assert!(
-        parse_exchange_plan_standard_attributes(&valid.replacen(
-            "510405d3-2a0c-4fea-960a-7fee59b32f9b",
-            "11111111-1111-4111-8111-111111111111",
-            1,
-        ))
+        parse_exchange_plan_standard_attributes(
+            &valid.replacen("{-14}", "{-13}", 1),
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &valid.replacen(
+                "510405d3-2a0c-4fea-960a-7fee59b32f9b",
+                "11111111-1111-4111-8111-111111111111",
+                1,
+            ),
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
         .is_none()
     );
 
     let description_bool = valid.replacen("{\"S\",\"\"}", "{\"B\",0}", 1);
-    assert!(parse_exchange_plan_standard_attributes(&description_bool).is_none());
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &description_bool,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
     let code_empty_string = valid.replacen("{\"S\",\"   \"}", "{\"S\",\"\"}", 1);
-    assert!(parse_exchange_plan_standard_attributes(&code_empty_string).is_none());
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &code_empty_string,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
+    );
     let first_marker_string = valid.replacen("{\"U\"}", "{\"S\",\"\"}", 1);
-    assert!(parse_exchange_plan_standard_attributes(&first_marker_string).is_none());
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &first_marker_string,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
 
     let legacy = exchange_plan_standard_attributes_for_test(false);
     let mixed_shape = valid.replacen(
-        &information_register_standard_attribute_bag_for_test("Recorder", true, false),
-        &information_register_standard_attribute_bag_for_test("Recorder", false, false),
+        &standard_attribute_bag_for_test("Recorder", true, false),
+        &standard_attribute_bag_for_test("Recorder", false, false),
         1,
     );
-    assert!(parse_exchange_plan_standard_attributes(&mixed_shape).is_none());
-    assert!(parse_exchange_plan_standard_attributes(&legacy).is_some());
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &mixed_shape,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_exchange_plan_standard_attributes(
+            &legacy,
+            "ПланОбмена1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
+    );
 
-    let ir = information_register_standard_attributes_for_test(true);
-    assert!(parse_information_register_standard_attributes(&ir).is_some());
+    let ir = standard_attributes_for_test(true);
+    assert!(
+        parse_standard_attribute_collection(
+            &ir,
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
+    );
     let ir_with_exchange_plan_string = ir.replacen("{\"U\"}", "{\"S\",\"   \"}", 1);
     assert!(
-        parse_information_register_standard_attributes(&ir_with_exchange_plan_string).is_none()
+        parse_standard_attribute_collection(
+            &ir_with_exchange_plan_string,
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
     );
 }
 
@@ -24969,7 +25303,11 @@ fn covers_information_register_owner_scalar_protocol_domains() {
     for (raw, expected) in [("0", "InList"), ("1", "InDialog"), ("2", "BothWays")] {
         assert_eq!(information_register_edit_type_xml(raw), Some(expected));
     }
-    for (raw, expected) in [("0", "Automatic"), ("1", "Managed")] {
+    for (raw, expected) in [
+        ("0", "Automatic"),
+        ("1", "Managed"),
+        ("2", "AutomaticAndManaged"),
+    ] {
         assert_eq!(
             information_register_data_lock_control_mode_xml(raw),
             Some(expected)
@@ -24978,8 +25316,8 @@ fn covers_information_register_owner_scalar_protocol_domains() {
     for (raw, expected) in [("0", "DontUse"), ("1", "Use")] {
         assert_eq!(information_register_full_text_search(raw), Some(expected));
     }
-    assert_eq!(information_register_bool("0"), Some(false));
-    assert_eq!(information_register_bool("1"), Some(true));
+    assert_eq!(parse_1c_bool_field(Some("0")), Some(false));
+    assert_eq!(parse_1c_bool_field(Some("1")), Some(true));
 
     for invalid in ["-1", "7", "1 trailing", "{1}", ""] {
         assert!(information_register_periodicity_xml(invalid).is_none());
@@ -24987,7 +25325,7 @@ fn covers_information_register_owner_scalar_protocol_domains() {
         assert!(information_register_edit_type_xml(invalid).is_none());
         assert!(information_register_data_lock_control_mode_xml(invalid).is_none());
         assert!(information_register_full_text_search(invalid).is_none());
-        assert!(information_register_bool(invalid).is_none());
+        assert!(parse_1c_bool_field(Some(invalid)).is_none());
     }
 }
 
@@ -25026,22 +25364,30 @@ fn resolves_only_unambiguous_same_owner_information_register_forms() {
             kind: "Form",
         },
     )]);
+    let declared = [uuid.to_string()];
     assert_eq!(
-        parse_information_register_owned_form_ref(uuid, "Prices", &valid),
+        parse_owned_form_ref(uuid, "InformationRegister", &declared, "Prices", &valid),
         Some(Some("InformationRegister.Prices.Form.Record".to_string()))
     );
     assert_eq!(
-        parse_information_register_owned_form_ref(
+        parse_owned_form_ref(
             "00000000-0000-0000-0000-000000000000",
+            "InformationRegister",
+            &[],
             "Prices",
             &BTreeMap::new(),
         ),
         Some(None)
     );
-    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &BTreeMap::new()).is_none());
     assert!(
-        parse_information_register_owned_form_ref(
+        parse_owned_form_ref(uuid, "InformationRegister", &[], "Prices", &valid).is_none(),
+        "an empty declared collection names no form"
+    );
+    assert!(
+        parse_owned_form_ref(
             "99999999-9999-4999-8999-99999999999",
+            "InformationRegister",
+            &declared,
             "Prices",
             &valid,
         )
@@ -25064,7 +25410,10 @@ fn resolves_only_unambiguous_same_owner_information_register_forms() {
             },
         ),
     ]);
-    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &ambiguous).is_none());
+    assert!(
+        parse_owned_form_ref(uuid, "InformationRegister", &declared, "Prices", &ambiguous)
+            .is_none()
+    );
     let foreign = BTreeMap::from([(
         uuid.to_string(),
         FormSourceReference {
@@ -25072,7 +25421,9 @@ fn resolves_only_unambiguous_same_owner_information_register_forms() {
             kind: "Form",
         },
     )]);
-    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &foreign).is_none());
+    assert!(
+        parse_owned_form_ref(uuid, "InformationRegister", &declared, "Prices", &foreign).is_none()
+    );
 }
 
 #[test]
@@ -25091,10 +25442,16 @@ fn rejects_task_code33_as_information_register_owner_shape() {
 }
 
 #[test]
-fn parses_information_register_standard_attribute_legacy_and_modern_bags() {
+fn parses_standard_attribute_legacy_and_modern_bags() {
     for modern in [false, true] {
-        let raw = information_register_standard_attributes_for_test(modern);
-        let attributes = parse_information_register_standard_attributes(&raw).unwrap();
+        let raw = standard_attributes_for_test(modern);
+        let attributes = parse_standard_attribute_collection(
+            &raw,
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
 
         assert_eq!(
             attributes
@@ -25152,14 +25509,14 @@ fn parses_information_register_standard_attribute_legacy_and_modern_bags() {
 }
 
 #[test]
-fn accepts_independent_captured_information_register_standard_attribute_bags() {
+fn accepts_independent_captured_standard_attribute_bags() {
     let legacy = r##"{13,24,1183c14f-f814-49c6-9233-a3c26b3f64cf,{"#",9ad557b1-249e-48dc-824b-3e149ecf10a6,{3,0,0}},2723eb98-b4c1-498a-a6f3-70444757902f,{"#",98ea8e5a-b586-442b-b944-6e3447734aa7,0},2bbba66b-fabf-4863-8ba3-54b3c64c896e,{"B",0},2c8143d5-4248-4c43-8bfb-307c0be2e415,{"B",0},33c74a4d-561f-4bc0-9eaa-8d21c893c0a9,{"#",ad3615c5-aae6-4725-89be-91827523abd9,{ad3615c5-aae6-4725-89be-91827523abd9,0}},3eaf5a8b-06d6-47b0-ac7d-a9698247f499,{"U"},4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},4de03908-56f4-4396-a61e-17253afca9ac,{"B",0},580c29e2-8af4-4258-882a-7cf8073e61c8,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},6c4f7074-e7d4-48eb-b31b-132873666262,{"#",157fa490-4ce9-11d4-9415-008048da11f9,{1,00000000-0000-0000-0000-000000000000}},6e3a1131-37a3-4da5-8895-572d9d0c9db6,{"#",ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,{ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,2}},7ba608f2-e654-42a3-8885-334fe88ca910,{"#",12ca4003-ac70-450e-b897-37faf86bd313,0},88149a78-9448-4767-867b-0e650d165d2e,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},90ae4b5d-e0fd-49ef-a008-d67c1e75038c,{"B",0},9288a8ed-b259-46d0-a8e3-70d87956ff2d,{"#",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}},b02800e9-a8d1-42ab-9a12-f673e92be968,{"B",0},c65a541f-0b91-4f33-bc88-fbaaa57f9992,{"U"},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},cf4abea4-37b2-11d4-940f-008048da11f9,{"S",""},d4232326-022b-421e-b6d3-88e418f74327,{"#",3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,{3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,1}},e3da683b-c54a-457a-a243-b9b4f9bf76dd,{"#",b76a58b9-2a56-4e46-bb31-8e04ad9f31ae,{5006,0}},e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208,{"U"},f49e4ced-4033-4e6c-8755-9fbaaccd6078,{"S",""},fcf503b8-1c06-454a-970c-06413e64aee5,{"#",f2eaae14-91a7-47b9-9d69-097877f41580,{0,0}}}"##;
     let modern = r##"{14,25,1183c14f-f814-49c6-9233-a3c26b3f64cf,{"#",9ad557b1-249e-48dc-824b-3e149ecf10a6,{3,0,0}},2723eb98-b4c1-498a-a6f3-70444757902f,{"#",98ea8e5a-b586-442b-b944-6e3447734aa7,0},2bbba66b-fabf-4863-8ba3-54b3c64c896e,{"B",0},2c8143d5-4248-4c43-8bfb-307c0be2e415,{"B",0},33c74a4d-561f-4bc0-9eaa-8d21c893c0a9,{"#",ad3615c5-aae6-4725-89be-91827523abd9,{ad3615c5-aae6-4725-89be-91827523abd9,0}},3b10624f-1e3d-495d-8093-25225efc5313,{"#",502b7765-f89c-4fd0-924f-0a28d3dc09b7,{502b7765-f89c-4fd0-924f-0a28d3dc09b7,0}},3eaf5a8b-06d6-47b0-ac7d-a9698247f499,{"U"},4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},4de03908-56f4-4396-a61e-17253afca9ac,{"B",0},580c29e2-8af4-4258-882a-7cf8073e61c8,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},6c4f7074-e7d4-48eb-b31b-132873666262,{"#",157fa490-4ce9-11d4-9415-008048da11f9,{1,00000000-0000-0000-0000-000000000000}},6e3a1131-37a3-4da5-8895-572d9d0c9db6,{"#",ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,{ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,2}},7ba608f2-e654-42a3-8885-334fe88ca910,{"#",12ca4003-ac70-450e-b897-37faf86bd313,0},88149a78-9448-4767-867b-0e650d165d2e,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},90ae4b5d-e0fd-49ef-a008-d67c1e75038c,{"B",0},9288a8ed-b259-46d0-a8e3-70d87956ff2d,{"#",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}},b02800e9-a8d1-42ab-9a12-f673e92be968,{"B",0},c65a541f-0b91-4f33-bc88-fbaaa57f9992,{"U"},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},cf4abea4-37b2-11d4-940f-008048da11f9,{"S",""},d4232326-022b-421e-b6d3-88e418f74327,{"#",3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,{3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,1}},e3da683b-c54a-457a-a243-b9b4f9bf76dd,{"#",b76a58b9-2a56-4e46-bb31-8e04ad9f31ae,{5006,0}},e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208,{"U"},f49e4ced-4033-4e6c-8755-9fbaaccd6078,{"S",""},fcf503b8-1c06-454a-970c-06413e64aee5,{"#",f2eaae14-91a7-47b9-9d69-097877f41580,{0,0}}}"##;
 
     for (raw, modern) in [(legacy, false), (modern, true)] {
-        let bag = parse_information_register_standard_attribute_bag(raw).unwrap();
+        let bag = parse_standard_attribute_bag(raw).unwrap();
         assert_eq!(bag.has_type_reduction_mode, modern);
-        let attribute = parse_information_register_standard_attribute("Active", &bag).unwrap();
+        let attribute = parse_standard_attribute_with_bag_fill("Active", &bag).unwrap();
         assert_eq!(attribute.fill_checking, "DontCheck");
         assert!(matches!(attribute.fill_value, MetadataChildFillValue::Nil));
     }
@@ -25172,55 +25529,95 @@ fn accepts_independent_captured_information_register_standard_attribute_bags() {
 /// 8.3.27.2214 writes `<xr:DataHistory>Use</xr:DataHistory>` on each of their
 /// standard attributes.
 #[test]
-fn reads_information_register_standard_attribute_bag_revision_9_like_12() {
-    let current = information_register_standard_attribute_bag_for_test("Active", false, false);
+fn reads_standard_attribute_bag_revision_9_like_12() {
+    let current = standard_attribute_bag_for_test("Active", false, false);
     let data_history = r##"9288a8ed-b259-46d0-a8e3-70d87956ff2d,{"#",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}},"##;
     assert!(current.contains(data_history));
     let without_history = current.replacen(data_history, "", 1);
     for revision in ["12", "9"] {
         let raw = without_history.replacen("{13,24,", &format!("{{{revision},23,"), 1);
-        let bag = parse_information_register_standard_attribute_bag(&raw);
+        let bag = parse_standard_attribute_bag(&raw);
         assert!(bag.is_some(), "revision {revision}");
     }
 }
 
 #[test]
-fn rejects_malformed_information_register_standard_attribute_envelopes_and_bags() {
-    let valid = information_register_standard_attributes_for_test(true);
-    assert!(parse_information_register_standard_attributes("{0}").is_some());
-    assert!(parse_information_register_standard_attributes(&format!("{valid} trailing")).is_none());
+fn rejects_malformed_standard_attribute_envelopes_and_bags() {
+    let valid = standard_attributes_for_test(true);
     assert!(
-        parse_information_register_standard_attributes(&valid.replacen("{1,{1,4,", "{1,{1,5,", 1))
-            .is_none()
+        parse_standard_attribute_collection(
+            "{0}",
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_some()
     );
     assert!(
-        parse_information_register_standard_attributes(&valid.replacen("{-5}", "{-4}", 1))
-            .is_none()
-    );
-    assert!(
-        parse_information_register_standard_attributes(&valid.replacen(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-            "510405d3-2a0c-4fea-960a-7fee59b32f9c",
-            1,
-        ))
+        parse_standard_attribute_collection(
+            &format!("{valid} trailing"),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
         .is_none()
     );
-    let modern_bag = information_register_standard_attribute_bag_for_test("Active", true, true);
-    let legacy_bag = information_register_standard_attribute_bag_for_test("Active", false, true);
     assert!(
-        parse_information_register_standard_attributes(&valid.replacen(
-            &modern_bag,
-            &legacy_bag,
-            1,
-        ))
+        parse_standard_attribute_collection(
+            &valid.replacen("{1,{1,4,", "{1,{1,5,", 1),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_standard_attribute_collection(
+            &valid.replacen("{-5}", "{-4}", 1),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    assert!(
+        parse_standard_attribute_collection(
+            &valid.replacen(
+                STANDARD_ATTRIBUTE_SECTION_UUID,
+                "510405d3-2a0c-4fea-960a-7fee59b32f9c",
+                1,
+            ),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+    let modern_bag = standard_attribute_bag_for_test("Active", true, true);
+    let legacy_bag = standard_attribute_bag_for_test("Active", false, true);
+    assert!(
+        parse_standard_attribute_collection(
+            &valid.replacen(&modern_bag, &legacy_bag, 1,),
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
         .is_none()
     );
     let wrong_typed_wrapper = valid.replacen(
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
         "98ea8e5a-b586-442b-b944-6e3447734aa8",
         1,
     );
-    assert!(parse_information_register_standard_attributes(&wrong_typed_wrapper).is_none());
+    assert!(
+        parse_standard_attribute_collection(
+            &wrong_typed_wrapper,
+            "РегистрСведений1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let tail =
         information_register_owner_tail_with_standard_attributes_for_test(&wrong_typed_wrapper);
@@ -25228,48 +25625,48 @@ fn rejects_malformed_information_register_standard_attribute_envelopes_and_bags(
     let header = parse_metadata_header_from_text(&root, register_uuid).unwrap();
     let owner = parse_information_register_owner_fields(&root, &header).unwrap();
     assert!(
-        parse_information_register_owner_properties(&owner, &header, &BTreeMap::new()).is_none()
+        parse_information_register_owner_properties(
+            &owner,
+            &header,
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
     );
 
     let fields = split_information_register_braced_fields(&modern_bag).unwrap();
     let rebuild = |fields: &[&str]| format!("{{{}}}", fields.join(","));
     let mut reordered = fields.clone();
     reordered.swap(2, 4);
-    assert!(parse_information_register_standard_attribute_bag(&rebuild(&reordered)).is_none());
+    assert!(parse_standard_attribute_bag(&rebuild(&reordered)).is_none());
     let mut duplicate = fields.clone();
     duplicate[4] = duplicate[2];
-    assert!(parse_information_register_standard_attribute_bag(&rebuild(&duplicate)).is_none());
+    assert!(parse_standard_attribute_bag(&rebuild(&duplicate)).is_none());
     let mut unknown = fields.clone();
     unknown[2] = "1183c14f-f814-49c6-9233-a3c26b3f64ce";
-    assert!(parse_information_register_standard_attribute_bag(&rebuild(&unknown)).is_none());
+    assert!(parse_standard_attribute_bag(&rebuild(&unknown)).is_none());
     let wrong_tag = modern_bag.replacen("{14,25,", "{12,25,", 1);
-    assert!(parse_information_register_standard_attribute_bag(&wrong_tag).is_none());
+    assert!(parse_standard_attribute_bag(&wrong_tag).is_none());
     let wrong_count = modern_bag.replacen("{14,25,", "{14,24,", 1);
-    assert!(parse_information_register_standard_attribute_bag(&wrong_count).is_none());
+    assert!(parse_standard_attribute_bag(&wrong_count).is_none());
 }
 
 #[test]
-fn rejects_non_modal_information_register_standard_attribute_immutable_values() {
+fn rejects_non_modal_standard_attribute_immutable_values() {
     let invalid_values = [
         (
             0,
-            format!(
-                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,1}}}}"
-            ),
+            format!("{{\"#\",{STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,1}}}}"),
         ),
         (
             4,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
-                "1",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID, "1"),
         ),
         (
             5,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
-                "1",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID, "1"),
         ),
         (6, "{\"S\",\"\"}".to_string()),
         (8, "{\"B\",1}".to_string()),
@@ -25281,36 +25678,27 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
         ),
         (
             11,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
-                "1",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID, "1"),
         ),
-        (14, "{\"B\",1}".to_string()),
         (16, "{\"B\",1}".to_string()),
         (17, "{\"N\",0}".to_string()),
         (19, "{\"S\",\"comment\"}".to_string()),
         (
             21,
-            format!(
-                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,1}}}}"
-            ),
+            format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,1}}}}"),
         ),
-        (23, "{\"S\",\"mask\"}".to_string()),
         (
             24,
-            format!(
-                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,1}}}}"
-            ),
+            format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,1}}}}"),
         ),
     ];
     for (index, invalid) in invalid_values {
-        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        let mut values = standard_attribute_values_for_test("Active", true);
         values[index] = invalid;
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
         assert!(
-            parse_information_register_standard_attribute("Active", &bag).is_none(),
+            parse_standard_attribute_with_bag_fill("Active", &bag).is_none(),
             "immutable property {index} was accepted"
         );
     }
@@ -25323,32 +25711,32 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
     // costing. Both stored values are read; a value outside the closed pair
     // still refuses the attribute.
     for (stored, expected) in [("0", Some(false)), ("1", Some(true))] {
-        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        let mut values = standard_attribute_values_for_test("Active", true);
         values[2] = format!("{{\"B\",{stored}}}");
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
         assert_eq!(
-            parse_information_register_standard_attribute("Active", &bag)
+            parse_standard_attribute_with_bag_fill("Active", &bag)
                 .map(|attribute| attribute.multi_line),
             expected
         );
     }
-    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    let mut values = standard_attribute_values_for_test("Active", true);
     values[2] = "{\"B\",2}".to_string();
-    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+    let raw = standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_standard_attribute_with_bag_fill("Active", &bag).is_none());
 
     // Property 10 is `ChoiceForm`. The empty reference is read as the
     // self-closed element; a named form is refused by this scopeless family,
     // which has no form index to name it with.
-    let mut values = information_register_standard_attribute_values_for_test("Active", true);
+    let mut values = standard_attribute_values_for_test("Active", true);
     values[10] = format!(
         "{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,7d3a4bd6-0c30-4d5a-bd51-9f6a5e0f2a11}}}}"
     );
-    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+    let raw = standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_standard_attribute_with_bag_fill("Active", &bag).is_none());
 
     // Property 12 is `ChoiceHistoryOnInput`, and it is not immutable: the
     // stand writes `DontUse` for it on the `Date` standard attribute of `do`
@@ -25356,59 +25744,47 @@ fn rejects_non_modal_information_register_standard_attribute_immutable_values() 
     // read now instead of refused; a value outside the closed pair still
     // refuses the attribute.
     for (stored, expected) in [("0", Some("Auto")), ("1", Some("DontUse"))] {
-        let mut values = information_register_standard_attribute_values_for_test("Active", true);
-        values[12] = information_register_standard_attribute_direct_enum_for_test(
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-            stored,
-        );
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        let mut values = standard_attribute_values_for_test("Active", true);
+        values[12] =
+            standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID, stored);
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
         assert_eq!(
-            parse_information_register_standard_attribute("Active", &bag)
+            parse_standard_attribute_with_bag_fill("Active", &bag)
                 .map(|attribute| attribute.choice_history_on_input),
             expected
         );
     }
-    let mut values = information_register_standard_attribute_values_for_test("Active", true);
-    values[12] = information_register_standard_attribute_direct_enum_for_test(
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
-        "2",
-    );
-    let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-    let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-    assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+    let mut values = standard_attribute_values_for_test("Active", true);
+    values[12] =
+        standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID, "2");
+    let raw = standard_attribute_bag_from_values_for_test(&values, true);
+    let bag = parse_standard_attribute_bag(&raw).unwrap();
+    assert!(parse_standard_attribute_with_bag_fill("Active", &bag).is_none());
 }
 
 #[test]
-fn enforces_information_register_standard_attribute_dynamic_domains() {
+fn enforces_standard_attribute_dynamic_domains() {
     for name in ["Active", "LineNumber", "Recorder", "Period"] {
-        let values = information_register_standard_attribute_values_for_test(name, true);
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-        assert!(parse_information_register_standard_attribute(name, &bag).is_some());
+        let values = standard_attribute_values_for_test(name, true);
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
+        assert!(parse_standard_attribute_with_bag_fill(name, &bag).is_some());
     }
 
     let dynamic_invalid_values = [
         (
             1,
-            information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-                "2",
-            ),
+            standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "2"),
         ),
         (
             1,
-            information_register_standard_attribute_direct_enum_for_test(
-                "98ea8e5a-b586-442b-b944-6e3447734aa8",
-                "0",
-            ),
+            standard_attribute_direct_enum_for_test("98ea8e5a-b586-442b-b944-6e3447734aa8", "0"),
         ),
         (3, "{\"B\",2}".to_string()),
         (
             7,
-            format!(
-                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"en\",\"tip\",junk}}}}"
-            ),
+            format!("{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"en\",\"tip\",junk}}}}"),
         ),
         (
             7,
@@ -25416,25 +25792,19 @@ fn enforces_information_register_standard_attribute_dynamic_domains() {
         ),
         (
             15,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
-                "2",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_DATA_HISTORY_UUID, "2"),
         ),
         (
             20,
-            information_register_standard_attribute_nested_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
-                "2",
-            ),
+            standard_attribute_nested_enum_for_test(STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID, "2"),
         ),
     ];
     for (index, invalid) in dynamic_invalid_values {
-        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        let mut values = standard_attribute_values_for_test("Active", true);
         values[index] = invalid;
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
-        assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
+        assert!(parse_standard_attribute_with_bag_fill("Active", &bag).is_none());
     }
 
     let fill_value_cases = [
@@ -25452,12 +25822,12 @@ fn enforces_information_register_standard_attribute_dynamic_domains() {
         ("Period", "{\"S\",\"20130101000000\"}", false),
     ];
     for (name, fill_value, expected) in fill_value_cases {
-        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        let mut values = standard_attribute_values_for_test(name, false);
         values[22] = fill_value.to_string();
-        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
-        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        let raw = standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_standard_attribute_bag(&raw).unwrap();
         assert_eq!(
-            parse_information_register_standard_attribute(name, &bag).is_some(),
+            parse_standard_attribute_with_bag_fill(name, &bag).is_some(),
             expected,
             "{name} fill value {fill_value}"
         );
@@ -25469,20 +25839,18 @@ fn enforces_information_register_standard_attribute_dynamic_domains() {
         ("19000101000000", "1900-01-01T00:00:00"),
         ("20130101000000", "2013-01-01T00:00:00"),
     ] {
-        let value = parse_information_register_standard_attribute_fill_value(
-            &format!("{{\"D\",{raw}}}"),
-            "Period",
-        )
-        .unwrap();
+        let value =
+            parse_standard_attribute_fill_value_from_bag(&format!("{{\"D\",{raw}}}"), "Period")
+                .unwrap();
         assert!(matches!(value, MetadataChildFillValue::DateTime(value) if value == expected));
     }
 }
 
 #[test]
-fn emits_information_register_standard_attributes_from_exact_owner_root() {
+fn emits_standard_attributes_from_exact_owner_root() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     for modern in [false, true] {
-        let standard_attributes = information_register_standard_attributes_for_test(modern);
+        let standard_attributes = standard_attributes_for_test(modern);
         let tail =
             information_register_owner_tail_with_standard_attributes_for_test(&standard_attributes);
         let raw = exact_information_register_root_for_test(register_uuid, &tail);
@@ -25747,7 +26115,7 @@ fn extracts_information_register_generated_types_internal_info() {
 }
 
 #[test]
-fn rejects_legacy_short_information_register_standard_attributes() {
+fn rejects_legacy_short_standard_attributes() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let standard_attribute_details = "{1,{0}}";
     let blob = deflate_for_test(
@@ -26104,21 +26472,19 @@ fn accounting_register_standard_attribute_bag_for_test(
     with_overrides: bool,
     modern: bool,
 ) -> String {
-    let mut values = information_register_standard_attribute_values_for_test("Recorder", false);
+    let mut values = standard_attribute_values_for_test("Recorder", false);
     if with_overrides {
-        values[7] =
-            information_register_standard_attribute_localized_for_test(Some("Record type tip"));
-        values[18] =
-            information_register_standard_attribute_localized_for_test(Some("Record type"));
+        values[7] = standard_attribute_localized_for_test(Some("Record type tip"));
+        values[18] = standard_attribute_localized_for_test(Some("Record type"));
     }
-    information_register_standard_attribute_bag_from_values_for_test(&values, modern)
+    standard_attribute_bag_from_values_for_test(&values, modern)
 }
 
 fn accounting_register_standard_attributes_for_test(definitions: &[(&str, bool)]) -> String {
     let mut payload = vec!["1".to_string(), definitions.len().to_string()];
     for (marker, with_overrides) in definitions {
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
         payload.push(accounting_register_standard_attribute_bag_for_test(
             *with_overrides,
             false,
@@ -26190,7 +26556,7 @@ fn emits_accounting_register_record_type_from_complete_raw_triplet() {
         let record_type = accounting_register_standard_attribute_block(&xml, "RecordType");
 
         assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
-        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 12);
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 6);
         assert_eq!(
             xml.matches(r#"<xr:StandardAttribute name="RecordType">"#)
                 .count(),
@@ -26228,7 +26594,7 @@ fn preserves_accounting_register_record_type_tooltip_and_synonym() {
         let xml = extract_accounting_register_xml_for_test(&raw, register_uuid, source_version);
         let record_type = accounting_register_standard_attribute_block(&xml, "RecordType");
 
-        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 12);
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 6);
         assert!(record_type.contains("<xr:ToolTip>"));
         assert!(record_type.contains("<v8:content>Record type tip</v8:content>"));
         assert!(record_type.contains("<xr:Synonym>"));
@@ -26248,7 +26614,7 @@ fn omits_accounting_register_record_type_without_raw_marker() {
     ] {
         let xml = extract_accounting_register_xml_for_test(&raw, register_uuid, source_version);
 
-        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 11);
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 5);
         assert!(!xml.contains(r#"<xr:StandardAttribute name="RecordType">"#));
     }
 }
@@ -26269,21 +26635,17 @@ fn rejects_malformed_accounting_register_standard_attribute_collections_atomical
         "1".to_string(),
         "2".to_string(),
         "{-9}".to_string(),
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
+        STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
         property_bag.clone(),
         "{-10}".to_string(),
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
+        STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
         modern_property_bag,
     ];
     let mixed_bag_shapes = format!("{{1,{{{}}}}}", mixed_payload.join(","));
     let mutations = [
         (
             "wrong section UUID",
-            valid.replacen(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
-                register_uuid,
-                1,
-            ),
+            valid.replacen(STANDARD_ATTRIBUTE_SECTION_UUID, register_uuid, 1),
         ),
         ("missing property bag", missing_bag),
         ("garbage property bag", garbage_bag),
@@ -26305,7 +26667,7 @@ fn rejects_malformed_accounting_register_standard_attribute_collections_atomical
 
             assert_eq!(
                 xml.matches("<xr:StandardAttribute").count(),
-                11,
+                5,
                 "{case} in {}",
                 source_version.as_str()
             );
@@ -28646,6 +29008,8 @@ fn formats_enum_with_empty_child_objects_as_self_closing_node() {
         generated_types: Vec::new(),
         use_standard_commands: true,
         has_standard_attributes: true,
+        standard_attribute_extras: Vec::new(),
+        characteristics: Default::default(),
         quick_choice: true,
         choice_mode: "BothWays",
         choice_history_on_input: "DontUse",
@@ -28736,6 +29100,7 @@ fn extracts_enum_child_form_and_template_refs_from_current_indexes() {
             relative_path: PathBuf::from("Enums/Status/Templates/ExtraTemplate.xml"),
             kind: "Template",
             template_type: "TextDocument",
+            orphaned: false,
         },
     );
 
@@ -31427,6 +31792,9 @@ fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperti
         choice_folders_and_items: "Items",
         quick_choice: "Auto",
         data_history: "DontUse",
+        choice_form: None,
+        update_data_history_immediately_after_write: false,
+        execute_after_write_data_history_version_processing: false,
     }
 }
 
@@ -31558,18 +31926,25 @@ fn parses_constant_choice_parameters_as_design_time_refs() {
         "9fe5bd6a-0dc3-492a-8124-5d8374b7dc0f".to_string(),
         "Enum.ТипыИзмеряемыхВеличин.EnumValue.Вес".to_string(),
     )]);
-    let parameters = parse_constant_choice_parameters(
+    let parameters = parse_metadata_child_choice_parameters(
         Some(
             r##"{0,1,"Отбор.ТипИзмеряемойВеличины", {"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,e9aecab4-da2b-4a51-b13c-fb8ca3924bce,9fe5bd6a-0dc3-492a-8124-5d8374b7dc0f}}}"##,
         ),
+        &BTreeMap::from([(
+            "e9aecab4-da2b-4a51-b13c-fb8ca3924bce".to_string(),
+            "Enum.ТипыИзмеряемыхВеличин".to_string(),
+        )]),
         &object_refs,
-    );
+    )
+    .expect("choice parameters");
+    let mut xml = String::new();
+    push_choice_parameters_xml_with_tag(&mut xml, "\t\t\t", "ChoiceParameters", &parameters, false);
 
     assert_eq!(parameters.len(), 1);
     assert_eq!(parameters[0].name, "Отбор.ТипИзмеряемойВеличины");
     assert_eq!(
-        format_choice_parameters_xml(&parameters),
-        "<ChoiceParameters>\r\n\t\t\t\t<app:item name=\"Отбор.ТипИзмеряемойВеличины\">\r\n\t\t\t\t\t<app:value xsi:type=\"xr:DesignTimeRef\">Enum.ТипыИзмеряемыхВеличин.EnumValue.Вес</app:value>\r\n\t\t\t\t</app:item>\r\n\t\t\t</ChoiceParameters>"
+        xml,
+        "\t\t\t<ChoiceParameters>\r\n\t\t\t\t<app:item name=\"Отбор.ТипИзмеряемойВеличины\">\r\n\t\t\t\t\t<app:value xsi:type=\"xr:DesignTimeRef\">Enum.ТипыИзмеряемыхВеличин.EnumValue.Вес</app:value>\r\n\t\t\t\t</app:item>\r\n\t\t\t</ChoiceParameters>\r\n"
     );
 }
 
@@ -32126,12 +32501,12 @@ fn extracts_common_attribute_fill_checking_from_native_property_tail() {
 {0},
 {0},0,"",0,
 {"U"},
-{"U"},0,@ZERO_UUID@,2,0,
+{"U"},0,@ZERO_UUID@,2,1,
 {5006,0},
 {3,0,0},
 {0,0},0,
 {0},
-{"S",""},1,0,0},
+{"S",""},0,0,0},
 {0,0}},0}"#
         .replace("@UUID@", uuid)
         .replace("@ZERO_UUID@", zero_uuid);
@@ -34966,7 +35341,7 @@ fn rejects_malformed_strict_filter_criterion_root_owner_and_scalar_slots() {
             replace_filter_criterion_test_value(
                 &fixture.raw,
                 ",{0},{0},{0}},2,",
-                ",{1,\"en\",\"List\"},{0},{0}},2,",
+                ",{1,\"en\"},{0},{0}},2,",
             ),
         ),
         (
@@ -35317,7 +35692,6 @@ fn rejects_invalid_strict_filter_criterion_content_atomically() {
     );
 
     for invalid_reference in [
-        "Document.Invoice",
         "Document.Invoice.Command.Open",
         "Document.Invoice.TabularSection.Lines.Item",
         "Document..Attribute.Code",
@@ -37239,6 +37613,7 @@ fn report_template_refs_for_test(
                         .with_extension("xml"),
                     kind: "Template",
                     template_type: "DataCompositionSchema",
+                    orphaned: false,
                 },
             )
         })
@@ -37566,6 +37941,7 @@ fn fails_report_child_template_cohort_closed_on_resolution_collisions() {
             relative_path: PathBuf::from("Reports/ResolutionReport/Templates/First.xml"),
             kind: "Template",
             template_type: "DataCompositionSchema",
+            orphaned: false,
         },
     );
 
@@ -37789,6 +38165,7 @@ fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
             relative_path: PathBuf::from("Reports/SalesReport/Templates/MainSchema.xml"),
             kind: "Template",
             template_type: "DataCompositionSchema",
+            orphaned: false,
         },
     )]);
     let object_refs = BTreeMap::from([(
@@ -39035,22 +39412,19 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
         ];
         let mut payload = vec!["1".to_owned(), attributes.len().to_string()];
         for (marker, fill_value, presentation) in attributes {
-            let mut values =
-                information_register_standard_attribute_values_for_test("Active", false);
+            let mut values = standard_attribute_values_for_test("Active", false);
             values[22] = fill_value.to_owned();
             if let Some((tooltip, synonym)) = presentation {
                 values[7] = format!(
-                    "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{tooltip}\"}}}}"
+                    "{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{tooltip}\"}}}}"
                 );
                 values[18] = format!(
-                    "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{synonym}\"}}}}"
+                    "{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{synonym}\"}}}}"
                 );
             }
             payload.push(format!("{{{marker}}}"));
-            payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
-            payload.push(
-                information_register_standard_attribute_bag_from_values_for_test(&values, true),
-            );
+            payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+            payload.push(standard_attribute_bag_from_values_for_test(&values, true));
         }
         format!("{{1,{{{}}}}}", payload.join(","))
     };
@@ -39178,11 +39552,8 @@ fn extracts_document_numbering_commands_and_default_forms_to_metadata_xml() {
     let mut standard_attribute_payload = vec!["1".to_owned(), "5".to_owned()];
     for marker in ["-7", "-5", "-4", "-3", "-2"] {
         standard_attribute_payload.push(format!("{{{marker}}}"));
-        standard_attribute_payload
-            .push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
-        standard_attribute_payload.push(information_register_standard_attribute_bag_for_test(
-            "Active", true, false,
-        ));
+        standard_attribute_payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        standard_attribute_payload.push(standard_attribute_bag_for_test("Active", true, false));
     }
     fields[32] = format!("{{1,{{{}}}}}", standard_attribute_payload.join(","));
     collections[4] = format!(
@@ -39383,6 +39754,7 @@ fn extracts_document_child_forms_and_templates_to_metadata_xml() {
             relative_path: PathBuf::from("Documents/Invoice/Templates/Print.xml"),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
 
@@ -39446,11 +39818,8 @@ fn extracts_document_child_attribute_data_history_tail() {
     let mut standard_attribute_payload = vec!["1".to_owned(), "5".to_owned()];
     for marker in ["-7", "-5", "-4", "-3", "-2"] {
         standard_attribute_payload.push(format!("{{{marker}}}"));
-        standard_attribute_payload
-            .push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
-        standard_attribute_payload.push(information_register_standard_attribute_bag_for_test(
-            "Active", true, false,
-        ));
+        standard_attribute_payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        standard_attribute_payload.push(standard_attribute_bag_for_test("Active", true, false));
     }
     fields[32] = format!("{{1,{{{}}}}}", standard_attribute_payload.join(","));
     collections[2] = attribute_collection;
@@ -39666,8 +40035,10 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
         5
     );
     assert_eq!(
-        parse_task_field_references(
-            fields[28],
+        parse_field_reference_collection(
+            &fields,
+            28,
+            "Task",
             "CorpusTask",
             &BTreeMap::new(),
             &BTreeSet::new(),
@@ -39677,8 +40048,10 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
         vec!["Task.CorpusTask.StandardAttribute.Number"]
     );
     assert_eq!(
-        parse_task_field_references(
-            fields[46],
+        parse_field_reference_collection(
+            &fields,
+            46,
+            "Task",
             "CorpusTask",
             &BTreeMap::new(),
             &BTreeSet::new(),
@@ -39688,7 +40061,7 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
         Vec::<String>::new()
     );
     assert_eq!(
-        parse_task_standard_attributes(fields[34], &type_index, &BTreeMap::new())
+        parse_task_standard_attributes(fields[34], "Задача1", &type_index, &BTreeMap::new())
             .expect("Task standard attribute envelope")
             .expect("present Task standard attributes")
             .len(),
@@ -40288,6 +40661,7 @@ fn extracts_data_processor_child_forms_and_templates_to_metadata_xml() {
             relative_path: PathBuf::from("DataProcessors/Loader/Templates/Settings.xml"),
             kind: "Template",
             template_type: "TextDocument",
+            orphaned: false,
         },
     )]);
 
@@ -42645,10 +43019,22 @@ fn keeps_non_exact_code56_arities_on_legacy_as_description() {
 
 #[test]
 fn rejects_malformed_exact_code56_description_length_atomically() {
-    for malformed in ["", "value", "-1", "4294967296", "{0}"] {
+    for malformed in ["", "value", "4294967296", "{0}"] {
         let fixture =
             catalog_default_presentation_fixture("56", 61, malformed, "MalformedDescriptionLength");
         assert!(fixture.extract().is_none(), "accepted slot 19: {malformed}");
+    }
+}
+
+#[test]
+fn accepts_signed_exact_code56_description_length() {
+    for length in ["-1", "-2147483648"] {
+        let xml = catalog_default_presentation_xml("56", 61, length, "SignedDescriptionLength")
+            .expect("signed description length");
+        assert!(
+            xml.contains(&format!("<DescriptionLength>{length}</DescriptionLength>")),
+            "{xml}"
+        );
     }
 }
 
@@ -43629,6 +44015,7 @@ fn extracts_catalog_child_forms_and_templates_to_metadata_xml() {
             relative_path: PathBuf::from("Catalogs/Products/Templates/Print.xml"),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
 
@@ -45569,18 +45956,13 @@ fn extracts_catalog_tabular_section_property_tail() {
         r#"{"S",""}"#,
         "0",
     );
-    let mut line_number_values =
-        information_register_standard_attribute_values_for_test("LineNumber", true);
-    line_number_values[1] = information_register_standard_attribute_direct_enum_for_test(
-        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-        "1",
-    );
+    let mut line_number_values = standard_attribute_values_for_test("LineNumber", true);
+    line_number_values[1] =
+        standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "1");
     line_number_values[22] = "{\"U\"}".to_string();
-    let line_number_bag =
-        information_register_standard_attribute_bag_from_values_for_test(&line_number_values, true);
-    let standard_attributes_presence = format!(
-        "{{1,{{1,1,{{-10}},{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID},{line_number_bag}}}}}"
-    );
+    let line_number_bag = standard_attribute_bag_from_values_for_test(&line_number_values, true);
+    let standard_attributes_presence =
+        format!("{{1,{{1,1,{{-10}},{STANDARD_ATTRIBUTE_SECTION_UUID},{line_number_bag}}}}}");
     let tabular = catalog_tabular_section_item_with_overrides_for_test(
         tabular_section_uuid,
         "Prices",
@@ -46416,11 +46798,15 @@ fn parses_web_service_header_with_real_short_header_wrapper() {
 #[test]
 fn rejects_web_service_non_decimal_and_overflowing_counts() {
     let usize_overflow = format!("{}0", usize::MAX);
-    let u32_overflow = format!("{}0", u32::MAX);
+    let u64_overflow = format!("{}0", u64::MAX);
     assert!(parse_web_service_usize("+1").is_none());
     assert!(parse_web_service_usize(&usize_overflow).is_none());
-    assert!(parse_web_service_u32("+20").is_none());
-    assert!(parse_web_service_u32(&u32_overflow).is_none());
+    assert!(parse_web_service_u64("+20").is_none());
+    assert!(parse_web_service_u64(&u64_overflow).is_none());
+    assert_eq!(
+        parse_web_service_u64("18446744073709551615"),
+        Some(u64::MAX)
+    );
     assert!(parse_web_service_localized_value(&format!("{{{usize_overflow}}}")).is_none());
     assert!(
         parse_web_service_operations(
@@ -46537,8 +46923,6 @@ fn rejects_empty_or_path_ambiguous_web_service_names_and_required_text() {
     );
 
     let cases = [
-        valid.replacen("\"http://example.com/service\"", "\"\"", 1),
-        valid.replacen("\"RemoteApi.1cws\"", "\"\"", 1),
         valid.replacen("\"HandlePing\"", "\"\"", 1),
         valid.replacen(
             "\"RemoteApi\",{1,\"en\",\"RemoteApi\"}",
@@ -46586,6 +46970,19 @@ fn rejects_empty_or_path_ambiguous_web_service_names_and_required_text() {
             extract_web_service_fixture_for_test(&raw, &BTreeMap::new()).is_none(),
             "accepted empty/path-ambiguous WebService field: {raw}"
         );
+    }
+
+    // An empty namespace and an empty descriptor file name are the platform's
+    // own minimal service (TEST123/1); both are accepted and print empty.
+    for (from, tag) in [
+        ("\"http://example.com/service\"", "<Namespace/>"),
+        ("\"RemoteApi.1cws\"", "<DescriptorFileName/>"),
+    ] {
+        let raw = valid.replacen(from, "\"\"", 1);
+        let extracted = extract_web_service_fixture_for_test(&raw, &BTreeMap::new())
+            .unwrap_or_else(|| panic!("rejected an empty {tag}"));
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        assert!(xml.contains(tag), "{tag} is not empty in {xml}");
     }
 }
 
@@ -47064,25 +47461,20 @@ fn exact_register_standard_attributes_with_fill_for_test(
     let mut payload = vec!["1".to_string(), definitions.len().to_string()];
     for (marker, name) in definitions {
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
-        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = standard_attribute_values_for_test(name, false);
         if let Some(fill_value) = fill_value {
-            let index = INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+            let index = STANDARD_ATTRIBUTE_KEYS
                 .iter()
-                .position(|key| {
-                    *key == INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID
-                })
+                .position(|key| *key == STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)
                 .expect("the authored property bag declares its fill-value key");
             values[index] = fill_value.to_owned();
         }
         if *name == "Period" {
-            values[1] = information_register_standard_attribute_direct_enum_for_test(
-                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
-                "1",
-            );
+            values[1] =
+                standard_attribute_direct_enum_for_test(STANDARD_ATTRIBUTE_FILL_CHECKING_UUID, "1");
         }
-        payload
-            .push(information_register_standard_attribute_bag_from_values_for_test(&values, false));
+        payload.push(standard_attribute_bag_from_values_for_test(&values, false));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
@@ -47263,7 +47655,8 @@ impl CalculationRegisterPresentationsFixture {
             16 => "2".to_string(),
             17 | 18 => "1".to_string(),
             22 => CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
-            23 => CALCULATION_DEFAULT_FORM_TEST_UUID.to_string(),
+            23 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            24 => "1".to_string(),
             29 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
             28 => exact_register_standard_attributes_for_test(&[
                 ("-13", "RegistrationPeriod"),
@@ -47492,14 +47885,12 @@ fn accumulation_register_exports_with_no_customized_standard_attributes() {
 /// (confirmed by hand).
 #[test]
 fn register_standard_attribute_accepts_choice_parameter_links_kind_5004() {
-    let mut values = information_register_standard_attribute_values_for_test("Active", false);
-    values[21] = format!(
-        "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5004,0}}}}"
-    );
-    let bag_text = information_register_standard_attribute_bag_from_values_for_test(&values, false);
-    let bag = parse_information_register_standard_attribute_bag(&bag_text)
+    let mut values = standard_attribute_values_for_test("Active", false);
+    values[21] = format!("{{\"#\",{STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5004,0}}}}");
+    let bag_text = standard_attribute_bag_from_values_for_test(&values, false);
+    let bag = parse_standard_attribute_bag(&bag_text)
         .expect("bag with a 5004 choice-parameter-links kind tag must still parse");
-    let attribute = parse_register_standard_attribute("Active", &bag, MetadataChildFillValue::Nil);
+    let attribute = parse_standard_attribute_with_bag_fill("Active", &bag);
     assert!(
         attribute.is_some(),
         "a standard attribute whose empty ChoiceParameterLinks carries kind tag 5004 \
@@ -48016,18 +48407,23 @@ fn calculation_presentations_emit_mandatory_empty_triple_in_schema_position() {
 }
 
 #[test]
-fn calculation_presentations_reject_nonempty_and_malformed_slots_atomically() {
+fn calculation_presentations_accept_nonempty_and_reject_malformed_slots_atomically() {
+    let accepted = register_localized_field(&[("en", "valid but unsupported")]);
     let rejected = [
-        register_localized_field(&[("en", "valid but unsupported")]),
         "{1,\"en\"}".to_string(),
         "{1,en,\"value\"}".to_string(),
         "{2,\"en\",\"first\",\"en\",\"second\"}".to_string(),
         "{1,\"en\",\"value\",0}".to_string(),
-        "{ 0 }".to_string(),
         "0".to_string(),
     ];
 
     for slot in 30..=32 {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[slot] = accepted.clone();
+        assert!(
+            fixture.extract().is_some(),
+            "rejected nonempty exact field {slot}"
+        );
         for value in &rejected {
             let mut fixture = CalculationRegisterPresentationsFixture::exact();
             fixture.fields[slot] = value.clone();
@@ -48035,6 +48431,14 @@ fn calculation_presentations_reject_nonempty_and_malformed_slots_atomically() {
                 fixture.extract().is_none(),
                 "accepted unsupported exact field {slot}: {value:?}"
             );
+        }
+    }
+
+    for empty in ["{ 0 }"] {
+        for slot in 30..=32 {
+            let mut fixture = CalculationRegisterPresentationsFixture::exact();
+            fixture.fields[slot] = empty.to_string();
+            assert!(fixture.extract().is_some(), "rejected empty {empty:?}");
         }
     }
 }
@@ -48218,26 +48622,29 @@ fn calculation_period_emits_fixed_vector_once_in_schema_order() {
 }
 
 #[test]
-fn calculation_period_alternative_scalars_remain_accepted_omissions() {
+fn calculation_period_scalar_domains_fail_closed_on_unobserved_codes() {
     let fixed = CalculationRegisterPresentationsFixture::exact()
         .xml()
         .unwrap();
-    let fixed_without_period = fixed
-        .replace("\t\t\t<Periodicity>Month</Periodicity>\r\n", "")
-        .replace("\t\t\t<ActionPeriod>true</ActionPeriod>\r\n", "")
-        .replace("\t\t\t<BasePeriod>true</BasePeriod>\r\n", "");
-    // Slot 17 is `<ActionPeriod>` and separates both values on the corpus, so
-    // `0` is a reading and no longer an omission; slot 18 is `<BasePeriod>`,
-    // whose `0` the calculation register of an extension separates (`false`).
-    // Every other scalar there, and every alternative on the slot that stays a
-    // checked constant, still refuses the block whole.
-    let alternatives = [
-        (16, vec!["0", "1", "3", "-1", "value", "{0}"]),
+    // Every code the corpus separates is a reading: `<Periodicity>` stores
+    // `0`..`3` for `Year`/`Quarter`/`Month`/`Day`.
+    for (raw, expected) in [
+        ("0", "<Periodicity>Year</Periodicity>"),
+        ("1", "<Periodicity>Quarter</Periodicity>"),
+        ("2", "<Periodicity>Month</Periodicity>"),
+        ("3", "<Periodicity>Day</Periodicity>"),
+    ] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[16] = raw.to_string();
+        let xml = fixture.xml().expect("observed periodicity code");
+        assert_eq!(xml.matches(expected).count(), 1, "code {raw}");
+    }
+
+    for (slot, values) in [
+        (16, vec!["4", "-1", "value", "{0}"]),
         (17, vec!["2", "-1", "value", "{0}"]),
         (18, vec!["2", "-1", "value", "{0}"]),
-    ];
-
-    for (slot, values) in alternatives {
+    ] {
         for value in values {
             let mut fixture = CalculationRegisterPresentationsFixture::exact();
             fixture.fields[slot] = value.to_string();
@@ -48249,79 +48656,34 @@ fn calculation_period_alternative_scalars_remain_accepted_omissions() {
                 .collect::<Vec<_>>();
             let header =
                 parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
-            assert!(matches!(
-                parse_calculation_register_fixed_period("CalculationRegister", &fields, &header,),
-                Some(None)
-            ));
-
-            let source = fixture
-                .extract()
-                .expect("alternative period vector must remain accepted");
-            let xml = String::from_utf8(source.xml).unwrap();
-            assert!(!xml.contains("<Periodicity>"));
-            assert!(!xml.contains("<ActionPeriod>"));
-            assert!(!xml.contains("<BasePeriod>"));
-            if slot == 16 && value == "0" {
-                assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
-            }
-
-            let mut register = parse_register_properties_from_text(
-                "CalculationRegister",
-                &raw,
-                CALCULATION_PRESENTATIONS_TEST_UUID,
-                &BTreeMap::new(),
-                &BTreeMap::new(),
-                &BTreeMap::new(),
-                InfobaseConfigSourceVersion::V2_21,
-            )
-            .unwrap();
-            assert!(register.calculation_period.is_none());
-            let before = format_register_source_xml(
-                "CalculationRegister",
-                &header,
-                &register,
-                InfobaseConfigSourceVersion::V2_21,
-                &MetadataTypeSetLeafIndex::new(),
+            assert!(
+                parse_calculation_register_fixed_period("CalculationRegister", &fields, &header,)
+                    .is_none(),
+                "unobserved {slot}={value} must refuse the register"
             );
-            register.calculation_period = None;
-            let after = format_register_source_xml(
-                "CalculationRegister",
-                &header,
-                &register,
-                InfobaseConfigSourceVersion::V2_21,
-                &MetadataTypeSetLeafIndex::new(),
+            assert!(
+                fixture.extract().is_none(),
+                "unobserved {slot}={value} must reject the record"
             );
-            assert_eq!(before, after, "period marker changed slot {slot}={value}");
-
-            if slot != 16 {
-                assert_eq!(
-                    xml, fixed_without_period,
-                    "non-neighbor scalar changed XML at slot {slot}={value}"
-                );
-            }
         }
     }
 
-    // `0` in slot 17 is `<ActionPeriod>false</ActionPeriod>`, the second value
-    // the corpus separates, and the block stays whole around it.
+    // `0` in slot 17 is `<ActionPeriod>false</ActionPeriod>`, `0` in slot 18 is
+    // `<BasePeriod>false</BasePeriod>`, and the block stays whole around them.
     let mut false_action = CalculationRegisterPresentationsFixture::exact();
     false_action.fields[17] = "0".to_string();
-    let false_action_xml = false_action.xml().unwrap();
     assert_eq!(
-        false_action_xml,
+        false_action.xml().unwrap(),
         fixed.replace(
             "\t\t\t<ActionPeriod>true</ActionPeriod>\r\n",
             "\t\t\t<ActionPeriod>false</ActionPeriod>\r\n",
         )
     );
 
-    // `0` in slot 18 is `<BasePeriod>false</BasePeriod>`: the calculation
-    // register of the `_ДемоРасширение` extension writes `0` in both slots.
     let mut false_base = CalculationRegisterPresentationsFixture::exact();
     false_base.fields[18] = "0".to_string();
-    let false_base_xml = false_base.xml().unwrap();
     assert_eq!(
-        false_base_xml,
+        false_base.xml().unwrap(),
         fixed.replace(
             "\t\t\t<BasePeriod>true</BasePeriod>\r\n",
             "\t\t\t<BasePeriod>false</BasePeriod>\r\n",
@@ -48484,16 +48846,30 @@ fn calculation_include_help_emits_fixed_false_once_in_schema_order() {
 }
 
 #[test]
-fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
+fn calculation_include_help_reads_both_booleans_and_refuses_other_atoms() {
     let exact = CalculationRegisterPresentationsFixture::exact()
         .xml()
         .unwrap();
-    let include_help_line = "\t\t\t<IncludeHelpInContents>false</IncludeHelpInContents>\r\n";
-    let expected_omission = exact.replace(include_help_line, "");
+    // Slot 25 is `<IncludeHelpInContents>`: both boolean codes are readings.
+    let mut enabled = CalculationRegisterPresentationsFixture::exact();
+    enabled.fields[25] = "1".to_string();
+    assert_eq!(
+        enabled.xml().unwrap(),
+        exact.replace(
+            "<IncludeHelpInContents>false</IncludeHelpInContents>",
+            "<IncludeHelpInContents>true</IncludeHelpInContents>",
+        )
+    );
+    let mut padded = CalculationRegisterPresentationsFixture::exact();
+    padded.fields[25] = " 1 ".to_string();
+    assert!(
+        padded
+            .xml()
+            .unwrap()
+            .contains("<IncludeHelpInContents>true</IncludeHelpInContents>")
+    );
 
     for value in [
-        "1",
-        " 1 ",
         "2",
         "-1",
         "00",
@@ -48514,15 +48890,15 @@ fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
 
-        assert!(matches!(
-            parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &header,),
-            Some(None)
-        ));
-        let xml = fixture
-            .xml()
-            .expect("alternative include-help atom must remain accepted");
-        assert!(!xml.contains("<IncludeHelpInContents>"));
-        assert_eq!(xml, expected_omission, "consumed field 25 value {value}");
+        assert!(
+            parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &header,)
+                .is_none(),
+            "unobserved field 25 value {value} must refuse the register"
+        );
+        assert!(
+            fixture.extract().is_none(),
+            "unobserved field 25 value {value} must reject the record"
+        );
     }
 }
 
@@ -48728,7 +49104,8 @@ fn calculation_include_help_has_no_production_corpus_literals() {
 #[test]
 fn calculation_form_pair_emits_same_owner_default_and_mandatory_empty_auxiliary() {
     let form_refs = calculation_form_refs_for_test();
-    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let mut fixture = CalculationRegisterPresentationsFixture::exact();
+    fixture.fields[23] = CALCULATION_DEFAULT_FORM_TEST_UUID.to_string();
     let source = fixture
         .extract_with_form_refs(&form_refs)
         .expect("exact calculation form pair");
@@ -48762,10 +49139,15 @@ fn calculation_form_pair_emits_same_owner_default_and_mandatory_empty_auxiliary(
 }
 
 #[test]
-fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
+fn calculation_form_pair_resolver_refuses_references_the_designer_does_not_own() {
     let preferred_fallback_uuid = "11111111-1111-4111-8111-111111111111";
     let unknown_uuid = "22222222-2222-4222-8222-222222222222";
     let mut cases = Vec::new();
+    let form_fixture = || {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[23] = CALCULATION_DEFAULT_FORM_TEST_UUID.to_string();
+        fixture
+    };
 
     // A nil default-list-form uuid is no longer an omission: it is the register
     // naming no form, and the platform writes `<DefaultListForm/>` and
@@ -48797,7 +49179,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
 
     cases.push((
         "cross-owner F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Other/Forms/List.xml",
@@ -48806,7 +49188,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "CommonForm F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CommonForms/List.xml",
@@ -48815,7 +49197,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "wrong-kind F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Payroll/Forms/List.xml",
@@ -48824,7 +49206,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "nested-path F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Payroll/Forms/Nested/List.xml",
@@ -48833,7 +49215,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "wrong-extension F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Payroll/Forms/List.bin",
@@ -48842,7 +49224,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     ));
     cases.push((
         "multi-segment QName F23",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         form_refs_for_test(
             CALCULATION_DEFAULT_FORM_TEST_UUID,
             "CalculationRegisters/Payroll/Forms/List.Detail.xml",
@@ -48860,7 +49242,7 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
     );
     cases.push((
         "case-insensitive UUID collision",
-        CalculationRegisterPresentationsFixture::exact(),
+        form_fixture(),
         collisions,
     ));
 
@@ -48873,34 +49255,44 @@ fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
             .collect::<Vec<_>>();
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
-        assert!(matches!(
+        assert!(
             parse_calculation_register_fixed_form_pair(
                 "CalculationRegister",
                 &fields,
                 &header,
                 &form_refs,
-            ),
-            Some(None)
-        ));
-
-        let xml = fixture
-            .xml_with_form_refs(&form_refs)
-            .unwrap_or_else(|| panic!("rejected resolver omission: {label}"));
-        assert!(!xml.contains("<DefaultListForm"), "{label}");
-        assert!(!xml.contains("<AuxiliaryListForm"), "{label}");
-
-        let mut baseline = fixture.clone();
-        baseline.fields[23] = "0".to_string();
-        let baseline_xml = baseline.xml_with_form_refs(&form_refs).unwrap();
-        assert_eq!(xml, baseline_xml, "resolver consumed {label}");
+                None,
+            )
+            .is_none(),
+            "{label} must refuse the register"
+        );
+        assert!(
+            fixture.extract_with_form_refs(&form_refs).is_none(),
+            "{label} must reject the record"
+        );
     }
 }
 
 #[test]
-fn calculation_form_pair_nonzero_or_malformed_auxiliary_is_accepted_omission() {
+fn calculation_form_pair_reads_auxiliary_slot_and_refuses_non_owned_values() {
     let form_refs = calculation_form_refs_for_test();
+    // An owned auxiliary form is written from its own slot, next to an empty
+    // default one.
+    let mut owned = CalculationRegisterPresentationsFixture::exact();
+    owned.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+    owned.fields[29] = CALCULATION_DEFAULT_FORM_TEST_UUID.to_string();
+    let source = owned
+        .extract_with_form_refs(&form_refs)
+        .expect("owned auxiliary list form");
+    let xml = String::from_utf8(source.xml).unwrap();
+    assert!(xml.contains("\t\t\t<DefaultListForm/>\r\n"));
+    assert!(
+        xml.contains(
+            "<AuxiliaryListForm>CalculationRegister.Payroll.Form.List</AuxiliaryListForm>"
+        )
+    );
+
     for value in [
-        CALCULATION_DEFAULT_FORM_TEST_UUID,
         "00000000-0000-0000-0000-000000000001",
         "0",
         "00",
@@ -48917,24 +49309,21 @@ fn calculation_form_pair_nonzero_or_malformed_auxiliary_is_accepted_omission() {
             .collect::<Vec<_>>();
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
-        assert!(matches!(
+        assert!(
             parse_calculation_register_fixed_form_pair(
                 "CalculationRegister",
                 &fields,
                 &header,
                 &form_refs,
-            ),
-            Some(None)
-        ));
-
-        let xml = fixture
-            .xml_with_form_refs(&form_refs)
-            .expect("alternative F29 must remain accepted");
-        assert!(!xml.contains("<DefaultListForm"));
-        assert!(!xml.contains("<AuxiliaryListForm"));
-        let mut baseline = fixture;
-        baseline.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
-        assert_eq!(xml, baseline.xml_with_form_refs(&form_refs).unwrap());
+                None,
+            )
+            .is_none(),
+            "unowned F29 {value} must refuse the register"
+        );
+        assert!(
+            fixture.extract_with_form_refs(&form_refs).is_none(),
+            "unowned F29 {value} must reject the record"
+        );
     }
 }
 
@@ -48956,6 +49345,7 @@ fn calculation_form_pair_direct_seam_requires_full_exact_owner_boundary() {
             &fields,
             &expected,
             &form_refs,
+            None,
         ),
         Some(Some(_))
     ));
@@ -48989,6 +49379,7 @@ fn calculation_form_pair_direct_seam_requires_full_exact_owner_boundary() {
                 &fields,
                 &expected,
                 &form_refs,
+                None,
             )
             .is_none()
         );
@@ -49002,6 +49393,7 @@ fn calculation_form_pair_direct_seam_requires_full_exact_owner_boundary() {
             &fields,
             &mismatch,
             &form_refs,
+            None,
         )
         .is_none()
     );
@@ -49112,7 +49504,8 @@ fn calculation_form_pair_preserves_accounting_and_accumulation_form_slots() {
 
 #[test]
 fn calculation_form_pair_changes_only_the_two_mandatory_lines() {
-    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let mut fixture = CalculationRegisterPresentationsFixture::exact();
+    fixture.fields[23] = CALCULATION_DEFAULT_FORM_TEST_UUID.to_string();
     let raw = fixture.raw();
     let header =
         parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
@@ -49371,11 +49764,19 @@ fn calculation_schedule_resolver_alternatives_omit_the_whole_tuple() {
         for field in &mut baseline.fields[19..=22] {
             *field = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
         }
-        assert_eq!(
-            xml,
-            baseline.xml_with_object_refs(&refs).unwrap(),
-            "{label}"
-        );
+        // A register that names neither a schedule nor a chart still declares
+        // the four properties, empty (TEST123/1, platform 8.3.27.2214); a
+        // partial tuple stays an omission and is not equal to that baseline.
+        let baseline_xml = baseline.xml_with_object_refs(&refs).unwrap();
+        for property in [
+            "<Schedule/>",
+            "<ScheduleValue/>",
+            "<ScheduleDate/>",
+            "<ChartOfCalculationTypes/>",
+        ] {
+            assert!(baseline_xml.contains(property), "{label}: {property}");
+        }
+        assert_ne!(xml, baseline_xml, "{label}");
     }
 }
 
@@ -49645,14 +50046,22 @@ fn calculation_full_text_search_emits_fixed_dont_use_once_in_native_order() {
 }
 
 #[test]
-fn calculation_full_text_search_alternatives_are_accepted_omissions() {
-    let mut omitted = CalculationRegisterPresentationsFixture::exact();
-    omitted.fields[27] = "1".to_string();
-    let expected_omission = omitted.xml().unwrap();
-    assert!(!expected_omission.contains("<FullTextSearch>"));
+fn calculation_full_text_search_reads_both_codes_and_refuses_other_atoms() {
+    let exact = CalculationRegisterPresentationsFixture::exact()
+        .xml()
+        .unwrap();
+    // Slot 27 is `<FullTextSearch>`: `0` is `DontUse` and `1` is `Use`.
+    let mut used = CalculationRegisterPresentationsFixture::exact();
+    used.fields[27] = "1".to_string();
+    assert_eq!(
+        used.xml().unwrap(),
+        exact.replace(
+            "<FullTextSearch>DontUse</FullTextSearch>",
+            "<FullTextSearch>Use</FullTextSearch>",
+        )
+    );
 
     for value in [
-        "1",
         "2",
         "-1",
         "00",
@@ -49673,19 +50082,19 @@ fn calculation_full_text_search_alternatives_are_accepted_omissions() {
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
 
-        assert!(matches!(
+        assert!(
             parse_calculation_register_fixed_full_text_search(
                 "CalculationRegister",
                 &fields,
                 &header,
-            ),
-            Some(None)
-        ));
-        let xml = fixture
-            .xml()
-            .unwrap_or_else(|| panic!("rejected accepted F27 omission {value}"));
-        assert!(!xml.contains("<FullTextSearch>"), "F27 {value}");
-        assert_eq!(xml, expected_omission, "consumed F27 {value}");
+            )
+            .is_none(),
+            "unobserved F27 {value} must refuse the register"
+        );
+        assert!(
+            fixture.extract().is_none(),
+            "unobserved F27 {value} must reject the record"
+        );
     }
 }
 
@@ -50956,15 +51365,15 @@ fn characteristics_slot_matrix_covers_every_owner_family_that_declares_the_prope
 }
 
 #[test]
-fn characteristics_cct_preconditions_preserve_exact_zero_pair_and_binary_lexemes() {
+fn characteristics_cct_preconditions_preserve_binary_lexemes() {
     let mut fields = vec![""; 59];
-    fields[15] = "{0,0}";
     fields[36] = "0";
-    fields[52] = "{1,{0,0}}";
     assert!(cct_characteristics_preconditions(&fields));
     fields[36] = "1";
     assert!(cct_characteristics_preconditions(&fields));
-    for valid in [" 0 ", "1 "] {
+    fields[36] = "2";
+    assert!(cct_characteristics_preconditions(&fields));
+    for valid in [" 0 ", "1 ", "2 "] {
         fields[36] = valid;
         assert!(
             cct_characteristics_preconditions(&fields),
@@ -50972,24 +51381,9 @@ fn characteristics_cct_preconditions_preserve_exact_zero_pair_and_binary_lexemes
         );
     }
 
-    for invalid in ["00", "01"] {
+    for invalid in ["00", "01", "3"] {
         fields[36] = invalid;
         assert!(!cct_characteristics_preconditions(&fields));
-    }
-    fields[36] = "0";
-    for valid in ["{ 0 ,0 }", "{0, 0}"] {
-        fields[15] = valid;
-        assert!(
-            cct_characteristics_preconditions(&fields),
-            "rejected baseline-compatible padded pair {valid:?}"
-        );
-    }
-    for invalid in ["{1,1}", "{00,0}", "{0,00}", "{0}", "{0,0,0}", "0,0", "{0,0"] {
-        fields[15] = invalid;
-        assert!(
-            !cct_characteristics_preconditions(&fields),
-            "accepted invalid pair {invalid:?}"
-        );
     }
 }
 
@@ -51582,8 +51976,8 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
     assert_eq!(parsed[0].value_change, "Clear");
 
     // A path that leaves the owner is written back raw, the way the platform
-    // writes it; a bare standard attribute code is still refused, because only
-    // the catalog table names one.
+    // writes it; a bare standard attribute code names the family's own
+    // attribute.
     let foreign = parse_owner_choice_parameter_links(
         &links,
         "ChartOfCharacteristicTypes",
@@ -51596,15 +51990,17 @@ fn cct_attribute_choice_parameter_links_resolve_inside_the_owning_plan() {
         foreign[0].data_path,
         format!("0:{SECTION_UUID}/0:{ATTRIBUTE_UUID}")
     );
-    assert!(
-        parse_owner_choice_parameter_links(
-            "{5006,1,\"Отбор\",1,{-8},0}",
-            "ChartOfCharacteristicTypes",
-            "СтатьиАктивовПассивов",
-            false,
-            &object_refs,
-        )
-        .is_none()
+    let own = parse_owner_choice_parameter_links(
+        "{5006,1,\"Отбор\",1,{-8},0}",
+        "ChartOfCharacteristicTypes",
+        "СтатьиАктивовПассивов",
+        false,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        own[0].data_path,
+        "ChartOfCharacteristicTypes.СтатьиАктивовПассивов.StandardAttribute.Code"
     );
     assert_eq!(
         parse_catalog_choice_parameter_links(
@@ -51626,26 +52022,25 @@ fn line_number_standard_attributes_for_test(
     edit_format: &str,
     synonym: &str,
 ) -> String {
-    let localized = |content: &str| {
-        format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{content}}}")
-    };
+    let localized =
+        |content: &str| format!("{{\"#\",{STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{content}}}");
     let mut pairs = Vec::new();
-    for key in INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS {
+    for key in STANDARD_ATTRIBUTE_KEYS {
         let value = match key {
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID => localized(format),
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID => {
-                localized(edit_format)
-            }
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => localized(synonym),
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID => {
-                r#"{"U"}"#.to_owned()
-            }
+            STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID => localized(format),
+            STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID => localized(edit_format),
+            STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => localized(synonym),
+            STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID => r#"{"U"}"#.to_owned(),
+            // The measured default: `TransformValues`.
+            STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID => format!(
+                "{{\"#\",{STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID},{{{STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID},0}}}}"
+            ),
             _ => "{0}".to_owned(),
         };
         pairs.push(format!("{key},{value}"));
     }
     let bag = format!("{{14,25,{}}}", pairs.join(","));
-    format!("{{1,{{1,1,{{-10}},{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID},{bag}}}}}")
+    format!("{{1,{{1,1,{{-10}},{STANDARD_ATTRIBUTE_SECTION_UUID},{bag}}}}}")
 }
 
 #[test]
@@ -51683,6 +52078,7 @@ fn tabular_section_line_number_format_and_edit_format_are_read_not_assumed_empty
             line_number_synonym: line_number.synonym,
             line_number_format: line_number.format,
             line_number_edit_format: line_number.edit_format,
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: Some(5),
         },
@@ -51721,6 +52117,7 @@ fn tabular_section_line_number_format_and_edit_format_are_read_not_assumed_empty
             line_number_synonym: line_number.synonym,
             line_number_format: line_number.format,
             line_number_edit_format: line_number.edit_format,
+            line_number_type_reduction_mode: "TransformValues",
             use_mode: None,
             line_number_length: Some(5),
         },
@@ -51902,6 +52299,8 @@ fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_
         ("1", "1", "Variable", "Managed"),
         ("0", "0", "Fixed", "Automatic"),
         ("0", "1", "Variable", "Automatic"),
+        // The third value the platform writes for this property.
+        ("2", "0", "Fixed", "AutomaticAndManaged"),
     ] {
         let mut owned = vec!["0".to_owned(); 49];
         owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = slot28.to_owned();
@@ -51916,13 +52315,14 @@ fn business_process_number_allowed_length_and_data_lock_mode_ride_the_slots_the_
             Some(lock_mode)
         );
     }
-    // Neither slot admits a value outside its closed pair.
+    // Neither slot admits a value outside its closed set: the length keeps two
+    // codes, the lock mode the platform's three.
     let mut owned = vec!["0".to_owned(); 49];
     owned[BUSINESS_PROCESS_NUMBER_ALLOWED_LENGTH_SLOT] = "2".to_owned();
     let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
     assert_eq!(parse_business_process_number_allowed_length(&fields), None);
     let mut owned = vec!["0".to_owned(); 49];
-    owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = "2".to_owned();
+    owned[BUSINESS_PROCESS_DATA_LOCK_CONTROL_MODE_SLOT] = "3".to_owned();
     let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
     assert_eq!(parse_business_process_data_lock_control_mode(&fields), None);
 }
@@ -52026,18 +52426,33 @@ fn business_process_standard_attribute_slot_admits_the_absent_envelope() {
     // "this object overrides nothing", exactly as it already does on the
     // Catalog root -- it is not a shape this reader may refuse.
     assert!(matches!(
-        parse_business_process_standard_attributes("{0}", &BTreeMap::new(), &BTreeMap::new()),
+        parse_business_process_standard_attributes(
+            "{0}",
+            "БизнесПроцесс1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        ),
         Some(None)
     ));
     // The envelope itself is still verified: a present collection whose
     // declared arity is not this family's is refused, not silently emptied.
     assert!(
-        parse_business_process_standard_attributes("{1,{1,0}}", &BTreeMap::new(), &BTreeMap::new())
-            .is_none()
+        parse_business_process_standard_attributes(
+            "{1,{1,0}}",
+            "БизнесПроцесс1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
     );
     assert!(
-        parse_business_process_standard_attributes("{2}", &BTreeMap::new(), &BTreeMap::new())
-            .is_none()
+        parse_business_process_standard_attributes(
+            "{2}",
+            "БизнесПроцесс1",
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
     );
 }
 
@@ -52057,6 +52472,7 @@ fn business_process_owned_templates_resolve_like_every_other_owner_family() {
             )),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
     assert_eq!(
@@ -52075,6 +52491,7 @@ fn business_process_owned_templates_resolve_like_every_other_owner_family() {
             relative_path: PathBuf::from(format!("Documents/Ознакомление/Templates/{NAME}.xml")),
             kind: "Template",
             template_type: "SpreadsheetDocument",
+            orphaned: false,
         },
     )]);
     assert_eq!(
@@ -52119,8 +52536,8 @@ fn business_process_attribute_choice_parameter_links_resolve_inside_the_owning_p
     assert_eq!(parsed[0].value_change, "Clear");
 
     // A path that leaves the owner is written back raw, exactly as the
-    // platform writes it, and a bare standard attribute code stays unnamed
-    // outside the catalog table.
+    // platform writes it; a bare standard attribute code names the family's
+    // own attribute.
     let foreign = parse_owner_choice_parameter_links(
         &links,
         "BusinessProcess",
@@ -52133,15 +52550,17 @@ fn business_process_attribute_choice_parameter_links_resolve_inside_the_owning_p
         foreign[0].data_path,
         format!("0:{SECTION_UUID}/0:{ATTRIBUTE_UUID}")
     );
-    assert!(
-        parse_owner_choice_parameter_links(
-            "{5006,1,\"Отбор\",1,{-8},0}",
-            "BusinessProcess",
-            "Исполнение",
-            false,
-            &object_refs,
-        )
-        .is_none()
+    let own = parse_owner_choice_parameter_links(
+        "{5006,1,\"Отбор\",1,{-8},0}",
+        "BusinessProcess",
+        "Исполнение",
+        false,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        own[0].data_path,
+        "BusinessProcess.Исполнение.StandardAttribute.HeadTask"
     );
 }
 
@@ -54199,17 +54618,14 @@ fn task_standard_attribute_presence_root_for_test(standard_attributes: &str) -> 
 fn task_standard_attribute_presence_collection_for_test(override_number: bool) -> String {
     let mut payload = vec!["1".to_owned(), "8".to_owned()];
     for (marker, name) in TASK_STANDARD_ATTRIBUTES {
-        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        let mut values = standard_attribute_values_for_test(name, false);
         if override_number && name == "Number" {
-            values[7] =
-                information_register_standard_attribute_localized_for_test(Some("Number tip"));
-            values[18] =
-                information_register_standard_attribute_localized_for_test(Some("Number caption"));
+            values[7] = standard_attribute_localized_for_test(Some("Number tip"));
+            values[18] = standard_attribute_localized_for_test(Some("Number caption"));
         }
         payload.push(format!("{{{marker}}}"));
-        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
-        payload
-            .push(information_register_standard_attribute_bag_from_values_for_test(&values, false));
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        payload.push(standard_attribute_bag_from_values_for_test(&values, false));
     }
     format!("{{1,{{{}}}}}", payload.join(","))
 }
@@ -54318,7 +54734,7 @@ fn accounting_register_standard_attribute_presence_preserves_absence_and_overrid
         let present_xml = extract_accounting_register_xml_for_test(&present, &uuid, profile);
         assert_eq!(
             present_xml.matches("<xr:StandardAttribute name=").count(),
-            12
+            6
         );
         let record_type = accounting_register_standard_attribute_block(&present_xml, "RecordType");
         assert!(record_type.contains("Record type tip"));
@@ -54337,9 +54753,10 @@ fn accounting_register_standard_attribute_presence_preserves_absence_and_overrid
 #[test]
 fn accounting_register_standard_attribute_presence_retains_empty_present_and_malformed_fallback() {
     let uuid = owner_graph_uuid_for_test(200);
-    // Existing accounting-register fallback is intentionally preserved. These
-    // envelopes must not be mistaken for the exact native absence marker.
-    for collection in ["{1,{1,0}}", "{0,0}", "{2,{1,0}}"] {
+    // The exact present envelope with no members keeps the family's default
+    // set; the malformed envelopes keep the older fallback, and none of them
+    // may be mistaken for the exact native absence marker.
+    for (collection, expected) in [("{1,{1,0}}", 11), ("{0,0}", 5), ("{2,{1,0}}", 5)] {
         let raw = accounting_register_root_for_test(&uuid, false, collection);
         for profile in [
             InfobaseConfigSourceVersion::V2_20,
@@ -54348,7 +54765,7 @@ fn accounting_register_standard_attribute_presence_retains_empty_present_and_mal
             let xml = extract_accounting_register_xml_for_test(&raw, &uuid, profile);
             assert_eq!(
                 xml.matches("<xr:StandardAttribute name=").count(),
-                11,
+                expected,
                 "{collection}"
             );
             assert!(!xml.contains("name=\"RecordType\""));
@@ -54364,25 +54781,33 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     );
     assert!(parse_information_register_owner_localized_value("{1,0}").is_none());
     let index = BTreeMap::new();
-    let vocabulary = || ChartStandardAttributeVocabulary::NilOnly;
+    let forms = BTreeMap::new();
+    let vocabulary = || StandardAttributeVocabulary::NilOnly;
     let attributes = parse_chart_root_standard_attributes(
         "{0}",
         CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
         vocabulary(),
+        None,
         &index,
         &index,
+        &forms,
     )
     .unwrap();
     assert!(attributes.is_empty());
     // This root-only admission must not turn unproved ordinary nested
     // standard-attribute absence into accepted/defaulted content.
     assert!(
-        parse_chart_standard_attributes(
+        parse_standard_attributes(
             "{0}",
-            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-            vocabulary(),
-            &index,
-            &index,
+            StandardAttributeReader {
+                definitions: CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+                vocabulary: vocabulary(),
+                owner_prefix: None,
+                type_index: &index,
+                object_refs: &index,
+                choice_form_refs: Some(&forms),
+                clear_links_only: false,
+            },
         )
         .is_none()
     );
@@ -54391,8 +54816,10 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
             "{0,0}",
             CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
             vocabulary(),
+            None,
             &index,
             &index,
+            &forms,
         )
         .is_none()
     );
@@ -54403,8 +54830,10 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
         &complete,
         CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
         vocabulary(),
+        None,
         &index,
         &index,
+        &forms,
     )
     .unwrap();
     assert_eq!(
@@ -54418,37 +54847,50 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
         assert_eq!(attribute.name, *name);
     }
     assert!(
-        parse_chart_root_standard_tabular_sections(
+        parse_standard_tabular_sections(
             "{0}",
-            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
+            None,
+            &index,
+            &index,
+            &forms,
         )
         .unwrap()
         .is_none()
     );
     assert!(
-        parse_chart_root_standard_tabular_sections(
+        parse_standard_tabular_sections(
             "{1,{0,0}}",
-            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
+            None,
+            &index,
+            &index,
+            &forms,
         )
         .is_none()
     );
     let mut payload = vec![
         "0".to_owned(),
-        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS
             .len()
             .to_string(),
     ];
-    for (marker, _, definitions) in CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS {
+    for (marker, _, definitions) in CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS {
         payload.push((*marker).to_owned());
         if definitions.iter().any(|(_, name)| *name == "LineNumber") {
             let numeric_fill = exact_register_standard_attributes_for_test(definitions);
             assert!(
-                parse_chart_standard_attributes(
+                parse_standard_attributes(
                     &numeric_fill,
-                    definitions,
-                    vocabulary(),
-                    &index,
-                    &index,
+                    StandardAttributeReader {
+                        definitions,
+                        vocabulary: vocabulary(),
+                        owner_prefix: None,
+                        type_index: &index,
+                        object_refs: &index,
+                        choice_form_refs: Some(&forms),
+                        clear_links_only: false,
+                    },
                 )
                 .is_none(),
                 "nested chart attributes must still refuse numeric LineNumber fill"
@@ -54460,21 +54902,87 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
             "{{3,{{0}},\"authored section\",0,0,{attributes},{{0}}}}"
         ));
     }
-    let present = parse_chart_root_standard_tabular_sections(
+    let present = parse_standard_tabular_sections(
         &format!("{{1,{{{}}}}}", payload.join(",")),
-        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
+        None,
+        &index,
+        &index,
+        &forms,
     )
     .unwrap()
     .expect("a complete native section remains present");
     assert_eq!(
         present.len(),
-        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS.len()
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS.len()
     );
     let mut xml = String::new();
     push_chart_standard_tabular_sections_xml(&mut xml, &present);
     assert!(xml.contains("<StandardTabularSections>"));
     assert!(xml.contains("authored section"));
     assert!(xml.contains("name=\"ExtDimensionTypes\""));
+}
+
+/// A chart root's standard attribute may name its own `<xr:ChoiceForm>`.
+///
+/// 8.3.27.2214 `ChartsOfAccounts/ПланСчетов2`: the `Parent` record's
+/// `ChoiceForm` slot carries the uuid of the chart's own `ФормаВыбора` and the
+/// platform exports `<xr:ChoiceForm>ChartOfAccounts.ПланСчетов2.Form.ФормаВыбора</xr:ChoiceForm>`.
+/// `ChartsOfCalculationTypes/ПланВидовРасчета1` names one the same way from a
+/// standard tabular section. The slot used to be read without the form index,
+/// so a named form refused the attribute and the object lost its whole file.
+#[test]
+fn chart_standard_attribute_names_a_resolved_choice_form() {
+    let form_uuid = "337a76d8-b77b-4307-b9b3-c4175953d39f";
+    let mut forms = BTreeMap::new();
+    forms.insert(
+        form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("ChartsOfAccounts/ПланСчетов2/Forms/ФормаВыбора.xml"),
+            kind: "Form",
+        },
+    );
+    let index = BTreeMap::new();
+    let definitions = [("-6", "Parent")];
+    let mut payload = vec!["1".to_string(), definitions.len().to_string()];
+    for (marker, name) in definitions {
+        payload.push(format!("{{{marker}}}"));
+        payload.push(STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = standard_attribute_values_for_test(name, false);
+        values[10] = format!("{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{form_uuid}}}}}");
+        payload.push(standard_attribute_bag_from_values_for_test(&values, false));
+    }
+    let record = format!("{{1,{{{}}}}}", payload.join(","));
+    let attributes = parse_chart_root_standard_attributes(
+        &record,
+        &definitions,
+        StandardAttributeVocabulary::NilOnly,
+        None,
+        &index,
+        &index,
+        &forms,
+    )
+    .unwrap();
+    match &attributes[0].choice_form {
+        MetadataChoiceForm::Reference(name) => {
+            assert_eq!(name, "ChartOfAccounts.ПланСчетов2.Form.ФормаВыбора")
+        }
+        MetadataChoiceForm::Empty => panic!("the named choice form must resolve to its reference"),
+    }
+    // Without the form index the same record keeps the fail-closed refusal:
+    // the name is never invented from the uuid.
+    assert!(
+        parse_chart_root_standard_attributes(
+            &record,
+            &definitions,
+            StandardAttributeVocabulary::NilOnly,
+            None,
+            &index,
+            &index,
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
 }
 
 #[test]

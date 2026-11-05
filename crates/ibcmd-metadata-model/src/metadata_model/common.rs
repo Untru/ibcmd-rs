@@ -163,11 +163,14 @@ fn flag(properties: &Element, name: &str) -> Result<bool> {
     }
 }
 
-fn number(properties: &Element, name: &str) -> Result<i64> {
+/// A field the platform stores as a 64-bit word
+/// (`SessionMaxAge`): the canonical spelling is unsigned, so a stored `-1`
+/// reads as `18446744073709551615`.
+fn number_u64(properties: &Element, name: &str) -> Result<u64> {
     let value = text(properties, name).trim();
     value
-        .parse::<i64>()
-        .with_context(|| format!("<{name}> is not a number: {value:?}"))
+        .parse::<u64>()
+        .with_context(|| format!("<{name}> is not a 64-bit number: {value:?}"))
 }
 
 /// The code a table gives an enumeration value.
@@ -1083,8 +1086,12 @@ const COMMAND_CLASS: &str = "078a6af8-d22c-4248-9c33-7e90075a3d2c";
 #[doc(hidden)]
 pub const PARAMETER_USE_MODES: &[(&str, i64)] = &[("Single", 0), ("Multiple", 1)];
 
+/// `<OnMainServerUnavalableBehavior>`. The stored codes are read off the
+/// matrix corpus: `Auto` writes `0`, `MakeDisable` `1`, `DontChangeBehavior`
+/// `2` (the two commands that are not `Auto`).
 #[doc(hidden)]
-pub const MAIN_SERVER_UNAVAILABLE_BEHAVIORS: &[(&str, i64)] = &[("Auto", 0)];
+pub const MAIN_SERVER_UNAVAILABLE_BEHAVIORS: &[(&str, i64)] =
+    &[("Auto", 0), ("MakeDisable", 1), ("DontChangeBehavior", 2)];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommonCommand {
@@ -1403,7 +1410,7 @@ pub struct HttpService {
     pub header: Header,
     pub root_url: String,
     pub reuse_sessions: i64,
-    pub session_max_age: i64,
+    pub session_max_age: u64,
     pub templates: Vec<HttpUrlTemplate>,
 }
 
@@ -1432,7 +1439,7 @@ impl HttpService {
             header: Header::of(object)?,
             root_url: text(p, "RootURL").to_string(),
             reuse_sessions: enum_prop(p, "ReuseSessions", REUSE_SESSIONS)?,
-            session_max_age: number(p, "SessionMaxAge")?,
+            session_max_age: number_u64(p, "SessionMaxAge")?,
             templates,
         })
     }
@@ -1477,7 +1484,7 @@ impl HttpService {
                 Brace::str(self.root_url.clone()),
                 self.header.to_brace(),
                 Brace::num(self.reuse_sessions),
-                Brace::num(self.session_max_age),
+                Brace::atom(self.session_max_age),
             ],
             Brace::num(1),
             Brace::List(templates),
@@ -1490,7 +1497,8 @@ const WEB_PARAMETERS: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
 
 const TRANSFER_DIRECTIONS: &[(&str, i64)] = &[("In", 0), ("Out", 1), ("InOut", 2)];
 
-const DATA_LOCK_CONTROL_MODES: &[(&str, i64)] = &[("Automatic", 0), ("Managed", 1)];
+const DATA_LOCK_CONTROL_MODES: &[(&str, i64)] =
+    &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)];
 
 /// An XDTO type named by a QName: `{0,"namespace","name"}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1583,7 +1591,7 @@ pub struct WebService {
     pub namespaces: Vec<String>,
     pub descriptor_file_name: String,
     pub reuse_sessions: i64,
-    pub session_max_age: i64,
+    pub session_max_age: u64,
     pub operations: Vec<WebServiceOperation>,
 }
 
@@ -1641,7 +1649,7 @@ impl WebService {
             namespaces,
             descriptor_file_name: text(p, "DescriptorFileName").to_string(),
             reuse_sessions: enum_prop(p, "ReuseSessions", REUSE_SESSIONS)?,
-            session_max_age: number(p, "SessionMaxAge")?,
+            session_max_age: number_u64(p, "SessionMaxAge")?,
             operations,
         })
     }
@@ -1700,7 +1708,7 @@ impl WebService {
                 Brace::str(self.descriptor_file_name.clone()),
                 Brace::List(namespaces),
                 Brace::num(self.reuse_sessions),
-                Brace::num(self.session_max_age),
+                Brace::atom(self.session_max_age),
             ],
             Brace::num(1),
             Brace::List(operations),

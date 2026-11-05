@@ -70,15 +70,16 @@ pub use role_rights::{
 pub use standard_attributes::{
     ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES,
     ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES,
-    CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
-    CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS, ChartStandardTabularSectionDefinition,
-    DOCUMENT_STANDARD_ATTRIBUTES, accumulation_register_record_set_standard_attribute_name,
+    CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS, CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTIONS,
+    CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTE_DEFINITIONS,
+    CHART_OF_CALCULATION_TYPES_STANDARD_TABULAR_SECTIONS, DOCUMENT_STANDARD_ATTRIBUTES,
+    StandardTabularSectionDefinition, accumulation_register_record_set_standard_attribute_name,
     chart_of_accounts_sole_standard_tabular_section_name,
     chart_of_accounts_standard_attribute_definitions, chart_of_accounts_standard_tabular_section,
 };
 pub use style::{
-    standard_style_item_code_for_name, standard_style_item_for_code, style_system_color_name,
-    style_web_color_name,
+    standard_style_item_code_for_name, standard_style_item_for_code, style_web_color_name,
+    style_win_color_name,
 };
 pub use support::{elapsed_ms, ext_picture_file_name, inflate_raw_deflate, is_svg_content};
 pub use type_xml::{

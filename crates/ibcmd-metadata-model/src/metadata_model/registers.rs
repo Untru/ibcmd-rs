@@ -47,7 +47,8 @@ pub fn compile(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Br
 // ---------------------------------------------------------------------------
 // Code tables.
 
-const DATA_LOCK_CONTROL_MODE: &[(&str, i64)] = &[("Automatic", 0), ("Managed", 1)];
+const DATA_LOCK_CONTROL_MODE: &[(&str, i64)] =
+    &[("Automatic", 0), ("Managed", 1), ("AutomaticAndManaged", 2)];
 const FULL_TEXT_SEARCH: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1)];
 const DATA_HISTORY: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1)];
 const INDEXING: &[(&str, i64)] = &[
@@ -68,14 +69,11 @@ const INFORMATION_REGISTER_PERIODICITY: &[(&str, i64)] = &[
 const WRITE_MODE: &[(&str, i64)] = &[("Independent", 0), ("RecorderSubordinate", 1)];
 const EDIT_TYPE: &[(&str, i64)] = &[("InList", 0), ("InDialog", 1), ("BothWays", 2)];
 const REGISTER_TYPE: &[(&str, i64)] = &[("Balance", 0), ("Turnovers", 1)];
-/// Only `Month` (2) is evidenced; the others follow the platform's enum order.
-const CALCULATION_REGISTER_PERIODICITY: &[(&str, i64)] = &[
-    ("Day", 0),
-    ("Week", 1),
-    ("Month", 2),
-    ("Quarter", 3),
-    ("Year", 4),
-];
+/// `<Periodicity>` is one of four platform literals. The corpus separates all
+/// four codes against the platform's own XML: `0` `Year`, `1` `Quarter`,
+/// `2` `Month`, `3` `Day`.
+const CALCULATION_REGISTER_PERIODICITY: &[(&str, i64)] =
+    &[("Year", 0), ("Quarter", 1), ("Month", 2), ("Day", 3)];
 const MOVE_BOUNDARY_ON_POSTING: &[(&str, i64)] = &[("Move", 0), ("DontMove", 1)];
 const NUMBER_TYPE: &[(&str, i64)] = &[("Number", 0), ("String", 1)];
 const NUMBER_ALLOWED_LENGTH: &[(&str, i64)] = &[("Fixed", 0), ("Variable", 1)];

@@ -210,6 +210,51 @@ const ROUTES: &[SourceAssetRoute] = &[
     route!("WebService", Module, ".0", "Ext/Module.bsl", Module),
     route!("Bot", Module, ".1", "Ext/Module.bsl", Module),
     route!("IntegrationService", Module, ".0", "Ext/Module.bsl", Module),
+    // External data source children carry their modules in their own rows;
+    // the suffixes differ per kind and were measured on the CF corpus. The
+    // family names come from the schema crate, as for the WebSocket client.
+    SourceAssetRoute {
+        owner_family: ibcmd_schema::external_data_source_children::CUBE_KIND,
+        role: SourceAssetRole::ManagerModule,
+        suffix: ".1",
+        relative_path: "Ext/ManagerModule.bsl",
+        codec: SourceAssetCodec::Module,
+    },
+    SourceAssetRoute {
+        owner_family: ibcmd_schema::external_data_source_children::CUBE_KIND,
+        role: SourceAssetRole::RecordSetModule,
+        suffix: ".2",
+        relative_path: "Ext/RecordSetModule.bsl",
+        codec: SourceAssetCodec::Module,
+    },
+    SourceAssetRoute {
+        owner_family: ibcmd_schema::external_data_source_children::TABLE_KIND,
+        role: SourceAssetRole::ManagerModule,
+        suffix: ".1",
+        relative_path: "Ext/ManagerModule.bsl",
+        codec: SourceAssetCodec::Module,
+    },
+    SourceAssetRoute {
+        owner_family: ibcmd_schema::external_data_source_children::TABLE_KIND,
+        role: SourceAssetRole::RecordSetModule,
+        suffix: ".3",
+        relative_path: "Ext/RecordSetModule.bsl",
+        codec: SourceAssetCodec::Module,
+    },
+    SourceAssetRoute {
+        owner_family: ibcmd_schema::external_data_source_children::DIMENSION_TABLE_KIND,
+        role: SourceAssetRole::ManagerModule,
+        suffix: ".1",
+        relative_path: "Ext/ManagerModule.bsl",
+        codec: SourceAssetCodec::Module,
+    },
+    SourceAssetRoute {
+        owner_family: ibcmd_schema::external_data_source_children::DIMENSION_TABLE_KIND,
+        role: SourceAssetRole::ObjectModule,
+        suffix: ".2",
+        relative_path: "Ext/ObjectModule.bsl",
+        codec: SourceAssetCodec::Module,
+    },
     route!(
         "Subsystem",
         CommandInterface,

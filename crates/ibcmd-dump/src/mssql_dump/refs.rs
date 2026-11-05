@@ -18,13 +18,12 @@ use super::{
     contains_metadata_header_name_between, contains_metadata_header_uuid_between,
     decode_owner_graph_for_family_parser, enclosing_metadata_header_for_code,
     form_source_reference_name, format_configuration_source_xml, inflate_raw_deflate,
-    information_register_bool, information_register_decimal_is_valid,
-    information_register_periodicity_xml, information_register_uuid_is_zero,
-    information_register_write_mode_xml, insert_configuration_internal_info_xml,
-    insert_configuration_root_child_objects_xml, insert_metadata_child_objects_xml,
-    is_defined_type_metadata_text, is_form_metadata_text, is_metadata_header_marker,
-    is_offset_inside_metadata_object_code, is_template_metadata_text, is_uuid_text,
-    looks_like_graphical_scheme_blob_text, metadata_header_field_index,
+    information_register_decimal_is_valid, information_register_periodicity_xml,
+    information_register_uuid_is_zero, information_register_write_mode_xml,
+    insert_configuration_internal_info_xml, insert_configuration_root_child_objects_xml,
+    insert_metadata_child_objects_xml, is_defined_type_metadata_text, is_form_metadata_text,
+    is_metadata_header_marker, is_offset_inside_metadata_object_code, is_template_metadata_text,
+    is_uuid_text, looks_like_graphical_scheme_blob_text, metadata_header_field_index,
     metadata_kind_can_own_forms, metadata_kind_can_own_templates, metadata_kind_for_source_folder,
     metadata_object_field_candidates_around_header, metadata_object_fields,
     metadata_reference_collection_len, metadata_source_for_object_text, metadata_source_for_text,
@@ -142,7 +141,7 @@ fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeade
         // `0:<uuid>` sentinel, because this function returned `None` (falling
         // back to the default `true`) for every kind but `Catalog`.
         let fields = parse_information_register_owner_fields(text, header)?;
-        return information_register_bool(fields.logical.get(7)?);
+        return parse_1c_bool_field(Some(fields.logical.get(7)?));
     }
     if kind == "Report" {
         // Same slot `parse_report_properties_from_text` reads for the report's
@@ -202,7 +201,7 @@ fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeade
     };
     let mut diagnostic = None;
     let graph = decode_owner_graph_for_family_parser(family, text, header, &mut diagnostic)?;
-    information_register_bool(graph.owner_fields.get(slot)?)
+    parse_1c_bool_field(Some(graph.owner_fields.get(slot)?))
 }
 
 /// How many members the target's own `<BasedOn>` list declares, read at the
@@ -579,7 +578,7 @@ fn catalog_declared_standard_attributes(
         ),
         owned: metadata_reference_collection_len(fields.get(CATALOG_OWNER_FIELD_OWNERS)?)
             .map(|count| count > 0),
-        hierarchical: information_register_bool(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?),
+        hierarchical: parse_1c_bool_field(Some(fields.get(CATALOG_OWNER_FIELD_HIERARCHICAL)?)),
         folder_hierarchy: catalog_hierarchy_type_xml(
             fields.get(CATALOG_OWNER_FIELD_HIERARCHY_TYPE)?,
         )
@@ -782,11 +781,13 @@ pub(super) fn build_metadata_object_reference_indexes_with_children(
     let mut index = MetadataObjectReferenceIndexes::default();
     let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
     let recalculation_refs = build_calculation_recalculation_reference_index(rows);
+    // EDS children are named by their whole chain, not by `kind.name`.
+    let eds_names = super::eds_export::owner_names(rows);
     // Each row's references are read on their own, in parallel, and applied
     // in row order: the index (and which uuids it saw twice) comes out
     // exactly as the sequential walk made it.
     let per_row = |(row, children): (&MetadataTextRow, &Option<RowChildReferences>)| {
-        object_references_of_row(row, &subsystem_refs, children.as_ref())
+        object_references_of_row(row, &subsystem_refs, &eds_names, children.as_ref())
     };
     let found = parallel::install(|| {
         rows.par_iter()
@@ -814,6 +815,7 @@ pub(super) fn build_metadata_object_reference_indexes_with_children(
 fn object_references_of_row(
     row: &MetadataTextRow,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    eds_names: &BTreeMap<String, String>,
     children: Option<&RowChildReferences>,
 ) -> ReferenceOps {
     let mut index = ReferenceOps::default();
@@ -826,7 +828,9 @@ fn object_references_of_row(
             return index;
         };
         let _brace_jumps = register_brace_jumps([row.text.as_str()]);
-        let reference = if kind == "Subsystem" {
+        let reference = if let Some(full) = eds_names.get(&row.file_name) {
+            full.clone()
+        } else if kind == "Subsystem" {
             subsystem_refs
                 .get(&header.uuid)
                 .and_then(subsystem_source_reference_name)
@@ -834,7 +838,7 @@ fn object_references_of_row(
         } else {
             format!("{kind}.{}", header.name)
         };
-        index.insert(row.file_name.clone(), reference);
+        index.insert(row.file_name.clone(), reference.clone());
         if kind == "Enum" {
             for value in parse_enum_values_from_text(&row.text) {
                 index.insert(
@@ -846,7 +850,7 @@ fn object_references_of_row(
         for command in nested_command_headers_for_owner_from_text(kind, &row.text, &row.file_name) {
             index.insert(
                 command.uuid,
-                format!("{}.{}.Command.{}", kind, header.name, command.name),
+                format!("{reference}.Command.{}", command.name),
             );
         }
         for (child, _, reference) in children.into_iter().flatten() {
@@ -2848,6 +2852,9 @@ pub(super) fn build_form_source_reference_index_from_texts(
 
     // Each owner's form uuids, in parallel; each form's owners form a set, so
     // the order they are added in does not matter.
+    // The owner directory of an EDS child carries its own chain, which the
+    // row's folder alone does not name.
+    let eds_dirs = super::eds_export::owner_dirs(rows);
     let owned = |(row, is_form): (&MetadataTextRow, &bool)| {
         if *is_form {
             return None;
@@ -2860,7 +2867,9 @@ pub(super) fn build_form_source_reference_index_from_texts(
         if !metadata_kind_can_own_forms(kind) {
             return None;
         }
-        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        let owner_path = eds_dirs.get(&header.uuid).cloned().unwrap_or_else(|| {
+            PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
+        });
         let references = owned_form_uuid_values_matching(&row.text, &form_uuids)?;
         Some((owner_path, references))
     };
@@ -3016,16 +3025,28 @@ pub(super) fn build_template_source_reference_index_from_texts<'a>(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
+    // The owner directory of an EDS child carries its own chain, which the
+    // row's folder alone does not name.
+    let eds_dirs = super::eds_export::owner_dirs(metadata_texts);
     // Which rows are templates and which can own one, in parallel; then only
     // the uuid-like values that name a template are kept for the owners (the
     // index below asks for nothing else), in row order.
     enum TemplateRow<'a> {
-        Template(MetadataHeader),
+        /// The template row and whether it is a row of its own family (a
+        /// `CommonTemplate`) rather than a child of some owner.
+        Template(MetadataHeader, bool),
         Owner(&'a MetadataTextRow, PathBuf),
     }
     let classify = |row: &'a MetadataTextRow| -> Option<TemplateRow<'a>> {
         if is_template_metadata_text(&row.text, &row.file_name) {
-            return row.header.clone().map(TemplateRow::Template);
+            let common = row
+                .kind
+                .as_deref()
+                .is_some_and(ibcmd_schema::metadata_kind::is_common_template_kind);
+            return row
+                .header
+                .clone()
+                .map(|header| TemplateRow::Template(header, common));
         }
         let (Some(kind), Some(folder), Some(header)) =
             (row.kind.as_deref(), row.folder, row.header.as_ref())
@@ -3035,23 +3056,25 @@ pub(super) fn build_template_source_reference_index_from_texts<'a>(
         if !metadata_kind_can_own_templates(kind) {
             return None;
         }
-        let owner_path = PathBuf::from(folder).join(sanitize_source_path_segment(&header.name));
+        let owner_path = eds_dirs.get(&header.uuid).cloned().unwrap_or_else(|| {
+            PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
+        });
         Some(TemplateRow::Owner(row, owner_path))
     };
     let classified =
         parallel::install(|| metadata_texts.par_iter().map(classify).collect::<Vec<_>>())
             .unwrap_or_else(|_| metadata_texts.iter().map(classify).collect());
-    let mut templates = Vec::<MetadataHeader>::new();
+    let mut templates = Vec::<(MetadataHeader, bool)>::new();
     let mut owners = Vec::new();
     for row in classified.into_iter().flatten() {
         match row {
-            TemplateRow::Template(header) => templates.push(header),
+            TemplateRow::Template(header, common) => templates.push((header, common)),
             TemplateRow::Owner(row, owner_path) => owners.push((row, owner_path)),
         }
     }
     let template_uuids = templates
         .iter()
-        .map(|template| template.uuid.as_str())
+        .map(|(template, _)| template.uuid.as_str())
         .collect::<std::collections::HashSet<_>>();
     let named = |(row, _): &(&MetadataTextRow, PathBuf)| {
         uuid_like_values(&row.text)
@@ -3072,11 +3095,15 @@ pub(super) fn build_template_source_reference_index_from_texts<'a>(
     }
 
     let mut index = BTreeMap::new();
-    for template in templates {
+    // The root inventory decides which common templates exist at all; an
+    // unlisted row is a stale store record the platform never exports.
+    let root_order = super::build_configuration_root_child_order_from_texts(metadata_texts);
+    for (template, common) in templates {
         let owner_matches = owner_paths_by_ref
             .get(&template.uuid)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
+        let orphaned = common && !root_order.is_empty() && !root_order.contains_key(&template.uuid);
         let relative_path = if let [owner_path] = owner_matches {
             owner_path
                 .join("Templates")
@@ -3107,6 +3134,7 @@ pub(super) fn build_template_source_reference_index_from_texts<'a>(
                 relative_path,
                 kind,
                 template_type,
+                orphaned,
             },
         );
     }
@@ -3272,8 +3300,10 @@ pub(super) fn template_type_from_code(code: u32) -> Option<&'static str> {
     match code {
         0 => Some("SpreadsheetDocument"),
         1 => Some("BinaryData"),
+        2 => Some("ActiveDocument"),
         3 => Some("HTMLDocument"),
         4 => Some("TextDocument"),
+        5 => Some("GeographicalSchema"),
         6 => Some("DataCompositionSchema"),
         7 => Some("DataCompositionAppearanceTemplate"),
         // Confirmed on real ERP УХ 3.2.12.6 raw metadata via `cf extract` on
@@ -4479,7 +4509,7 @@ pub(super) fn parse_configuration_allowed_incoming_share_request_types(
             uti: parse_1c_quoted_string(payload.get(2)?.trim())?,
             ext: parse_1c_quoted_string(payload.get(3)?.trim())?,
             processing_variant: processing_variant.to_string(),
-            is_custom: information_register_bool(payload.get(5)?)?,
+            is_custom: parse_1c_bool_field(Some(payload.get(5)?))?,
         });
     }
     Some(types)

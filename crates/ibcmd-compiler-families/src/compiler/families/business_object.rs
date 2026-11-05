@@ -1258,7 +1258,11 @@ fn build_catalog(
     fields[43] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[44] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[45] = list(vec![token("0")]);
@@ -1387,7 +1391,11 @@ fn build_document(
     fields[30] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[31] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[32] = list(vec![token("0")]);
@@ -1557,7 +1565,11 @@ fn build_exchange_plan(
     fields[28] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
     fields[29] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[30] = standard_attributes(&["-14", "-13", "-10", "-9", "-6", "-4", "-3", "-2"])?;
@@ -1657,16 +1669,12 @@ fn build_business_process(
     fields[2] = bool_token(object, "UseStandardCommands")?;
     put_generated_pairs(&mut fields, &[3, 5, 7, 9, 11, 13], &generated);
     fields[15] = metadata_reference_collection(object, "BasedOn", indexes)?;
-    fields[16] = token("1");
+    fields[16] = enum_code(object, "NumberType", &[("Number", "0"), ("String", "1")])?;
     fields[17] = token("0");
     fields[18] = token(u32_property(object, "NumberLength")?.to_string());
-    fields[19] = enum_code(
-        object,
-        "CreateOnInput",
-        &[("Auto", "0"), ("DontUse", "1"), ("Use", "2")],
-    )?;
-    fields[20] = bool_token(object, "CheckUnique")?;
-    fields[21] = bool_token(object, "Autonumbering")?;
+    fields[19] = bool_token(object, "CheckUnique")?;
+    fields[20] = bool_token(object, "Autonumbering")?;
+    fields[21] = token("1");
     for (slot, name) in (22..=24).zip(["DefaultObjectForm", "DefaultListForm", "DefaultChoiceForm"])
     {
         fields[slot] = optional_owned_reference(object, name, &children.forms, indexes)?;
@@ -1688,11 +1696,15 @@ fn build_business_process(
     fields[28] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
-    fields[29] = bool_token(object, "CreateTaskInPrivilegedMode")?;
+    fields[29] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[30] = standard_attributes(&["-9", "-8", "-7", "-5", "-4", "-3", "-2"])?;
-    fields[31] = token("1");
+    fields[31] = bool_token(object, "CreateTaskInPrivilegedMode")?;
     for (slot, name) in (32..=34).zip([
         "AuxiliaryObjectForm",
         "AuxiliaryListForm",
@@ -1715,7 +1727,11 @@ fn build_business_process(
         &[("Fixed", "0"), ("Variable", "1")],
     )?;
     fields[41] = list(vec![token("0"), list(vec![token("0")])]);
-    fields[42] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[42] = enum_code(
+        object,
+        "CreateOnInput",
+        &[("Auto", "0"), ("DontUse", "1"), ("Use", "2")],
+    )?;
     fields[43] = field_reference_collection(
         object,
         "DataLockFields",
@@ -1766,7 +1782,6 @@ fn build_task(
     }
     let generated = generated_pairs(object, &["Object", "Ref", "Selection", "List", "Manager"])?;
     require_enum_value(object, "TaskNumberAutoPrefix", "BusinessProcessNumber")?;
-    require_enum_value(object, "DefaultPresentation", "AsDescription")?;
     require_enum_value(object, "EditType", "InDialog")?;
     require_enum_value(object, "CreateOnInput", "DontUse")?;
     require_enum_value(object, "DataHistory", "DontUse")?;
@@ -1792,15 +1807,16 @@ fn build_task(
     }
     fields[18] = enum_code(object, "NumberType", &[("Number", "0"), ("String", "1")])?;
     fields[19] = token(u32_property(object, "NumberLength")?.to_string());
-    fields[20] = enum_code(
+    fields[20] = bool_token(object, "CheckUnique")?;
+    fields[21] = bool_token(object, "Autonumbering")?;
+    fields[22] = token(u32_property(object, "DescriptionLength")?.to_string());
+    fields[23] = token("1");
+    fields[24] = bool_token(object, "IncludeHelpInContents")?;
+    fields[43] = enum_code(
         object,
         "NumberAllowedLength",
-        &[("Variable", "0"), ("Fixed", "1")],
+        &[("Fixed", "0"), ("Variable", "1")],
     )?;
-    fields[21] = bool_token(object, "CheckUnique")?;
-    fields[22] = token(u32_property(object, "DescriptionLength")?.to_string());
-    fields[23] = bool_token(object, "Autonumbering")?;
-    fields[24] = token("1");
     fields[25] = addressing.clone();
     fields[26] = optional_owned_member_reference(
         object,
@@ -1812,19 +1828,29 @@ fn build_task(
     if token_is_nil(&addressing) && !children.addressing_attributes.is_empty() {
         return invalid_model(uuid, "Task addressing attributes exist without Addressing");
     }
-    fields[27] = token("1");
+    // A Task has no code, so its first presentation is `AsNumber` (`0`); the
+    // platform writes `1` for `AsDescription`.
+    fields[27] = enum_code(
+        object,
+        "DefaultPresentation",
+        &[("AsNumber", "0"), ("AsDescription", "1")],
+    )?;
     fields[28] =
         field_reference_collection(object, "InputByString", BusinessObjectFamily::Task, indexes)?;
     fields[29] =
         optional_metadata_reference_kind(object, "CurrentPerformer", "SessionParameter", indexes)?;
     fields[30] = metadata_reference_collection_kind(object, "BasedOn", "BusinessProcess", indexes)?;
     fields[31] = token("0");
-    fields[32] = enum_code(
+    fields[32] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[33] = enum_code(
         object,
         "DataLockControlMode",
-        &[("Automatic", "0"), ("Managed", "1")],
+        &[
+            ("Automatic", "0"),
+            ("Managed", "1"),
+            ("AutomaticAndManaged", "2"),
+        ],
     )?;
-    fields[33] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
     fields[34] = standard_attributes(&["-10", "-9", "-8", "-7", "-5", "-4", "-3", "-2"])?;
     for (slot, name) in (35..=37).zip([
         "AuxiliaryObjectForm",
@@ -1842,13 +1868,12 @@ fn build_task(
     ]) {
         fields[slot] = localized_value(object, name, "language")?;
     }
-    fields[43] = enum_code(
-        object,
-        "ChoiceHistoryOnInput",
-        &[("Auto", "0"), ("DontUse", "1")],
-    )?;
     fields[44] = list(vec![token("0"), list(vec![token("0")])]);
-    fields[45] = bool_token(object, "IncludeHelpInContents")?;
+    fields[45] = enum_code(
+        object,
+        "CreateOnInput",
+        &[("Auto", "0"), ("DontUse", "1"), ("Use", "2")],
+    )?;
     fields[46] = field_reference_collection(
         object,
         "DataLockFields",
@@ -1856,6 +1881,14 @@ fn build_task(
         indexes,
     )?;
     fields[47] = input_modes(object)?;
+    fields[48] = enum_code(
+        object,
+        "ChoiceHistoryOnInput",
+        &[("Auto", "0"), ("DontUse", "1")],
+    )?;
+    fields[49] = enum_code(object, "DataHistory", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[50] = bool_token(object, "UpdateDataHistoryImmediatelyAfterWrite")?;
+    fields[51] = bool_token(object, "ExecuteAfterWriteDataHistoryVersionProcessing")?;
 
     Ok(list(vec![
         token("1"),
@@ -5950,15 +5983,17 @@ mod tests {
     /// Chart of calculation types, 63 slots. Measured on five charts:
     /// DependenceOnCalculationTypes is slot 27 (`0` on the extension's, `1` on
     /// the other four), IncludeHelpInContents 37 (direct), DataLockControlMode
-    /// 41, CodeAllowedLength 53; EditType (35), ChoiceMode (38), QuickChoice
-    /// (39) and CreateOnInput (55) hold one value on every chart on record.
+    /// 41, CodeAllowedLength 53; `EditType` rides slot 24 and
+    /// `UseStandardCommands` slot 35 (the platform's positions), ChoiceMode
+    /// (38), QuickChoice (39) and CreateOnInput (55) hold one value on every
+    /// chart on record.
     #[test]
     fn chart_of_calculation_types_properties_ride_their_stored_slots() {
         check_slots(
             BusinessObjectFamily::ChartOfCalculationTypes,
             &[],
             &[
-                ("UseStandardCommands", "true", "false", 24, "0"),
+                ("UseStandardCommands", "true", "false", 35, "0"),
                 ("CodeLength", "9", "5", 25, "5"),
                 ("CodeType", "String", "Number", 26, "0"),
                 (
@@ -5971,14 +6006,14 @@ mod tests {
                 (
                     "DependenceOnCalculationTypes",
                     "DontUse",
-                    "OnBasePeriod",
+                    "OnRegistrationPeriod",
                     27,
                     "2",
                 ),
                 ("ActionPeriodUse", "false", "true", 29, "1"),
                 ("DescriptionLength", "100", "120", 30, "120"),
                 ("DefaultPresentation", "AsDescription", "AsCode", 31, "0"),
-                ("EditType", "InDialog", "InList", 35, "0"),
+                ("EditType", "InDialog", "InList", 24, "0"),
                 ("IncludeHelpInContents", "false", "true", 37, "1"),
                 ("ChoiceMode", "BothWays", "QuickChoice", 38, "1"),
                 ("QuickChoice", "false", "true", 39, "1"),
@@ -6060,16 +6095,30 @@ mod tests {
     /// counts its one collection whatever the mode.
     #[test]
     fn recalculation_lock_mode_rides_the_owner_record() {
-        for (mode, code) in [("Managed", "1"), ("Automatic", "0")] {
-            let (fields, count) = owner_record(&compile_edited(
+        for (mode, code) in [
+            ("Managed", "1"),
+            ("Automatic", "0"),
+            ("AutomaticAndManaged", "2"),
+        ] {
+            let blob = compile_edited(
                 BusinessObjectFamily::Recalculation,
                 &[(
                     "<DataLockControlMode>Managed</DataLockControlMode>",
                     &format!("<DataLockControlMode>{mode}</DataLockControlMode>"),
                 )],
-            ));
+            );
+            let (fields, count) = owner_record(&blob);
             assert_eq!(fields.len(), 9);
             assert_eq!((fields[8].as_str(), count.as_str()), (code, "1"), "{mode}");
+            // Every code the compiler writes must decode back.
+            let profile = BusinessObjectMetadataProfile::fixture(
+                "platform-test",
+                BusinessObjectFamily::Recalculation,
+            );
+            assert!(
+                decode_business_object_blob(&blob, &profile).is_ok(),
+                "{mode} does not decode"
+            );
         }
     }
 
