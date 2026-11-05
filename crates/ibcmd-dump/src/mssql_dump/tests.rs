@@ -54753,9 +54753,10 @@ fn accounting_register_standard_attribute_presence_preserves_absence_and_overrid
 #[test]
 fn accounting_register_standard_attribute_presence_retains_empty_present_and_malformed_fallback() {
     let uuid = owner_graph_uuid_for_test(200);
-    // Existing accounting-register fallback is intentionally preserved. These
-    // envelopes must not be mistaken for the exact native absence marker.
-    for collection in ["{1,{1,0}}", "{0,0}", "{2,{1,0}}"] {
+    // The exact present envelope with no members keeps the family's default
+    // set; the malformed envelopes keep the older fallback, and none of them
+    // may be mistaken for the exact native absence marker.
+    for (collection, expected) in [("{1,{1,0}}", 11), ("{0,0}", 5), ("{2,{1,0}}", 5)] {
         let raw = accounting_register_root_for_test(&uuid, false, collection);
         for profile in [
             InfobaseConfigSourceVersion::V2_20,
@@ -54764,7 +54765,7 @@ fn accounting_register_standard_attribute_presence_retains_empty_present_and_mal
             let xml = extract_accounting_register_xml_for_test(&raw, &uuid, profile);
             assert_eq!(
                 xml.matches("<xr:StandardAttribute name=").count(),
-                5,
+                expected,
                 "{collection}"
             );
             assert!(!xml.contains("name=\"RecordType\""));

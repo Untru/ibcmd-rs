@@ -18573,9 +18573,9 @@ fn register_standard_attributes(
             ));
         }
         // A collection that is present but lists no member keeps the family's
-        // default set: only its absence removes the attributes. A member that
-        // is listed carries that attribute's overrides.
-        let default_set = accounting_attributes.present.is_empty();
+        // default set: only its absence removes the attributes. A malformed
+        // envelope keeps the older fallback, which is not the native shape.
+        let default_set = accounting_attributes.known && accounting_attributes.present.is_empty();
         attributes.extend([
             register_standard_attribute("Active", "DontCheck", accounting_overrides, None),
             register_standard_attribute("LineNumber", "DontCheck", accounting_overrides, None),
@@ -18638,6 +18638,9 @@ struct RegisterStandardAttributeOverrides {
 #[derive(Default)]
 struct AccountingRegisterStandardAttributes {
     absent: bool,
+    /// The collection parsed as the exact present envelope (`{1,{...}}`);
+    /// a malformed one keeps the older fallback.
+    known: bool,
     present: BTreeSet<&'static str>,
     overrides: BTreeMap<&'static str, RegisterStandardAttributeOverrides>,
 }
@@ -18814,6 +18817,7 @@ fn parse_accounting_register_standard_attribute_collection(
             },
         );
     }
+    attributes.known = true;
     Some(attributes)
 }
 
