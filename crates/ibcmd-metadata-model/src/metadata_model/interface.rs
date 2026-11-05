@@ -277,6 +277,7 @@ impl Interface {
             full_name: format!("Interface.{}", self.head.name),
             children: Vec::new(),
             types: Vec::new(),
+            string_types: Vec::new(),
         }
     }
 }

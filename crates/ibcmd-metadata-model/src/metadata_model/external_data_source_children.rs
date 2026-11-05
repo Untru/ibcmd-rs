@@ -1195,6 +1195,7 @@ pub fn owned_names(kind: &str, row: &Brace, owner: &str) -> Result<ObjectNames> 
         full_name,
         children,
         types,
+        string_types: Vec::new(),
     })
 }
 

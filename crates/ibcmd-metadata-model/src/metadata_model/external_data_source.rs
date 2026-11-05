@@ -364,6 +364,7 @@ pub fn names(row: &Brace) -> Result<ObjectNames> {
                 value_id: value_id.clone(),
             })
             .collect(),
+        string_types: Vec::new(),
     })
 }
 

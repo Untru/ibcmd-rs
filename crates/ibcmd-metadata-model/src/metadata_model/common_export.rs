@@ -910,6 +910,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         full_name: format!("{kind}.{}", head.name),
         children,
         types,
+        string_types: Vec::new(),
     })
 }
 

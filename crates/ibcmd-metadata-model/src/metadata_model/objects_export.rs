@@ -1531,6 +1531,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         full_name: full_name.clone(),
         children: Vec::new(),
         types: Vec::new(),
+        string_types: Vec::new(),
     };
     let mut position = 0;
     for slot in layout.slots {

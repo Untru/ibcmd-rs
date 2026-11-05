@@ -193,26 +193,7 @@
     },
     "8.3.27.2342/combined": {
       "gaps": {
-        "CalculationRegisters/CovBasePeriod_true_Calc": "#549: CalculationRegisters/CovBasePeriod_true_Calc.xml differs",
-        "CalculationRegisters/CovIncludeHelpInContents_true_Calc": "#549: CalculationRegisters/CovIncludeHelpInContents_true_Calc.xml differs",
-        "CalculationRegisters/CovTemplate_Calc": "#549: CalculationRegisters/CovTemplate_Calc.xml differs",
-        "CalculationRegisters/CovUseStandardCommands_false_Calc": "#549: CalculationRegisters/CovUseStandardCommands_false_Calc.xml differs",
-        "ChartsOfCalculationTypes/CovQuickChoice_true": "#545 #627: ChartsOfCalculationTypes/CovQuickChoice_true.xml not written",
-        "CommonAttributes/CovAuthenticationSeparation_Separate": "#546: CommonAttributes/CovAuthenticationSeparation_Separate.xml differs",
-        "CommonAttributes/CovAutoUse_Use": "#546: CommonAttributes/CovAutoUse_Use.xml differs",
-        "CommonAttributes/CovExtendedEdit_true": "#546: CommonAttributes/CovExtendedEdit_true.xml differs",
-        "CommonAttributes/CovFillFromFillingValue_true": "#546: CommonAttributes/CovFillFromFillingValue_true.xml differs",
-        "CommonAttributes/CovMarkNegatives_true": "#546: CommonAttributes/CovMarkNegatives_true.xml differs",
-        "CommonAttributes/CovMultiLine_true": "#546: CommonAttributes/CovMultiLine_true.xml differs",
-        "CommonAttributes/CovPasswordMode_true": "#546: CommonAttributes/CovPasswordMode_true.xml differs",
-        "Constants/CovExecuteAfterWriteDataHistoryVersionProcessing_true": "#548: Constants/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml differs",
-        "Constants/CovUpdateDataHistoryImmediatelyAfterWrite_true": "#548: Constants/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml differs",
-        "ExchangePlans/CovExecuteAfterWriteDataHistoryVersionProcessing_true": "#545: ExchangePlans/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml not written",
-        "ExchangePlans/CovUpdateDataHistoryImmediatelyAfterWrite_true": "#545: ExchangePlans/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml not written",
-        "StyleItems/CovType_Font": "#550: StyleItems/CovType_Font.xml differs",
-        "Tasks/CovExecuteAfterWriteDataHistoryVersionProcessing_true": "#545: Tasks/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml not written",
-        "Tasks/CovUpdateDataHistoryImmediatelyAfterWrite_true": "#545: Tasks/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml not written",
-        "WSReferences/CovTemplate": "#551: WSReferences/CovTemplate.xml differs"
+        "StyleItems/CovType_Font": "#550: StyleItems/CovType_Font.xml differs"
       }
     },
     "8.3.27.2342/external/combined-erf": {
@@ -222,15 +203,10 @@
     },
     "8.5.1.1150/calculationregisters": {
       "gaps": {
-        "CovBasePeriod_true": "#549: CalculationRegisters/CovBasePeriod_true.xml differs",
-        "CovIncludeHelpInContents_true": "#549: CalculationRegisters/CovIncludeHelpInContents_true.xml differs",
-        "CovTemplate": "#549: CalculationRegisters/CovTemplate.xml differs",
-        "CovUseStandardCommands_false": "#549: CalculationRegisters/CovUseStandardCommands_false.xml differs"
       }
     },
     "8.5.1.1150/chartsofcalculationtypes": {
       "gaps": {
-        "CovQuickChoice_true": "#545 #627: ChartsOfCalculationTypes/CovQuickChoice_true.xml not written"
       }
     },
     "8.5.1.1150/combined": {
@@ -271,12 +247,7 @@
         "CommonForms/CovVisualLabelDecorationFont_6acd95475d1b.xml": "#599: base-free stage has no base Config row 2ff83f08-ea04-5150-938d-c3102d549350.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_806a28ec2195.xml": "#599: base-free stage has no base Config row 6a0eb8ad-5300-5a70-8934-52e920df606a.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_c7cb4e395323.xml": "#599: base-free stage has no base Config row e31247ab-49a9-5620-9ecd-034db9787a73.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_05ef0a3d94ff.xml": "#599: base-free stage has no base Config row fa73533b-19d1-540a-84e4-782410c3ab9b.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_12684bcf3818.xml": "#599: base-free stage has no base Config row d76da713-5081-5c95-8183-dd6fba2300ae.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
         "CommonForms/CovVisualLabelFieldFont_5747a0aa7553.xml": "#599: base-free stage has no base Config row 459b727a-192b-5cde-ba7a-a8d62fa7ea6a.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelFieldTextColor_c210628e0abb.xml": "#599: base-free stage has no base Config row 43377cf2-e8ef-52f3-83a5-009cf5ef9df7.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 1707a6fa-41fb-5431-bf0e-d5a6f2a2591f.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row 38943628-21bd-5526-8bcd-a726044c06e7.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
         "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
@@ -296,19 +267,10 @@
     },
     "8.5.1.1150/commonattributes": {
       "gaps": {
-        "CovAuthenticationSeparation_Separate": "#546: CommonAttributes/CovAuthenticationSeparation_Separate.xml differs",
-        "CovAutoUse_Use": "#546: CommonAttributes/CovAutoUse_Use.xml differs",
-        "CovExtendedEdit_true": "#546: CommonAttributes/CovExtendedEdit_true.xml differs",
-        "CovFillFromFillingValue_true": "#546: CommonAttributes/CovFillFromFillingValue_true.xml differs",
-        "CovMarkNegatives_true": "#546: CommonAttributes/CovMarkNegatives_true.xml differs",
-        "CovMultiLine_true": "#546: CommonAttributes/CovMultiLine_true.xml differs",
-        "CovPasswordMode_true": "#546: CommonAttributes/CovPasswordMode_true.xml differs"
       }
     },
     "8.5.1.1150/constants": {
       "gaps": {
-        "CovExecuteAfterWriteDataHistoryVersionProcessing_true": "#548: Constants/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml differs",
-        "CovUpdateDataHistoryImmediatelyAfterWrite_true": "#548: Constants/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml differs"
       }
     },
     "8.5.1.1150/corpus-business-process-flowchart": {
@@ -426,12 +388,7 @@
         "CommonForms/CovVisualLabelDecorationFont_6acd95475d1b.xml": "#599: base-free stage has no base Config row 22c460de-2ad2-55e1-9327-ee174e5a1215.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_806a28ec2195.xml": "#599: base-free stage has no base Config row b15efd09-2dc4-5e3e-b673-e03eedef54a5.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_c7cb4e395323.xml": "#599: base-free stage has no base Config row 072799cd-8a28-5836-a2fd-414fa3971c68.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_05ef0a3d94ff.xml": "#599: base-free stage has no base Config row 38d72a0f-a11f-5e4d-b5c6-4b31cc226bdb.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_12684bcf3818.xml": "#599: base-free stage has no base Config row 31a3de95-adbe-5776-8641-3e3a2fd583d2.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
-        "CommonForms/CovVisualLabelFieldFont_5747a0aa7553.xml": "#599: base-free stage has no base Config row 5620d112-c5f7-5c69-b547-75edf236335f.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelFieldTextColor_c210628e0abb.xml": "#599: base-free stage has no base Config row a60596e1-d9ff-57b9-bff6-e1085bc649a9.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 5494fb95-8cc2-505a-a26e-9a889a31ad8f.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row b9671aa2-c691-5c19-aaab-f0c38a65cb7c.0: the native form writer refuses it: a group names a background colour it cannot place"
+        "CommonForms/CovVisualLabelFieldFont_5747a0aa7553.xml": "#599: base-free stage has no base Config row 5620d112-c5f7-5c69-b547-75edf236335f.0: the native form writer refuses it: <LabelField> names a font the writer cannot place"
       }
     },
     "8.5.1.1150/corpus-orphan-catalog-facets": {
@@ -497,8 +454,6 @@
     },
     "8.5.1.1150/exchangeplans": {
       "gaps": {
-        "CovExecuteAfterWriteDataHistoryVersionProcessing_true": "#545: ExchangePlans/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml not written",
-        "CovUpdateDataHistoryImmediatelyAfterWrite_true": "#545: ExchangePlans/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml not written"
       }
     },
     "8.5.1.1150/external/combined-epf": {
@@ -518,13 +473,10 @@
     },
     "8.5.1.1150/tasks": {
       "gaps": {
-        "CovExecuteAfterWriteDataHistoryVersionProcessing_true": "#545: Tasks/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml not written",
-        "CovUpdateDataHistoryImmediatelyAfterWrite_true": "#545: Tasks/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml not written"
       }
     },
     "8.5.1.1150/wsreferences": {
       "gaps": {
-        "CovTemplate": "#551: WSReferences/CovTemplate.xml differs"
       }
     },
     "8.5.1.1529/combined": {
@@ -660,12 +612,7 @@
         "CommonForms/CovVisualLabelDecorationFont_6acd95475d1b.xml": "#599: base-free stage has no base Config row 2ff83f08-ea04-5150-938d-c3102d549350.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_806a28ec2195.xml": "#599: base-free stage has no base Config row 6a0eb8ad-5300-5a70-8934-52e920df606a.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_c7cb4e395323.xml": "#599: base-free stage has no base Config row e31247ab-49a9-5620-9ecd-034db9787a73.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_05ef0a3d94ff.xml": "#599: base-free stage has no base Config row fa73533b-19d1-540a-84e4-782410c3ab9b.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_12684bcf3818.xml": "#599: base-free stage has no base Config row d76da713-5081-5c95-8183-dd6fba2300ae.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
         "CommonForms/CovVisualLabelFieldFont_5747a0aa7553.xml": "#599: base-free stage has no base Config row 459b727a-192b-5cde-ba7a-a8d62fa7ea6a.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelFieldTextColor_c210628e0abb.xml": "#599: base-free stage has no base Config row 43377cf2-e8ef-52f3-83a5-009cf5ef9df7.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 1707a6fa-41fb-5431-bf0e-d5a6f2a2591f.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row 38943628-21bd-5526-8bcd-a726044c06e7.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonTemplates/CovModernSheetBuiltinFont.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetBuiltinFont/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read StyleItem XML StyleItems/TitleLevel2.xml",
         "CommonTemplates/CovModernSheetChartColumn.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartColumn/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <d4p1:chartType> spells Column, which the chart writer has not measured",
         "CommonTemplates/CovModernSheetChartLine.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: the exporter cannot read back the chart the writer built",
@@ -972,12 +919,7 @@
         "CommonForms/CovVisualLabelDecorationFont_6acd95475d1b.xml": "#599: base-free stage has no base Config row 2ff83f08-ea04-5150-938d-c3102d549350.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_806a28ec2195.xml": "#599: base-free stage has no base Config row 6a0eb8ad-5300-5a70-8934-52e920df606a.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_c7cb4e395323.xml": "#599: base-free stage has no base Config row e31247ab-49a9-5620-9ecd-034db9787a73.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_05ef0a3d94ff.xml": "#599: base-free stage has no base Config row fa73533b-19d1-540a-84e4-782410c3ab9b.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_12684bcf3818.xml": "#599: base-free stage has no base Config row d76da713-5081-5c95-8183-dd6fba2300ae.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
         "CommonForms/CovVisualLabelFieldFont_5747a0aa7553.xml": "#599: base-free stage has no base Config row 459b727a-192b-5cde-ba7a-a8d62fa7ea6a.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelFieldTextColor_c210628e0abb.xml": "#599: base-free stage has no base Config row 43377cf2-e8ef-52f3-83a5-009cf5ef9df7.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 1707a6fa-41fb-5431-bf0e-d5a6f2a2591f.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row 38943628-21bd-5526-8bcd-a726044c06e7.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
         "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
@@ -1128,12 +1070,7 @@
         "CommonForms/CovVisualLabelDecorationFont_6acd95475d1b.xml": "#599: base-free stage has no base Config row 2ff83f08-ea04-5150-938d-c3102d549350.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_806a28ec2195.xml": "#599: base-free stage has no base Config row 6a0eb8ad-5300-5a70-8934-52e920df606a.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_c7cb4e395323.xml": "#599: base-free stage has no base Config row e31247ab-49a9-5620-9ecd-034db9787a73.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_05ef0a3d94ff.xml": "#599: base-free stage has no base Config row fa73533b-19d1-540a-84e4-782410c3ab9b.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
-        "CommonForms/CovVisualLabelDecorationTextColor_12684bcf3818.xml": "#599: base-free stage has no base Config row d76da713-5081-5c95-8183-dd6fba2300ae.0: the native form writer refuses it: <LabelDecoration> names a colour the writer cannot place",
         "CommonForms/CovVisualLabelFieldFont_5747a0aa7553.xml": "#599: base-free stage has no base Config row 459b727a-192b-5cde-ba7a-a8d62fa7ea6a.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
-        "CommonForms/CovVisualLabelFieldTextColor_c210628e0abb.xml": "#599: base-free stage has no base Config row 43377cf2-e8ef-52f3-83a5-009cf5ef9df7.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 1707a6fa-41fb-5431-bf0e-d5a6f2a2591f.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row 38943628-21bd-5526-8bcd-a726044c06e7.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonTemplates/CovModernSheetBuiltinFont.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetBuiltinFont/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read StyleItem XML StyleItems/TitleLevel2.xml",
         "CommonTemplates/CovModernSheetChartColumn.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartColumn/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <d4p1:chartType> spells Column, which the chart writer has not measured",
         "CommonTemplates/CovModernSheetChartLine.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: the exporter cannot read back the chart the writer built",

@@ -18572,6 +18572,10 @@ fn register_standard_attributes(
                 None,
             ));
         }
+        // A collection that is present but lists no member keeps the family's
+        // default set: only its absence removes the attributes. A member that
+        // is listed carries that attribute's overrides.
+        let default_set = accounting_attributes.present.is_empty();
         attributes.extend([
             register_standard_attribute("Active", "DontCheck", accounting_overrides, None),
             register_standard_attribute("LineNumber", "DontCheck", accounting_overrides, None),
@@ -18583,7 +18587,7 @@ fn register_standard_attributes(
             (2, "ExtDimension2", "ExtDimensionType2"),
             (3, "ExtDimension3", "ExtDimensionType3"),
         ] {
-            if accounting_attributes.present.contains(dimension) {
+            if default_set || accounting_attributes.present.contains(dimension) {
                 attributes.push(register_standard_attribute(
                     dimension,
                     "DontCheck",
@@ -18594,7 +18598,7 @@ fn register_standard_attributes(
                     }),
                 ));
             }
-            if accounting_attributes.present.contains(dimension_type) {
+            if default_set || accounting_attributes.present.contains(dimension_type) {
                 attributes.push(register_standard_attribute(
                     dimension_type,
                     "DontCheck",

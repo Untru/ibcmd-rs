@@ -352,6 +352,7 @@ impl WebSocketClient {
             full_name: format!("{}.{}", Layout::KIND, self.header.name),
             children: Vec::new(),
             types: Vec::new(),
+            string_types: Vec::new(),
         }
     }
 }

@@ -258,6 +258,7 @@ pub(crate) fn names(row: &Brace) -> Result<ObjectNames> {
         full_name: "Configuration".to_string(),
         children: Vec::new(),
         types: Vec::new(),
+        string_types: Vec::new(),
     })
 }
 

@@ -21,7 +21,7 @@ pub mod names;
 #[path = "export_values.rs"]
 pub mod values;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -40,6 +40,10 @@ pub struct NameIndex {
     names: HashMap<String, String>,
     /// Generated types: type id -> name (`CatalogRef.X`, `DefinedType.Y`).
     types: HashMap<String, String>,
+    /// Generated types of a defined type whose members include a string
+    /// (`{"S",...}`): an attribute typed by such a set writes an empty string
+    /// fill value as `xs:string`, not `xsi:nil`.
+    string_types: HashSet<String>,
     /// Predefined items of catalogs and charts: item uuid -> (owner full
     /// name, item name). A copied object keeps its items' ids, so one id can
     /// name items of several owners.
@@ -95,6 +99,7 @@ impl NameIndex {
         Self {
             names,
             types,
+            string_types: HashSet::new(),
             predefined,
         }
     }
@@ -107,6 +112,16 @@ impl NameIndex {
     /// Name of a generated type (`CatalogRef.X`) by its type id.
     pub fn type_name(&self, type_id: &str) -> Option<&str> {
         self.types.get(type_id).map(String::as_str)
+    }
+
+    /// Whether the generated type of a defined type carries a string member.
+    pub fn type_has_string(&self, type_id: &str) -> bool {
+        self.string_types.contains(&type_id.to_ascii_lowercase())
+    }
+
+    /// Marks a defined type's generated type as carrying a string member.
+    pub fn insert_string_type(&mut self, type_id: &str) {
+        self.string_types.insert(type_id.to_ascii_lowercase());
     }
 
     /// Name of a predefined item by its uuid; `None` when the uuid names
@@ -142,6 +157,9 @@ impl NameIndex {
         for generated in &names.types {
             self.types
                 .insert(generated.type_id.clone(), generated.name.clone());
+        }
+        for type_id in &names.string_types {
+            self.insert_string_type(type_id);
         }
     }
 
@@ -208,6 +226,10 @@ pub struct ObjectNames {
     /// attributes, commands, enum values...): (full name, uuid).
     pub children: Vec<(String, String)>,
     pub types: Vec<GeneratedTypeName>,
+    /// Generated types of a defined type whose members include a string
+    /// (`{"S",...}`): an attribute typed by such a set writes an empty string
+    /// fill value as `xs:string`, not `xsi:nil`.
+    pub string_types: Vec<String>,
 }
 
 /// Decodes one stored row into the object's model (its XML element).
@@ -310,6 +332,33 @@ pub fn configuration_objects(row: &Brace) -> Result<Vec<(String, String)>> {
     super::root::export::top_level_objects(row)
 }
 
+/// Whether a `DefinedType` row's pattern lists a string member: an attribute
+/// typed by such a set writes an empty string fill value as `xs:string`, not
+/// `xsi:nil`. The row is `{1,{0,<type id>,<value id>,<header>,<pattern>}}`.
+pub fn defined_type_pattern_has_string(row: &Brace) -> bool {
+    let Ok(root) = list(row) else {
+        return false;
+    };
+    let Ok(payload) = item(root, 1) else {
+        return false;
+    };
+    let Ok(fields) = list(payload) else {
+        return false;
+    };
+    let Ok(pattern) = item(fields, 4) else {
+        return false;
+    };
+    let Ok(entries) = list(pattern) else {
+        return false;
+    };
+    entries.iter().skip(1).any(|entry| {
+        list(entry)
+            .ok()
+            .and_then(|fields| fields.first().and_then(Brace::as_str))
+            .is_some_and(|marker| marker == "S")
+    })
+}
+
 /// What the row of an owned object (a recalculation, a nested subsystem)
 /// contributes to a name index. Its names start with its owner's full name
 /// (`owner`, `CalculationRegister.X`), which its own row does not hold: the
@@ -343,6 +392,7 @@ pub fn owned_object_names(kind: &str, row: &Brace, owner: &str) -> Result<Object
                 uuid: head.0,
                 children: Vec::new(),
                 types: Vec::new(),
+                string_types: Vec::new(),
             })
         }
         other => bail!("not yet: no owned-row names for {other}"),

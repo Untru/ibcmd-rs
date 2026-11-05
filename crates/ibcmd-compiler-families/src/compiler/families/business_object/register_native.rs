@@ -1219,7 +1219,7 @@ fn build_cot(
         &[2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22],
         &generated,
     );
-    fields[24] = bool_token(object, "UseStandardCommands")?;
+    fields[24] = enum_code(object, "EditType", EDIT_TYPE)?;
     fields[25] = token(u32_property(object, "CodeLength")?.to_string());
     fields[26] = enum_code(object, "CodeType", CODE_TYPE)?;
     // The property slots were measured on five charts of the four corpora
@@ -1227,9 +1227,9 @@ fn build_cot(
     // is slot 27 (`0` DontUse on the extension's chart, `1` OnActionPeriod on
     // the other four), IncludeHelpInContents 37 (direct: `1` on the two ERP УХ
     // charts), DataLockControlMode 41, CodeAllowedLength 53 (`0` on ERP УХ
-    // `Начисления`), ChoiceHistoryOnInput 59. EditType (35, `1` InDialog),
-    // ChoiceMode (38, `2` BothWays), QuickChoice (39, `0`) and CreateOnInput
-    // (55, `1` DontUse) are held by their constant values alone.
+    // `Начисления`), ChoiceHistoryOnInput 59. `UseStandardCommands` rides slot
+    // 35 and `EditType` slot 24 -- the two the reader reads -- so both are
+    // written from the object; the earlier constant pair had them swapped.
     fields[27] = enum_code(
         object,
         "DependenceOnCalculationTypes",
@@ -1251,7 +1251,7 @@ fn build_cot(
     {
         fields[slot] = form_slot(object, name, &forms, indexes)?;
     }
-    fields[35] = enum_code(object, "EditType", EDIT_TYPE)?;
+    fields[35] = bool_token(object, "UseStandardCommands")?;
     fields[36] = list(vec![token("0"), token("0")]);
     fields[37] = bool_token(object, "IncludeHelpInContents")?;
     fields[38] = enum_code(object, "ChoiceMode", CHOICE_MODE)?;

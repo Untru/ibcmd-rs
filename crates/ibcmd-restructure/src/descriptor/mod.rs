@@ -744,13 +744,16 @@ static CHART_OF_CALCULATION_TYPES: Layout = Layout {
         Generated("BaseCalculationTypesRow"),
         Generated("LeadingCalculationTypes"),
         Generated("LeadingCalculationTypesRow"),
-        Flag("UseStandardCommands"),
+        // The platform stores `EditType` in this slot (field 24) and
+        // `UseStandardCommands` in the one the reader reads as field 35; the
+        // earlier pair had these two swapped.
+        Code("EditType", EDIT_TYPE),
         Number("CodeLength"),
         Code("CodeType", CODE_TYPE),
         // The chart of an extension separates slot 27 from EditType
         // (DependenceOnCalculationTypes DontUse, EditType InDialog): the
-        // dependence rides slot 27 and the edit type slot 35, `1` (InDialog)
-        // on every chart on record.
+        // dependence rides slot 27 and the edit type the slot above
+        // (field 24), `1` (InDialog) on every chart on record.
         Code(
             "DependenceOnCalculationTypes",
             DEPENDENCE_ON_CALCULATION_TYPES,
@@ -762,7 +765,7 @@ static CHART_OF_CALCULATION_TYPES: Layout = Layout {
         Reference("DefaultObjectForm"),
         Reference("DefaultListForm"),
         Reference("DefaultChoiceForm"),
-        Code("EditType", EDIT_TYPE),
+        Flag("UseStandardCommands"),
         References("BasedOn"),
         Flag("IncludeHelpInContents"),
         Code("ChoiceMode", CHOICE_MODE),

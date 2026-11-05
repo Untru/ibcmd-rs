@@ -199,11 +199,20 @@ fn fill_value_element(node: &Brace, type_pattern: &Brace, names: &NameIndex) -> 
     let fields = list(node)?;
     if fields.first().and_then(Brace::as_str) == Some("S") && string(item(fields, 1)?)?.is_empty() {
         let pattern = list(type_pattern)?;
+        // A `{"#",<type id>}` member names a defined type: only the type's
+        // own pattern says whether it carries a string.
         let has_string = pattern.iter().skip(1).any(|entry| {
-            list(entry)
-                .ok()
-                .and_then(|fields| fields.first().and_then(Brace::as_str))
-                == Some("S")
+            let Ok(fields) = list(entry) else {
+                return false;
+            };
+            match fields.first().and_then(Brace::as_str) {
+                Some("S") => true,
+                Some("#") => fields
+                    .get(1)
+                    .and_then(|type_id| type_id.as_str().or_else(|| type_id.as_atom()))
+                    .is_some_and(|type_id| names.type_has_string(type_id)),
+                _ => false,
+            }
         });
         if !has_string {
             return Ok(el("FillValue").attr("nil", "true"));

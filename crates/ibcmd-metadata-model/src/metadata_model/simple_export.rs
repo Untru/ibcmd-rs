@@ -624,6 +624,7 @@ fn generated(
 pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     let root = list(row)?;
     let fields = list(item(root, 1)?)?;
+    let mut string_types = Vec::new();
     let (head, types, children) = match kind {
         "Language"
         | "FunctionalOption"
@@ -672,6 +673,11 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
                 item(fields, 1)?,
                 item(fields, 2)?,
             )?];
+            // A defined type over a string writes an empty string fill value
+            // as `xs:string`; the index keeps which type ids those are.
+            if super::super::export::defined_type_pattern_has_string(row) {
+                string_types.extend(types.iter().map(|generated| generated.type_id.clone()));
+            }
             (head, types, Vec::new())
         }
         "SettingsStorage" => {
@@ -723,6 +729,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         full_name: format!("{kind}.{}", head.name),
         children,
         types,
+        string_types,
     })
 }
 
