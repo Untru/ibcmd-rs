@@ -67,6 +67,26 @@ impl NameIndex {
         for generated in index.generated_types.values() {
             types.insert(generated.type_id.clone(), generated.name.clone());
         }
+        // A defined type over a string is answered by its own XML: an
+        // attribute typed by it writes an empty string fill value as
+        // `xs:string`, and the name index has to know which types those are.
+        let mut string_types = HashSet::new();
+        for (full_name, entry) in &index.objects {
+            if entry.kind.as_str() != "DefinedType" {
+                continue;
+            }
+            let Ok(bytes) = fs::read(&entry.path) else {
+                continue;
+            };
+            if !defined_type_xml_has_string(&bytes) {
+                continue;
+            }
+            for generated in index.generated_types.values() {
+                if generated.name == *full_name {
+                    string_types.insert(generated.type_id.to_ascii_lowercase());
+                }
+            }
+        }
         let mut predefined = HashMap::<String, Vec<(String, String)>>::new();
         for entry in index.objects.values() {
             if !matches!(
@@ -357,6 +377,19 @@ pub fn defined_type_pattern_has_string(row: &Brace) -> bool {
             .and_then(|fields| fields.first().and_then(Brace::as_str))
             .is_some_and(|marker| marker == "S")
     })
+}
+
+/// Whether a `DefinedType`'s XML declares a string member (`<v8:Type>xs:string
+/// </v8:Type>`): the source-tree route names those types the same way the row
+/// route does, so a fill value keeps its `xs:string` spelling there too.
+fn defined_type_xml_has_string(bytes: &[u8]) -> bool {
+    fn walk(element: &Element) -> bool {
+        if element.name == "v8:Type" && element.text.trim() == "xs:string" {
+            return true;
+        }
+        element.children.iter().any(walk)
+    }
+    parse_element_tree(bytes).is_ok_and(|root| walk(&root))
 }
 
 /// What the row of an owned object (a recalculation, a nested subsystem)

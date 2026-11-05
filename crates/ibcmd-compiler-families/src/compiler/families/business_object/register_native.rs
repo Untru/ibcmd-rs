@@ -1541,7 +1541,7 @@ fn decode_recalculation(
         "0",
         "Recalculation header wrapper discriminator",
     )?;
-    if !matches!(&fields[8], NativeValue::Token(mode) if matches!(mode.as_str(), "0" | "1")) {
+    if !matches!(&fields[8], NativeValue::Token(mode) if matches!(mode.as_str(), "0" | "1" | "2")) {
         return native("Recalculation lock mode is not a known code");
     }
     let uuid = parse_header_uuid(&wrapper[1])?;

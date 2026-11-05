@@ -5983,15 +5983,17 @@ mod tests {
     /// Chart of calculation types, 63 slots. Measured on five charts:
     /// DependenceOnCalculationTypes is slot 27 (`0` on the extension's, `1` on
     /// the other four), IncludeHelpInContents 37 (direct), DataLockControlMode
-    /// 41, CodeAllowedLength 53; EditType (35), ChoiceMode (38), QuickChoice
-    /// (39) and CreateOnInput (55) hold one value on every chart on record.
+    /// 41, CodeAllowedLength 53; `EditType` rides slot 24 and
+    /// `UseStandardCommands` slot 35 (the platform's positions), ChoiceMode
+    /// (38), QuickChoice (39) and CreateOnInput (55) hold one value on every
+    /// chart on record.
     #[test]
     fn chart_of_calculation_types_properties_ride_their_stored_slots() {
         check_slots(
             BusinessObjectFamily::ChartOfCalculationTypes,
             &[],
             &[
-                ("UseStandardCommands", "true", "false", 24, "0"),
+                ("UseStandardCommands", "true", "false", 35, "0"),
                 ("CodeLength", "9", "5", 25, "5"),
                 ("CodeType", "String", "Number", 26, "0"),
                 (
@@ -6011,7 +6013,7 @@ mod tests {
                 ("ActionPeriodUse", "false", "true", 29, "1"),
                 ("DescriptionLength", "100", "120", 30, "120"),
                 ("DefaultPresentation", "AsDescription", "AsCode", 31, "0"),
-                ("EditType", "InDialog", "InList", 35, "0"),
+                ("EditType", "InDialog", "InList", 24, "0"),
                 ("IncludeHelpInContents", "false", "true", 37, "1"),
                 ("ChoiceMode", "BothWays", "QuickChoice", 38, "1"),
                 ("QuickChoice", "false", "true", 39, "1"),
@@ -6098,15 +6100,25 @@ mod tests {
             ("Automatic", "0"),
             ("AutomaticAndManaged", "2"),
         ] {
-            let (fields, count) = owner_record(&compile_edited(
+            let blob = compile_edited(
                 BusinessObjectFamily::Recalculation,
                 &[(
                     "<DataLockControlMode>Managed</DataLockControlMode>",
                     &format!("<DataLockControlMode>{mode}</DataLockControlMode>"),
                 )],
-            ));
+            );
+            let (fields, count) = owner_record(&blob);
             assert_eq!(fields.len(), 9);
             assert_eq!((fields[8].as_str(), count.as_str()), (code, "1"), "{mode}");
+            // Every code the compiler writes must decode back.
+            let profile = BusinessObjectMetadataProfile::fixture(
+                "platform-test",
+                BusinessObjectFamily::Recalculation,
+            );
+            assert!(
+                decode_business_object_blob(&blob, &profile).is_ok(),
+                "{mode} does not decode"
+            );
         }
     }
 
