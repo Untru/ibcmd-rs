@@ -92,3 +92,11 @@ ibcmd-rs infobase config export --db-path=<scratch>/ib --platform=<native-build>
 Whole nested forms remain unequal because of #596. No ID-normalization fix
 is included. Refs #603 does not claim complete whole-form acceptance. MSSQL
 and the exact 8.5.1.1150 runtime were not run.
+
+## Completed final verification
+
+Final code `cd0b1721a2f76492aa465471959571f309fb5cc8`; clean iter SHA-256 `0c8be8bc9fac50925f7f5fe6b51d7f2fa03f017e9816efecfa3b2d444ce8c490`. Its final native replay used exact pinned 2214 inputs on 2214 and exact pinned 1529 inputs on 1529: 16/16 complete rights values, 8/8 complete root forms; nested companion-ID differences remain #596. Both source databases retained their hashes.
+
+Full staged `cargo xtask ci` passed all 29 steps on `c99dd54947f7a6351a201077f5ab9015e9d63b04`, with no skipped step: workspace 4708 passed / 89 existing ignored, root integration 554 / 4, root library 904 / 7; temporary-directory check passed.
+
+Fresh-context critic: **APPROVE**. Independently reran both schema regressions and all six `cargo xtask check` steps; repeated CF and disposable-copy fileDB exports with the final iter binary and empty PATH, checked all sixteen rights values and eight complete root forms, and verified saved file/database hashes. Parent independently reran the two schema tests and exact public property regression: 2/2 and 1/1 PASS. This final evidence commit changes no code, tests or baseline.
