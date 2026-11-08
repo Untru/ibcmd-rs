@@ -2124,6 +2124,16 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     }
     let raw_declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
     let mut rows = parse_moxel_rows(&fields);
+    // Keep an unmeasured list in its row until admission: returning None for
+    // the cell would let the legacy row scanner silently truncate the stream.
+    if rows.iter().flat_map(|row| &row.cells).any(|cell| {
+        cell.value
+            .iter()
+            .chain(&cell.detail_value)
+            .any(MoxelCellValue::has_unmeasured_value_list)
+    }) {
+        return None;
+    }
     if rows.is_empty() {
         return None;
     }
@@ -4318,10 +4328,33 @@ pub enum MoxelCellValue {
     Reference(usize),
     Structure(Vec<(String, MoxelCellValue)>),
     Array(Vec<MoxelCellValue>),
+    EmptyValueList,
+    /// Decoder quarantine; a spreadsheet containing this never reaches XML.
+    UnmeasuredValueList,
+}
+
+impl MoxelCellValue {
+    fn has_unmeasured_value_list(&self) -> bool {
+        match self {
+            Self::UnmeasuredValueList => true,
+            Self::Array(values) => values.iter().any(Self::has_unmeasured_value_list),
+            Self::Structure(properties) => properties
+                .iter()
+                .any(|(_, value)| value.has_unmeasured_value_list()),
+            _ => false,
+        }
+    }
 }
 
 pub fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
     let fields = split_1c_braced_fields(text, 0)?;
+    if let Some(known) = ibcmd_schema::spreadsheet_value_list::classify_fields(&fields) {
+        return Some(if known {
+            MoxelCellValue::EmptyValueList
+        } else {
+            MoxelCellValue::UnmeasuredValueList
+        });
+    }
     // A tag is one letter, and nothing but the quoted letter unescapes to it.
     let tag = match fields.first()?.trim() {
         "\"U\"" => "U",
@@ -11542,9 +11575,15 @@ pub fn parse_moxel_bounds_area(bounds: &[&str], name: String) -> Option<MoxelAre
     })
 }
 
-pub fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
-    // Isolated unchanged renderer for the legacy embedded-form caller. It does
-    // not construct a typed plan and therefore cannot panic on plan admission.
+/// Render a complete document, refusing unmeasured cell values even when the
+/// caller constructed the spreadsheet without decoder admission.
+pub fn format_moxel_spreadsheet_xml(
+    spreadsheet: &MoxelSpreadsheet,
+) -> Result<String, MxlDiagnostic> {
+    // Public callers may construct a spreadsheet without decoder admission.
+    for row in &spreadsheet.rows {
+        validate_moxel_row_values(row)?;
+    }
     let output_format_indices = moxel_output_format_indices(spreadsheet);
     let output_format_index_map = moxel_output_format_index_map(&output_format_indices);
     render_moxel_spreadsheet_xml(
@@ -11613,11 +11652,11 @@ fn format_moxel_spreadsheet_xml_with_plan(
     // writer migration.  This renderer only receives their already-resolved
     // output projection and does not inspect raw MOXCEL values.
     let _ = (&plan.palette, &plan.format_map);
-    Ok(render_moxel_spreadsheet_xml(
+    render_moxel_spreadsheet_xml(
         spreadsheet,
         &plan.output_format_indices,
         &plan.output_format_index_map,
-    ))
+    )
 }
 
 /// The four packed drawing-border flags, in publication order. Their weights
@@ -11662,7 +11701,10 @@ fn render_moxel_spreadsheet_xml(
     spreadsheet: &MoxelSpreadsheet,
     output_format_indices: &[usize],
     output_format_index_map: &BTreeMap<usize, usize>,
-) -> String {
+) -> Result<String, MxlDiagnostic> {
+    for row in &spreadsheet.rows {
+        validate_moxel_row_values(row)?;
+    }
     let emit_first_row_format_index =
         moxel_column_format_slots(&spreadsheet.column_sets, spreadsheet.column_count) == 0;
     let font_projection = moxel_font_projection(spreadsheet, output_format_indices);
@@ -11743,7 +11785,7 @@ fn render_moxel_spreadsheet_xml(
             row,
             output_format_index_map,
             emit_first_row_format_index,
-        );
+        )?;
     }
     for drawing in &spreadsheet.drawings {
         push_moxel_drawing_xml(&mut xml, drawing, output_format_index_map);
@@ -11953,7 +11995,7 @@ fn render_moxel_spreadsheet_xml(
         push_moxel_picture_xml(&mut xml, picture);
     }
     xml.push_str("</document>");
-    xml
+    Ok(xml)
 }
 
 pub fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize {
@@ -15006,12 +15048,33 @@ pub fn push_moxel_document_area_xml(xml: &mut String, tag: &str, area: &MoxelAre
     _ = write!(xml, "\t</{tag}>\r\n");
 }
 
+fn unmeasured_value_list_writer_error() -> MxlDiagnostic {
+    MxlDiagnostic::writer(
+        "mxl.writer.value-list-profile",
+        "an unmeasured ValueList profile cannot be published",
+    )
+}
+
+fn validate_moxel_row_values(row: &MoxelRow) -> Result<(), MxlDiagnostic> {
+    if row.cells.iter().any(|cell| {
+        cell.value
+            .iter()
+            .chain(&cell.detail_value)
+            .any(MoxelCellValue::has_unmeasured_value_list)
+    }) {
+        return Err(unmeasured_value_list_writer_error());
+    }
+    Ok(())
+}
+
+/// Append a complete row, or leave `xml` unchanged on an unmeasured value.
 pub fn push_moxel_row_xml(
     xml: &mut String,
     row: &MoxelRow,
     output_format_index_map: &BTreeMap<usize, usize>,
     emit_first_format_index: bool,
-) {
+) -> Result<(), MxlDiagnostic> {
+    validate_moxel_row_values(row)?;
     // Every element below is appended piece by piece: a template of ERP УХ
     // publishes hundreds of thousands of cells, and formatting each element
     // through `write!` cost more than the rest of the writer together.
@@ -15054,7 +15117,7 @@ pub fn push_moxel_row_xml(
     if row.cells.is_empty() {
         xml.push_str("\t\t\t<empty>true</empty>\r\n");
         xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
-        return;
+        return Ok(());
     }
     let mut expected_column = 0usize;
     for cell in &row.cells {
@@ -15144,7 +15207,7 @@ pub fn push_moxel_row_xml(
         if let Some(value) = &cell.value
             && !value_is_reference
         {
-            push_moxel_cell_value_xml(xml, "v", value);
+            push_moxel_cell_value_xml(xml, "v", value)?;
         }
         if let Some(detail_parameter) = &cell.detail_parameter {
             push_xml_text_element(xml, "\t\t\t\t\t", "detailParameter", detail_parameter);
@@ -15152,10 +15215,10 @@ pub fn push_moxel_row_xml(
         if let Some(value) = &cell.value
             && value_is_reference
         {
-            push_moxel_cell_value_xml(xml, "v", value);
+            push_moxel_cell_value_xml(xml, "v", value)?;
         }
         if let Some(detail_value) = &cell.detail_value {
-            push_moxel_cell_value_xml(xml, "d", detail_value);
+            push_moxel_cell_value_xml(xml, "d", detail_value)?;
         }
         if let Some(picture_parameter) = &cell.picture_parameter {
             push_xml_text_element(xml, "\t\t\t\t\t", "pictureParameter", picture_parameter);
@@ -15171,6 +15234,7 @@ pub fn push_moxel_row_xml(
         expected_column = cell.column_index + 1;
     }
     xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
+    Ok(())
 }
 
 /// Publishes one typed cell member.
@@ -15178,8 +15242,12 @@ pub fn push_moxel_row_xml(
 /// A stored reference always publishes as `<r>`, whichever member carries it;
 /// every other spelling keeps the member's own element name and carries the
 /// XSD type the platform writes for it.
-fn push_moxel_cell_value_xml(xml: &mut String, element: &str, value: &MoxelCellValue) {
-    push_moxel_typed_value_xml(xml, element, value, 5);
+fn push_moxel_cell_value_xml(
+    xml: &mut String,
+    element: &str,
+    value: &MoxelCellValue,
+) -> Result<(), MxlDiagnostic> {
+    push_moxel_typed_value_xml(xml, element, value, 5)
 }
 
 /// The shared typed-value writer `push_moxel_cell_value_xml` calls at its
@@ -15194,7 +15262,10 @@ fn push_moxel_typed_value_xml(
     element: &str,
     value: &MoxelCellValue,
     depth: usize,
-) {
+) -> Result<(), MxlDiagnostic> {
+    if value.has_unmeasured_value_list() {
+        return Err(unmeasured_value_list_writer_error());
+    }
     let indent = "\t".repeat(depth);
     match value {
         MoxelCellValue::Nil => {
@@ -15247,7 +15318,7 @@ fn push_moxel_typed_value_xml(
                     "{property_indent}<v8:Property name=\"{}\">\r\n",
                     XmlText(key)
                 );
-                push_moxel_typed_value_xml(xml, "v8:Value", property_value, depth + 2);
+                push_moxel_typed_value_xml(xml, "v8:Value", property_value, depth + 2)?;
                 _ = write!(xml, "{property_indent}</v8:Property>\r\n");
             }
             _ = write!(xml, "{indent}</{element}>\r\n");
@@ -15255,11 +15326,24 @@ fn push_moxel_typed_value_xml(
         MoxelCellValue::Array(values) => {
             _ = write!(xml, "{indent}<{element} xsi:type=\"v8:Array\">\r\n");
             for value in values {
-                push_moxel_typed_value_xml(xml, "v8:Value", value, depth + 1);
+                push_moxel_typed_value_xml(xml, "v8:Value", value, depth + 1)?;
             }
             _ = write!(xml, "{indent}</{element}>\r\n");
         }
+        MoxelCellValue::EmptyValueList => {
+            let kind = ibcmd_schema::spreadsheet_value_list::XML_TYPE;
+            _ = write!(xml, "{indent}<{element} xsi:type=\"{kind}\">\r\n");
+            _ = write!(
+                xml,
+                "{indent}\t<v8:valueType/>\r\n{indent}\t<v8:lastId xsi:type=\"xs:decimal\">0</v8:lastId>\r\n"
+            );
+            _ = write!(xml, "{indent}</{element}>\r\n");
+        }
+        MoxelCellValue::UnmeasuredValueList => {
+            return Err(unmeasured_value_list_writer_error());
+        }
     }
+    Ok(())
 }
 
 /// Publishes an embedded control blob verbatim.
@@ -15437,7 +15521,7 @@ mod moxel_exact_parity_tests {
 
     #[test]
     fn member_forty_publishes_the_automatic_width_flag() {
-        let xml = format_moxel_spreadsheet_xml(&reconciliation_report_headers());
+        let xml = format_moxel_spreadsheet_xml(&reconciliation_report_headers()).unwrap();
 
         assert_eq!(
             xml.matches("<autoWidthCalculation>true</autoWidthCalculation>")
@@ -15593,6 +15677,7 @@ mod moxel_exact_parity_tests {
         assert!(spreadsheet.template_mode);
         assert!(
             format_moxel_spreadsheet_xml(&spreadsheet)
+                .unwrap()
                 .contains("<templateMode>true</templateMode>")
         );
 
@@ -15601,7 +15686,11 @@ mod moxel_exact_parity_tests {
         let spreadsheet =
             parse_moxel_spreadsheet_text(&cleared, &BTreeMap::new(), no_builtin_types).unwrap();
         assert!(!spreadsheet.template_mode);
-        assert!(!format_moxel_spreadsheet_xml(&spreadsheet).contains("<templateMode>"));
+        assert!(
+            !format_moxel_spreadsheet_xml(&spreadsheet)
+                .unwrap()
+                .contains("<templateMode>")
+        );
     }
 
     /// Fixture: `tests/fixtures/moxel_buyer_instruction_picture_parameter_raw.txt`,
@@ -15621,7 +15710,7 @@ mod moxel_exact_parity_tests {
         let spreadsheet =
             parse_moxel_spreadsheet_text(BUYER_INSTRUCTION_RAW, &BTreeMap::new(), no_builtin_types)
                 .unwrap();
-        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
         assert!(
             xml.contains("\t\t\t\t\t<pictureParameter>КартинкаИнструкции</pictureParameter>\r\n"),
@@ -15634,7 +15723,7 @@ mod moxel_exact_parity_tests {
         let spreadsheet =
             parse_moxel_spreadsheet_text(BUYER_INSTRUCTION_RAW, &BTreeMap::new(), no_builtin_types)
                 .unwrap();
-        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
         assert_eq!(xml.matches("<format").count(), 2, "{xml}");
         assert!(
@@ -15771,7 +15860,7 @@ mod moxel_exact_parity_tests {
             cells: vec![cell],
         };
         let mut xml = String::new();
-        push_moxel_row_xml(&mut xml, &row, &BTreeMap::new(), false);
+        push_moxel_row_xml(&mut xml, &row, &BTreeMap::new(), false).unwrap();
         assert_eq!(xml.matches("<v8:item>").count(), 2);
         assert!(xml.contains(
             "<v8:lang>ru</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>Добавить страницу</v8:content>"
@@ -15786,16 +15875,17 @@ mod moxel_exact_parity_tests {
     #[test]
     fn typed_cell_members_publish_the_platform_spellings() {
         let mut xml = String::new();
-        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Number("0".to_string()));
-        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text(String::new()));
-        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text("5".to_string()));
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Number("0".to_string())).unwrap();
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text(String::new())).unwrap();
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text("5".to_string())).unwrap();
         push_moxel_cell_value_xml(
             &mut xml,
             "v",
             &MoxelCellValue::DateTime("00010101000000".to_string()),
-        );
-        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Nil);
-        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Reference(15));
+        )
+        .unwrap();
+        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Nil).unwrap();
+        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Reference(15)).unwrap();
 
         assert_eq!(
             xml,

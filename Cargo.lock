@@ -1016,6 +1016,7 @@ name = "ibcmd-moxel"
 version = "0.1.0"
 dependencies = [
  "ibcmd-1c-text",
+ "ibcmd-schema",
  "serde",
 ]
 
