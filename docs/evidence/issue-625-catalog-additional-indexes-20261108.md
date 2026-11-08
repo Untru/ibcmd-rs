@@ -109,5 +109,12 @@ Full staged `cargo xtask ci --keep-going` completes with terminal exit0:
 and root library904 tests pass; existing ignored89/4/7 remain unchanged.
 Temporary-directory cleanup passes. All source/tests were tracked before
 the gate; later edits only extend this evidence Markdown. No test was
-ignored, relabelled or removed. Fresh-context review remains pending. No exact1150 runtime,
+ignored, relabelled or removed. Fresh-context independent review is APPROVE with no actionable findings.
+The reviewer independently passes check5, acceptance coverage5, strict
+round-trip4, suffix unit1, physical policy and diff whitespace. Its isolated
+clean-base bootstrap reproduces the intended unmapped refusal for both
+exact public sources without publishing a CF. A fresh native replay passes
+16 commands,32 complete application-file comparisons and10 same-candidate
+full files including the manifest; both audits have zero failures. All
+reviewer processes are terminal and the source remains unchanged. No exact1150 runtime,
 SQL Server, full combined import or local release audit claim is made.
