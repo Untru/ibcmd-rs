@@ -67,3 +67,7 @@ The full local gate is run after staging the change with the hosted CI compilati
 ```sh
 CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_INCREMENTAL=0 TMPDIR=/private/tmp cargo xtask ci
 ```
+
+Final staged gate on `78d80f04011b084aaee205bd7742a3743a613e1d`: **29 PASS**, no skipped steps. Workspace 4711 passed / 89 existing ignored; root integration 554 passed / 4 existing ignored; root library 904 passed / 7 existing ignored; temporary-directory check passed. An earlier sandboxed attempt failed resolving npm's registry and is not counted as passing; the final gate used network permission.
+
+Fresh-context follow-up review of that exact head against the stated base: **APPROVE**. The reviewer independently reran all six `cargo xtask check` steps and checked the final binary hash, all six receipt trees/hashes, failing-first logs and CI log. The 42 native commands were recorded by the author, not repeated by the follow-up reviewer. Parent verification additionally reran all five binary-qualifier tests and the exact public two-dialect corpus regression: 5/5 and 1/1 passed. This final documentation commit changes no production code, tests or baseline.
