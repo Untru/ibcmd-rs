@@ -17,11 +17,14 @@ pub use ibcmd_dump::mssql_dump::*;
 // selector and refuses `--object`.
 pub use crate::stored_objects::dump_config;
 
+#[cfg(test)]
+pub(crate) use ibcmd_dump::mssql_dump::extract_form_body_xml;
+
 pub(crate) use ibcmd_dump::mssql_dump::{
     ConfigTable, DumpHooks, FileDbReadScope, FileInfobaseConfig, FileSink, StagedRow, StateBase,
     StateExportReport, StoredActivationRows, active_generation_history, constant_row_always_used,
     dump_config_with, dump_config_with_descriptor_validation, dump_config_with_selected_validation,
-    dump_config_with_sql, dynamic_generation_aliases, export_staged_state, extract_form_body_xml,
+    dump_config_with_sql, dynamic_generation_aliases, export_staged_state,
     extract_form_body_xml_strict, extract_inflated_moxel_spreadsheet_xml_with_line_trace,
     extract_moxel_spreadsheet_xml, extract_moxel_spreadsheet_xml_with_line_trace,
     extract_standalone_metadata_source_xml, fetch_config_part0_rows, fetch_config_row_whole,
@@ -75,6 +78,9 @@ pub(crate) use ibcmd_dump::test_fixtures::{
 
 // The command-line argument structs, which `cli` re-exports, and the
 // extension export.
+#[cfg(test)]
+pub(crate) use ibcmd_dump::mssql_dump::extract_form_body_xml;
+
 pub(crate) use ibcmd_dump::mssql_dump::{args, extension};
 
 /// The incremental export's state: `ibcmd-dump`'s `mssql_dump::incremental`.
