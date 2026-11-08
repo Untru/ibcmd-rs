@@ -51,5 +51,36 @@ their hashes around reads. No SQL Server evidence is claimed.
 
 The initial report was tracked before the full gate. Final staged CI
 completed29PASS with no skipped local stage: workspace, root integration,
-root library and cleanup all passed. Independent fresh-context review is
-pending; failed or interrupted runs are not PASS.
+root library and cleanup all passed. Independent fresh-context review approved27c342d5: check six PASS,
+metadata68/schema131/stored5 tests and all five coverage_corpus tests PASS.
+The reviewer repeated four native exports and six candidate routes using
+retained disposable controls, with fresh output directories:132/132 complete
+files including ConfigDumpInfo.xml matched; all four database hashes stable.
+No additional native create was claimed for that reviewer run.
+
+## Reproduction routes and tree hashes
+
+After decoding the exact public `configuration.cf.b64` named above, repeat
+with each installed build and a fresh output/database directory for every run:
+
+```text
+native ibcmd infobase create --db-path=<copy> --create-database --locale=ru_RU --load=<exact-public.cf> --apply --force --data=<unique>
+native ibcmd infobase config export --db-path=<copy> <native-output> --data=<unique>
+target/iter/ibcmd-rs cf export <exact-public.cf> <candidate-cf-output> --source-version <2.20-or-2.21>
+target/iter/ibcmd-rs infobase config export --db-path=<copy> --platform=<installed-build> <candidate-file-output>
+```
+
+Run both sides with LANG=ru_RU.UTF-8 and candidate PATH empty. Positive
+controls clone the native XML, change only the target Periodicity toDay and
+MainFilterOnPeriod totrue, then native create/import/apply/export before the
+candidate read. Compare every complete file, excluding ConfigDumpInfo.xml.
+Hashes cover sorted relative path,NUL,fileSHA256,NUL,byte length,LF records.
+
+| Build | Control | Route | Files | Equal tree SHA-256 |
+|---|---|---|---:|---|
+| 8.3.27.2214 | original | file | 21 | 4b83aefdb9b8e73be11a5c499962a22365f90094edd0af1c037c20ff715013b3 |
+| 8.3.27.2214 | original | cf | 21 | 4b83aefdb9b8e73be11a5c499962a22365f90094edd0af1c037c20ff715013b3 |
+| 8.3.27.2214 | periodic | file | 21 | 17db08de585c96102a668f32142edc6ae84d2f2b1d521c082bb35cc4d47d32c4 |
+| 8.5.1.1529 | original | file | 21 | 387ad1dd5916705a1d2803cc746395f97727a50fcad2b58a21eecdfbc813ee54 |
+| 8.5.1.1529 | original | cf | 21 | 387ad1dd5916705a1d2803cc746395f97727a50fcad2b58a21eecdfbc813ee54 |
+| 8.5.1.1529 | periodic | file | 21 | e6db0ebb752d3a663fd5bfc7b87773f03855998fd9836536c99598b11254263f |
