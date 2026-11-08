@@ -78,9 +78,6 @@ pub(crate) use ibcmd_dump::test_fixtures::{
 
 // The command-line argument structs, which `cli` re-exports, and the
 // extension export.
-#[cfg(test)]
-pub(crate) use ibcmd_dump::mssql_dump::extract_form_body_xml;
-
 pub(crate) use ibcmd_dump::mssql_dump::{args, extension};
 
 /// The incremental export's state: `ibcmd-dump`'s `mssql_dump::incremental`.
