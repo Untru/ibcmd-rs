@@ -4160,6 +4160,7 @@ pub fn form_output_code(value: Option<&str>) -> Option<&'static str> {
 pub struct FormPeriodFieldSchema;
 
 impl FormPeriodFieldSchema {
+    pub const XML_NAMESPACE: &'static [u8] = b"http://v8.1c.ru/8.3/xcf/logform";
     pub const XML_TAG: &'static str = "PeriodField";
     pub const XML_ATTRIBUTE_COUNT: usize = 2;
     pub fn is_item_tag(tag: &str) -> bool {

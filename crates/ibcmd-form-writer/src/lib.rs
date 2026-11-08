@@ -7463,7 +7463,7 @@ pub fn pack_form_body_blob_from_form_xml_base_free_through(
 
 #[doc(hidden)]
 pub fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
-    let mut reader = Reader::from_reader(xml);
+    let mut reader = quick_xml::NsReader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut root_seen = false;
     let mut root_closed = false;
@@ -7474,6 +7474,19 @@ pub fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                // Resolve after the event so declarations on this element and all
+                // ancestor rebindings participate in PeriodField admission.
+                if (local == ibcmd_form_schema::FormPeriodFieldSchema::XML_TAG
+                    || period_depth == Some(depth))
+                    && !matches!(reader.resolve_element(event.name()).0,
+                        quick_xml::name::ResolveResult::Bound(namespace)
+                            if namespace.as_ref() == ibcmd_form_schema::FormPeriodFieldSchema::XML_NAMESPACE)
+                {
+                    return Err(anyhow!(
+                        "PeriodField element <{local}> namespace is not measured"
+                    ));
+                }
+
                 if period_depth == Some(depth)
                     && !ibcmd_form_schema::FormPeriodFieldSchema::supports_xml_property(&local)
                 {
@@ -7523,9 +7536,25 @@ pub fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
                             "PeriodField scalar <{local}> attributes are not measured"
                         ));
                     }
-                    let value = reader
-                        .read_text(event.name())
-                        .context("failed to read PeriodField scalar")?;
+                    // Consume through NsReader to close the scalar namespace scope
+                    // before processing its siblings (Reader::read_text skips it).
+                    let mut scalar_buffer = Vec::new();
+                    let value = match reader.read_event_into(&mut scalar_buffer)? {
+                        Event::Text(text) => text.decode()?.into_owned(),
+                        _ => {
+                            return Err(anyhow!(
+                                "PeriodField scalar <{local}> shape is not measured"
+                            ));
+                        }
+                    };
+                    scalar_buffer.clear();
+                    if !matches!(reader.read_event_into(&mut scalar_buffer)?,
+                        Event::End(end) if end.name() == event.name())
+                    {
+                        return Err(anyhow!(
+                            "PeriodField scalar <{local}> shape is not measured"
+                        ));
+                    }
                     if !ibcmd_form_schema::FormPeriodFieldSchema::xml_scalar_is_measured(
                         &local, &value,
                     ) {
@@ -7546,6 +7575,19 @@ pub fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                // Resolve after the event so declarations on this element and all
+                // ancestor rebindings participate in PeriodField admission.
+                if (local == ibcmd_form_schema::FormPeriodFieldSchema::XML_TAG
+                    || period_depth == Some(depth))
+                    && !matches!(reader.resolve_element(event.name()).0,
+                        quick_xml::name::ResolveResult::Bound(namespace)
+                            if namespace.as_ref() == ibcmd_form_schema::FormPeriodFieldSchema::XML_NAMESPACE)
+                {
+                    return Err(anyhow!(
+                        "PeriodField element <{local}> namespace is not measured"
+                    ));
+                }
+
                 if local == ibcmd_form_schema::FormPeriodFieldSchema::XML_TAG {
                     return Err(anyhow!("empty PeriodField is not measured"));
                 }

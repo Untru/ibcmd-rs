@@ -226,6 +226,48 @@ fn period_field_unmeasured_xml_properties_refuse() {
 }
 
 #[test]
+fn period_field_inherited_foreign_namespaces_refuse() {
+    let mut accepted = Vec::new();
+    for build in ["8.3.27.2214", "8.5.1.1150"] {
+        let path = coverage_paths::root()
+            .join("coverage")
+            .join(build)
+            .join("corpus-managed-forms/native/CommonForms/CovPeriodField/Ext/Form.xml");
+        let xml = fs::read_to_string(path).unwrap();
+        let namespace = "http://v8.1c.ru/8.3/xcf/logform";
+        for changed in [
+            xml.replace("<ChildItems>", "<ChildItems xmlns=\"urn:unknown-period\">"),
+            xml.replace("<ChildItems>", "<ChildItems xmlns=\"\">"),
+            xml.replace(&format!("xmlns=\"{namespace}\""), "xmlns=\"urn:unknown-period\""),
+            xml.replace("<ContextMenu ", "<ContextMenu xmlns=\"urn:unknown-period\" "),
+            xml.replace("<ExtendedTooltip ", "<ExtendedTooltip xmlns=\"\" "),
+            xml.replace("<PeriodField name=\"Period\" id=\"1\">", "<PeriodField name=\"Period\" id=\"1\"><Width xmlns=\"urn:unknown-period\">35</Width>"),
+        ] {
+            assert_ne!(changed, xml, "namespace mutation must match {build}");
+            match ibcmd_form_writer::compile_native_form_body_through(
+                changed.as_bytes(), None, None, None,
+            ) {
+                Ok(_) => accepted.push(build),
+                Err(error) => assert!(error.to_string().contains("PeriodField"), "{build}: {error:#}"),
+            }
+        }
+        // Namespace scope is restored by a nearer ancestor declaration.
+        let rebound = xml
+            .replace(&format!("xmlns=\"{namespace}\""), "xmlns=\"urn:outer\"")
+            .replace(
+                "<ChildItems>",
+                &format!("<ChildItems xmlns=\"{namespace}\">"),
+            );
+        ibcmd_form_writer::compile_native_form_body_through(rebound.as_bytes(), None, None, None)
+            .unwrap_or_else(|error| panic!("{build}: restored PeriodField namespace: {error:#}"));
+    }
+    assert!(
+        accepted.is_empty(),
+        "foreign PeriodField namespaces accepted: {accepted:?}"
+    );
+}
+
+#[test]
 fn period_field_unmeasured_scalar_shapes_refuse() {
     for build in ["8.3.27.2214", "8.5.1.1150"] {
         let path = coverage_paths::root()
