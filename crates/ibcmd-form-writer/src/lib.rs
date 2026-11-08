@@ -8013,7 +8013,7 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
         };
     let attributes_conditional_appearance_source =
         form_attributes_conditional_appearance_source(xml);
-    let mut reader = Reader::from_reader(xml);
+    let mut reader = quick_xml::NsReader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
     let mut text_value = String::new();
@@ -8103,6 +8103,7 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
                     &path,
                     &local,
                     &event,
+                    reader.resolve_element(event.name()).0,
                     current_attribute.as_mut(),
                 )?;
 
@@ -8622,6 +8623,7 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
                     &path,
                     &local,
                     &event,
+                    reader.resolve_element(event.name()).0,
                     current_attribute.as_mut(),
                 )?;
                 if path_is(
@@ -24010,6 +24012,7 @@ fn start_form_attribute_binary_qualifier(
     path: &[String],
     local: &str,
     event: &BytesStart<'_>,
+    namespace: quick_xml::name::ResolveResult<'_>,
     attribute: Option<&mut FormXmlAttribute>,
 ) -> Result<()> {
     if form_attribute_binary_qualifier_part(path).is_some() {
@@ -24025,6 +24028,13 @@ fn start_form_attribute_binary_qualifier(
         &["Type", FormBinaryDataQualifier::CONTAINER_XML_NAME],
     ) && FormBinaryDataQualifier::from_xml_local_name(local).is_some();
     if is_container || is_qualifier {
+        if !matches!(namespace, quick_xml::name::ResolveResult::Bound(namespace)
+            if namespace.as_ref() == FormBinaryDataQualifier::XML_NAMESPACE.as_bytes())
+        {
+            return Err(anyhow!(
+                "unsupported namespace on Form Attribute BinaryDataQualifiers/{local}"
+            ));
+        }
         for attribute in event.attributes() {
             let attribute =
                 attribute.context("invalid Form Attribute BinaryDataQualifiers attribute")?;
@@ -24498,9 +24508,28 @@ mod tests {
     }
 
     #[test]
+    fn binary_form_attribute_qualifier_namespaces_fail_closed() {
+        for qualifiers in [
+            r#"<v8:BinaryDataQualifiers><v8:Length xmlns:v8="urn:unsupported">16</v8:Length></v8:BinaryDataQualifiers>"#,
+            r#"<v8:BinaryDataQualifiers><foreign:Length xmlns:foreign="urn:unsupported">16</foreign:Length></v8:BinaryDataQualifiers>"#,
+            r#"<v8:BinaryDataQualifiers><v8:AllowedLength xmlns:v8="urn:unsupported">Fixed</v8:AllowedLength></v8:BinaryDataQualifiers>"#,
+            r#"<v8:BinaryDataQualifiers xmlns:v8="urn:unsupported"/>"#,
+            r#"<foreign:BinaryDataQualifiers xmlns:foreign="urn:unsupported"/>"#,
+            r#"<v8:BinaryDataQualifiers><Length xmlns="">16</Length></v8:BinaryDataQualifiers>"#,
+        ] {
+            assert!(
+                binary_attribute_pattern_from_qualifiers(qualifiers).is_err(),
+                "accepted unsupported binary qualifier namespace: {qualifiers}"
+            );
+        }
+    }
+
+    #[test]
     fn binary_form_attribute_qualifier_namespace_declarations_preserve_values() -> anyhow::Result<()>
     {
         for qualifiers in [
+            r#"<core:BinaryDataQualifiers xmlns:core="http://v8.1c.ru/8.1/data/core"><core:Length>16</core:Length><core:AllowedLength>Fixed</core:AllowedLength></core:BinaryDataQualifiers>"#,
+            r#"<BinaryDataQualifiers xmlns="http://v8.1c.ru/8.1/data/core"><Length>16</Length><AllowedLength>Fixed</AllowedLength></BinaryDataQualifiers>"#,
             r#"<v8:BinaryDataQualifiers xmlns:extra="urn:coverage:qualifiers"><v8:Length xmlns="urn:coverage:unused">16</v8:Length><v8:AllowedLength xmlns:extra="urn:coverage:leaf">Fixed</v8:AllowedLength></v8:BinaryDataQualifiers>"#,
             r#"<v8:BinaryDataQualifiers xmlns:v8="http://v8.1c.ru/8.1/data/core"><v8:Length xmlns:v8="http://v8.1c.ru/8.1/data/core">16</v8:Length><v8:AllowedLength>Fixed</v8:AllowedLength></v8:BinaryDataQualifiers>"#,
         ] {
