@@ -5578,11 +5578,7 @@ fn prepare_additional_indexes_body_row(
 }
 
 fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
-    match kind {
-        "Document" => Some("3"),
-        "AccumulationRegister" => Some("4"),
-        _ => None,
-    }
+    ibcmd_schema::metadata_child_storage_facts::additional_indexes_body_suffix(kind)
 }
 
 fn prepare_style_body_row(
@@ -12587,7 +12583,11 @@ mod tests {
             super::additional_indexes_body_suffix("AccumulationRegister"),
             Some("4")
         );
-        assert_eq!(super::additional_indexes_body_suffix("Catalog"), None);
+        assert_eq!(super::additional_indexes_body_suffix("Catalog"), Some("1d"));
+        assert_eq!(
+            super::additional_indexes_body_suffix("InformationRegister"),
+            None
+        );
         assert_eq!(
             super::infer_additional_indexes_body_path(
                 native_path(r"Documents\Order.xml").as_path()

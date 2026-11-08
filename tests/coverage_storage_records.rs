@@ -722,3 +722,51 @@ fn coverage_empty_html_stored_record_has_a_precise_known_gap() {
         let _: Value = serde_json::from_slice(&bytes).unwrap();
     }
 }
+
+#[test]
+fn catalog_additional_indexes_compile_and_reexport_the_complete_native_body() {
+    use crate::coverage_corpus::TempDirectory;
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-catalog-additional-index");
+        let native = set.join("native");
+        let work = TempDirectory::new();
+        let binary = env!("CARGO_BIN_EXE_ibcmd-rs");
+        let cf = work.0.join("compiled.cf");
+        let output = Command::new(binary)
+            .args(["cf", "bootstrap", "--base-free"])
+            .arg(&native)
+            .arg(&cf)
+            .args(["--platform", platform])
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{platform}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let exported = work.0.join("export");
+        let output = Command::new(binary)
+            .args(["cf", "export"])
+            .arg(&cf)
+            .arg(&exported)
+            .args(["--source-version", version])
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{platform}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let target = "Catalogs/CovIndexedCatalog/Ext/AdditionalIndexes.xml";
+        assert_eq!(
+            fs::read(exported.join(target)).unwrap(),
+            fs::read(native.join(target)).unwrap(),
+            "{platform}: complete AdditionalIndexes.xml"
+        );
+    }
+}
