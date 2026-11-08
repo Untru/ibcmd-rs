@@ -9,7 +9,7 @@
 //! carry at all (`ScriptVariant`, `DataLockControlMode`, ...) are printed at
 //! the only value every corpus has, which is what `root.rs` accepts.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, anyhow, bail};
 
@@ -560,7 +560,7 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
         ConfigurationShape::V67 => FUNCTIONALITIES.len() - 1,
         _ => FUNCTIONALITIES.len(),
     };
-    if pairs != expected_pairs || table.len() != 2 + pairs + 1 {
+    if pairs != expected_pairs || table.len() < 2 + pairs + 1 {
         bail!(
             "the mobile functionality table holds {pairs} pairs in {} members",
             table.len()
@@ -580,21 +580,83 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
             other => bail!("mobile functionality {id} holds {other}"),
         }
     }
-    let tail = atom(item(table, 2 + pairs)?)?;
-    match (shape, tail) {
-        (ConfigurationShape::V67, "1") => {
+    let tail_start = ibcmd_schema::configuration_mobile::functionality_tail_start(pairs)
+        .ok_or_else(|| anyhow!("mobile pair count overflow"))?;
+    let tail = table
+        .get(tail_start..)
+        .ok_or_else(|| anyhow!("missing mobile tail"))?;
+    let mut messages = Vec::new();
+    if shape == ConfigurationShape::V67 {
+        let [flag] = tail else {
+            bail!("legacy mobile tail has extra members");
+        };
+        let enabled = crate::metadata_model::export::values::bool_text(flag)?.parse::<bool>()?;
+        if enabled {
             used.insert(41);
         }
-        (ConfigurationShape::V67, "0") | (_, "0") => {}
-        (_, other) => bail!(
-            "the mobile functionality table ends with {other}: permission messages are not decoded yet"
-        ),
+    } else {
+        let [count, records @ ..] = tail else {
+            bail!("missing mobile message count");
+        };
+        if usize::try_from(number(count)?)? != records.len() {
+            bail!("mobile message count mismatch");
+        }
+        let mut seen = BTreeSet::new();
+        for record in records {
+            let [id, description] = list(record)? else {
+                bail!("mobile message has unknown members");
+            };
+            let id = u32::try_from(number(id)?)?;
+            let name = ibcmd_schema::configuration_mobile::PERMISSIONS
+                .iter()
+                .find_map(|(candidate, name)| (*candidate == id).then_some(*name))
+                .ok_or_else(|| anyhow!("unknown mobile permission {id}"))?;
+            if !seen.insert(id) {
+                bail!("duplicate mobile permission {id}");
+            }
+            let [count, values @ ..] = list(description)? else {
+                bail!("missing description count");
+            };
+            let mut languages = BTreeSet::new();
+            let mut pairs = values.chunks_exact(2);
+            for pair in pairs.by_ref() {
+                let [lang, content] = pair else {
+                    unreachable!()
+                };
+                let lang = string(lang)?;
+                let _ = string(content)?;
+                if lang.is_empty() || !languages.insert(lang) {
+                    bail!("empty or duplicate description language");
+                }
+            }
+            if !pairs.remainder().is_empty() || usize::try_from(number(count)?)? != languages.len()
+            {
+                bail!("description count mismatch");
+            }
+            messages.push((id, name, description));
+        }
     }
     let permissions = permissions_of(&used);
     let expected_40 = serialize(&permission_table(&permissions)).replace("\r\n", "");
     expect(t, 40, &expected_40)?;
-    let expected_51 = serialize(&permission_flags(&permissions)).replace("\r\n", "");
-    expect(t, 51, &expected_51)?;
+    let descriptions = messages
+        .iter()
+        .map(|(id, _, description)| {
+            ibcmd_schema::configuration_mobile::legacy_permission_id(*id)
+                .map(|legacy| (legacy, *description))
+                .ok_or_else(|| anyhow!("mobile permission has no measured legacy capability"))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let expected_permissions = permission_flags(&permissions, &descriptions);
+    if item(
+        t,
+        ibcmd_schema::configuration_mobile::LEGACY_PERMISSION_TABLE_FIELD,
+    )? != &expected_permissions
+    {
+        bail!(
+            "legacy mobile permission flags or descriptions disagree with the functionality table"
+        );
+    }
     let mut functionalities = el("UsedMobileApplicationFunctionalities");
     for (id, name) in FUNCTIONALITIES {
         functionalities.children.push(
@@ -604,6 +666,14 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
                     "app:use",
                     if used.contains(&id) { "true" } else { "false" },
                 )),
+        );
+    }
+
+    for (_, name, description) in messages {
+        functionalities.children.push(
+            el("app:permissionMessage")
+                .child(leaf("app:permission", name))
+                .child(localized_element("app:description", description)?),
         );
     }
 

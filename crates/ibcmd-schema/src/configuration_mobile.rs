@@ -54,3 +54,36 @@ pub fn source_functionalities(version: Option<&str>) -> Option<&'static [(u32, &
         _ => None,
     }
 }
+
+/// Native message IDs are distinct from functionality IDs.
+pub const PERMISSIONS: [(u32, &str); 7] = [
+    (0, "Biometrics"),
+    (12, "Camera"),
+    (13, "Microphone"),
+    (14, "MusicLibrary"),
+    (15, "PictureAndVideoLibraries"),
+    (16, "AudioPlaybackAndVibration"),
+    (20, "PostNotifications"),
+];
+
+/// Distinct legacy capability IDs measured in the native message controls.
+pub fn legacy_permission_id(permission: u32) -> Option<u32> {
+    match permission {
+        0 => Some(29),
+        12 => Some(22),
+        13 => Some(23),
+        14 => Some(24),
+        15 => Some(25),
+        16 => Some(26),
+        20 => Some(35),
+        _ => None,
+    }
+}
+
+/// Property-tuple field carrying legacy permission flags and descriptions.
+pub const LEGACY_PERMISSION_TABLE_FIELD: usize = 51;
+
+/// The counted pair table starts after its version and pair count.
+pub fn functionality_tail_start(pair_count: usize) -> Option<usize> {
+    pair_count.checked_add(2)
+}

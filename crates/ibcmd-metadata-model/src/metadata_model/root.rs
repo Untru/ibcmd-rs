@@ -21,7 +21,7 @@
 #[path = "root_export.rs"]
 pub mod export;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, anyhow, bail};
 use ibcmd_schema::configuration_mobile::FUNCTIONALITIES;
@@ -763,6 +763,18 @@ fn properties_tuple(
     let roles = default_roles(p, context)?;
     let functionalities = mobile_functionalities(p)?;
     let permissions = permissions_of(&functionalities);
+    let messages = mobile_permission_messages(p)?;
+    if shape == ConfigurationShape::V67 && !messages.is_empty() {
+        bail!("permission messages require the complete mobile functionality table");
+    }
+    let legacy_messages = messages
+        .iter()
+        .map(|(id, description)| {
+            ibcmd_schema::configuration_mobile::legacy_permission_id(*id)
+                .map(|legacy| (legacy, description))
+                .ok_or_else(|| anyhow!("mobile permission has no measured legacy capability"))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
     let compatibility = Brace::num(compatibility as i64);
     validate_interface_edition(p, &context.version)?;
     let (interface_8_3, interface_8_5_1) = interface_compatibility(p, shape)?;
@@ -881,11 +893,11 @@ fn properties_tuple(
         Brace::num(1),
         nil(),
         // 51
-        permission_flags(&permissions),
+        permission_flags(&permissions, &legacy_messages),
         // 52
         pair(),
         // 53
-        functionality_table(&functionalities, shape),
+        functionality_table(&functionalities, shape, &messages),
         // 54 .. 58
         brace_list![Brace::num(0)],
         nil(),
@@ -1057,17 +1069,34 @@ fn mobile_functionalities(p: &Element) -> Result<BTreeSet<u32>> {
             used.insert(id);
         }
     }
-    if list.children_named("permissionMessage").next().is_some() {
-        bail!("Configuration <app:permissionMessage> entries are not compiled yet");
-    }
     Ok(used)
+}
+
+fn mobile_permission_messages(p: &Element) -> Result<Vec<(u32, Brace)>> {
+    let Some(list) = p.child("UsedMobileApplicationFunctionalities") else {
+        return Ok(Vec::new());
+    };
+    list.children_named("permissionMessage")
+        .map(|entry| {
+            let name = entry.child_text("permission").unwrap_or_default().trim();
+            let id = ibcmd_schema::configuration_mobile::PERMISSIONS
+                .iter()
+                .find_map(|(id, candidate)| (*candidate == name).then_some(*id))
+                .ok_or_else(|| anyhow!("unknown mobile permission {name:?}"))?;
+            Ok((id, localized(entry.child("description"))))
+        })
+        .collect()
 }
 
 /// Field 53: `{2,<n>,{<id>,<flag>}...,<tail>}`. The 60-field shape keeps 37
 /// pairs and spends its tail scalar on the last functionality
 /// (`TextToSpeech`); the longer shapes keep all 38 pairs and a tail of 0
 /// (the count of permission messages).
-fn functionality_table(used: &BTreeSet<u32>, shape: ConfigurationShape) -> Brace {
+fn functionality_table(
+    used: &BTreeSet<u32>,
+    shape: ConfigurationShape,
+    messages: &[(u32, Brace)],
+) -> Brace {
     let pairs = match shape {
         ConfigurationShape::V67 => &FUNCTIONALITIES[..FUNCTIONALITIES.len() - 1],
         _ => &FUNCTIONALITIES[..],
@@ -1081,8 +1110,11 @@ fn functionality_table(used: &BTreeSet<u32>, shape: ConfigurationShape) -> Brace
     }
     items.push(match shape {
         ConfigurationShape::V67 => Brace::flag(used.contains(&41)),
-        _ => Brace::num(0),
+        _ => Brace::num(messages.len() as i64),
     });
+    for (id, description) in messages {
+        items.push(brace_list![Brace::num(*id as i64), description.clone()]);
+    }
     Brace::List(items)
 }
 
@@ -1132,18 +1164,23 @@ fn permissions_of(functionalities: &BTreeSet<u32>) -> BTreeSet<u32> {
 
 /// Field 51: `{2,<n>,{<id>,<flag>,0}...}` over ids 1..38 but 4 and 15; 13
 /// and 14 are listed only when set.
-fn permission_flags(permissions: &BTreeSet<u32>) -> Brace {
+fn permission_flags(permissions: &BTreeSet<u32>, descriptions: &BTreeMap<u32, &Brace>) -> Brace {
     let ids = (1..=38u32)
         .filter(|id| !matches!(id, 4 | 15))
         .filter(|id| !matches!(id, 13 | 14) || permissions.contains(id))
         .collect::<Vec<_>>();
     let mut items = vec![Brace::num(2), Brace::num(ids.len() as i64)];
     for id in ids {
-        items.push(brace_list![
+        let description = descriptions.get(&id);
+        let mut entry = vec![
             Brace::num(id as i64),
             Brace::flag(permissions.contains(&id)),
-            Brace::num(0),
-        ]);
+            Brace::flag(description.is_some()),
+        ];
+        if let Some(description) = description {
+            entry.push((*description).clone());
+        }
+        items.push(Brace::List(entry));
     }
     Brace::List(items)
 }

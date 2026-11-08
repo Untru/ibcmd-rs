@@ -4255,15 +4255,7 @@ pub(super) fn parse_configuration_use_purposes(
 /// record's seven ids line up one-to-one, in order, with the seven
 /// `<app:permission>` names its native `Configuration.xml` prints. Any other
 /// id fails closed.
-const CONFIGURATION_MOBILE_APPLICATION_PERMISSIONS: [(u32, &str); 7] = [
-    (0, "Biometrics"),
-    (12, "Camera"),
-    (13, "Microphone"),
-    (14, "MusicLibrary"),
-    (15, "PictureAndVideoLibraries"),
-    (16, "AudioPlaybackAndVibration"),
-    (20, "PostNotifications"),
-];
+use ibcmd_schema::configuration_mobile::PERMISSIONS as CONFIGURATION_MOBILE_APPLICATION_PERMISSIONS;
 
 fn configuration_mobile_application_permission_name(id: u32) -> Option<&'static str> {
     CONFIGURATION_MOBILE_APPLICATION_PERMISSIONS
