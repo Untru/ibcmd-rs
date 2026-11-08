@@ -315,6 +315,7 @@ pub struct FormXmlAttribute {
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
     date_fractions: Option<String>,
+    binary_qualifiers_present: bool,
     binary_length: Option<String>,
     binary_allowed_length: Option<String>,
     main_attribute: Option<bool>,
@@ -8098,16 +8099,7 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
         match event {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                if path_is(
-                    &path,
-                    &FORM_ATTRIBUTE_PATH,
-                    &["Type", "BinaryDataQualifiers"],
-                ) && FormBinaryDataQualifier::from_xml_local_name(&local).is_none()
-                {
-                    return Err(anyhow!(
-                        "unsupported Form Attribute BinaryDataQualifiers/{local}"
-                    ));
-                }
+                start_form_attribute_binary_qualifier(&path, &local, current_attribute.as_mut())?;
 
                 // Cleared on every open. The list of names this used to
                 // test was extended three times in one day, each time
@@ -8621,6 +8613,7 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                start_form_attribute_binary_qualifier(&path, &local, current_attribute.as_mut())?;
                 if path_is(
                     &path,
                     &FORM_ATTRIBUTE_PATH,
@@ -9008,6 +9001,7 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
                 }
             }
             Ok(Event::Text(text)) => {
+                reject_form_binary_qualifiers_text(&path, text.xml_content()?.as_ref())?;
                 if path_ends_with_for_child_control_border(&path, &current_child_items)
                     && !text.xml_content()?.trim().is_empty()
                     && let Some(item) = current_child_items.last_mut()
@@ -9568,6 +9562,7 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
                 }
             }
             Ok(Event::CData(text)) => {
+                reject_form_binary_qualifiers_text(&path, text.xml_content()?.as_ref())?;
                 if form_attribute_binary_qualifier_part(&path).is_some() {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -13203,6 +13198,7 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         number_fraction_digits: None,
         number_allowed_sign: None,
         date_fractions: None,
+        binary_qualifiers_present: false,
         binary_length: None,
         binary_allowed_length: None,
         main_attribute: None,
@@ -24000,6 +23996,50 @@ fn form_type_spec_part<'a>(path: &'a [String], owner: &[&str], wrapped: bool) ->
     None
 }
 
+fn start_form_attribute_binary_qualifier(
+    path: &[String],
+    local: &str,
+    attribute: Option<&mut FormXmlAttribute>,
+) -> Result<()> {
+    if form_attribute_binary_qualifier_part(path).is_some() {
+        return Err(anyhow!(
+            "nested content in Form Attribute BinaryDataQualifiers/{local}"
+        ));
+    }
+    if path_is(path, &FORM_ATTRIBUTE_PATH, &["Type"])
+        && local == FormBinaryDataQualifier::CONTAINER_XML_NAME
+        && let Some(attribute) = attribute
+        && std::mem::replace(&mut attribute.binary_qualifiers_present, true)
+    {
+        return Err(anyhow!("duplicate Form Attribute BinaryDataQualifiers"));
+    }
+    if path_is(
+        path,
+        &FORM_ATTRIBUTE_PATH,
+        &["Type", FormBinaryDataQualifier::CONTAINER_XML_NAME],
+    ) && FormBinaryDataQualifier::from_xml_local_name(local).is_none()
+    {
+        return Err(anyhow!(
+            "unsupported Form Attribute BinaryDataQualifiers/{local}"
+        ));
+    }
+    Ok(())
+}
+
+fn reject_form_binary_qualifiers_text(path: &[String], text: &str) -> Result<()> {
+    if path_is(
+        path,
+        &FORM_ATTRIBUTE_PATH,
+        &["Type", FormBinaryDataQualifier::CONTAINER_XML_NAME],
+    ) && !text.trim().is_empty()
+    {
+        return Err(anyhow!(
+            "unexpected text in Form Attribute BinaryDataQualifiers"
+        ));
+    }
+    Ok(())
+}
+
 fn form_attribute_binary_qualifier_part(path: &[String]) -> Option<FormBinaryDataQualifier> {
     [
         FormBinaryDataQualifier::Length,
@@ -24368,6 +24408,11 @@ mod tests {
     #[test]
     fn binary_form_attribute_qualifiers_fail_closed() {
         for qualifiers in [
+            "</v8:BinaryDataQualifiers><v8:BinaryDataQualifiers>",
+            "<v8:Length>1<v8:Extra/>6</v8:Length>",
+            "<v8:Length>1<v8:Extra>6</v8:Extra></v8:Length>",
+            "unexpected text",
+            "<![CDATA[unexpected text]]>",
             "<v8:Length/>",
             "<v8:AllowedLength/>",
             "<v8:Length>-1</v8:Length>",

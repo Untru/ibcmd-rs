@@ -26,6 +26,8 @@ pub enum FormBinaryDataQualifier {
 }
 
 impl FormBinaryDataQualifier {
+    pub const CONTAINER_XML_NAME: &'static str = "BinaryDataQualifiers";
+
     pub fn from_xml_local_name(name: &str) -> Option<Self> {
         match name {
             "Length" => Some(Self::Length),
