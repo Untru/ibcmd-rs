@@ -169,6 +169,7 @@
     "CommonForms/CovFacetTemplate",
     "CommonForms/CovFormEventOnOpen",
     "CommonForms/CovFormType_Managed",
+    "CommonForms/CovFormattedRootUserVisibleTrue",
     "CommonForms/CovIncludeHelpInContents_true",
     "CommonForms/CovLayoutTemplate",
     "CommonForms/CovManagedFormTemplate",

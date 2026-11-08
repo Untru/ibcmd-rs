@@ -175,6 +175,7 @@
     "CommonForms/CovFacetTemplate",
     "CommonForms/CovFormEventOnOpen",
     "CommonForms/CovFormType_Managed",
+    "CommonForms/CovFormattedRootUserVisibleTrue",
     "CommonForms/CovHybridChildrenAlign",
     "CommonForms/CovHybridCollapseUse",
     "CommonForms/CovHybridDetailsTemplate",
