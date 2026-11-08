@@ -409,8 +409,8 @@
       }
     },
     "8.5.1.1150/corpus-nested-composition-contexts": {
-      "refused": {
-        "*": "#618: cf export: entry_export_failed: 1 CF storage entries could not be exported"
+      "gaps": {
+        "CovCompositionStandardPictures": "#618: CommonTemplates/CovCompositionStandardPictures/Ext/Template.xml differs"
       }
     },
     "8.5.1.1150/corpus-observed-spreadsheet-combinations": {

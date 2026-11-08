@@ -4,6 +4,9 @@
 //! written as an `xr:Picture` element naming the picture by its kind
 //! (`CommonPicture.<name>`, `StdPicture.<name>`) with `LoadTransparent`
 //! `true`, under a generated prefix numbered by the value element's depth.
+//! An unreferenced empty value has no Ref or LoadTransparent children: native
+//! 8.5.1.1529 writes its readable Picture element self-closing. Earlier 1150
+//! output kept the empty v8ui spelling; that legacy oracle is not rewritten.
 //!
 //! Evidence: the БСП 3.1.11 (8.3.27 XML) loaded by ibcmd 8.5.1.1529 into a
 //! file infobase and exported by it: all 120 picture values of its templates
@@ -25,10 +28,11 @@ use quick_xml::{Reader, events::Event};
 
 use ibcmd_form_writer::form::xml_2_21_writer::XmlEdits;
 
-const VALUE_TAG: &str = "dcscor:value";
-const PICTURE_TYPE: &str = "xsi:type=\"v8ui:Picture\"";
+use ibcmd_schema::dcs_picture_values::{
+    PICTURE_TYPE, READABLE_NAMESPACE as READABLE_NS, VALUE_TAG, empty_readable_value,
+    empty_stored_value,
+};
 const REF_ATTRIBUTE: &str = " ref=\"v8ui:";
-const READABLE_NS: &str = "http://v8.1c.ru/8.3/xcf/readable";
 const COMMON_PICTURE: &str = "CommonPicture.";
 const STD_PICTURE: &str = "StdPicture.";
 
@@ -105,8 +109,18 @@ pub fn with_8_5_picture_values(
         if !open.contains(PICTURE_TYPE) {
             continue;
         }
+        let mut depth = 1;
+        let mut parent = item.parent;
+        while let Some(index) = parent {
+            depth += 1;
+            parent = edits.elements[index].parent;
+        }
         let Some(at) = open.find(REF_ATTRIBUTE) else {
-            bail!("a picture value without a picture reference: {open}");
+            require_known_attributes(open, &[("xsi:type", "v8ui:Picture")])?;
+            require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+            edits.replace(element, &empty_readable_value(depth));
+            changed = true;
+            continue;
         };
         let name = &open[at + REF_ATTRIBUTE.len()..];
         let name = &name[..name.find('"').unwrap_or(name.len())];
@@ -122,12 +136,6 @@ pub fn with_8_5_picture_values(
         )?;
         require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
         let reference = picture_reference(name, object_refs);
-        let mut depth = 1;
-        let mut parent = item.parent;
-        while let Some(index) = parent {
-            depth += 1;
-            parent = edits.elements[index].parent;
-        }
         let prefix = format!("d{depth}p1");
         edits.replace(
             element,
@@ -177,7 +185,7 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
     let mut stored_kinds = BTreeMap::new();
     for element in 0..edits.elements.len() {
         let item = &edits.elements[element];
-        if item.tag != VALUE_TAG || item.self_closing {
+        if item.tag != VALUE_TAG {
             continue;
         }
         let open = &xml[item.open_start..];
@@ -193,6 +201,11 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
             ],
         )?;
         require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+        if item.self_closing {
+            edits.replace(element, &empty_stored_value());
+            changed = true;
+            continue;
+        }
         // Include content before the first child as well: inner_lines starts
         // at that child and would silently drop preceding text or comments.
         let open_end = item.open_start + xml[item.open_start..].find('>').unwrap() + 1;
@@ -388,11 +401,58 @@ mod tests {
     }
 
     #[test]
-    fn a_value_with_no_reference_is_refused() {
-        let xml = "<a>
-	<dcscor:value xsi:type=\"v8ui:Picture\"/>
-</a>";
-        assert!(with_8_5_picture_values(xml, &BTreeMap::new()).is_err());
+    fn an_empty_picture_uses_the_native_readable_spelling() {
+        let stored = "<a>\r\n\t<dcscor:value xsi:type=\"v8ui:Picture\"/>\r\n</a>";
+        let expected = "<a>\r\n\t<dcscor:value xmlns:d2p1=\"http://v8.1c.ru/8.3/xcf/readable\" xsi:type=\"d2p1:Picture\"/>\r\n</a>";
+        let written = with_8_5_picture_values(stored, &BTreeMap::new()).unwrap();
+        assert_eq!(written, expected);
+        assert_eq!(
+            with_stored_picture_values(&written).unwrap().as_deref(),
+            Some(stored)
+        );
+    }
+
+    #[test]
+    fn empty_and_named_pictures_round_trip_together() {
+        let stored = "<a>\r\n\t<dcscor:value xsi:type=\"v8ui:Picture\"/>\r\n\t<dcscor:value xsi:type=\"v8ui:Picture\" ref=\"v8ui:Information\"/>\r\n</a>";
+        let expected = "<a>\r\n\t<dcscor:value xmlns:d2p1=\"http://v8.1c.ru/8.3/xcf/readable\" xsi:type=\"d2p1:Picture\"/>\r\n\t<dcscor:value xmlns:d2p1=\"http://v8.1c.ru/8.3/xcf/readable\" xsi:type=\"d2p1:Picture\">\r\n\t\t<d2p1:Ref>StdPicture.Information</d2p1:Ref>\r\n\t\t<d2p1:LoadTransparent>true</d2p1:LoadTransparent>\r\n\t</dcscor:value>\r\n</a>";
+        let written = with_8_5_picture_values(stored, &BTreeMap::new()).unwrap();
+        assert_eq!(written, expected);
+        assert_eq!(
+            with_stored_picture_values(&written).unwrap().as_deref(),
+            Some(stored)
+        );
+    }
+
+    #[test]
+    fn readable_empty_picture_is_stored_without_a_reference() {
+        let source = "<a>\r\n\t<dcscor:value xmlns:d2p1=\"http://v8.1c.ru/8.3/xcf/readable\" xsi:type=\"d2p1:Picture\"/>\r\n</a>";
+        let expected = "<a>\r\n\t<dcscor:value xsi:type=\"v8ui:Picture\"/>\r\n</a>";
+        assert_eq!(
+            with_stored_picture_values(source).unwrap().as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn empty_picture_forward_refuses_unknown_attributes_and_inline_neighbors() {
+        for xml in [
+            "<a>\r\n\t<dcscor:value xsi:type=\"v8ui:Picture\" extra=\"keep\"/>\r\n</a>",
+            "<a><dcscor:value xsi:type=\"v8ui:Picture\"/></a>",
+            "<a>\r\n\t<dcscor:value xsi:type=\"v8ui:Picture\" ref=\"wrong:Information\"/>\r\n</a>",
+        ] {
+            assert!(with_8_5_picture_values(xml, &BTreeMap::new()).is_err());
+        }
+    }
+
+    #[test]
+    fn empty_picture_reverse_refuses_unknown_attributes_and_inline_neighbors() {
+        for xml in [
+            "<a>\r\n\t<dcscor:value xmlns:d2p1=\"http://v8.1c.ru/8.3/xcf/readable\" xsi:type=\"d2p1:Picture\" extra=\"keep\"/>\r\n</a>",
+            "<a><dcscor:value xmlns:d2p1=\"http://v8.1c.ru/8.3/xcf/readable\" xsi:type=\"d2p1:Picture\"/></a>",
+        ] {
+            assert!(with_stored_picture_values(xml).is_err());
+        }
     }
 
     #[test]
