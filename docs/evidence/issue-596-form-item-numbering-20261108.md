@@ -113,3 +113,14 @@ Final staged `cargo xtask ci`: **29 PASS**, no skipped steps. Workspace
 ignored; root library 904 passed / 7 existing ignored. Temporary-directory
 check passed. This report was tracked and staged before that complete run.
 The earlier interrupted attempts are not counted as passing.
+
+Fresh-context independent critic: **APPROVE** at
+`f0d2694edd75d8d1dd19692559cc039888a58db1`. Independently reran all six
+`cargo xtask check` steps (575 body tests and eight coverage tests), repeated
+the sixteen minimal named-ID comparisons through CF and fileDB, checked the
+twelve byte-equal forms and unchanged source database hashes, and verified
+that the baseline delta contains exactly 298 additions and no removals.
+The reviewer recomputed the saved audit totals, but did not repeat native
+control creation or the whole iter audit. The approval preserves the stated
+structural exclusions and does not justify closing broader acceptance gaps.
+This final evidence commit changes no production code, tests or baseline.
