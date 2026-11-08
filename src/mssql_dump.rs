@@ -17,18 +17,22 @@ pub use ibcmd_dump::mssql_dump::*;
 // selector and refuses `--object`.
 pub use crate::stored_objects::dump_config;
 
+#[cfg(test)]
+pub(crate) use ibcmd_dump::mssql_dump::extract_form_body_xml;
+
 pub(crate) use ibcmd_dump::mssql_dump::{
     ConfigTable, DumpHooks, FileDbReadScope, FileInfobaseConfig, FileSink, StagedRow, StateBase,
     StateExportReport, StoredActivationRows, active_generation_history, constant_row_always_used,
     dump_config_with, dump_config_with_descriptor_validation, dump_config_with_selected_validation,
-    dump_config_with_sql, dynamic_generation_aliases, export_staged_state, extract_form_body_xml,
-    extract_inflated_moxel_spreadsheet_xml_with_line_trace, extract_moxel_spreadsheet_xml,
-    extract_moxel_spreadsheet_xml_with_line_trace, extract_standalone_metadata_source_xml,
-    fetch_config_part0_rows, fetch_config_row_whole, fetch_extension_activation_rows,
-    fetch_main_activation_rows, file_db_rows_from_reader, file_extension_base_provider,
-    file_infobase_config, file_infobase_effective, help_link_marker_is_anchor,
-    help_standard_picture_negative_index, read_config_dump_info_with_sql, rewrite_help_links,
-    role_rights_xml_from_blob, root_family_folder, trace_form_body_with_context,
+    dump_config_with_sql, dynamic_generation_aliases, export_staged_state,
+    extract_form_body_xml_strict, extract_inflated_moxel_spreadsheet_xml_with_line_trace,
+    extract_moxel_spreadsheet_xml, extract_moxel_spreadsheet_xml_with_line_trace,
+    extract_standalone_metadata_source_xml, fetch_config_part0_rows, fetch_config_row_whole,
+    fetch_extension_activation_rows, fetch_main_activation_rows, file_db_rows_from_reader,
+    file_extension_base_provider, file_infobase_config, file_infobase_effective,
+    help_link_marker_is_anchor, help_standard_picture_negative_index,
+    read_config_dump_info_with_sql, rewrite_help_links, role_rights_xml_from_blob,
+    root_family_folder, trace_form_body_with_context,
     try_extract_moxel_spreadsheet_xml_with_generated_types, unpack_form_body_module_text,
     with_database_table, with_file_db_table, with_main_database_table, with_memory_rows_table,
     with_rows_dir_table, write_source_xml_file,

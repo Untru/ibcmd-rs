@@ -1004,7 +1004,7 @@ fn export_active_managed_form_fast(
     if descriptor_path != expected_descriptor {
         return Ok(None);
     }
-    let Some(form_xml) = crate::mssql_dump::extract_form_body_xml(
+    let Some(form_xml) = crate::mssql_dump::extract_form_body_xml_strict(
         &body_row.binary_data,
         &std::collections::BTreeMap::new(),
     ) else {

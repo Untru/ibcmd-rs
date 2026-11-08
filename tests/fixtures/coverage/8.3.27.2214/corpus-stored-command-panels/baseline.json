@@ -1,0 +1,9 @@
+{
+  "equal": [
+    "CovFieldCombinationHeightAll",
+    "CovFieldCombinationHeightButtons",
+    "CovFieldCombinationHeightLocationLeft",
+    "CovFieldCombinationHeightLocationNone",
+    "CovFieldCombinationHeightWidthBounds"
+  ]
+}

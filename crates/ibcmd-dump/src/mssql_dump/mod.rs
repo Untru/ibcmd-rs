@@ -1189,7 +1189,9 @@ pub(crate) use form_body_entry::render_form_body_xml_offline;
 #[doc(hidden)]
 pub use form_body_entry::trace_form_body_with_context;
 #[doc(hidden)]
-pub use form_body_entry::{extract_form_body_xml, unpack_form_body_module_text};
+pub use form_body_entry::{
+    extract_form_body_xml, extract_form_body_xml_strict, unpack_form_body_module_text,
+};
 
 #[doc(hidden)]
 pub fn extract_standalone_metadata_source_xml(

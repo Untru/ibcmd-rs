@@ -1,0 +1,9 @@
+{
+  "equal": [
+    "CommonForms/CovFieldCombinationHeightAll/Ext/Form.xml",
+    "CommonForms/CovFieldCombinationHeightButtons/Ext/Form.xml",
+    "CommonForms/CovFieldCombinationHeightLocationLeft/Ext/Form.xml",
+    "CommonForms/CovFieldCombinationHeightLocationNone/Ext/Form.xml",
+    "CommonForms/CovFieldCombinationHeightWidthBounds/Ext/Form.xml"
+  ]
+}

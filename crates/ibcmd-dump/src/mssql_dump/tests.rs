@@ -68,6 +68,26 @@ fn information_register_master_dimension_scan_keeps_only_a_proven_prefix() {
     );
 }
 
+/// Compatibility fragments are not evidence that a physical 8.5 profile is
+/// safe to publish. The source entry point must reject that same short body.
+#[test]
+fn legacy_form_fragments_require_the_compatibility_reader() {
+    let fragment =
+        r#"{4,{59,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"Bar",{1,0}}},"",{0}}"#;
+    let legacy = fragment.replacen("{59,", "{50,", 1);
+    let compatible =
+        extract_form_body_xml(&deflate_for_test(fragment.as_bytes()), &BTreeMap::new());
+    assert!(compatible.is_some());
+    assert_eq!(
+        compatible,
+        extract_form_body_xml_strict(&deflate_for_test(legacy.as_bytes()), &BTreeMap::new())
+    );
+    assert_eq!(
+        extract_form_body_xml_strict(&deflate_for_test(fragment.as_bytes()), &BTreeMap::new()),
+        None
+    );
+}
+
 #[test]
 fn form_navigation_panel_preserves_raw_item_order_and_rejects_bad_counts() {
     let register_uuid = "88888888-8888-4888-8888-888888888888";
@@ -7200,7 +7220,7 @@ fn keeps_form_module_but_suppresses_opaque_choice_list_asset() {
     let opaque_radio = r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#;
     let opaque_raw = "{9,2}";
     let form_body_text = format!(
-        "{{4,{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{0}}}}"
+        "{{4,{{50,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{0}}}}"
     );
     let form_body = deflate_for_test(form_body_text.as_bytes());
     let rows = vec![
@@ -7303,7 +7323,7 @@ fn opaque_choice_list_does_not_recover_malformed_list_settings_source_asset() {
     );
     let form_body = deflate_for_test(
         format!(
-            "{{4,{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{4,1,{malformed_attribute}}}}}"
+            "{{4,{{50,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{4,1,{malformed_attribute}}}}}"
         )
         .as_bytes(),
     );
@@ -7352,7 +7372,7 @@ fn malformed_list_settings_form_body_for_source_asset_diagnostic_test(
 ) -> Vec<u8> {
     let opaque_radio = r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#;
     let child_items = if include_opaque_radio {
-        format!("{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}}")
+        format!("{{50,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}}")
     } else {
         "{0}".to_owned()
     };

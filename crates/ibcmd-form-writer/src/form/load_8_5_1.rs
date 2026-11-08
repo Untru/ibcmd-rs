@@ -31,6 +31,7 @@ use super::xml_2_21_writer::{
 };
 use ibcmd_form_body::FormLayout;
 use ibcmd_form_body::layout_8_5_1::Node;
+use ibcmd_form_schema::FormTableHierarchyPanelLocationSchema;
 use ibcmd_metadata_source::MetadataSource;
 
 const FORM_ITEM_CLASS_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
@@ -308,6 +309,7 @@ fn down_convert_xml_2_21_form_as(
     items_root: Option<&Path>,
     layout: FormLayout,
 ) -> Result<(String, FormLoadFactsV8_5_1)> {
+    validate_hierarchy_panel_location_xml(xml)?;
     let mut facts = FormLoadFactsV8_5_1::default();
     let mut edits = XmlEdits::new_lenient(xml)?;
     let root = edits
@@ -831,6 +833,65 @@ fn load_field(
     Ok(())
 }
 
+fn validate_hierarchy_panel_location_xml(xml: &str) -> Result<()> {
+    if !xml.contains(FormTableHierarchyPanelLocationSchema::XML_NAME) {
+        return Ok(());
+    }
+    let mut reader = quick_xml::NsReader::from_str(xml);
+    let mut path = Vec::<String>::new();
+    loop {
+        match reader.read_event()? {
+            quick_xml::events::Event::Empty(event)
+                if event.local_name().as_ref()
+                    == FormTableHierarchyPanelLocationSchema::XML_NAME.as_bytes()
+                    && path.last().map(String::as_str)
+                        == Some(FormTableHierarchyPanelLocationSchema::TABLE_XML_NAME) =>
+            {
+                bail!(
+                    "<{}> must carry a value",
+                    FormTableHierarchyPanelLocationSchema::XML_NAME
+                );
+            }
+            quick_xml::events::Event::Start(event)
+                if event.local_name().as_ref()
+                    == FormTableHierarchyPanelLocationSchema::XML_NAME.as_bytes()
+                    && path.last().map(String::as_str)
+                        == Some(FormTableHierarchyPanelLocationSchema::TABLE_XML_NAME) =>
+            {
+                if event.name().as_ref()
+                    != FormTableHierarchyPanelLocationSchema::XML_NAME.as_bytes()
+                    || !matches!(reader.resolve_element(event.name()).0,
+                        quick_xml::name::ResolveResult::Bound(namespace)
+                        if namespace.as_ref() == FormTableHierarchyPanelLocationSchema::XML_NAMESPACE.as_bytes())
+                {
+                    bail!(
+                        "unsupported namespace or qualified name on <{}>",
+                        FormTableHierarchyPanelLocationSchema::XML_NAME
+                    );
+                }
+                for attribute in event.attributes() {
+                    let attribute = attribute?;
+                    if attribute.key.as_namespace_binding().is_none() {
+                        bail!(
+                            "unsupported attribute on <{}>",
+                            FormTableHierarchyPanelLocationSchema::XML_NAME
+                        );
+                    }
+                }
+                path.push(FormTableHierarchyPanelLocationSchema::XML_NAME.to_owned());
+            }
+            quick_xml::events::Event::Start(event) => {
+                path.push(String::from_utf8_lossy(event.name().as_ref()).into_owned());
+            }
+            quick_xml::events::Event::End(_) => {
+                path.pop();
+            }
+            quick_xml::events::Event::Eof => return Ok(()),
+            _ => {}
+        }
+    }
+}
+
 fn load_table(
     edits: &mut XmlEdits<'_>,
     element: usize,
@@ -869,6 +930,25 @@ fn load_table(
             (_, None) => {}
         }
     }
+    let hierarchy = take(
+        edits,
+        element,
+        FormTableHierarchyPanelLocationSchema::XML_NAME,
+    )?;
+    if layout == FormLayout::V8_3 && hierarchy.is_some() {
+        bail!(
+            "Table {} cannot be stored losslessly in the 8.3 layout",
+            FormTableHierarchyPanelLocationSchema::XML_NAME
+        );
+    }
+    item.tail.insert(
+        FormTableHierarchyPanelLocationSchema::tail_slot(),
+        code_of(
+            FormTableHierarchyPanelLocationSchema::VALUES,
+            hierarchy.as_deref(),
+            FormTableHierarchyPanelLocationSchema::XML_NAME,
+        )?,
+    );
     let activation = take(edits, element, "InitialRowActivation")?;
     item.tail.insert(
         6,
@@ -2286,5 +2366,107 @@ mod tests {
             out.replace("\r\n", ""),
             "{{4,4,{0},4},{4,3,{0,11111111-2222-3333-4444-555555555555},3},{8,3,0,1,100}}"
         );
+    }
+
+    fn hierarchy_table(property: &str) -> String {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" version=\"2.21\">\r\n\t<ChildItems>\r\n\t\t<Table name=\"Rows\" id=\"1\">\r\n{property}\t\t</Table>\r\n\t</ChildItems>\r\n</Form>"
+        )
+    }
+
+    #[test]
+    fn hierarchy_panel_location_is_encoded_in_table_tail() {
+        for (property, expected) in [
+            ("", "0"),
+            (
+                "\t\t\t<HierarchyPanelLocation>None</HierarchyPanelLocation>\r\n",
+                "1",
+            ),
+        ] {
+            let xml = hierarchy_table(property);
+            let (xml20, facts) = down_convert_xml_2_21_form(&xml, None, None).unwrap();
+            assert!(!xml20.contains("HierarchyPanelLocation"));
+            assert_eq!(
+                facts.items["1"].tail.get(&2).map(String::as_str),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn hierarchy_panel_location_rejects_unknown_and_lossy_layouts() {
+        let unknown =
+            hierarchy_table("\t\t\t<HierarchyPanelLocation>Unknown</HierarchyPanelLocation>\r\n");
+        assert!(down_convert_xml_2_21_form(&unknown, None, None).is_err());
+        let explicit =
+            hierarchy_table("\t\t\t<HierarchyPanelLocation>None</HierarchyPanelLocation>\r\n");
+        assert!(down_convert_xml_2_21_form_as(&explicit, None, None, FormLayout::V8_3).is_err());
+    }
+
+    #[test]
+    fn hierarchy_panel_location_rejects_unknown_attributes() {
+        for property in [
+            "<HierarchyPanelLocation extra=\"x\">None</HierarchyPanelLocation>",
+            "<HierarchyPanelLocation xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:nil=\"true\">None</HierarchyPanelLocation>",
+        ] {
+            assert!(
+                down_convert_xml_2_21_form(
+                    &hierarchy_table(&format!("\t\t\t{property}\r\n")),
+                    None,
+                    None
+                )
+                .is_err(),
+                "{property}"
+            );
+        }
+    }
+
+    #[test]
+    fn hierarchy_panel_location_rejects_foreign_namespaces() {
+        for property in [
+            "<HierarchyPanelLocation xmlns=\"urn:foreign\">None</HierarchyPanelLocation>",
+            "<foreign:HierarchyPanelLocation xmlns:foreign=\"urn:foreign\">None</foreign:HierarchyPanelLocation>",
+            "<missing:HierarchyPanelLocation>None</missing:HierarchyPanelLocation>",
+        ] {
+            assert!(
+                down_convert_xml_2_21_form(
+                    &hierarchy_table(&format!("\t\t\t{property}\r\n")),
+                    None,
+                    None
+                )
+                .is_err(),
+                "{property}"
+            );
+        }
+    }
+
+    #[test]
+    fn hierarchy_panel_location_preserves_namespace_declarations_and_rejects_nonvalues() {
+        for declaration in [
+            "xmlns=\"http://v8.1c.ru/8.3/xcf/logform\"",
+            "xmlns:unused=\"urn:unused\"",
+        ] {
+            let xml = hierarchy_table(&format!(
+                "\t\t\t<HierarchyPanelLocation {declaration}>None</HierarchyPanelLocation>\r\n"
+            ));
+            let (_, facts) = down_convert_xml_2_21_form(&xml, None, None).unwrap();
+            assert_eq!(facts.items["1"].tail.get(&2).map(String::as_str), Some("1"));
+        }
+        for property in [
+            "<HierarchyPanelLocation/>",
+            "<HierarchyPanelLocation></HierarchyPanelLocation>",
+            "<HierarchyPanelLocation><Unknown>None</Unknown></HierarchyPanelLocation>",
+            "<HierarchyPanelLocation>None</HierarchyPanelLocation><HierarchyPanelLocation>None</HierarchyPanelLocation>",
+        ] {
+            assert!(
+                down_convert_xml_2_21_form(
+                    &hierarchy_table(&format!("\t\t\t{property}\r\n")),
+                    None,
+                    None
+                )
+                .is_err(),
+                "{property}"
+            );
+        }
     }
 }

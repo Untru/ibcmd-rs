@@ -6892,7 +6892,7 @@ fn prepare_form_body_row(
         let native_form_matches = if form_xml.is_empty() {
             true
         } else {
-            crate::mssql_dump::extract_form_body_xml(&base_body, &BTreeMap::new())
+            crate::mssql_dump::extract_form_body_xml_strict(&base_body, &BTreeMap::new())
                 .is_some_and(|native_xml| native_xml == String::from_utf8_lossy(&form_xml))
         };
         let native_module_matches = match module_text.as_deref() {

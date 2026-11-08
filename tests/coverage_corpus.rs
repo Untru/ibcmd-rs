@@ -864,3 +864,208 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn table_hierarchy_panel_location_none_matches_native_profiles() {
+    let temp = TempDirectory::new();
+    for (platform, version, set_name, expected_forms) in [
+        ("8.5.1.1150", "2.21", "combined", 5),
+        ("8.5.1.1529", "2.21", "combined", 7),
+        (
+            "8.3.27.2214",
+            "2.20",
+            "corpus-cross-observed-scalars-from85",
+            1,
+        ),
+    ] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join(set_name);
+        let cf = temp.0.join(format!("{platform}.cf"));
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join(platform), version).unwrap();
+        let native = read_tree(&set.join("native"));
+        let property = |bytes: &[u8]| {
+            std::str::from_utf8(bytes)
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("<HierarchyPanelLocation"))
+                .map(str::trim)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let mut compared = 0;
+        for (path, bytes) in native
+            .iter()
+            .filter(|(path, _)| path.ends_with("TableHierarchyPanelLocation_None/Ext/Form.xml"))
+        {
+            let expected = property(bytes);
+            if version == "2.21" {
+                assert_eq!(
+                    expected,
+                    ["<HierarchyPanelLocation>None</HierarchyPanelLocation>"]
+                );
+            } else {
+                assert!(expected.is_empty());
+            }
+            assert_eq!(
+                property(exported.files.get(path).unwrap_or_else(|| panic!(
+                    "{platform}/{path}: missing output; {:?}",
+                    exported.refusal
+                ))),
+                expected,
+                "{platform}/{path}"
+            );
+            compared += 1;
+        }
+        assert_eq!(compared, expected_forms, "{platform}");
+    }
+}
+
+#[test]
+fn every_native_hierarchy_panel_case_reaches_the_85_fact_pass() {
+    let temp = TempDirectory::new();
+    let property = |bytes: &[u8]| {
+        std::str::from_utf8(bytes)
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains("<HierarchyPanelLocation"))
+            .map(str::trim)
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let mut compared = 0;
+    for (index, set) in coverage_sets().into_iter().enumerate() {
+        let native = read_tree(&set.join("native"));
+        let wanted = native
+            .iter()
+            .filter(|(path, bytes)| path.ends_with("/Form.xml") && !property(bytes).is_empty())
+            .collect::<Vec<_>>();
+        if wanted.is_empty() {
+            continue;
+        }
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(set.join("manifest.json")).unwrap()).unwrap();
+        let version = manifest["evidence"]["source_version"].as_str().unwrap();
+        let cf = temp.0.join(format!("{index}.cf"));
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join(format!("out-{index}")), version).unwrap();
+        for (path, bytes) in wanted {
+            let actual = exported.files.get(path).unwrap_or_else(|| {
+                panic!(
+                    "{}/{path}: missing output; {:?}",
+                    set.display(),
+                    exported.refusal
+                )
+            });
+            assert_eq!(
+                property(actual),
+                property(bytes),
+                "{}/{path}",
+                set.display()
+            );
+            compared += 1;
+        }
+    }
+    assert_eq!(compared, 35);
+}
+
+#[test]
+fn unknown_declared_85_root_trailer_is_not_published() {
+    use ibcmd_form_body::layout_8_5_1::{Node, parse_node};
+    let temp = TempDirectory::new();
+    let set = coverage_paths::root().join("coverage/8.5.1.1150/corpus-form-bound-scalars");
+    let name = "CovBoundTableHierarchyPanelLocation_None";
+    let descriptor =
+        fs::read_to_string(set.join(format!("native/CommonForms/{name}.xml"))).unwrap();
+    let uuid = descriptor
+        .split("<CommonForm uuid=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let key = format!("{uuid}.0");
+    let input = temp.0.join("input.cf");
+    fs::write(
+        &input,
+        decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+    )
+    .unwrap();
+    let extract = temp.0.join("extract");
+    let run = |args: &[&std::ffi::OsStr]| {
+        Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args(args)
+            .env("PATH", "")
+            .output()
+            .unwrap()
+    };
+    assert!(
+        run(&[
+            "cf".as_ref(),
+            "extract".as_ref(),
+            input.as_os_str(),
+            key.as_ref(),
+            extract.as_os_str()
+        ])
+        .status
+        .success()
+    );
+    let text = fs::read_to_string(extract.join("unpacked.bin")).unwrap();
+    let mut node = parse_node(&text).unwrap();
+    let Node::List(body) = &mut node else {
+        panic!()
+    };
+    let Node::List(root) = &mut body[1] else {
+        panic!()
+    };
+    let flag = root.len() - 12 + 2;
+    root[flag] = Node::Leaf("2".to_owned());
+    let patch = temp.0.join("patch.bin");
+    fs::write(&patch, format!("\u{feff}{}", node.to_text())).unwrap();
+    let changed = temp.0.join("changed.cf");
+    let replacement = format!("{key}={}", patch.display());
+    assert!(
+        run(&[
+            "cf".as_ref(),
+            "overlay".as_ref(),
+            input.as_os_str(),
+            changed.as_os_str(),
+            "--platform".as_ref(),
+            "8.5.1.1150".as_ref(),
+            "--raw-asset".as_ref(),
+            replacement.as_ref()
+        ])
+        .status
+        .success()
+    );
+    let out = temp.0.join("out");
+    let exported = run(&[
+        "cf".as_ref(),
+        "export".as_ref(),
+        changed.as_os_str(),
+        out.as_os_str(),
+        "--source-version".as_ref(),
+        "2.21".as_ref(),
+    ]);
+    assert!(!exported.status.success());
+    let report = format!(
+        "{}{}",
+        String::from_utf8_lossy(&exported.stdout),
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    assert!(report.contains("unsupported or ambiguous"), "{report}");
+    assert!(
+        !out.join(format!("CommonForms/{name}/Ext/Form.xml"))
+            .exists()
+    );
+}

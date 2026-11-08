@@ -17,19 +17,40 @@ pub(super) fn active_form_extension_export() -> Option<FormExtensionExport> {
     })
 }
 
+/// Read a compatible legacy fragment or a proven modern body. This helper
+/// does not admit a stored physical profile for source publication.
 #[allow(dead_code)]
 #[doc(hidden)]
 pub fn extract_form_body_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
+    extract_form_body_xml_with_profile(bytes, object_refs, false)
+}
+
+/// Validate declared modern profiles before extracting source XML. An unknown
+/// revision-59 trailer cannot use the legacy fragment reader at this boundary.
+#[doc(hidden)]
+pub fn extract_form_body_xml_strict(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    extract_form_body_xml_with_profile(bytes, object_refs, true)
+}
+
+fn extract_form_body_xml_with_profile(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    strict: bool,
+) -> Option<String> {
     let body =
         ibcmd_compiler::compiler::bodies::form::decode_compatible_managed_form(bytes).ok()?;
-    // A platform 8.5 body is read through its 8.3.27 down-conversion, the way
-    // the source export reads one (`source_assets`). What the members 8.5
-    // appends say is only spelled by the 2.21 writer, which this 2.20 reading
-    // is not.
-    if super::form::layout_8_5_1::is_form_body_8_5_1(body.parsed()) {
+    let modern = if strict {
+        super::form::layout_8_5_1::is_form_body_8_5_1(body.parsed())
+    } else {
+        super::form::layout_8_5_1::has_valid_form_body_8_5_1_trailer(body.parsed())
+    };
+    if modern {
         let (converted, _) =
             super::form::layout_8_5_1::down_convert_form_body_8_5_1(body.parsed()).ok()?;
         return extract_form_body_xml_from_body(&converted, object_refs, object_refs);

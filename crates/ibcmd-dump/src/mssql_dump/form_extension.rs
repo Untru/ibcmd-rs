@@ -86,10 +86,10 @@ pub(super) fn form_adoption(
     };
     let base_call_types = form_event_call_types(&base.layout);
     let v85 = source_version == InfobaseConfigSourceVersion::V2_21;
-    let (base, facts) = if v85 && super::form::layout_8_5_1::is_form_body_8_5_1(&base) {
+    let (base, facts) = if super::form::layout_8_5_1::is_form_body_8_5_1(&base) {
         let (converted, facts) = super::form::layout_8_5_1::down_convert_form_body_8_5_1(&base)
             .context("the adopted form's 8.5 base form")?;
-        (converted, Some(facts))
+        (converted, v85.then_some(facts))
     } else {
         (base, None)
     };
