@@ -1,0 +1,20 @@
+{
+  "equal": [
+    "CovCompositionAreaTemplate",
+    "CovCompositionCalculatedInput",
+    "CovCompositionChartPoint",
+    "CovCompositionChartSeries",
+    "CovCompositionNestedAreaTemplate",
+    "CovCompositionNestedCalculatedAppearance",
+    "CovCompositionNestedConditionalAppearance",
+    "CovCompositionNestedFieldAppearance",
+    "CovCompositionNestedFieldInput",
+    "CovCompositionNestedObjectSettings",
+    "CovCompositionNestedOutput",
+    "CovCompositionTableColumnAppearance",
+    "CovCompositionTableColumnOutput",
+    "CovCompositionTableRowAppearance",
+    "CovCompositionTableRowOutput",
+    "CovNestedCompositionTemplate"
+  ]
+}

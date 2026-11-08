@@ -864,3 +864,44 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+/// English-script configurations serialize built-in DCS setting names in
+/// English, including nested appearance and input-parameter contexts.
+#[test]
+fn english_composition_parameter_names_match_native() {
+    let temp = TempDirectory::new();
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        for name in [
+            "corpus-english-composition",
+            "corpus-english-parameter-contexts",
+            "corpus-structured-composition-contexts",
+        ] {
+            let set = coverage_paths::root()
+                .join("coverage")
+                .join(platform)
+                .join(name);
+            let cf = temp.0.join(format!("{platform}-{name}.cf"));
+            fs::write(
+                &cf,
+                decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+            )
+            .unwrap();
+            let exported =
+                cf_export(&cf, &temp.0.join(format!("{platform}-{name}")), version).unwrap();
+            let native = read_tree(&set.join("native"));
+            let mut compared = 0;
+            for (path, bytes) in native
+                .iter()
+                .filter(|(path, _)| path.ends_with("/Template.xml"))
+            {
+                assert_eq!(
+                    exported.files.get(path).unwrap(),
+                    bytes,
+                    "{platform}/{name}/{path}: complete template"
+                );
+                compared += 1;
+            }
+            assert!(compared > 0, "{platform}/{name}: no templates");
+        }
+    }
+}

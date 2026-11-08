@@ -35557,6 +35557,10 @@ fn selected_dcs_body_requests_metadata_object_references() {
     let body_only = selected_configuration_source_asset_index_needs_with_metadata(&file_names, &[])
         .expect("body-only template selection");
     assert!(body_only.object_refs);
+    assert!(
+        body_only.field_refs,
+        "DCS body needs the configuration script variant"
+    );
 
     let template_text = |template_type_code| {
         format!(
@@ -35568,6 +35572,10 @@ fn selected_dcs_body_requests_metadata_object_references() {
         selected_configuration_source_asset_index_needs_with_metadata(&file_names, &[dcs_metadata])
             .expect("DCS template selection");
     assert!(dcs.object_refs);
+    assert!(
+        dcs.field_refs,
+        "DCS body needs the configuration script variant"
+    );
 
     let text_metadata = metadata_text_row_from_text(template_uuid, template_text(4)).unwrap();
     let text = selected_configuration_source_asset_index_needs_with_metadata(
