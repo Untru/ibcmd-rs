@@ -3,10 +3,10 @@
   "base": "54b796f64da5daed3714acdf7810581fe0e58778",
   "fixture_commit": "8d138b896f462c3053d16076cbabf0ffe5030c1c",
   "code": {
-    "commit": "f7603a61b21be925f2009245bf00e1f0751a8f6a",
-    "tree": "caa9d7353eaf04a946f5251b166982a5eee0e850",
+    "commit": "cf29c5017393525791e5ea5734c082c120a22794",
+    "tree": "06b870310a8898cf82bb9c00fdf232778f90c533",
     "clean": true,
-    "binary_sha256": "84939399e33d584815c4fb7f6a9cea906204e057798cca9219e58b6f266e5875",
+    "binary_sha256": "03ce6046f64fcd03313cd88b10f477c10e0f9f7af7deb48d498549120ab14cf8",
     "version": "ibcmd-rs 0.4.1"
   },
   "native_tools": [
@@ -249,8 +249,8 @@
       "left_files": 4,
       "right_files": 4,
       "differences": [],
-      "left_tree_sha256": "5c5b0deef8fed60a10ae074246dc91b497ba5a391fdc3fde7a4647bc0a22afe5",
-      "right_tree_sha256": "5c5b0deef8fed60a10ae074246dc91b497ba5a391fdc3fde7a4647bc0a22afe5"
+      "left_tree_sha256": "f8ce2373124a16bd9041a5e0a8909aad653c1b9535aae929c140f01bdf036475",
+      "right_tree_sha256": "f8ce2373124a16bd9041a5e0a8909aad653c1b9535aae929c140f01bdf036475"
     },
     {
       "comparison": "8.3.27.2214-imported-native-application",
@@ -285,8 +285,8 @@
       "left_files": 4,
       "right_files": 4,
       "differences": [],
-      "left_tree_sha256": "d44811600911ce7e9eaa8de893dbdefa1ccc12cca3fd411458ce7a096e2e0dfe",
-      "right_tree_sha256": "d44811600911ce7e9eaa8de893dbdefa1ccc12cca3fd411458ce7a096e2e0dfe"
+      "left_tree_sha256": "571646a310b276b41e6bf7be38aea641f8d0ab9ce5ca7ffeea9d169ca078fac8",
+      "right_tree_sha256": "571646a310b276b41e6bf7be38aea641f8d0ab9ce5ca7ffeea9d169ca078fac8"
     },
     {
       "comparison": "8.5.1.1529-imported-native-application",
@@ -310,16 +310,16 @@
   "service_classification": [
     {
       "runtime": "8.3.27.2214",
-      "native_control_sha256": "ae17097898650afd00b19e5a20ab144bd4fe09cb7ef606e7821907b34d075d5d",
-      "own_import_native_export_sha256": "27de1b5bb4ffcba3cec50f701ec9a9589e28eee42a4194c555331fef8c1d51bf",
+      "native_control_sha256": "6c9ba919d531825d5734accd00c79a1a4768d5d38d3ecf5d27bdd2ac023968c1",
+      "own_import_native_export_sha256": "de65a91a66c62f6c4ef65e6e912e8c0f6c270c30cd34e16da99e120010019539",
       "changed_config_version_attributes": 3,
       "unexpected_changes": [],
       "no_other_byte_changes": true
     },
     {
       "runtime": "8.5.1.1529",
-      "native_control_sha256": "c46f267cab8549bc7076232b0aba44fff910bc7d92f8a9fe2b38b0beb308df7d",
-      "own_import_native_export_sha256": "69def8038b7072cea0ca80436e9600bdc51c5c72c13cab459989694175a21557",
+      "native_control_sha256": "3c7993ca5c1cfebaeee386641c42f4074a8aa5de76c4ecd2ce2b4e7b92de144b",
+      "own_import_native_export_sha256": "afa53c3e7dc35a5520e50f355d3af4bc56a687a0c3a05819ea8c9f5a64502fcc",
       "changed_config_version_attributes": 3,
       "unexpected_changes": [],
       "no_other_byte_changes": true
@@ -525,6 +525,108 @@
       "published": false
     },
     {
+      "runtime": "8.3.27.2214",
+      "case": "disguised filter wrapper",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "wrapped marker",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "wrapped marker at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "split marker",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "split marker at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "mixed prefix",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "mixed prefix at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "mixed suffix",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "mixed suffix at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "wrapped CDATA",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "wrapped CDATA at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "mixed CDATA",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "mixed CDATA at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "direct marker then tail",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "direct marker then tail at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "descendant marker then tail",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "descendant marker then tail at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
       "runtime": "8.5.1.1529",
       "case": "key-child",
       "exit_code": 2,
@@ -721,6 +823,108 @@
       "case": "EOF before </xr:KeyField>",
       "exit_code": 2,
       "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "disguised filter wrapper",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "wrapped marker",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "wrapped marker at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "split marker",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "split marker at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "mixed prefix",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "mixed prefix at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "mixed suffix",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "mixed suffix at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "wrapped CDATA",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "wrapped CDATA at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "mixed CDATA",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "mixed CDATA at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "direct marker then tail",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "direct marker then tail at EOF",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "descendant marker then tail",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "descendant marker then tail at EOF",
+      "exit_code": 2,
+      "published": false
     }
   ],
   "measurement_code_commit": "2e028962591a2f142b57fa201a365eda0f244461",
@@ -819,5 +1023,181 @@
     "saved_editions": 2,
     "exit_code": 0,
     "published_cf": true
-  }
+  },
+  "wrapped_marker_controls_before": {
+    "head": "5318a3ca91451da3ef4fcaedd5d33bc67ae66f27",
+    "cases_per_saved_edition": 12,
+    "unexpected_publications_per_saved_edition": 9,
+    "saved_editions": 2
+  },
+  "positive_text_controls": [
+    {
+      "runtime": "8.3.27.2214",
+      "case": "CDATA",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "archived native application tree",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897",
+      "actual_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897"
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "split CDATA suffix",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "archived native application tree",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897",
+      "actual_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897"
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "split CDATA prefix",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "archived native application tree",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897",
+      "actual_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897"
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "entity",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "archived native application tree",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897",
+      "actual_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897"
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "filter string",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "generated legacy filter control",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "e4fcaab13a06799e0961010cbea78592803db1b5c1d1421307b7da31306a9aa9",
+      "actual_tree_sha256": "e4fcaab13a06799e0961010cbea78592803db1b5c1d1421307b7da31306a9aa9"
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "UUID text",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "generated legacy UUID control",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "6f23e2494baf6e4b6947cdd24793e45d5e8567549fdfd34640129392de47b0b6",
+      "actual_tree_sha256": "6f23e2494baf6e4b6947cdd24793e45d5e8567549fdfd34640129392de47b0b6"
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "UUID split CDATA",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "generated legacy UUID control",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "6f23e2494baf6e4b6947cdd24793e45d5e8567549fdfd34640129392de47b0b6",
+      "actual_tree_sha256": "6f23e2494baf6e4b6947cdd24793e45d5e8567549fdfd34640129392de47b0b6"
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "CDATA",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "archived native application tree",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265",
+      "actual_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265"
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "split CDATA suffix",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "archived native application tree",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265",
+      "actual_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265"
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "split CDATA prefix",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "archived native application tree",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265",
+      "actual_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265"
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "entity",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "archived native application tree",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265",
+      "actual_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265"
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "filter string",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "generated legacy filter control",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "ca78678d4ddb392fe7d7d369b411e2309bc0d883476afd14befead7060e99296",
+      "actual_tree_sha256": "ca78678d4ddb392fe7d7d369b411e2309bc0d883476afd14befead7060e99296"
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "UUID text",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "generated legacy UUID control",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "159056b81140bf73e87c435d43028b9d000fccc3b4a26b967dbbdfdc9c4a565a",
+      "actual_tree_sha256": "159056b81140bf73e87c435d43028b9d000fccc3b4a26b967dbbdfdc9c4a565a"
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "UUID split CDATA",
+      "bootstrap_exit": 0,
+      "export_exit": 0,
+      "expected_kind": "generated legacy UUID control",
+      "include_config_dump_info": false,
+      "files": 3,
+      "differences": [],
+      "expected_tree_sha256": "159056b81140bf73e87c435d43028b9d000fccc3b4a26b967dbbdfdc9c4a565a",
+      "actual_tree_sha256": "159056b81140bf73e87c435d43028b9d000fccc3b4a26b967dbbdfdc9c4a565a"
+    }
+  ]
 }

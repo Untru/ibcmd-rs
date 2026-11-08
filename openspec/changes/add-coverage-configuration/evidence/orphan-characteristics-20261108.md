@@ -21,7 +21,7 @@ markers attached to a resolved source remain refusals.
 Before the fix, both new complete-tree regressions failed: CF export omitted
 the Catalog descriptor; base-free bootstrap refused `unresolved reference -2`.
 After the fix, both editions export and bootstrap/re-export all three
-application files exactly. Seventy-six malformed marker/source/structure/UUID
+application files exactly. One hundred ten malformed marker/source/structure/UUID
 combinations refuse bootstrap before publishing a CF. Lower-level controls cover the exact marker
 domain and the existing source-bound `-2` → Catalog.Code interpretation.
 
@@ -52,7 +52,7 @@ cargo xtask affected
 cargo xtask check
 ```
 
-The focused regressions passed 5/5, the CF suite 10/10, stored-row suite 4/4,
+The focused regressions passed 6/6, the CF suite 11/11, stored-row suite 4/4,
 and round-trip suite 4/4. `check` passed all ten steps. An initial sandbox
 run could not bind seven fake PostgreSQL sockets; the same socket family
 passed 9/9 with local IPC permission, followed by the complete green check.
@@ -61,8 +61,8 @@ No test was disabled. The physical-adapter policy guard passed unchanged.
 ## Native evidence
 
 The clean iter build is code commit
-`f7603a61b21be925f2009245bf00e1f0751a8f6a`, binary SHA-256
-`84939399e33d584815c4fb7f6a9cea906204e057798cca9219e58b6f266e5875`.
+`cf29c5017393525791e5ea5734c082c120a22794`, binary SHA-256
+`03ce6046f64fcd03313cd88b10f477c10e0f9f7af7deb48d498549120ab14cf8`.
 It was built with Rust 1.95.0 using `cargo build --locked --profile iter`.
 The [native receipt](orphan-characteristics-native-20261108.json) binds the
 native tool versions/hashes, CF inputs, twenty command exits and all tree hashes.
@@ -104,7 +104,7 @@ their existing admission boundary. No dependency edge or policy baseline changed
 
 Failing-first controls reproduced whitespace normalization, unknown child and
 attribute loss, and nil/known UUID publication. The final clean iter binary
-refuses all 66 additional actual-process controls (33 per runtime) without a CF.
+refuses all 100 additional actual-process controls (50 per runtime) without a CF.
 All negative process controls run with an empty PATH.
 
 A follow-up failing-first regression reproduced twelve silent publications on
@@ -121,13 +121,21 @@ that an unfinished second envelope could disappear from the compact forest.
 Admission now reconstructs the entire unfinished element stack for detection,
 while the legacy tree API still selects the final closed root. Seven EOF
 positions, from the outer root through the marker field, are refused on both
-archived editions. Strict admission requires every candidate
+archived editions. Detection also observes descendant/mixed text in original
+source order, including CDATA and decoded entities. Schema-owned finite-state
+probes retain a witnessed marker before unknown trailing content, use bounded
+state, and never search UUID substrings. The filter union is excluded from
+identity roles. Canonical CDATA/entity spellings and legacy filter/UUID controls
+round-trip to all three expected application files in fourteen positive
+controls. Eight compare archived native application trees; six compare generated
+legacy filter/UUID controls. Unknown child structure refuses before publication. Strict admission requires every candidate
 Characteristics block to be the unique canonical block consumed by compilation.
 
-The permanent integration regressions exercise 76 negative combinations on
+The permanent integration regressions exercise 110 negative combinations on
 the two archived editions. No exception from strict admission has a fallback.
 
-The initial CI attempt used an overlong TMPDIR and was superseded. Final
+Earlier CI attempts were superseded by admission fixes; the 5318a3ca run was
+terminated before completion. Final
 merge-gate results are reported against the immutable evidence commit in the
 PR; no earlier run is claimed as validation of that HEAD. Test environments
 use a short temporary root to satisfy Unix-domain socket length limits.
