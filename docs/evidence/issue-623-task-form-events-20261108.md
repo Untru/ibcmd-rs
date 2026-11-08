@@ -138,7 +138,11 @@ Native binary SHA-256:
 
 ## Final gate and review
 
-All evidence/new tests are tracked before full CI. Full staged CI and fresh
-independent review remain pending; pending, skipped or failed runs are not
-counted as successful gates. No fresh1150 runtime, SQL Server, release build,
-SBOM or release audit is claimed by these targeted native controls.
+All evidence/new tests were tracked before full CI. The recovered full gate
+on `7093bd17753a870bd54818d046962a8d357a79d7` completed with terminal exit0:
+29 PASS, no skipped local step. Workspace crates:4707 passed,89 existing
+ignored; root integration:554 passed,4 existing ignored; root library:904
+passed,7 existing ignored. Temporary-directory cleanup passed. No test was
+ignored, relabelled or removed for this change. Fresh independent review
+remains pending. No fresh1150 runtime, SQL Server, release build, SBOM or
+release audit is claimed by these local targeted controls.
