@@ -13464,16 +13464,7 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(4)
                 .and_then(|field| parse_form_rights_setting(field, object_refs)),
         )
-    } else if matches!(
-        tag,
-        "PictureField"
-            | "LabelField"
-            | "InputField"
-            | "CheckBoxField"
-            | "RadioButtonField"
-            | "TextDocumentField"
-            | "SpreadSheetDocumentField"
-    ) {
+    } else {
         FormChildItemUserVisibleSchema::from_raw_layout(
             wrapper,
             fields.len(),
@@ -13484,8 +13475,6 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(5)
                 .and_then(|field| parse_form_rights_setting(field, object_refs)),
         )
-    } else {
-        None
     };
     let show_title_options = matches!(tag, "ColumnGroup" | "Page" | "UsualGroup")
         .then(|| {

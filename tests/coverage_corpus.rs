@@ -864,3 +864,68 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn formatted_document_visibility_matches_native_default_and_false() {
+    fn field_rights(xml: &str) -> Option<&str> {
+        let anchor = "<FormattedDocumentField name=\"ContentField\" id=\"1\">";
+        assert_eq!(
+            xml.matches(anchor).count(),
+            1,
+            "formatted field must survive"
+        );
+        let field = xml
+            .split_once(anchor)
+            .unwrap()
+            .1
+            .split_once("</FormattedDocumentField>")
+            .unwrap()
+            .0;
+        let start = field.find("<UserVisible");
+        assert_eq!(
+            field.matches("<UserVisible").count(),
+            usize::from(start.is_some())
+        );
+        start.map(|start| {
+            let rights = &field[start..];
+            assert!(
+                rights.starts_with("<UserVisible>"),
+                "unexpected rights envelope"
+            );
+            let end = rights.find("</UserVisible>").unwrap() + "</UserVisible>".len();
+            &rights[..end]
+        })
+    }
+    let temp = TempDirectory::new();
+    for (platform, source_version) in [
+        ("8.3.27.2214", "2.20"),
+        ("8.5.1.1150", "2.21"),
+        ("8.5.1.1529", "2.21"),
+    ] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-formatted-document-visibility");
+        let cf = temp.0.join(format!("{platform}.cf"));
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join(platform), source_version).unwrap();
+        for name in [
+            "CovFormattedRootUserVisibleTrue",
+            "CovFormattedNestedUserVisibleTrue",
+            "CovFormattedRootUserVisibleFalse",
+            "CovFormattedNestedUserVisibleFalse",
+        ] {
+            let relative = format!("CommonForms/{name}/Ext/Form.xml");
+            let native = fs::read(set.join("native").join(&relative)).unwrap();
+            let native = std::str::from_utf8(&native).unwrap();
+            let actual = std::str::from_utf8(exported.files.get(&relative).unwrap()).unwrap();
+            let expected = field_rights(native);
+            assert_eq!(expected.is_some(), name.ends_with("False"));
+            assert_eq!(field_rights(actual), expected, "{platform}: {name}");
+        }
+    }
+}

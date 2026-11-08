@@ -5440,6 +5440,10 @@ impl FormChildItemUserVisibleSchema {
     /// declared member `<n>` may name roles that override the common answer.
     /// This function validates the record shape that puts a tuple at that
     /// slot and passes the caller's reading of it straight through.
+    ///
+    /// Public native formatted-document visibility cases carry the same
+    /// 60-member wrapper-37 prefix in root and nested fields, with both
+    /// common true (omitted XML) and false (an explicit rights element).
     pub fn from_raw_layout<T>(
         wrapper: &str,
         field_count: usize,
@@ -5465,6 +5469,7 @@ impl FormChildItemUserVisibleSchema {
                 | "CheckBoxField"
                 | "RadioButtonField"
                 | "TextDocumentField"
+                | "FormattedDocumentField"
                 | "SpreadSheetDocumentField",
                 1,
                 Some("1"),
@@ -10151,5 +10156,77 @@ mod form_layout_policy_tests {
         assert_eq!(form_nondefault_percent_scale("100"), None);
         assert_eq!(form_nondefault_percent_scale("0100"), Some("0100".into()));
         assert_eq!(form_nondefault_percent_scale("1,0"), None);
+    }
+}
+
+#[cfg(test)]
+mod formatted_document_user_visible_tests {
+    use super::FormChildItemUserVisibleSchema;
+
+    #[test]
+    fn formatted_document_visibility_preserves_default_false_and_role_payloads() {
+        for tag in ["FormattedDocumentField", "TextDocumentField", "InputField"] {
+            for payload in [None, Some(false), Some(true)] {
+                assert_eq!(
+                    FormChildItemUserVisibleSchema::from_raw_layout(
+                        "37",
+                        60,
+                        tag,
+                        1,
+                        Some("1"),
+                        Some(payload)
+                    ),
+                    Some(payload),
+                    "{tag}: {payload:?}"
+                );
+            }
+        }
+        let roles = Some((true, vec![("Role.Sample", false)]));
+        assert_eq!(
+            FormChildItemUserVisibleSchema::from_raw_layout(
+                "37",
+                60,
+                "FormattedDocumentField",
+                1,
+                Some("1"),
+                roles.clone()
+            ),
+            roles
+        );
+    }
+
+    #[test]
+    fn formatted_document_visibility_requires_the_complete_known_prefix_shape() {
+        for (wrapper, count, offset, marker) in [
+            ("48", 60, 1, Some("1")),
+            ("37", 59, 1, Some("1")),
+            ("37", 61, 1, Some("1")),
+            ("37", 60, 0, Some("1")),
+            ("37", 60, 1, Some("0")),
+            ("37", 60, 1, None),
+        ] {
+            assert_eq!(
+                FormChildItemUserVisibleSchema::from_raw_layout(
+                    wrapper,
+                    count,
+                    "FormattedDocumentField",
+                    offset,
+                    marker,
+                    Some(false)
+                ),
+                None
+            );
+        }
+        assert_eq!(
+            FormChildItemUserVisibleSchema::from_raw_layout(
+                "37",
+                60,
+                "UnknownField",
+                1,
+                Some("1"),
+                Some(false)
+            ),
+            None
+        );
     }
 }
