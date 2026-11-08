@@ -1506,6 +1506,12 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     (
         "Form",
         "cfg:TaskObject",
+        "BeforeWrite",
+        "9cc34712-da5f-4faa-a653-343d2085fbe8",
+    ),
+    (
+        "Form",
+        "cfg:TaskObject",
         "BeforeWriteAtServer",
         "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6",
     ),
@@ -12043,6 +12049,43 @@ mod tests {
                 vertical_align: Some("Stretch"),
                 ..NativeRootTail::default()
             }),
+            None
+        );
+    }
+
+    #[test]
+    fn writes_the_complete_native_task_form_event_table() {
+        let event = |name, handler| NativeEvent { name, handler };
+        assert_eq!(
+            format_native_events(
+                "Form",
+                "cfg:TaskObject",
+                &[
+                    event("AfterWrite", "After"),
+                    event("AfterWriteAtServer", "AfterServer"),
+                    event("OnReadAtServer", "Read"),
+                    event("OnOpen", "Open"),
+                    event("BeforeWrite", "Before"),
+                    event("OnCreateAtServer", "Create"),
+                    event("BeforeWriteAtServer", "BeforeServer"),
+                    event("FillCheckProcessingAtServer", "Check"),
+                ]
+            )
+            .as_deref(),
+            Some(
+                "{8,047d4d09-961c-4bdc-8519-eef10674c35b,\"After\",213d1900-dcad-4616-9f20-3f077156a40f,\"AfterServer\",390d5e4b-e732-4c88-8748-9e211a416984,\"Read\",3ccc650e-f631-4cae-8e33-3eaac610b5f9,\"Open\",9cc34712-da5f-4faa-a653-343d2085fbe8,\"Before\",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,\"Create\",bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6,\"BeforeServer\",e73d6384-49d2-4885-a752-a674d6ff7742,\"Check\",1,0,047d4d09-961c-4bdc-8519-eef10674c35b,0,1,213d1900-dcad-4616-9f20-3f077156a40f,0,1,390d5e4b-e732-4c88-8748-9e211a416984,0,1,3ccc650e-f631-4cae-8e33-3eaac610b5f9,0,1,9cc34712-da5f-4faa-a653-343d2085fbe8,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1,bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6,0,1,e73d6384-49d2-4885-a752-a674d6ff7742,0,1}"
+            )
+        );
+        assert_eq!(
+            format_native_events(
+                "Form",
+                "cfg:UnknownObject",
+                &[event("BeforeWrite", "Before")]
+            ),
+            None
+        );
+        assert_eq!(
+            format_native_events("Form", "cfg:TaskObject", &[event("FutureEvent", "Future")]),
             None
         );
     }
