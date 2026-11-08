@@ -133,3 +133,65 @@ run is not a passed gate. Its original CI and workspace logs were retained
 before a clean retry. The retry and subsequent fresh-context review remain
 pending. Release builds, SBOM, the release audit and MSSQL are outside
 these local results.
+
+## Durable recovery and apply-check diagnosis
+
+The first full gate was interrupted at 25 PASS without a terminal result.
+A subsequent coordinator-owned full gate completed with 28 PASS and one failed
+workspace step: `a_stored_row_in_the_newer_format_is_read_like_a_staged_one`
+failed at `decoder.decode("Catalog", &twin.before).is_ok()` (128 passed,
+one failed, six existing ignored in that harness). Root integration, root
+library and the temporary-directory check passed. This is not a passed gate.
+
+During the first attempted base reproduction an external deletion removed
+the temporary worktrees, shared toolchain, logs and native/raw artifacts.
+The observed missing-standard-library link failures are environmental and
+are not a reproduction of the apply-check assertion. Completed measurements
+above remain historical results; their deleted raw receipts are not claimed
+available. Recovery uses a durable worktree, the same pinned Rust 1.95.0 and
+the unchanged public corpus.
+
+After recovery, clean base `54b796f64da5daed3714acdf7810581fe0e58778`
+ran the exact failed command `cargo test --locked --workspace --exclude
+ibcmd-rs` successfully. Forty default-thread narrow apply-check runs also
+passed (129 passed, six existing ignored each). The narrow feature graph
+produced another binary, so the exact workspace-built base harness was also
+preserved (SHA-256
+`528d00b209eae5aae0c2fa4a8277f672f021ffac11b92afef1838661a1e8c844`).
+Its 77th default-thread run failed the related, different assertion
+`the_twin_rows_are_the_two_record_formats`: the before row requested in
+8.3.24 compatibility started with tag 57 instead of the expected 56.
+This proves a related fixture-generation failure on unchanged base, not an
+exact reproduction of the original decoder assertion.
+
+The fixture names use compatibility label, PID and SystemTime nanos, without
+a sequence. A separate pinned-Rust clock probe produced 160000 samples but
+only 1303 distinct instants, all microsecond-aligned. Compatibility loading
+also defaults to the dialect's version when its Configuration.xml cannot be
+read or parsed. These establish a plausible risk, not its causation here.
+A bounded 200-run diagnostic with temporary stderr-only lifecycle, row-head
+and error output passed. Its final trace scan found one actual overlap:
+two threads allocated the identical 8.3.24 scratch path; one removed it,
+and the other then observed Configuration.xml ENOENT and an ENOENT Drop.
+Both rows happened to compile as tag 56 in that diagnostic run, so the
+original assertion's causation is still not established. This demonstrates
+the independent fixture-lifecycle risk. Assertions, cleanup and default
+threading were retained; all temporary source changes were then restored
+byte-for-byte before normal verification. No test was
+ignored, relabelled or serialized, and no unrelated test workaround enters
+this change. The original failure's cause remains unknown; it is not labelled
+pre-existing or flaky.
+
+Both base procedures restored the original feature revision in finally.
+Twelve recovered native control commands pass; their four complete reference
+tree hashes match the table above exactly, and all six isolated owned target
+form files match the full native controls. A fresh candidate replay and a
+complete recovered full gate are pending and will be recorded separately.
+
+Recovered `cargo xtask check` completes all seven steps: format, crate clippy,
+root compilation, form-body, form-native, form-schema and the complete
+coverage suite. All three issue-specific regressions pass, including all
+49 public profiles. The physical-adapter policy guard passes without a
+baseline refresh. The next iter build is from the clean evidence revision;
+its new path-bound binary provenance, native replay and final full CI result
+will be recorded after completion.
