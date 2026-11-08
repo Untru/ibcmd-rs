@@ -1,7 +1,7 @@
 # PeriodField native parity — 2026-11-08
 
 Issue: #617. Base: `54b796f64da5daed3714acdf7810581fe0e58778`.
-Measured implementation: `2810310a1a141ca5f14287e3972dd2c5271d0fe7`.
+Measured implementation: `370b85c48b0abe3d359ac49c7b6439dd870d1a55`.
 Public clean-room corpus submodule: `8d138b896f462c3053d16076cbabf0ffe5030c1c`.
 No dependencies, vendor adaptations or generated schema JSON changed.
 
@@ -18,6 +18,24 @@ kind-18, revision-2, 14-member property bag.
 Additional failing-first controls exposed the stored layout, an unknown UI class,
 and malformed scalar XML. A product CLI probe accepted `<Width/>` and published
 CF before the scalar guard; the final CLI replay refuses it before publication.
+
+## Inherited namespace regression
+
+Fresh review found that a foreign default namespace declared on ChildItems
+was inherited by an unprefixed PeriodField yet accepted. The new regression
+ran red on both saved XML editions: ten foreign/unbound element and service
+property cases were accepted. The fixed admission resolves element namespaces
+through the existing quick-xml namespace reader, including ancestor rebindings,
+and requires the measured logform namespace for PeriodField and its direct
+properties. A nearer ancestor restoring that namespace remains accepted.
+Scalar text/end events pass through the namespace reader so its sibling scope
+is restored. No dependency edge changed and older profiles were not rewritten.
+
+A product CLI replay with PATH empty now exits 2 and publishes no CF for the
+inherited foreign namespace on both 8.3.27.2214 and 8.5.1.1529. Positive native
+import/apply/export was repeated on the namespace-fixed implementation:
+20 commands succeeded and all 20 complete files matched again. The binding
+and per-run tree hashes below refer to this final-source replay.
 
 ## Measured rule and boundaries
 
@@ -43,8 +61,8 @@ Commands used Rust 1.95.0, locked dependencies, PowerShell 7.6.9 and a short
 isolated temporary directory. Results on the measured implementation:
 
 - `cargo xtask affected`: four form crates plus `coverage_corpus::`.
-- `cargo test --locked -p ibcmd-rs --test integration coverage_corpus::period_field --no-default-features`: 8 passed.
-- `cargo xtask check`: 8 steps passed, including all 13 coverage-corpus tests.
+- `cargo test --locked -p ibcmd-rs --test integration coverage_corpus::period_field --no-default-features`: 9 passed.
+- `cargo xtask check`: 8 steps passed, including all 14 coverage-corpus tests.
 - `cargo test --locked -p ibcmd-rs --test integration coverage_round_trip:: --no-default-features`: 4 passed.
 - `pwsh -NoProfile -File tools/validate-physical-adapter-policy.ps1`: passed without baseline refresh.
 
@@ -58,7 +76,7 @@ flag controls per XML edition).
 
 ## Native acceptance
 
-Product version `0.4.1`, binary SHA-256 `4b959f8e3beec21805745ece46bcef4daf33f7f312dc2c82bef0b90bae49264f`.
+Product version `0.4.1`, binary SHA-256 `3c2542877fd8b87acfb70bf33a1c5834a8490d63a4ecf644b27ca8abb1af4dd4`.
 All 20 commands succeeded; all 20 full exported files matched, including
 ConfigDumpInfo.xml. The four complete target Form.xml hashes also matched
 the input source. The malformed empty-width CLI replay exited 2 without
@@ -79,10 +97,10 @@ are SHA-256 of compact sorted JSON mapping relative filenames to SHA-256.
 
 | Native build | Case | Equal files | Tree SHA-256 | Form.xml SHA-256 |
 |---|---|---:|---|---|
-| 8.3.27.2214 | default | 5 | `f2c855eb3787fe5c932a0e4b29ce6195d6979fbc24ad6df699bd8a356a28c430` | `21f53e2d906e7cf7007d619f2c5fd723c447449d543f2e3061fd72debf9afa1d` |
-| 8.3.27.2214 | geometry | 5 | `feff76ee095e3a909e9be6805899e072d39eeb9d173b709eb5c69478713a429b` | `25b42fff247b3607da5d26086a2ed1eade216f3c68ecf3c4a7a0eb511b108e33` |
-| 8.5.1.1529 | default | 5 | `1d3851eb2cdc9908b18fd27f99f486a943cd6954922a5ae4fd1ecfb967bc1e43` | `086146c1f674483235b0c03cc3e567f08a49bd5dd5b78e4ec5fddbc726650123` |
-| 8.5.1.1529 | geometry | 5 | `0bde24a4116249aae915e8b082845d862cb4819522f4b6d5428cd7649bb1fbe8` | `dd1b048c2398a3e82262f0eb502aeafbc33b174a58f6363cebf696556be24d76` |
+| 8.3.27.2214 | default | 5 | `5a24b7c3430ff4d8945e2d6c32fe7c4797370d16d2da7df624f670ec938fecf4` | `21f53e2d906e7cf7007d619f2c5fd723c447449d543f2e3061fd72debf9afa1d` |
+| 8.3.27.2214 | geometry | 5 | `8f00376789266d0a471f19cf6ed56e519e2b35c316c6077916e5d25244156e84` | `25b42fff247b3607da5d26086a2ed1eade216f3c68ecf3c4a7a0eb511b108e33` |
+| 8.5.1.1529 | default | 5 | `d8060097ecb4dd0f33c3ab4a70e5a76eebf7d98be91d5bb57f13489969590ac8` | `086146c1f674483235b0c03cc3e567f08a49bd5dd5b78e4ec5fddbc726650123` |
+| 8.5.1.1529 | geometry | 5 | `a084699e7f337fec69b12fef329c608a0bc574570bf038ec05a87ef35c617277` | `dd1b048c2398a3e82262f0eb502aeafbc33b174a58f6363cebf696556be24d76` |
 
 ## Remaining scope
 
