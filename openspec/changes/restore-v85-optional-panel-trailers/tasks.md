@@ -4,4 +4,4 @@
 2. [x] Implement the bounded schema-owned trailer reader and fail-closed conversion.
 3. [x] Verify zero/present-panel native controls and malformed/unknown/ambiguous refusals.
 4. [x] Preserve all existing baselines, measure the complete corpus and hold proven improvements.
-5. [ ] Run affected/check, staged CI, final native routes and independent review; record remaining acceptance limits.
+5. [x] Run affected/check, staged CI, final native routes and independent review; record remaining acceptance limits.
