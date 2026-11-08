@@ -872,7 +872,7 @@ fn orphan_characteristics_reject_hidden_duplicate_envelopes() {
         let without = format!("{}{}", &original[..start], &original[end..]);
         let owner_start = original.find("<Catalog ").unwrap();
         let owner_end = original.find("</Catalog>").unwrap() + "</Catalog>".len();
-        let cases = [
+        let mut cases = vec![
             (
                 "orphan in first XML root",
                 format!(
@@ -940,6 +940,19 @@ fn orphan_characteristics_reject_hidden_duplicate_envelopes() {
                 ),
             ),
         ];
+        for closing in [
+            "</MetaDataObject>",
+            "</Catalog>",
+            "</Properties>",
+            "</Characteristics>",
+            "</xr:Characteristic>",
+            "</xr:CharacteristicTypes>",
+            "</xr:KeyField>",
+        ] {
+            let start = original.find("<MetaDataObject ").unwrap();
+            let end = original.find(closing).unwrap();
+            cases.push((closing, format!("{}{}", without, &original[start..end])));
+        }
         for (label, changed) in cases {
             let temp = TempDirectory::new();
             let tree = temp.0.join("source");

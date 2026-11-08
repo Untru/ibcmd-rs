@@ -165,20 +165,24 @@ pub fn parse_element_tree_raw_line_breaks(xml: &[u8]) -> Result<Element> {
     parse_element_tree_with(xml, false)
 }
 
-/// Retains every top-level envelope for bounded admission before a caller
+/// Retains closed and unfinished top-level envelopes for bounded admission before a caller
 /// selects one owner. This compact reader remains lenient about document roots;
 /// callers admitting a detected profile must validate the original XML strictly.
 pub fn parse_element_forest_raw_line_breaks(xml: &[u8]) -> Result<Vec<Element>> {
-    parse_element_forest_with(xml, false)
+    parse_element_forest_with(xml, false, true)
 }
 
 fn parse_element_tree_with(xml: &[u8], normalize_line_breaks: bool) -> Result<Element> {
-    parse_element_forest_with(xml, normalize_line_breaks)?
+    parse_element_forest_with(xml, normalize_line_breaks, false)?
         .pop()
         .ok_or_else(|| anyhow!("XML has no root element"))
 }
 
-fn parse_element_forest_with(xml: &[u8], normalize_line_breaks: bool) -> Result<Vec<Element>> {
+fn parse_element_forest_with(
+    xml: &[u8],
+    normalize_line_breaks: bool,
+    retain_unfinished: bool,
+) -> Result<Vec<Element>> {
     let xml = xml.strip_prefix(b"\xef\xbb\xbf").unwrap_or(xml);
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
@@ -232,6 +236,17 @@ fn parse_element_forest_with(xml: &[u8], normalize_line_breaks: bool) -> Result<
         }
         buffer.clear();
     }
+    if retain_unfinished {
+        // EOF does not make an observed profile disappear. Reconstruct every
+        // open ancestor for detection; the admitting caller then rejects the
+        // original unfinished document through its strict reader.
+        while let Some(element) = stack.pop() {
+            match stack.last_mut() {
+                Some(parent) => parent.children.push(element),
+                None => roots.push(element),
+            }
+        }
+    }
     Ok(roots)
 }
 
@@ -275,6 +290,22 @@ mod tests {
         assert_eq!(
             parse_element_tree_raw_line_breaks(source).unwrap().name,
             "Second"
+        );
+        let unfinished = b"<Closed/><Open><Nested><KeyField>-2";
+        let roots = parse_element_forest_raw_line_breaks(unfinished).unwrap();
+        assert_eq!(roots.len(), 2);
+        assert_eq!(
+            roots
+                .last()
+                .unwrap()
+                .path(&["Nested", "KeyField"])
+                .unwrap()
+                .text,
+            "-2"
+        );
+        assert_eq!(
+            parse_element_tree_raw_line_breaks(unfinished).unwrap().name,
+            "Closed"
         );
     }
 
