@@ -8099,7 +8099,12 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
         match event {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                start_form_attribute_binary_qualifier(&path, &local, current_attribute.as_mut())?;
+                start_form_attribute_binary_qualifier(
+                    &path,
+                    &local,
+                    &event,
+                    current_attribute.as_mut(),
+                )?;
 
                 // Cleared on every open. The list of names this used to
                 // test was extended three times in one day, each time
@@ -8613,7 +8618,12 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                start_form_attribute_binary_qualifier(&path, &local, current_attribute.as_mut())?;
+                start_form_attribute_binary_qualifier(
+                    &path,
+                    &local,
+                    &event,
+                    current_attribute.as_mut(),
+                )?;
                 if path_is(
                     &path,
                     &FORM_ATTRIBUTE_PATH,
@@ -23999,6 +24009,7 @@ fn form_type_spec_part<'a>(path: &'a [String], owner: &[&str], wrapped: bool) ->
 fn start_form_attribute_binary_qualifier(
     path: &[String],
     local: &str,
+    event: &BytesStart<'_>,
     attribute: Option<&mut FormXmlAttribute>,
 ) -> Result<()> {
     if form_attribute_binary_qualifier_part(path).is_some() {
@@ -24006,8 +24017,26 @@ fn start_form_attribute_binary_qualifier(
             "nested content in Form Attribute BinaryDataQualifiers/{local}"
         ));
     }
-    if path_is(path, &FORM_ATTRIBUTE_PATH, &["Type"])
-        && local == FormBinaryDataQualifier::CONTAINER_XML_NAME
+    let is_container = path_is(path, &FORM_ATTRIBUTE_PATH, &["Type"])
+        && local == FormBinaryDataQualifier::CONTAINER_XML_NAME;
+    let is_qualifier = path_is(
+        path,
+        &FORM_ATTRIBUTE_PATH,
+        &["Type", FormBinaryDataQualifier::CONTAINER_XML_NAME],
+    ) && FormBinaryDataQualifier::from_xml_local_name(local).is_some();
+    if is_container || is_qualifier {
+        for attribute in event.attributes() {
+            let attribute =
+                attribute.context("invalid Form Attribute BinaryDataQualifiers attribute")?;
+            if attribute.key.as_namespace_binding().is_none() {
+                return Err(anyhow!(
+                    "unsupported attribute {} on Form Attribute BinaryDataQualifiers/{local}",
+                    String::from_utf8_lossy(attribute.key.as_ref())
+                ));
+            }
+        }
+    }
+    if is_container
         && let Some(attribute) = attribute
         && std::mem::replace(&mut attribute.binary_qualifiers_present, true)
     {
@@ -24435,6 +24464,58 @@ mod tests {
                 "accepted invalid binary qualifiers: {qualifiers}"
             );
         }
+    }
+
+    fn binary_attribute_pattern_from_qualifiers(qualifiers: &str) -> anyhow::Result<String> {
+        let xml = format!(
+            "{FORM_XML_HEAD}<Attributes><Attribute name=\"Payload\" id=\"1\"><Type><v8:Type>xs:base64Binary</v8:Type>{qualifiers}</Type></Attribute></Attributes></Form>"
+        );
+        let properties = super::parse_form_xml_body_properties(xml.as_bytes())?;
+        super::format_form_attribute_type_pattern(&properties.attributes[0], None)
+    }
+
+    #[test]
+    fn binary_form_attribute_qualifier_attributes_fail_closed() {
+        for attribute in [r#"unexpected="x""#, r#"xsi:nil="true""#] {
+            for qualifiers in [
+                format!(
+                    r#"<v8:BinaryDataQualifiers><v8:Length {attribute}>16</v8:Length><v8:AllowedLength>Fixed</v8:AllowedLength></v8:BinaryDataQualifiers>"#
+                ),
+                format!(
+                    r#"<v8:BinaryDataQualifiers><v8:Length>16</v8:Length><v8:AllowedLength {attribute}>Fixed</v8:AllowedLength></v8:BinaryDataQualifiers>"#
+                ),
+                format!(
+                    r#"<v8:BinaryDataQualifiers {attribute}><v8:Length>16</v8:Length><v8:AllowedLength>Fixed</v8:AllowedLength></v8:BinaryDataQualifiers>"#
+                ),
+                format!(r#"<v8:BinaryDataQualifiers {attribute}/>"#),
+            ] {
+                assert!(
+                    binary_attribute_pattern_from_qualifiers(&qualifiers).is_err(),
+                    "accepted unsupported binary qualifier attribute: {qualifiers}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn binary_form_attribute_qualifier_namespace_declarations_preserve_values() -> anyhow::Result<()>
+    {
+        for qualifiers in [
+            r#"<v8:BinaryDataQualifiers xmlns:extra="urn:coverage:qualifiers"><v8:Length xmlns="urn:coverage:unused">16</v8:Length><v8:AllowedLength xmlns:extra="urn:coverage:leaf">Fixed</v8:AllowedLength></v8:BinaryDataQualifiers>"#,
+            r#"<v8:BinaryDataQualifiers xmlns:v8="http://v8.1c.ru/8.1/data/core"><v8:Length xmlns:v8="http://v8.1c.ru/8.1/data/core">16</v8:Length><v8:AllowedLength>Fixed</v8:AllowedLength></v8:BinaryDataQualifiers>"#,
+        ] {
+            assert_eq!(
+                binary_attribute_pattern_from_qualifiers(qualifiers)?,
+                r#"{"Pattern",{"R",16,0}}"#
+            );
+        }
+        assert_eq!(
+            binary_attribute_pattern_from_qualifiers(
+                r#"<v8:BinaryDataQualifiers xmlns:extra="urn:coverage:empty"/>"#
+            )?,
+            r#"{"Pattern",{"R"}}"#
+        );
+        Ok(())
     }
 
     #[test]
