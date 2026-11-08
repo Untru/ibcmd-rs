@@ -1,0 +1,17 @@
+{
+  "equal": [
+    "CovCompatPageChildrenAlign_None",
+    "CovCompatPageEnableContentChange_true",
+    "CovCompatPageGroup_AlwaysHorizontal",
+    "CovCompatPageGroup_Horizontal",
+    "CovCompatPageHorizontalSpacing_Half",
+    "CovCompatPageHorizontalStretch_false",
+    "CovCompatPageHorizontalStretch_true",
+    "CovCompatPageReadOnly_true",
+    "CovCompatPageScrollOnCompress_true",
+    "CovCompatPageShowTitle_false",
+    "CovCompatPageVerticalAlign_Center",
+    "CovCompatPageVerticalStretch_false",
+    "CovCompatPageVerticalStretch_true"
+  ]
+}

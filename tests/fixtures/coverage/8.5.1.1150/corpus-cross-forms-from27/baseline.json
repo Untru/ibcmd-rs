@@ -1,5 +1,6 @@
 {
   "equal": [
+    "CovBoundTableExcludesSelectAll",
     "CovPictureTitleFontStyleItem",
     "CovRootCollapseImportance",
     "CovRootEventChoiceProcessing",

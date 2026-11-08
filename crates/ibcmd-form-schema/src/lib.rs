@@ -665,6 +665,12 @@ impl FormPopupColorSchema {
     }
 }
 
+/// The managed form's built-in navigator group is never published, and its
+/// anonymous service items do not take part in emitted item numbering.
+pub fn form_item_is_hidden_navigator(wrapper: &str, kind: &str) -> bool {
+    matches!((wrapper, kind), ("22", "7"))
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FormNestedAutoCommandBarSchema {
     marker: FormAutoCommandBarMarker,
