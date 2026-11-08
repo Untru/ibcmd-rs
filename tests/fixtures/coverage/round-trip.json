@@ -43,7 +43,7 @@
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
-        "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+        "Configuration.xml": "#678: the base-free writer refuses Configuration ClientApplicationInterface Ext/ClientApplicationInterface.xml: <panel> has <height>, which the writer cannot encode",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
@@ -124,11 +124,6 @@
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row f632ae58-e692-5695-9a81-f23d68e106d3.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row 96b9a6d0-8b49-52ff-a56b-4f97b33890ec.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 6be980d2-8e85-56f0-a9ba-bce9af9f8f48.0: the native form writer refuses it: <PeriodField> has no writer yet"
-      }
-    },
-    "8.3.27.2214/corpus-mobile-permission-messages": {
-      "refused": {
-        "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")"
       }
     },
     "8.3.27.2214/corpus-observed-spreadsheet-combinations": {
@@ -289,7 +284,7 @@
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
-        "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+        "Configuration.xml": "#678: the base-free writer refuses Configuration ClientApplicationInterface Ext/ClientApplicationInterface.xml: <panel> has <height>, which the writer cannot encode",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
@@ -401,11 +396,6 @@
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row f632ae58-e692-5695-9a81-f23d68e106d3.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row 96b9a6d0-8b49-52ff-a56b-4f97b33890ec.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 6be980d2-8e85-56f0-a9ba-bce9af9f8f48.0: the native form writer refuses it: <PeriodField> has no writer yet"
-      }
-    },
-    "8.5.1.1150/corpus-mobile-permission-messages": {
-      "refused": {
-        "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")"
       }
     },
     "8.5.1.1150/corpus-nested-composition-contexts": {
@@ -684,7 +674,7 @@
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
-        "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+        "Configuration.xml": "#678: Configuration <InterfaceCompatibilityMode> \"TaxiEnableVersion8_5\" has no known V76 pair",
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml": "#622: base-free stage has no base Config row f3219db8-eb25-5d7c-a93a-286ef76838d5.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
@@ -897,7 +887,7 @@
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
-        "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+        "Configuration.xml": "#678: the base-free writer refuses Configuration ClientApplicationInterface Ext/ClientApplicationInterface.xml: <panel> has <height>, which the writer cannot encode",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
@@ -990,7 +980,7 @@
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
-        "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+        "Configuration.xml": "#678: the base-free writer refuses Configuration ClientApplicationInterface Ext/ClientApplicationInterface.xml: <panel> has <height>, which the writer cannot encode",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
@@ -1152,7 +1142,7 @@
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
-        "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+        "Configuration.xml": "#678: Configuration <InterfaceCompatibilityMode> \"TaxiEnableVersion8_5\" has no known V76 pair",
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml": "#622: base-free stage has no base Config row f3219db8-eb25-5d7c-a93a-286ef76838d5.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",

@@ -41,7 +41,10 @@ pub use common_objects::{
     register_command_group_codec, register_common_command_codec, register_common_module_codec,
     register_common_picture_codec,
 };
-pub use configuration_mobile::parse_configuration_mobile_functionalities;
+pub use configuration_mobile::{
+    ConfigurationMobilePermissionMessage, ConfigurationMobileSettings,
+    parse_configuration_mobile_functionalities, parse_configuration_mobile_settings,
+};
 pub use configuration_v85_projection::validate_older_configuration_v85_defaults;
 pub use constant::{bundled_metadata_registry, register_constant_codec};
 pub use defined_type::register_defined_type_codec;

@@ -722,3 +722,185 @@ fn coverage_empty_html_stored_record_has_a_precise_known_gap() {
         let _: Value = serde_json::from_slice(&bytes).unwrap();
     }
 }
+
+#[test]
+fn mobile_permission_messages_round_trip_the_complete_configuration() {
+    use ibcmd_metadata_model::metadata_model::{
+        DescriptorContext, compile_descriptor,
+        export::{ExportContext, NameIndex, export_descriptor},
+        objects::parts::compatibility,
+    };
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let native = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-mobile-permission-messages/native");
+        let expected = fs::read(native.join("Configuration.xml")).unwrap();
+        let context = DescriptorContext::new(&native, version).unwrap();
+        let row = compile_descriptor(
+            "Configuration",
+            std::path::Path::new("Configuration.xml"),
+            &expected,
+            &context,
+        )
+        .unwrap();
+        let actual = export_descriptor(
+            "Configuration",
+            &row,
+            &ExportContext {
+                names: NameIndex::from_config_index(&context.index),
+                version: version.into(),
+                compat: compatibility(&context),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            actual.as_bytes(),
+            expected,
+            "{platform}: complete Configuration.xml including permission description"
+        );
+        for mutation in 0..8 {
+            let mut damaged = ibcmd_restructure::brace::parse_row(&row).unwrap();
+            assert_eq!(mutate_mobile_permission_record(&mut damaged, mutation), 1);
+            let bytes = ibcmd_restructure::brace::serialize_row(&damaged);
+            assert!(
+                export_descriptor(
+                    "Configuration",
+                    &bytes,
+                    &ExportContext {
+                        names: NameIndex::from_config_index(&context.index),
+                        version: version.into(),
+                        compat: compatibility(&context),
+                    }
+                )
+                .is_err(),
+                "{platform}: malformed mobile record {mutation} must refuse"
+            );
+        }
+    }
+}
+
+fn mutate_mobile_permission_record(
+    node: &mut ibcmd_restructure::brace::Brace,
+    mutation: usize,
+) -> usize {
+    use ibcmd_restructure::brace::Brace;
+    fn is_message(node: &Brace) -> bool {
+        matches!(node, Brace::List(items) if matches!(items.as_slice(), [Brace::Atom(id), Brace::List(description)] if id == "0" && description.iter().any(|value| value.as_str() == Some("Coverage permission"))))
+    }
+    let is_target = is_message(node);
+    let Brace::List(items) = node else {
+        return 0;
+    };
+    if mutation == 6
+        && let Some(position) = items.iter().position(is_message)
+    {
+        let message = items[position].clone();
+        let pairs = items[1].as_atom().unwrap().parse::<usize>().unwrap();
+        let tail = ibcmd_schema::configuration_mobile::functionality_tail_start(pairs).unwrap();
+        items[tail] = Brace::num(2);
+        items.push(message);
+        return 1;
+    }
+    if is_target {
+        match mutation {
+            0 => items[0] = Brace::num(999),
+            1 => items.push(Brace::num(0)),
+            _ => {
+                let Brace::List(description) = &mut items[1] else {
+                    unreachable!()
+                };
+                match mutation {
+                    2 => description[0] = Brace::num(2),
+                    3 => {
+                        description[0] = Brace::num(2);
+                        description.extend([Brace::str("ru"), Brace::str("duplicate")]);
+                    }
+                    4 => description[1] = Brace::str(""),
+                    5 => description[2] = Brace::num(7),
+                    7 => {
+                        description[2] =
+                            Brace::str("different from the legacy capability description")
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        return 1;
+    }
+    items
+        .iter_mut()
+        .map(|item| mutate_mobile_permission_record(item, mutation))
+        .sum()
+}
+
+#[test]
+fn mobile_permission_control_variants_keep_complete_native_configuration_xml() {
+    use ibcmd_metadata_model::metadata_model::{
+        DescriptorContext, compile_descriptor,
+        export::{ExportContext, NameIndex, export_descriptor},
+        objects::parts::compatibility,
+    };
+    // These edits reproduce the fourteen one-permission native controls and
+    // the empty/multiple-description controls on both installed platforms.
+    fn message(name: &str, content: Option<&str>) -> String {
+        let description = match content {
+            None => "\t\t\t\t\t<app:description/>".to_owned(),
+            Some(content) => format!(
+                "\t\t\t\t\t<app:description>\r\n\t\t\t\t\t\t<v8:item>\r\n\t\t\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>{content}</v8:content>\r\n\t\t\t\t\t\t</v8:item>\r\n\t\t\t\t\t</app:description>"
+            ),
+        };
+        format!(
+            "\t\t\t\t<app:permissionMessage>\r\n\t\t\t\t\t<app:permission>{name}</app:permission>\r\n{description}\r\n\t\t\t\t</app:permissionMessage>"
+        )
+    }
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let native = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-mobile-permission-messages/native");
+        let original =
+            String::from_utf8(fs::read(native.join("Configuration.xml")).unwrap()).unwrap();
+        let context = DescriptorContext::new(&native, version).unwrap();
+        let start = original.find("\t\t\t\t<app:permissionMessage>").unwrap();
+        let end = start
+            + original[start..].find("</app:permissionMessage>").unwrap()
+            + "</app:permissionMessage>".len();
+        let mut variants = ibcmd_schema::configuration_mobile::PERMISSIONS
+            .iter()
+            .map(|(_, name)| message(name, Some("Coverage permission")))
+            .collect::<Vec<_>>();
+        variants.push(message("Biometrics", None));
+        variants.push(format!(
+            "{}\r\n{}",
+            message("Biometrics", Some(" leading &amp; trailing ")),
+            message("Camera", Some("line1\nline2 &lt;value&gt;"))
+        ));
+        for (case, fragment) in variants.iter().enumerate() {
+            let mut expected = original.clone();
+            expected.replace_range(start..end, fragment);
+            let row = compile_descriptor(
+                "Configuration",
+                std::path::Path::new("Configuration.xml"),
+                expected.as_bytes(),
+                &context,
+            )
+            .unwrap();
+            let actual = export_descriptor(
+                "Configuration",
+                &row,
+                &ExportContext {
+                    names: NameIndex::from_config_index(&context.index),
+                    version: version.into(),
+                    compat: compatibility(&context),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                actual.as_bytes(),
+                expected.as_bytes(),
+                "{platform}: native control {case}, complete Configuration.xml"
+            );
+        }
+    }
+}

@@ -1,7 +1,7 @@
 //! Actual Configuration mobile flags, before compact metadata loses namespaces.
 
 use super::MetadataDecodeError;
-use super::common::{MD_NAMESPACE, resolve_namespaces, typed, uri_of};
+use super::common::{MD_NAMESPACE, V8_NAMESPACE, resolve_namespaces, typed, uri_of};
 use crate::{AttributeKind, XmlDocument, XmlElement, XmlNode};
 
 const PROPERTY: &str = "UsedMobileApplicationFunctionalities";
@@ -41,7 +41,7 @@ fn no_value_attributes(element: &XmlElement) -> Result<(), MetadataDecodeError> 
     Ok(())
 }
 
-fn text(element: &XmlElement) -> Result<String, MetadataDecodeError> {
+fn leaf_text(element: &XmlElement) -> Result<String, MetadataDecodeError> {
     no_value_attributes(element)?;
     let mut value = String::new();
     for node in element.children() {
@@ -52,7 +52,11 @@ fn text(element: &XmlElement) -> Result<String, MetadataDecodeError> {
             _ => return Err(invalid("mobile functionality leaf is not a simple value")),
         }
     }
-    Ok(value.trim().to_owned())
+    Ok(value)
+}
+
+fn text(element: &XmlElement) -> Result<String, MetadataDecodeError> {
+    Ok(leaf_text(element)?.trim().to_owned())
 }
 
 /// Returns the IDs whose *own XML* use flag is true. Absence of the whole
@@ -61,9 +65,9 @@ fn text(element: &XmlElement) -> Result<String, MetadataDecodeError> {
 /// missing or malformed flags never become factory defaults. Prefix spelling
 /// is irrelevant, but every expanded entry/leaf name must have the same APP URI.
 /// Wholly unqualified legacy metadata also admits wholly unqualified values.
-pub fn parse_configuration_mobile_functionalities(
+pub fn parse_configuration_mobile_settings(
     document: &XmlDocument,
-) -> Result<Option<Vec<u32>>, MetadataDecodeError> {
+) -> Result<Option<ConfigurationMobileSettings>, MetadataDecodeError> {
     let root = document.root();
     let uris = resolve_namespaces(root)?;
     let md = uri_of(root, &uris);
@@ -108,7 +112,7 @@ pub fn parse_configuration_mobile_functionalities(
     let roster = ibcmd_schema::configuration_mobile::source_functionalities(version)
         .ok_or_else(|| invalid("mobile functionality source dialect is not measured"))?;
     let entries = elements(block)?;
-    if entries.len() != roster.len() {
+    if entries.len() < roster.len() {
         return Err(invalid(
             "mobile functionality block is not the complete dialect roster",
         ));
@@ -118,7 +122,7 @@ pub fn parse_configuration_mobile_functionalities(
         return Err(invalid("mobile functionality application namespace"));
     }
     let mut enabled = Vec::new();
-    for (entry, (id, expected_name)) in entries.into_iter().zip(roster) {
+    for (entry, (id, expected_name)) in entries.iter().take(roster.len()).zip(roster) {
         if !typed(entry, "functionality", app, &uris) {
             return Err(invalid("mobile functionality entry expanded name"));
         }
@@ -143,7 +147,80 @@ pub fn parse_configuration_mobile_functionalities(
             _ => return Err(invalid("mobile functionality use is not true or false")),
         }
     }
-    Ok(Some(enabled))
+    let mut messages = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in entries.iter().skip(roster.len()) {
+        if !typed(entry, "permissionMessage", app, &uris) {
+            return Err(invalid("mobile permission message expanded name"));
+        }
+        no_value_attributes(entry)?;
+        let leaves = elements(entry)?;
+        if leaves.len() != 2
+            || !typed(leaves[0], "permission", app, &uris)
+            || !typed(leaves[1], "description", app, &uris)
+        {
+            return Err(invalid("mobile permission requires name then description"));
+        }
+        let name = text(leaves[0])?;
+        let id = ibcmd_schema::configuration_mobile::PERMISSIONS
+            .iter()
+            .find_map(|(id, candidate)| (*candidate == name).then_some(*id))
+            .ok_or_else(|| invalid("mobile permission is unknown"))?;
+        if !seen.insert(id) {
+            return Err(MetadataDecodeError::Duplicate("mobile permission"));
+        }
+        no_value_attributes(leaves[1])?;
+        let core = if md.is_none() && app.is_none() {
+            None
+        } else {
+            Some(V8_NAMESPACE)
+        };
+        let mut description = Vec::new();
+        let mut languages = std::collections::BTreeSet::new();
+        for item in elements(leaves[1])? {
+            if !typed(item, "item", core, &uris) {
+                return Err(invalid("mobile description item namespace"));
+            }
+            no_value_attributes(item)?;
+            let pair = elements(item)?;
+            if pair.len() != 2
+                || !typed(pair[0], "lang", core, &uris)
+                || !typed(pair[1], "content", core, &uris)
+            {
+                return Err(invalid("mobile description requires language then content"));
+            }
+            let lang = leaf_text(pair[0])?;
+            if lang.is_empty() || lang != lang.trim() || !languages.insert(lang.clone()) {
+                return Err(invalid("mobile description language empty or duplicated"));
+            }
+            let content = leaf_text(pair[1])?;
+            description.push((lang, content));
+        }
+        messages.push(ConfigurationMobilePermissionMessage {
+            permission: id,
+            description,
+        });
+    }
+    Ok(Some(ConfigurationMobileSettings { enabled, messages }))
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConfigurationMobileSettings {
+    pub enabled: Vec<u32>,
+    pub messages: Vec<ConfigurationMobilePermissionMessage>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigurationMobilePermissionMessage {
+    pub permission: u32,
+    pub description: Vec<(String, String)>,
+}
+
+/// Existing readers can ask for flags after validation of the complete block.
+pub fn parse_configuration_mobile_functionalities(
+    document: &XmlDocument,
+) -> Result<Option<Vec<u32>>, MetadataDecodeError> {
+    Ok(parse_configuration_mobile_settings(document)?.map(|settings| settings.enabled))
 }
 
 #[cfg(test)]
@@ -180,6 +257,59 @@ mod tests {
     fn parse(xml: &str) -> Result<Option<Vec<u32>>, MetadataDecodeError> {
         parse_configuration_mobile_functionalities(&XmlReader::from_slice(xml.as_bytes()).unwrap())
     }
+    #[test]
+    fn permission_descriptions_preserve_values_and_reject_unclassified_content() {
+        let message = "<a:permissionMessage><a:permission>Camera</a:permission><a:description xmlns:c=\"http://v8.1c.ru/8.1/data/core\"><c:item><c:lang>ru</c:lang><c:content> leading &amp; trailing </c:content></c:item></a:description></a:permissionMessage>";
+        let source = document("2.20", &(entries("2.20", &[0, 25]) + message));
+        let parse_settings = |xml: &str| {
+            parse_configuration_mobile_settings(&XmlReader::from_slice(xml.as_bytes()).unwrap())
+        };
+        assert_eq!(
+            parse_settings(&source).unwrap(),
+            Some(ConfigurationMobileSettings {
+                enabled: vec![0, 25],
+                messages: vec![ConfigurationMobilePermissionMessage {
+                    permission: 12,
+                    description: vec![("ru".into(), " leading & trailing ".into())],
+                }],
+            })
+        );
+        for bad in [
+            source.replace("Camera", "FuturePermission"),
+            source.replace("<a:permissionMessage>", "<a:permissionMessage extra=\"lost\">"),
+            source.replace("<a:description xmlns:c=", "<a:description extra=\"lost\" xmlns:c="),
+            source.replace("<c:item>", "<c:item extra=\"lost\">"),
+            source.replace("<c:content>", "<c:content extra=\"lost\">"),
+            source.replace("http://v8.1c.ru/8.1/data/core", "urn:wrong"),
+            source.replace("<c:lang>ru</c:lang>", "<c:lang> ru </c:lang>"),
+            source.replace("<c:lang>ru</c:lang>", "<c:lang/>"),
+            source.replace("</c:item>", "<c:extra/></c:item>"),
+            source.replace("</a:description>", "<c:item><c:lang>ru</c:lang><c:content>duplicate</c:content></c:item></a:description>"),
+            source.replace("</a:description>", "unclassified</a:description>"),
+            source.replace("</m:UsedMobileApplicationFunctionalities>", &(message.to_owned() + "</m:UsedMobileApplicationFunctionalities>")),
+        ] {
+            assert!(parse_settings(&bad).is_err(), "accepted malformed message: {bad}");
+        }
+    }
+
+    #[test]
+    fn public_permission_messages_keep_their_functionality_flags() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/1c-fixtures/coverage");
+        for build in ["8.3.27.2214", "8.5.1.1150"] {
+            let bytes = std::fs::read(
+                root.join(build)
+                    .join("corpus-mobile-permission-messages/native/Configuration.xml"),
+            )
+            .unwrap();
+            let document = XmlReader::from_slice(&bytes).unwrap();
+            assert_eq!(
+                parse_configuration_mobile_functionalities(&document).unwrap(),
+                Some(vec![0, 25])
+            );
+        }
+    }
+
     #[test]
     fn own_flags_and_older_roster_project_without_factory_substitution() {
         for version in ["2.17", "2.20", "2.21"] {

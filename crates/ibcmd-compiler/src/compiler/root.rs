@@ -254,6 +254,8 @@ pub struct ConfigurationBodyProperties {
     pub default_roles: Vec<ObjectUuid>,
     /// Enabled mobile functionality IDs (`0..=27` and `32..=41`).
     pub enabled_mobile_functionalities: Vec<u32>,
+    /// Permission-message IDs and exact localized descriptions, distinct from functionalities.
+    pub mobile_permission_messages: Vec<ibcmd_xml::metadata::ConfigurationMobilePermissionMessage>,
     /// Config-body tuple bytes for the six Configuration properties whose
     /// coordinate inside that tuple is corpus-proven.
     pub evidenced_property_digits: ConfigurationEvidencedPropertyDigits,
@@ -313,6 +315,7 @@ impl ConfigurationBodyProperties {
             use_platform_application: true,
             default_roles: Vec::new(),
             enabled_mobile_functionalities: Vec::new(),
+            mobile_permission_messages: Vec::new(),
             evidenced_property_digits: ConfigurationEvidencedPropertyDigits::default(),
         }
     }
@@ -749,6 +752,23 @@ fn validate_configuration_properties(
             ));
         }
     }
+    let mut permission_ids = BTreeSet::new();
+    for message in &properties.mobile_permission_messages {
+        if ibcmd_schema::configuration_mobile::legacy_permission_id(message.permission).is_none()
+            || !permission_ids.insert(message.permission)
+        {
+            return invalid_configuration("mobile permission ID is unknown or duplicated");
+        }
+        let description = message
+            .description
+            .iter()
+            .map(|(language, content)| ConfigurationLocalizedString::new(language, content))
+            .collect::<Vec<_>>();
+        validate_localized_strings(
+            "Properties/UsedMobileApplicationFunctionalities/permissionMessage",
+            &description,
+        )?;
+    }
     Ok(())
 }
 
@@ -1065,10 +1085,13 @@ fn push_configuration_properties(
     fields.push(NIL_UUID.to_owned());
     fields.push("1".to_owned());
     fields.push(NIL_UUID.to_owned());
-    fields.push(configuration_client_capabilities());
+    fields.push(configuration_client_capabilities(
+        &properties.mobile_permission_messages,
+    ));
     fields.push("{0,0}".to_owned());
     fields.push(configuration_mobile_capabilities(
         &properties.enabled_mobile_functionalities,
+        &properties.mobile_permission_messages,
     ));
     fields.push("{0}".to_owned());
     fields.push(NIL_UUID.to_owned());
@@ -1170,20 +1193,36 @@ fn configuration_compatibility_options() -> String {
     output
 }
 
-fn configuration_client_capabilities() -> String {
+fn configuration_client_capabilities(
+    messages: &[ibcmd_xml::metadata::ConfigurationMobilePermissionMessage],
+) -> String {
     const IDS: [u32; 35] = [
         1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
         29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
     ];
     let mut output = format!("{{2,{}", IDS.len());
     for id in IDS {
-        write!(&mut output, ",{{{id},0,0}}").expect("writing to String cannot fail");
+        if let Some(message) = messages.iter().find(|message| {
+            ibcmd_schema::configuration_mobile::legacy_permission_id(message.permission) == Some(id)
+        }) {
+            write!(
+                &mut output,
+                ",{{{id},0,1,{}}}",
+                permission_description_1c(&message.description)
+            )
+            .expect("writing to String cannot fail");
+        } else {
+            write!(&mut output, ",{{{id},0,0}}").expect("writing to String cannot fail");
+        }
     }
     output.push('}');
     output
 }
 
-fn configuration_mobile_capabilities(enabled: &[u32]) -> String {
+fn configuration_mobile_capabilities(
+    enabled: &[u32],
+    messages: &[ibcmd_xml::metadata::ConfigurationMobilePermissionMessage],
+) -> String {
     let enabled = enabled.iter().copied().collect::<BTreeSet<_>>();
     let ids = mobile_functionality_ids().collect::<Vec<_>>();
     let mut output = format!("{{2,{}", ids.len());
@@ -1195,8 +1234,27 @@ fn configuration_mobile_capabilities(enabled: &[u32]) -> String {
         )
         .expect("writing to String cannot fail");
     }
-    output.push_str(",0}");
+    write!(&mut output, ",{}", messages.len()).expect("writing to String cannot fail");
+    for message in messages {
+        write!(
+            &mut output,
+            ",{{{},{}}}",
+            message.permission,
+            permission_description_1c(&message.description)
+        )
+        .expect("writing to String cannot fail");
+    }
+    output.push('}');
     output
+}
+
+fn permission_description_1c(values: &[(String, String)]) -> String {
+    localized_1c(
+        &values
+            .iter()
+            .map(|(lang, content)| ConfigurationLocalizedString::new(lang, content))
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn mobile_functionality_ids() -> impl Iterator<Item = u32> {

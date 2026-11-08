@@ -32,7 +32,7 @@ use ibcmd_xml::{
     AttributeKind, DialectDetection, DialectRegistry, XmlDocument, XmlElement, XmlNode, XmlReader,
     bundled_dialect_registry, bundled_metadata_registry,
     metadata::{
-        decode_configuration_envelope, parse_configuration_mobile_functionalities,
+        decode_configuration_envelope, parse_configuration_mobile_settings,
         validate_older_configuration_v85_defaults,
     },
     source_tree::{SourceKind, SourceTree},
@@ -1364,7 +1364,7 @@ fn project_configuration(
             ))
         })?;
     }
-    let enabled_mobile = parse_configuration_mobile_functionalities(document).map_err(|error| {
+    let mobile_settings = parse_configuration_mobile_settings(document).map_err(|error| {
         BootstrapCompileError::InvalidConfiguration(format!(
             "UsedMobileApplicationFunctionalities: {error}"
         ))
@@ -1512,13 +1512,13 @@ fn project_configuration(
                 reject_unless_empty(name, element)?;
             }
             "UsedMobileApplicationFunctionalities" => {
-                properties.enabled_mobile_functionalities =
-                    enabled_mobile.clone().ok_or_else(|| {
-                        BootstrapCompileError::InvalidConfiguration(
-                            "UsedMobileApplicationFunctionalities has no validated value"
-                                .to_owned(),
-                        )
-                    })?;
+                let settings = mobile_settings.as_ref().ok_or_else(|| {
+                    BootstrapCompileError::InvalidConfiguration(
+                        "UsedMobileApplicationFunctionalities has no validated value".to_owned(),
+                    )
+                })?;
+                properties.enabled_mobile_functionalities = settings.enabled.clone();
+                properties.mobile_permission_messages = settings.messages.clone();
             }
             "DefaultStyle" => {
                 reject_unless_evidenced_default(name, element)?;
@@ -3135,5 +3135,27 @@ EndProcedure",
             BootstrapCompileError::InvalidConfiguration(message)
                 if message.contains("`FutureProperty` has no base-free projection")
         ));
+    }
+    #[test]
+    fn configuration_projection_keeps_the_complete_permission_description() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/1c-fixtures/coverage");
+        let bytes = std::fs::read(
+            root.join("8.3.27.2214/corpus-mobile-permission-messages/native/Configuration.xml"),
+        )
+        .unwrap();
+        let document = XmlReader::from_slice(&bytes).unwrap();
+        let projection = project_configuration(&document, 80327, false, "2.20").unwrap();
+        assert_eq!(
+            projection.properties.enabled_mobile_functionalities,
+            vec![0, 25]
+        );
+        assert_eq!(
+            projection.properties.mobile_permission_messages,
+            vec![ibcmd_xml::metadata::ConfigurationMobilePermissionMessage {
+                permission: 0,
+                description: vec![("ru".into(), "Coverage permission".into())],
+            }]
+        );
     }
 }
