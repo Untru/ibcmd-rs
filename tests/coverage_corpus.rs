@@ -864,3 +864,65 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn table_hierarchy_panel_location_none_matches_native_profiles() {
+    let temp = TempDirectory::new();
+    for (platform, version, set_name, expected_forms) in [
+        ("8.5.1.1150", "2.21", "combined", 5),
+        ("8.5.1.1529", "2.21", "combined", 7),
+        (
+            "8.3.27.2214",
+            "2.20",
+            "corpus-cross-observed-scalars-from85",
+            1,
+        ),
+    ] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join(set_name);
+        let cf = temp.0.join(format!("{platform}.cf"));
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join(platform), version).unwrap();
+        let native = read_tree(&set.join("native"));
+        let property = |bytes: &[u8]| {
+            std::str::from_utf8(bytes)
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("<HierarchyPanelLocation"))
+                .map(str::trim)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let mut compared = 0;
+        for (path, bytes) in native
+            .iter()
+            .filter(|(path, _)| path.ends_with("TableHierarchyPanelLocation_None/Ext/Form.xml"))
+        {
+            let expected = property(bytes);
+            if version == "2.21" {
+                assert_eq!(
+                    expected,
+                    ["<HierarchyPanelLocation>None</HierarchyPanelLocation>"]
+                );
+            } else {
+                assert!(expected.is_empty());
+            }
+            assert_eq!(
+                property(exported.files.get(path).unwrap_or_else(|| panic!(
+                    "{platform}/{path}: missing output; {:?}",
+                    exported.refusal
+                ))),
+                expected,
+                "{platform}/{path}"
+            );
+            compared += 1;
+        }
+        assert_eq!(compared, expected_forms, "{platform}");
+    }
+}

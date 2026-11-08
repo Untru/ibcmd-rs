@@ -11,6 +11,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Result, anyhow, bail};
+use ibcmd_form_schema::FormTableHierarchyPanelLocationSchema;
 
 use ibcmd_form_body::layout_8_5_1::{
     FormFactsV8_5_1, FormItemFactsV8_5_1, Node, group_event_name_8_5_1,
@@ -287,6 +288,8 @@ impl<'a> XmlEdits<'a> {
             None if self.lenient => &[],
             None => bail!("no 2.21 child order is known for <{parent_tag}>"),
         };
+        let order =
+            FormTableHierarchyPanelLocationSchema::complete_xml_child_order(&parent_tag, order);
         let rank = |name: &str| order.iter().position(|known| *known == name);
         let mut before = None;
         let mut new_rank = usize::MAX - 1;
@@ -724,6 +727,16 @@ const FACT_RULES: &[FactRule] = &[
         element: "Orientation",
         replaces: &[],
         values: &[("1", None), ("2", Some("HorizontalIfPossible"))],
+    },
+    FactRule {
+        tags: &["Table"],
+        source: FactSource::Item(
+            FormTableHierarchyPanelLocationSchema::REVISION,
+            FormTableHierarchyPanelLocationSchema::tail_slot(),
+        ),
+        element: FormTableHierarchyPanelLocationSchema::XML_NAME,
+        replaces: &[],
+        values: FormTableHierarchyPanelLocationSchema::VALUES,
     },
     // Tables: members the `73` record appends. The line and alternation
     // flags moved: 2.21 names them `...BWA` and reads them here, while the
@@ -1212,7 +1225,16 @@ fn apply_rules(
     }
     if let Some(item) = item {
         match tag.as_str() {
-            "Table" if item.revision == "73" => {
+            tag if tag == FormTableHierarchyPanelLocationSchema::TABLE_XML_NAME
+                && item.revision == FormTableHierarchyPanelLocationSchema::REVISION =>
+            {
+                let schema = FormTableHierarchyPanelLocationSchema::from_raw_layout(
+                    &item.revision,
+                    item.tail.len(),
+                );
+                if schema.is_none() {
+                    bail!("Table has an unsupported hierarchy-panel tail shape");
+                }
                 apply_complex_settings_view_mode(edits, element, item)?
             }
             "UsualGroup" if item.bag_revision.as_deref() == Some("38") => {
@@ -1848,6 +1870,58 @@ mod tests {
                 apply_group_events(&mut edits, group, &node, None).is_err(),
                 "{block}"
             );
+        }
+    }
+
+    #[test]
+    fn hierarchy_panel_location_preserves_known_codes_and_refuses_unknown_shapes() {
+        let xml = |property: &str| {
+            format!("<Form>\r\n\t<Table name=\"Rows\" id=\"1\">\r\n{property}\t</Table>\r\n</Form>")
+        };
+        let item = |code: Node| {
+            let mut tail = [
+                "2", "2", "0", "0", "\"\"", "\"\"", "0", "1", "0", "0", "2", "0", "2", "1", "0",
+                "2", "0", "2", "1", "0", "0", "0", "0", "0", "1", "0", "1", "0",
+            ]
+            .into_iter()
+            .map(|value| Node::Leaf(value.to_owned()))
+            .collect::<Vec<_>>();
+            tail[2] = code;
+            FormItemFactsV8_5_1 {
+                revision: "73".to_owned(),
+                tail,
+                ..FormItemFactsV8_5_1::default()
+            }
+        };
+        let write = |item| {
+            let facts = FormFactsV8_5_1 {
+                items: BTreeMap::from([("1".to_owned(), item)]),
+                ..FormFactsV8_5_1::default()
+            };
+            apply_form_facts_8_5_1(xml(""), &facts, &BTreeMap::new(), None, false)
+        };
+        for (code, property) in [
+            ("0", ""),
+            (
+                "1",
+                "\t\t<HierarchyPanelLocation>None</HierarchyPanelLocation>\r\n",
+            ),
+        ] {
+            let (actual, assets) = write(item(Node::Leaf(code.to_owned()))).unwrap();
+            assert_eq!(actual, xml(property));
+            assert!(assets.is_empty());
+        }
+        for code in [
+            Node::Leaf("2".to_owned()),
+            Node::Leaf("999".to_owned()),
+            Node::List(Vec::new()),
+        ] {
+            assert!(write(item(code)).is_err());
+        }
+        for length in [0, 27, 29] {
+            let mut malformed = item(Node::Leaf("1".to_owned()));
+            malformed.tail.resize(length, Node::Leaf("0".to_owned()));
+            assert!(write(malformed).is_err());
         }
     }
 }

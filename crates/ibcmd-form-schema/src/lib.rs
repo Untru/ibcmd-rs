@@ -20,6 +20,9 @@
 /// *malformed*.
 pub const FORM_ABSENT_MEMBER: &str = "\u{1}absent";
 
+mod table_hierarchy;
+pub use table_hierarchy::FormTableHierarchyPanelLocationSchema;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormChildItemKind {
     UsualGroup,
