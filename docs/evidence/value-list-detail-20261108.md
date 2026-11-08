@@ -1,9 +1,10 @@
-# ValueList spreadsheet detail — #614, 2026-11-08
+# ValueList spreadsheet detail — #614, 2026-11-08; review correction 2026-11-09
 
 ## Scope and revisions
 
 Base: `54b796f64da5daed3714acdf7810581fe0e58778`.
-Code: `5c1a1faf079784b9d0a11b34972b6b0fa2148e75`.
+Code: `491cdca128c1597ce7fa78e8d673a0b13c584679`.
+Initial implementation: `5c1a1faf079784b9d0a11b34972b6b0fa2148e75`.
 Public corpus gitlink: `8d138b896f462c3053d16076cbabf0ffe5030c1c` (unchanged).
 Rust: 1.95.0. PowerShell: 7.6.9. Builds use the pinned toolchain and a private short temporary directory.
 
@@ -21,7 +22,7 @@ the detail cell disappeared. The independent XML compilation test failed with
 `a value of type v8:ValueListType has no writer`.
 
 `cargo test --locked -p ibcmd-rs --test integration coverage_corpus::value_list_detail --no-default-features`
-passes all seven tests. They compare complete public XML on both retained corpus
+passes all eight tests. They compare complete public XML on both retained corpus
 editions, compile/read back the complete document through the existing 2.20/2.21
 source projection, preserve a declaration-only ValueList type, and reject unknown
 source/storage profiles. Eleven raw mutations pass through complete spreadsheet
@@ -35,6 +36,28 @@ attributes on the list and its two children were accepted. Their regression test
 now rejects those five cases plus a second namespaced type attribute. The checks
 apply to the newly supported ValueList profile; other typed-value branches retain
 their existing behavior.
+
+## Public writer admission correction
+
+A public-API regression first failed on `678d4d8e9315931bee127116b2521640a1abaa9d`:
+`parse_moxel_cell` followed by public `push_moxel_row_xml` reached the old
+`unreachable!("spreadsheet admission rejects unmeasured value lists")`.
+Caller-constructed rows and spreadsheets can bypass whole-document decoder
+admission, including nested Array/Structure values and detail values.
+
+Both public XML writer boundaries now return `Result`. They recursively validate
+all cells before writing any XML and return writer-stage diagnostic
+`mxl.writer.value-list-profile` for this quarantine value. The embedded-form
+caller propagates refusal through its existing `Option` boundary. Supported
+values keep their existing complete XML output.
+
+`cargo test --locked -p ibcmd-moxel --test value_list_public_writes` passes two
+external public-API tests. Six direct/nested value/detail cases assert a typed
+refusal, no panic, and an exactly unchanged nonempty caller buffer even after a
+valid first cell. The positive row test compares the entire appended XML. The
+eighth coverage integration test independently constructs a public spreadsheet,
+asserts its complete public XML, then checks explicit refusal of nested unknown
+values in either member. No expected output or baseline changed for this fix.
 
 ## Matched portable corpus
 
@@ -53,6 +76,11 @@ descriptor). Every remaining per-path stored difference and CF verdict diagnosti
 is unchanged. Only those measured gains enter the converter baselines. The public
 corpus and prior passing baseline entries are unchanged.
 
+On the corrected code, all 242 CF verdicts and all 124 stored set/exit/path
+verdicts match the initial fixed measurement exactly: 8073 CF equal, 5026
+different, 137 refused; 7455 stored equal and 1795 different. The original
+fixed-minus-base gains therefore remain thirteen CF variants and six stored paths.
+
 The writer round-trip suite passed four tests and explicitly reported eight #614
 refusals resolved. Exactly those eight allowances were removed from
 `tests/fixtures/coverage/round-trip.json`.
@@ -68,7 +96,7 @@ cargo test --locked -p ibcmd-rs --test integration coverage_round_trip:: --no-de
 ## Native replay
 
 The clean code revision above was built with `cargo build --locked --profile iter`.
-Binary SHA-256: `3f14c92b0c743ee66df7d485c80d769110c22832d8d9142898585bd7596ec4b4`.
+Binary SHA-256: `f8a8db36fb5f6e3dfb10bddf6e5f3c3a7849d7c17786c825c2af618ce2e78a90`.
 The product version is 0.4.1; it does not embed Git SHA, so this proof binds the
 clean checkout revision and the built binary digest explicitly.
 
@@ -118,16 +146,22 @@ normalization; only filesystem path composition is normalized to NFC.
 
 ## Gates and cleanup
 
-`cargo xtask affected` selected compiler, MOXCEL, schema and the coverage integration
-suite, and required the full gate for manifests/shared fixtures. `cargo xtask check`
-passed seven steps: formatting, standalone workspace Clippy, root compilation and
-the affected tests (compiler 133, MOXCEL 38, schema 131, coverage 12).
+`cargo xtask affected` selected compiler, dump, form-body, MOXCEL, schema and the
+coverage integration suite, and required the full gate for manifests/shared
+fixtures and root code. `cargo xtask check` passed nine steps: formatting,
+standalone workspace Clippy, root compilation and all six affected test steps.
+The public MOXCEL regression suite adds two passing tests; the coverage suite
+contains eight focused ValueList tests. An initial sandboxed check could not
+bind local TCP test sockets (seven dump tests: OS PermissionDenied); repeating
+the complete check with local socket access passed.
 The physical-adapter policy passed without a baseline refresh.
 
-`cargo xtask ci` on the code revision passed **29 steps, 0 failures, 0 skips**,
+The initial implementation’s `cargo xtask ci` passed **29 steps, 0 failures, 0 skips**,
 including all root integration suites, the root library and the empty-temporary-
 directory check. Root library: 904 passed, 0 failed, seven existing opt-in tests
-ignored. Release-shaped hosted matrix steps are identified below as not run locally.
+ignored. The final correction is frozen before its separate final-head CI; that
+run is recorded against the resulting immutable evidence commit. Release-shaped
+hosted matrix steps are identified below as not run locally.
 
 The separate base measurement target was cleaned (2.2 GiB) and its worktree removed.
 All generated native infobases, CF files, native/own export trees and extracted
