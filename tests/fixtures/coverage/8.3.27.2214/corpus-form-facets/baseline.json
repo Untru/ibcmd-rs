@@ -1,6 +1,7 @@
 {
   "equal": [
     "CovFacetCollapseItemsByImportanceVariant",
+    "CovFacetCommandSpace",
     "CovFacetConversationsRepresentation",
     "CovFacetPlannerBeforeCreate",
     "CovFacetPlannerBeforeStartQuickEdit",

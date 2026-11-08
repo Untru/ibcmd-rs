@@ -12,6 +12,7 @@
     "CommonForms/CovEmbeddedSpreadsheetCells.xml",
     "CommonForms/CovEmbeddedSpreadsheetCells/Ext/Form.xml",
     "CommonForms/CovFormCommandSpace.xml",
+    "CommonForms/CovFormCommandSpace/Ext/Form.xml",
     "CommonForms/CovFormEventOnOpen.xml",
     "CommonForms/CovFormEventOnOpen/Ext/Form.xml",
     "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",

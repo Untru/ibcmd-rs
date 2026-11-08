@@ -2,6 +2,7 @@
   "equal": [
     "CovChartField",
     "CovEmbeddedSpreadsheetCells",
+    "CovFormCommandSpace",
     "CovFormEventOnOpen",
     "CovManagedFormTemplate",
     "CovPlannerField",
