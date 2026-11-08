@@ -56,10 +56,9 @@ audit finds exact complete DataPath vectors in all 49 public forms carrying
 one of the two issue paths, over 13 archives. Two same-named legacy aliases
 bind only Object.Code and are outside those two target paths; that separate
 gap is not claimed fixed or labelled pre-existing by this measurement.
-The final binary and native candidate results are recorded below. The first
-full staged CI run was interrupted; a complete retry and independent review
-remain pending. No pending item is counted
-as passing.
+The recovered binary, native replay and successful full gate are recorded
+below. Earlier interrupted/failed gates are retained as history and are not
+counted as success. Independent review remains pending.
 
 Fresh native builds are installed 8.3.27.2214 and approved 8.5.1.1529;
 saved 1150 remains an honest offline oracle. Both builds have loaded and
@@ -74,7 +73,7 @@ and LANG=ru_RU.UTF-8. No dependency, vendor edit, generated schema JSON edit,
 platform-version heuristic, MSSQL measurement or exact1150 runtime claim.
 
 
-## Final binary and native routes
+## Initial completed binary and native routes
 
 Clean code commit `4873840bfadf58504dc4cf4e7dd722741adbdcd8`, Rust 1.95.0, macOS ARM64,
 iter profile, version `ibcmd-rs 0.4.1`. Binary SHA-256:
@@ -130,9 +129,9 @@ crate tests. Its final workspace binary reported four of seven test results;
 there is no terminal summary or surviving process, and the original tool
 session is unavailable. The cause and exit code are not established. This
 run is not a passed gate. Its original CI and workspace logs were retained
-before a clean retry. The retry and subsequent fresh-context review remain
-pending. Release builds, SBOM, the release audit and MSSQL are outside
-these local results.
+before a retry; the later deletion and recovery are recorded next. The final
+recovered gate result is below. Release builds, SBOM, the release audit and
+MSSQL are outside these local results.
 
 ## Durable recovery and apply-check diagnosis
 
@@ -177,7 +176,7 @@ Both rows happened to compile as tag 56 in that diagnostic run, so the
 original assertion's causation is still not established. This demonstrates
 the independent fixture-lifecycle risk. Assertions, cleanup and default
 threading were retained; all temporary source changes were then restored
-byte-for-byte before normal verification. No test was
+byte-for-byte before normal verification. No test was newly
 ignored, relabelled or serialized, and no unrelated test workaround enters
 this change. The original failure's cause remains unknown; it is not labelled
 pre-existing or flaky.
@@ -185,13 +184,49 @@ pre-existing or flaky.
 Both base procedures restored the original feature revision in finally.
 Twelve recovered native control commands pass; their four complete reference
 tree hashes match the table above exactly, and all six isolated owned target
-form files match the full native controls. A fresh candidate replay and a
-complete recovered full gate are pending and will be recorded separately.
+form files match the full native controls. The completed fresh candidate
+replay and recovered full gate are recorded below.
 
 Recovered `cargo xtask check` completes all seven steps: format, crate clippy,
 root compilation, form-body, form-native, form-schema and the complete
 coverage suite. All three issue-specific regressions pass, including all
 49 public profiles. The physical-adapter policy guard passes without a
-baseline refresh. The next iter build is from the clean evidence revision;
-its new path-bound binary provenance, native replay and final full CI result
-will be recorded after completion.
+baseline refresh. The clean recovered iter build and its new path-bound
+binary provenance are recorded below.
+
+
+## Recovered candidate replay
+
+The recovered clean build revision is `41b767059249d37172d9edadea35b6f51dff016d`;
+implementation files remain byte-identical to code commit
+`4873840bfadf58504dc4cf4e7dd722741adbdcd8`. Rust and cargo remain pinned 1.95.0;
+the new durable build path changes binary provenance. The current candidate
+version is `ibcmd-rs 0.4.1`, SHA-256
+`1b5b73dcef1650cedc24d3bbe6e58bf3901d6473b722253217459664ed0b4b85`. The initial binary/hash above describe the
+completed historical run, not the recovered candidate.
+
+The recovered matrix completes all 30 commands with exit 0, including two
+exact raw CF extractions; together with the twelve regenerated native
+controls, 42/42 commands succeed. Both raw hashes match the original saved
+records exactly. All eight full CF/file reader routes return 0; all twenty
+complete target Form.xml comparisons match. Four default verified imports,
+native apply and both readers again produce eight complete output trees:
+124/124 files byte-equal, excluding ConfigDumpInfo.xml. All four source and
+all four candidate databases retain their hashes around read-only exports.
+The four complete tree hashes remain identical to the table above. There is
+no --no-verify, normalization, platform fallback or source-tree mutation.
+
+The recovered full `cargo xtask ci --keep-going` completed with exit 0 and
+29 PASS, no failed or skipped local step. Workspace crates: 4708 passed,
+zero failed, 89 existing ignored; root integration suites: 556 passed,
+zero failed, four existing ignored; root library: 904 passed, zero failed,
+seven existing ignored. Temporary-directory validation also passed. Both
+record-format assertions discussed above passed in this genuine full gate.
+
+All new files were tracked before the gate. Production, tests and baseline
+files remain unchanged from code commit 4873840b; only evidence Markdown has
+been updated since the clean binary build. No temporary diagnostic source
+remains; no unrelated assertion, fixture lifetime or test threading was
+changed to obtain this result. The original source-tree limitations above
+remain explicit. Fresh-context review and the coordinator's independent
+rerun are pending; neither is claimed complete here.
