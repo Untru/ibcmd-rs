@@ -556,14 +556,23 @@ fn information_register(row: &Brace, context: &ExportContext) -> Result<Element>
     if let Some(block) = standard_attributes(row.slot(26)?, owner, context)? {
         properties.children.push(block);
     }
+    let periodicity = code(
+        "InformationRegisterPeriodicity",
+        row.slot(18)?,
+        INFORMATION_REGISTER_PERIODICITY,
+    )?;
+    let write_mode = code("WriteMode", row.slot(19)?, WRITE_MODE)?;
+    let stored_filter = bool_text(row.slot(23)?)?.parse::<bool>()?;
+    let effective_filter = ibcmd_schema::information_register_policy::main_filter_on_period(
+        stored_filter,
+        &periodicity.text,
+        &write_mode.text,
+    )
+    .ok_or_else(|| anyhow!("unsupported information-register filter policy"))?;
     let properties = properties
-        .child(code(
-            "InformationRegisterPeriodicity",
-            row.slot(18)?,
-            INFORMATION_REGISTER_PERIODICITY,
-        )?)
-        .child(code("WriteMode", row.slot(19)?, WRITE_MODE)?)
-        .child(flag("MainFilterOnPeriod", row.slot(23)?)?)
+        .child(periodicity)
+        .child(write_mode)
+        .child(leaf("MainFilterOnPeriod", effective_filter.to_string()))
         .child(flag("IncludeHelpInContents", row.slot(22)?)?)
         .child(code(
             "DataLockControlMode",

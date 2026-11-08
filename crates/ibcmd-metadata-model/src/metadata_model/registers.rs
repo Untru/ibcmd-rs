@@ -56,16 +56,9 @@ const INDEXING: &[(&str, i64)] = &[
     ("IndexWithAdditionalOrder", 2),
 ];
 const TYPE_REDUCTION_MODE: &[(&str, i64)] = &[("TransformValues", 0), ("DeleteData", 1)];
-const INFORMATION_REGISTER_PERIODICITY: &[(&str, i64)] = &[
-    ("Nonperiodical", 0),
-    ("Year", 1),
-    ("Quarter", 2),
-    ("Month", 3),
-    ("Day", 4),
-    ("Second", 5),
-    ("RecorderPosition", 6),
-];
-const WRITE_MODE: &[(&str, i64)] = &[("Independent", 0), ("RecorderSubordinate", 1)];
+const INFORMATION_REGISTER_PERIODICITY: &[(&str, i64)] =
+    ibcmd_schema::information_register_policy::PERIODICITY;
+const WRITE_MODE: &[(&str, i64)] = ibcmd_schema::information_register_policy::WRITE_MODE;
 const EDIT_TYPE: &[(&str, i64)] = &[("InList", 0), ("InDialog", 1), ("BothWays", 2)];
 const REGISTER_TYPE: &[(&str, i64)] = &[("Balance", 0), ("Turnovers", 1)];
 /// Only `Month` (2) is evidenced; the others follow the platform's enum order.
