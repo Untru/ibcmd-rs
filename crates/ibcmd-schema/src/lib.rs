@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod characteristics;
 pub mod configuration_mobile;
 pub mod configuration_rights;
 pub mod configuration_root;

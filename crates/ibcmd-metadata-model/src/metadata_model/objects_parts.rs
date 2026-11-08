@@ -376,16 +376,16 @@ impl<'a> Obj<'a> {
                 num(4),
                 source(types)?,
                 source(values)?,
-                self.characteristic_field(values.child_text("ObjectField"))?,
-                self.characteristic_field(values.child_text("TypeField"))?,
-                self.characteristic_field(values.child_text("ValueField"))?,
-                self.characteristic_field(types.child_text("TypesFilterField"))?,
+                self.characteristic_field(values.child_text("ObjectField"), values)?,
+                self.characteristic_field(values.child_text("TypeField"), values)?,
+                self.characteristic_field(values.child_text("ValueField"), values)?,
+                self.characteristic_field(types.child_text("TypesFilterField"), types)?,
                 shared::typed_value(types.child("TypesFilterValue"), self.cx)?,
-                self.characteristic_field(types.child_text("KeyField"))?,
-                self.characteristic_field(types.child_text("DataPathField"))?,
-                self.characteristic_field(types.child_text("MultipleValuesUseField"))?,
-                self.characteristic_field(values.child_text("MultipleValuesKeyField"))?,
-                self.characteristic_field(values.child_text("MultipleValuesOrderField"))?,
+                self.characteristic_field(types.child_text("KeyField"), types)?,
+                self.characteristic_field(types.child_text("DataPathField"), types)?,
+                self.characteristic_field(types.child_text("MultipleValuesUseField"), types)?,
+                self.characteristic_field(values.child_text("MultipleValuesKeyField"), values)?,
+                self.characteristic_field(values.child_text("MultipleValuesOrderField"), values)?,
             ];
             list.push(brace_list![
                 Brace::str("#"),
@@ -397,11 +397,24 @@ impl<'a> Obj<'a> {
     }
 
     /// `{1,<field>,0}`, `-1` for none.
-    fn characteristic_field(&self, text: Option<&str>) -> Result<Brace> {
+    fn characteristic_field(&self, text: Option<&str>, source: &Element) -> Result<Brace> {
         let text = text.map(str::trim).unwrap_or("-1");
         let field = match text {
             "" | "-1" => brace_list![num(-1)],
             "0" => brace_list![num(0)],
+            _ if ibcmd_schema::characteristics::orphan_standard_attribute_marker(text)
+                .is_some() =>
+            {
+                if source
+                    .attr(ibcmd_schema::characteristics::SOURCE_ATTRIBUTE)
+                    .is_none_or(|from| !from.trim().is_empty())
+                {
+                    bail!("an unresolved characteristic standard attribute has a source");
+                }
+                brace_list![num(i64::from(
+                    ibcmd_schema::characteristics::orphan_standard_attribute_marker(text).unwrap()
+                ))]
+            }
             _ if text.starts_with("0:") => {
                 let uuid = ibcmd_core::identity::ObjectUuid::parse(&text[2..])
                     .map_err(|error| anyhow!("invalid unresolved characteristic field: {error}"))?;

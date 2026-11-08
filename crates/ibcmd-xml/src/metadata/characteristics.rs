@@ -27,6 +27,7 @@ const DESIGN_TIME_REF_TYPE: &str = "xr:DesignTimeRef";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CharacteristicsXmlError {
     InvalidIndent,
+    UnsupportedStandardAttributeMarker,
     InvalidXmlCharacter {
         context: &'static str,
         code_point: u32,
@@ -36,6 +37,8 @@ pub enum CharacteristicsXmlError {
 impl Display for CharacteristicsXmlError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnsupportedStandardAttributeMarker => formatter
+                .write_str("unsupported unresolved characteristic standard-attribute marker"),
             Self::InvalidIndent => {
                 formatter.write_str("Characteristics XML indent contains non-whitespace")
             }
@@ -290,7 +293,7 @@ fn group_source(group: &XmlElement) -> Result<CharacteristicReference, MetadataD
     }
     let source = source.ok_or(MetadataDecodeError::Missing("Characteristic from"))?;
     // A characteristic can name no source (`from=""`); the platform stores a nil
-    // uuid for it and every field of the group is a sentinel.
+    // uuid for it. Detached field identities can still remain in that group.
     if source.is_empty() {
         return Ok(CharacteristicReference::empty_source());
     }
@@ -308,6 +311,11 @@ fn decode_field(element: &XmlElement) -> Result<CharacteristicField, MetadataDec
         "0" => Ok(CharacteristicField::Sentinel(
             CharacteristicFieldSentinel::Empty,
         )),
+        _ if ibcmd_schema::characteristics::orphan_standard_attribute_marker(&value).is_some() => {
+            Ok(CharacteristicField::UnresolvedStandardAttribute(
+                ibcmd_schema::characteristics::orphan_standard_attribute_marker(&value).unwrap(),
+            ))
+        }
         _ if value.starts_with("0:") => ibcmd_core::identity::ObjectUuid::parse(&value[2..])
             .map(CharacteristicField::Unresolved)
             .map_err(|error| MetadataDecodeError::Core(error.to_string())),
@@ -522,6 +530,9 @@ fn field_value(
     field: &CharacteristicField,
 ) -> Result<CanonicalField, MetadataDecodeError> {
     let value = match field {
+        CharacteristicField::UnresolvedStandardAttribute(marker) => {
+            return text_field(name, &marker.to_string());
+        }
         CharacteristicField::Unresolved(uuid) => return text_field(name, &format!("0:{uuid}")),
         CharacteristicField::Reference(reference) => reference.path(),
         CharacteristicField::Sentinel(CharacteristicFieldSentinel::Undefined) => "undefined",
@@ -570,6 +581,12 @@ fn validate_model(model: &Characteristics) -> Result<(), CharacteristicsXmlError
 }
 
 fn validate_field(field: &CharacteristicField) -> Result<(), CharacteristicsXmlError> {
+    if let CharacteristicField::UnresolvedStandardAttribute(marker) = field
+        && ibcmd_schema::characteristics::orphan_standard_attribute_marker(&marker.to_string())
+            .is_none()
+    {
+        return Err(CharacteristicsXmlError::UnsupportedStandardAttributeMarker);
+    }
     if let CharacteristicField::Reference(reference) = field {
         validate_reference(reference, "field reference")?;
     }
@@ -602,6 +619,7 @@ const fn is_xml_1_0(character: char) -> bool {
 
 fn push_field(xml: &mut String, indent: &str, name: &str, field: &CharacteristicField) {
     let value = match field {
+        CharacteristicField::UnresolvedStandardAttribute(marker) => marker.to_string(),
         CharacteristicField::Unresolved(uuid) => format!("0:{uuid}"),
         CharacteristicField::Reference(reference) => reference.path().to_string(),
         CharacteristicField::Sentinel(CharacteristicFieldSentinel::Undefined) => "-1".to_string(),
@@ -781,6 +799,27 @@ mod tests {
         format!(
             "<Root xmlns=\"urn:test\" xmlns:r=\"{XR_NAMESPACE}\" xmlns:i=\"{XSI_NAMESPACE}\" xmlns:s=\"{XML_SCHEMA_NAMESPACE}\"><Characteristics><r:Characteristic><r:CharacteristicTypes from=\"Catalog.Types\"><r:KeyField>0</r:KeyField><r:TypesFilterField>-1</r:TypesFilterField>{filter}<r:DataPathField>0</r:DataPathField><r:MultipleValuesUseField>-1</r:MultipleValuesUseField></r:CharacteristicTypes><r:CharacteristicValues from=\"Catalog.Values\"><r:ObjectField>0</r:ObjectField><r:TypeField>-1</r:TypeField><r:ValueField>0</r:ValueField><r:MultipleValuesKeyField>-1</r:MultipleValuesKeyField><r:MultipleValuesOrderField>0</r:MultipleValuesOrderField></r:CharacteristicValues></r:Characteristic></Characteristics></Root>"
         )
+    }
+
+    #[test]
+    fn orphan_standard_attribute_marker_requires_an_empty_source() {
+        let fixture = qname_fixture(XSI_NAMESPACE, XML_SCHEMA_NAMESPACE)
+            .replace("from=\"Catalog.Types\"", "from=\"\"")
+            .replace("<r:KeyField>0</r:KeyField>", "<r:KeyField>-2</r:KeyField>");
+        let model = decode_fixture(&fixture).unwrap();
+        assert_eq!(
+            model.items()[0].types().key_field(),
+            &CharacteristicField::UnresolvedStandardAttribute(-2)
+        );
+        let xml = render_characteristics_xml(&model, "").unwrap();
+        assert!(xml.contains("<xr:KeyField>-2</xr:KeyField>"));
+        for replacement in ["-3", "1", "-02", "-2147483649"] {
+            assert!(
+                decode_fixture(&fixture.replace(">-2<", &format!(">{replacement}<"))).is_err(),
+                "{replacement}"
+            );
+        }
+        assert!(decode_fixture(&fixture.replace("from=\"\"", "from=\"Catalog.Types\"")).is_err());
     }
 
     #[test]

@@ -106,13 +106,16 @@ pub enum CharacteristicFieldSentinel {
     Empty,
 }
 
-/// Either a resolved field reference or a closed sentinel.
+/// A resolved or detached field identity, or a closed sentinel.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CharacteristicField {
     Reference(CharacteristicReference),
     /// A stored field UUID that no longer resolves in the configuration.
     /// The platform retains this value rather than discarding the owner.
     Unresolved(ObjectUuid),
+    /// A standard-field marker whose source no longer exists. Adapters admit
+    /// the measured marker domain; no metadata family or name is inferred.
+    UnresolvedStandardAttribute(i32),
     Sentinel(CharacteristicFieldSentinel),
 }
 
@@ -120,7 +123,7 @@ impl CharacteristicField {
     pub const fn reference(&self) -> Option<&CharacteristicReference> {
         match self {
             Self::Reference(reference) => Some(reference),
-            Self::Unresolved(_) | Self::Sentinel(_) => None,
+            Self::Unresolved(_) | Self::UnresolvedStandardAttribute(_) | Self::Sentinel(_) => None,
         }
     }
 }
@@ -315,8 +318,8 @@ impl Characteristics {
 
 fn validate_source(source: &CharacteristicReference) -> Result<(), CharacteristicsBuildError> {
     if source.path().is_empty() {
-        // No source: every field of the group is a sentinel (a reference field
-        // fails its ancestry check).
+        // No source: detached identities and sentinels remain representable;
+        // resolved reference paths still fail their ancestry check.
         return Ok(());
     }
     let parts = source.path().split('.').collect::<Vec<_>>();
@@ -336,6 +339,13 @@ fn validate_field_ancestry(
     field: &CharacteristicField,
     source: &CharacteristicReference,
 ) -> Result<(), CharacteristicsBuildError> {
+    if matches!(field, CharacteristicField::UnresolvedStandardAttribute(_)) {
+        return source
+            .path()
+            .is_empty()
+            .then_some(())
+            .ok_or(CharacteristicsBuildError::ReferenceOutsideSource);
+    }
     let Some(reference) = field.reference() else {
         return Ok(());
     };

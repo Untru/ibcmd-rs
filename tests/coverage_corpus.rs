@@ -635,6 +635,115 @@ fn empty_or_untyped_failed_exports_are_never_salvaged() {
 }
 
 #[test]
+fn orphan_characteristics_export_matches_complete_native_trees() {
+    for (platform, source_version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("configuration.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join("export"), source_version).unwrap();
+        assert!(
+            exported.refusal.is_none(),
+            "{platform}: {:?}",
+            exported.refusal
+        );
+        assert_eq!(exported.files, read_tree(&set.join("native")), "{platform}");
+    }
+}
+
+#[test]
+fn orphan_characteristics_bootstrap_matches_complete_native_trees() {
+    for (platform, source_version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("configuration.cf");
+        let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+            .arg(set.join("native"))
+            .arg(&cf)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{platform}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let exported = cf_export(&cf, &temp.0.join("export"), source_version).unwrap();
+        assert!(
+            exported.refusal.is_none(),
+            "{platform}: {:?}",
+            exported.refusal
+        );
+        assert_eq!(exported.files, read_tree(&set.join("native")), "{platform}");
+    }
+}
+
+#[test]
+fn orphan_characteristics_reject_unknown_markers_before_publication() {
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        let source = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics/native");
+        for (marker, source_attribute) in [
+            ("-3", "from=\"\""),
+            ("1", "from=\"\""),
+            ("-02", "from=\"\""),
+            ("-2147483649", "from=\"\""),
+            ("-2", ""),
+            ("-2", "from=\"Catalog.CovOrphanCharacteristics\""),
+        ] {
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("source");
+            for (path, bytes) in read_tree(&source) {
+                let destination = tree.join(&path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                let bytes = if path == "Catalogs/CovOrphanCharacteristics.xml" {
+                    String::from_utf8(bytes)
+                        .unwrap()
+                        .replace(
+                            "<xr:KeyField>-2</xr:KeyField>",
+                            &format!("<xr:KeyField>{marker}</xr:KeyField>"),
+                        )
+                        .replacen(
+                            "<xr:CharacteristicTypes from=\"\">",
+                            &format!("<xr:CharacteristicTypes {source_attribute}>"),
+                            1,
+                        )
+                        .into_bytes()
+                } else {
+                    bytes
+                };
+                fs::write(destination, bytes).unwrap();
+            }
+            let cf = temp.0.join("refused.cf");
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+                .arg(&tree)
+                .arg(&cf)
+                .output()
+                .unwrap();
+            assert!(
+                !output.status.success(),
+                "{platform}: accepted {marker} {source_attribute}"
+            );
+            assert!(!cf.exists(), "{platform}: published {marker}");
+        }
+    }
+}
+
+#[test]
 fn coverage_sets_hold_their_baseline() {
     let sets = coverage_sets();
     assert!(

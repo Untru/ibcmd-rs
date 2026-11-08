@@ -709,6 +709,14 @@ mod characteristics {
                 ))
             }
             [marker] => {
+                if source.path().is_empty()
+                    && let Some(marker) =
+                        ibcmd_schema::characteristics::orphan_standard_attribute_marker(
+                            marker.trim(),
+                        )
+                {
+                    return Ok(CharacteristicField::UnresolvedStandardAttribute(marker));
+                }
                 let marker = marker.trim().parse::<i32>().ok().ok_or_else(|| {
                     malformed_field(
                         family,
