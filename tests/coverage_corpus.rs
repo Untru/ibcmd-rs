@@ -864,3 +864,42 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn native_task_form_events_compile() {
+    let mut refusals = Vec::new();
+    let mut compared = 0;
+    for set in coverage_sets() {
+        let native = set.join("native");
+        let tasks = native.join("Tasks");
+        if !tasks.is_dir() {
+            continue;
+        }
+        let source = ibcmd_rs::module_blob::MetadataSourceContext::new(native.clone());
+        for (path, xml) in read_tree(&tasks) {
+            if !path.ends_with("/Ext/Form.xml") {
+                continue;
+            }
+            let text = std::str::from_utf8(&xml).unwrap();
+            if !text.contains("cfg:TaskObject.") || !text.contains("<Event name=\"BeforeWrite\">") {
+                continue;
+            }
+            let items = tasks.join(path.replace("/Ext/Form.xml", "/Ext/Form"));
+            let module = fs::read(items.join("Module.bsl")).unwrap();
+            if let Err(error) = ibcmd_rs::module_blob::compile_native_form_body(
+                &xml,
+                Some(&module),
+                Some(&source),
+                Some(&items),
+            ) {
+                refusals.push(format!("{}/{path}: {error:#}", set.display()));
+            }
+            compared += 1;
+        }
+    }
+    assert_eq!(
+        compared, 9,
+        "all public native Task/BeforeWrite form profiles"
+    );
+    assert!(refusals.is_empty(), "{}", refusals.join("\n"));
+}

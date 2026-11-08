@@ -44,8 +44,7 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
-        "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
+        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription"
       }
     },
     "8.3.27.2214/corpus-business-process-flowchart": {
@@ -181,11 +180,6 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml"
       }
     },
-    "8.3.27.2214/corpus-task-form-events": {
-      "refused": {
-        "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
-      }
-    },
     "8.3.27.2214/corpus-template-bodies": {
       "refused": {
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\""
@@ -290,8 +284,7 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
-        "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
+        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription"
       }
     },
     "8.5.1.1150/commonattributes": {
@@ -483,11 +476,6 @@
     "8.5.1.1150/corpus-spreadsheet-standard-picture": {
       "refused": {
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml"
-      }
-    },
-    "8.5.1.1150/corpus-task-form-events": {
-      "refused": {
-        "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
     },
     "8.5.1.1150/corpus-template-bodies": {
@@ -691,8 +679,7 @@
         "Enums/CovPaletteEnum.xml": "#599: unsupported enum value colour pal:Violet",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\"",
-        "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`",
-        "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
+        "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`"
       }
     },
     "8.5.1.1529/corpus-chart-settings": {
@@ -898,8 +885,7 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
-        "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
+        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription"
       }
     },
     "8.3.27.2342/combined": {
@@ -991,8 +977,7 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
-        "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
+        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription"
       }
     },
     "8.5.1.1529/combined": {
@@ -1159,8 +1144,7 @@
         "Enums/CovPaletteEnum.xml": "#599: unsupported enum value colour pal:Violet",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\"",
-        "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`",
-        "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
+        "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`"
       }
     }
   }
