@@ -20,7 +20,9 @@ No fixture bytes, schema slots, dependencies or vendor files changed.
 
 ## Portable checks
 
-Rust 1.95.0, macOS ARM64. The pinned corpus is
+Rust 1.95.0, macOS ARM64. The full gate uses
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only` and `TMPDIR=/private/tmp`
+(the short canonical path also fits Unix socket limits). The pinned corpus is
 `8d138b896f462c3053d16076cbabf0ffe5030c1c`.
 
 - Writer boundary test: 1 passed; reader/host-spelling boundary test: 1 passed.
@@ -37,6 +39,13 @@ Rust 1.95.0, macOS ARM64. The pinned corpus is
 - `coverage_round_trip::` on the built integration binary: 4 passed after
   removing the eight resolved Space writer refusal allowances.
 
+- Final `cargo xtask ci` at code/test commit `8a913dc6`: **29 PASS**, no
+  failed or skipped steps. Workspace: 4,708 passed / 89 ignored; root
+  integration harnesses: 554 passed / 4 ignored; root library: 904 passed /
+  7 ignored. Temporary-directory cleanup passed. The release build, native
+  micro-corpus parity, SBOM and release audit are separate hosted-CI steps
+  and were not run locally.
+
 ## Native checks
 
 Fresh native platforms: 8.3.27.2214 and 8.5.1.1529. The latter reads the
@@ -52,7 +61,11 @@ exports.
 
 Target-only projections retain the original public `SpaceForm` or
 `CovFacetCommandSpace`, their owner descriptors and required metadata, and
-remove unrelated forms. Each projection imports with the default ibcmd-rs
+remove unrelated forms. The owned-form projection removes every other
+`Catalogs/*/Forms` descriptor/directory and its matching owner `Form` entry.
+The facet projection removes other `CommonForms` and their corresponding
+`Configuration.xml` declarations. All remaining metadata is preserved.
+Each projection imports with the default ibcmd-rs
 self-check, accepts native `config apply --force`, and re-exports the
 complete target Form.xml byte-for-byte on both native platforms: four
 successful import/apply/export sequences.
@@ -76,5 +89,18 @@ The whole owned-catalog-form set still refuses deep `DataPath` bindings
 tracked by #606. That fix is not included here. Target-only import evidence
 does not prove whole-set import, so this change references #605 without
 claiming that its entire acceptance is complete. MSSQL was not run.
-Fresh native controls above initially used the debug candidate; final iter
-binary evidence and merge-gate results are recorded after validation.
+The final iter replay used `cargo build --locked --profile iter`, with the
+production patch from `721a0991`; subsequent commits change tests, baselines
+or evidence only. Its SHA-256 is
+`a5dd1ba6fe9279b8fdc0be98ba92e59e654bc384f336934c332cc660868e7b2d`. All eight
+CF/file-infobase full-target XML comparisons and all four target-only
+import/self-check/native-apply/native-export sequences passed on this iter
+binary. All 26 external commands exited zero, and all four source database
+hashes stayed unchanged during candidate exports.
+
+Native binary receipts:
+
+| Build | Reported `--version` | SHA-256 |
+| --- | --- | --- |
+| 8.3.27.2214 | 8.3.27.2214 | `1a35bba7883a7fdf9a8678392e4b1520df452995ce005ff225f94594e70cfe25` |
+| 8.5.1.1529 | 8.5.1.1529 | `40f74bfb8237465acc934aaea4b8d40557602bdc0ab37fc5bb389023166d2ffb` |
