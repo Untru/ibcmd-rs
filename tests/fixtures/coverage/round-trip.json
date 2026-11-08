@@ -3,7 +3,6 @@
     "8.3.27.2214/combined": {
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
-        "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
@@ -53,11 +52,7 @@
         "*": "#616: cf export: entry_export_failed: 1 CF storage entries could not be exported"
       }
     },
-    "8.3.27.2214/corpus-catalog-additional-index": {
-      "refused": {
-        "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family"
-      }
-    },
+    "8.3.27.2214/corpus-catalog-additional-index": {},
     "8.3.27.2214/corpus-catalog-pictures": {
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL"
@@ -236,7 +231,6 @@
     "8.5.1.1150/combined": {
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
-        "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
@@ -316,11 +310,7 @@
         "*": "#616: cf export: entry_export_failed: 1 CF storage entries could not be exported"
       }
     },
-    "8.5.1.1150/corpus-catalog-additional-index": {
-      "refused": {
-        "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family"
-      }
-    },
+    "8.5.1.1150/corpus-catalog-additional-index": {},
     "8.5.1.1150/corpus-catalog-pictures": {
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL"
@@ -531,7 +521,6 @@
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
-        "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
@@ -857,7 +846,6 @@
     "8.3.27.2214/combined": {
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
-        "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
@@ -937,7 +925,6 @@
     "8.5.1.1150/combined": {
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
-        "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
@@ -999,7 +986,6 @@
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
-        "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
