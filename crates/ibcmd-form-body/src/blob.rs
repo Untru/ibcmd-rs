@@ -157,8 +157,8 @@ fn validate_period_field_records(record: &str) -> Result<()> {
             .map(|range| record[range.clone()].trim())
             .collect::<Vec<_>>();
         if let Some(slot) = FormPeriodFieldSchema::options_slot_for_record(&fields) {
-            if !FormPeriodFieldSchema::record_length_is_measured(&fields) {
-                return Err(anyhow!("PeriodField has an unmeasured record length"));
+            if !FormPeriodFieldSchema::record_header_is_measured(&fields) {
+                return Err(anyhow!("PeriodField has an unmeasured record header"));
             }
             let bag = fields
                 .get(slot)

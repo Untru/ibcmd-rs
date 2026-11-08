@@ -96,20 +96,81 @@ fn period_field_matches_complete_native_form_in_both_editions() {
     }
 }
 
+fn period_field_profiles() -> [(&'static str, [&'static str; 4]); 6] {
+    [
+        ("", ["1", "1", "1", "1"]),
+        (
+            "<Width>35</Width><AutoMaxWidth>false</AutoMaxWidth><MaxWidth>40</MaxWidth><Height>3</Height><AutoMaxHeight>false</AutoMaxHeight><MaxHeight>5</MaxHeight><HorizontalStretch>false</HorizontalStretch><VerticalStretch>false</VerticalStretch>",
+            ["0", "0", "0", "0"],
+        ),
+        (
+            "<HorizontalStretch>false</HorizontalStretch>",
+            ["0", "1", "1", "1"],
+        ),
+        (
+            "<VerticalStretch>false</VerticalStretch>",
+            ["1", "0", "1", "1"],
+        ),
+        ("<AutoMaxWidth>false</AutoMaxWidth>", ["1", "1", "0", "1"]),
+        ("<AutoMaxHeight>false</AutoMaxHeight>", ["1", "1", "1", "0"]),
+    ]
+}
+
+fn period_field_xml(native: &[u8], properties: &str) -> Vec<u8> {
+    if properties.is_empty() {
+        return native.to_vec();
+    }
+    let opening = "<PeriodField name=\"Period\" id=\"1\">";
+    String::from_utf8(native.to_vec())
+        .unwrap()
+        .replace(
+            opening,
+            &format!(
+                "{opening}\r\n\t\t\t{}",
+                properties.replace("><", ">\r\n\t\t\t<")
+            ),
+        )
+        .into_bytes()
+}
+
 #[test]
 fn period_field_native_xml_compiles_in_both_editions() {
+    use ibcmd_form_body::layout_8_5_1::{Node, parse_node};
+    fn flags(node: &Node) -> Option<[String; 4]> {
+        let Node::List(members) = node else {
+            return None;
+        };
+        if matches!(members.first().and_then(Node::as_leaf), Some("37" | "48"))
+            && members.get(5).and_then(Node::as_leaf) == Some("18")
+        {
+            let Node::List(bag) = members.get(39)? else {
+                return None;
+            };
+            // Coordinates independently measured by changing one flag at a
+            // time on native 8.3.27.2214 and 8.5.1.1529. Do not substitute
+            // writer/reader schema constants for this native oracle.
+            return Some([6, 7, 9, 12].map(|slot| bag[slot].as_leaf().unwrap().to_owned()));
+        }
+        members.iter().find_map(flags)
+    }
     for build in ["8.3.27.2214", "8.5.1.1150"] {
         let path = coverage_paths::root()
             .join("coverage")
             .join(build)
             .join("corpus-managed-forms/native/CommonForms/CovPeriodField/Ext/Form.xml");
-        ibcmd_form_writer::compile_native_form_body_through(
-            &fs::read(path).unwrap(),
-            None,
-            None,
-            None,
-        )
-        .unwrap_or_else(|error| panic!("{build}: PeriodField native XML refuses: {error:#}"));
+        let native = fs::read(path).unwrap();
+        for (properties, expected) in period_field_profiles() {
+            let xml = period_field_xml(&native, properties);
+            let body = ibcmd_form_writer::compile_native_form_body_through(&xml, None, None, None)
+                .unwrap_or_else(|error| {
+                    panic!("{build}: PeriodField native XML refuses: {error:#}")
+                });
+            assert_eq!(
+                flags(&parse_node(&body).unwrap()).unwrap(),
+                expected.map(str::to_owned),
+                "{build}: {properties}"
+            );
+        }
     }
 }
 
@@ -167,13 +228,8 @@ fn period_field_public_xml_bootstrap_preserves_complete_form() {
             .join("coverage")
             .join(build)
             .join("corpus-managed-forms/native");
-        for geometry in [false, true] {
-            let mut expected = fs::read(native.join(relative)).unwrap();
-            if geometry {
-                expected = String::from_utf8(expected).unwrap().replace(
-                "<PeriodField name=\"Period\" id=\"1\">",
-                "<PeriodField name=\"Period\" id=\"1\">\r\n\t\t\t<Width>35</Width>\r\n\t\t\t<AutoMaxWidth>false</AutoMaxWidth>\r\n\t\t\t<MaxWidth>40</MaxWidth>\r\n\t\t\t<Height>3</Height>\r\n\t\t\t<AutoMaxHeight>false</AutoMaxHeight>\r\n\t\t\t<MaxHeight>5</MaxHeight>\r\n\t\t\t<HorizontalStretch>false</HorizontalStretch>\r\n\t\t\t<VerticalStretch>false</VerticalStretch>").into_bytes();
-            }
+        for (properties, _) in period_field_profiles() {
+            let expected = period_field_xml(&fs::read(native.join(relative)).unwrap(), properties);
             let temp = TempDirectory::new();
             let tree = temp.0.join("tree");
             for (name, mut bytes) in read_tree(&native) {
@@ -262,6 +318,30 @@ fn period_field_unknown_storage_payloads_refuse() {
             .to_string()
             .contains("PeriodField")
     );
+    for (from, to) in [
+        (
+            "{37,{1,02023637-7868-4a5f-8576-835a76e0c9ba}",
+            "{37,{1,00000000-0000-0000-0000-000000000001}",
+        ),
+        (
+            "{37,{1,02023637-7868-4a5f-8576-835a76e0c9ba}",
+            "{37,{0,02023637-7868-4a5f-8576-835a76e0c9ba}",
+        ),
+        ("18,\"Period\"", "18,\"\""),
+        (
+            "{37,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,18,",
+            "{37,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0},18,",
+        ),
+    ] {
+        let changed = body.replace(from, to);
+        assert_ne!(changed, body);
+        assert!(
+            ibcmd_form_body::parse_form_body_plain(&changed)
+                .unwrap_err()
+                .to_string()
+                .contains("PeriodField")
+        );
+    }
 }
 
 #[test]

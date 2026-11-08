@@ -4205,23 +4205,48 @@ impl FormPeriodFieldSchema {
             == "{0,1,0}"
     }
 
-    pub fn record_length_is_measured(fields: &[&str]) -> bool {
+    pub fn record_header_is_measured(fields: &[&str]) -> bool {
         let offset = usize::from(fields.get(5).is_some_and(|value| value.starts_with('{')));
-        matches!(
-            (fields.first().copied(), fields.len().saturating_sub(offset)),
-            (Some("37"), 59) | (Some("48"), 74)
-        )
+        offset == 0
+            && Self::has_item_namespace(fields)
+            && Self::identity_tuple(fields)
+                .is_some_and(|(id, _)| id.trim().parse::<i64>().is_ok_and(|id| id > 0))
+            && fields
+                .get(6)
+                .and_then(|name| name.strip_prefix('"')?.strip_suffix('"'))
+                .is_some_and(|name| !name.is_empty())
+            && matches!(
+                (fields.first().copied(), fields.len().saturating_sub(offset)),
+                (Some("37"), 59) | (Some("48"), 74)
+            )
     }
 
     pub fn options_slot_for_record(fields: &[&str]) -> Option<usize> {
-        let identity = fields.get(1)?.strip_prefix('{')?.strip_suffix('}')?;
-        let (_, class) = identity.split_once(',')?;
-        if class.trim() != "02023637-7868-4a5f-8576-835a76e0c9ba" {
+        let known_wrapper = matches!(fields.first().copied(), Some("37" | "48"));
+        if !(Self::has_item_namespace(fields)
+            || known_wrapper && Self::identity_tuple(fields).is_some())
+        {
             return None;
         }
         let offset = usize::from(fields.get(5).is_some_and(|value| value.starts_with('{')));
         (fields.get(5 + offset).copied() == Some("18"))
             .then_some(FormFieldSchema::OPTIONS_BASE_SLOT + offset)
+    }
+
+    fn has_item_namespace(fields: &[&str]) -> bool {
+        Self::identity_tuple(fields).is_some_and(|(_, class)| {
+            class
+                .trim()
+                .eq_ignore_ascii_case("02023637-7868-4a5f-8576-835a76e0c9ba")
+        })
+    }
+
+    fn identity_tuple<'a>(fields: &[&'a str]) -> Option<(&'a str, &'a str)> {
+        fields
+            .get(1)
+            .and_then(|identity| identity.strip_prefix('{')?.strip_suffix('}'))
+            .and_then(|identity| identity.split_once(','))
+            .filter(|(_, class)| !class.chars().any(|ch| matches!(ch, ',' | '{' | '}')))
     }
 
     pub fn item_tag_from_raw_layout(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
