@@ -2124,6 +2124,16 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     }
     let raw_declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
     let mut rows = parse_moxel_rows(&fields);
+    // Keep an unmeasured list in its row until admission: returning None for
+    // the cell would let the legacy row scanner silently truncate the stream.
+    if rows.iter().flat_map(|row| &row.cells).any(|cell| {
+        cell.value
+            .iter()
+            .chain(&cell.detail_value)
+            .any(MoxelCellValue::has_unmeasured_value_list)
+    }) {
+        return None;
+    }
     if rows.is_empty() {
         return None;
     }
@@ -4318,10 +4328,33 @@ pub enum MoxelCellValue {
     Reference(usize),
     Structure(Vec<(String, MoxelCellValue)>),
     Array(Vec<MoxelCellValue>),
+    EmptyValueList,
+    /// Decoder quarantine; a spreadsheet containing this never reaches XML.
+    UnmeasuredValueList,
+}
+
+impl MoxelCellValue {
+    fn has_unmeasured_value_list(&self) -> bool {
+        match self {
+            Self::UnmeasuredValueList => true,
+            Self::Array(values) => values.iter().any(Self::has_unmeasured_value_list),
+            Self::Structure(properties) => properties
+                .iter()
+                .any(|(_, value)| value.has_unmeasured_value_list()),
+            _ => false,
+        }
+    }
 }
 
 pub fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
     let fields = split_1c_braced_fields(text, 0)?;
+    if let Some(known) = ibcmd_schema::spreadsheet_value_list::classify_fields(&fields) {
+        return Some(if known {
+            MoxelCellValue::EmptyValueList
+        } else {
+            MoxelCellValue::UnmeasuredValueList
+        });
+    }
     // A tag is one letter, and nothing but the quoted letter unescapes to it.
     let tag = match fields.first()?.trim() {
         "\"U\"" => "U",
@@ -15258,6 +15291,18 @@ fn push_moxel_typed_value_xml(
                 push_moxel_typed_value_xml(xml, "v8:Value", value, depth + 1);
             }
             _ = write!(xml, "{indent}</{element}>\r\n");
+        }
+        MoxelCellValue::EmptyValueList => {
+            let kind = ibcmd_schema::spreadsheet_value_list::XML_TYPE;
+            _ = write!(xml, "{indent}<{element} xsi:type=\"{kind}\">\r\n");
+            _ = write!(
+                xml,
+                "{indent}\t<v8:valueType/>\r\n{indent}\t<v8:lastId xsi:type=\"xs:decimal\">0</v8:lastId>\r\n"
+            );
+            _ = write!(xml, "{indent}</{element}>\r\n");
+        }
+        MoxelCellValue::UnmeasuredValueList => {
+            unreachable!("spreadsheet admission rejects unmeasured value lists")
         }
     }
 }

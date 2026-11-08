@@ -243,6 +243,9 @@ pub fn preserve_spreadsheet_language(base: &[u8], compiled: &[u8]) -> Result<Vec
 struct Node {
     /// Local name.
     name: String,
+    namespace: Option<String>,
+    type_namespace: Option<String>,
+    type_attribute_namespace: Option<String>,
     /// Qualified attribute names as written, with unescaped values.
     attributes: Vec<(String, String)>,
     children: Vec<Node>,
@@ -317,6 +320,13 @@ impl Node {
         }
         Ok(())
     }
+
+    fn value_list_attribute_count(&self) -> usize {
+        self.attributes
+            .iter()
+            .filter(|(key, _)| !ibcmd_schema::spreadsheet_value_list::is_namespace_declaration(key))
+            .count()
+    }
 }
 
 fn parse_dom(xml: &[u8]) -> Result<Node> {
@@ -334,12 +344,12 @@ fn parse_dom(xml: &[u8]) -> Result<Node> {
             .context("SpreadsheetDocument XML is not well-formed")?
         {
             Event::Start(start) => {
-                let mut node = start_node(&start)?;
+                let mut node = start_node(&start, &stack)?;
                 node.span.0 = before;
                 stack.push(node);
             }
             Event::Empty(start) => {
-                let mut node = start_node(&start)?;
+                let mut node = start_node(&start, &stack)?;
                 node.span = (before, reader.buffer_position() as usize);
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(node),
@@ -387,7 +397,7 @@ fn parse_dom(xml: &[u8]) -> Result<Node> {
     root.ok_or_else(|| anyhow!("SpreadsheetDocument XML has no root element"))
 }
 
-fn start_node(start: &BytesStart<'_>) -> Result<Node> {
+fn start_node(start: &BytesStart<'_>, ancestors: &[Node]) -> Result<Node> {
     let qualified = String::from_utf8_lossy(start.name().as_ref()).into_owned();
     let name = qualified
         .rsplit_once(':')
@@ -400,8 +410,37 @@ fn start_node(start: &BytesStart<'_>) -> Result<Node> {
         let value = attribute.unescape_value()?.into_owned();
         attributes.push((key, value));
     }
+    let resolve = |qualified: &str| {
+        let declaration = qualified.split_once(':').map_or_else(
+            || "xmlns".to_owned(),
+            |(prefix, _)| format!("xmlns:{prefix}"),
+        );
+        attributes
+            .iter()
+            .find(|(key, _)| key == &declaration)
+            .map(|(_, uri)| uri.clone())
+            .or_else(|| {
+                ancestors.iter().rev().find_map(|node| {
+                    node.attributes
+                        .iter()
+                        .find(|(key, _)| key == &declaration)
+                        .map(|(_, uri)| uri.clone())
+                })
+            })
+    };
+    let namespace = resolve(&qualified);
+    let type_attribute = attributes
+        .iter()
+        .find(|(key, _)| key.rsplit(':').next() == Some("type"));
+    let type_namespace = type_attribute.and_then(|(_, value)| resolve(value));
+    // A default XML namespace applies to elements, never to attributes.
+    let type_attribute_namespace =
+        type_attribute.and_then(|(key, _)| key.split_once(':').and_then(|_| resolve(key)));
     Ok(Node {
         name,
+        namespace,
+        type_namespace,
+        type_attribute_namespace,
         attributes,
         children: Vec::new(),
         text: String::new(),
@@ -2983,6 +3022,49 @@ fn typed_value(node: &Node) -> Result<String> {
             }
             record.push_str("}}");
             Ok(record)
+        }
+        value_list if value_list == ibcmd_schema::spreadsheet_value_list::XML_TYPE => {
+            use ibcmd_schema::spreadsheet_value_list as schema;
+            const CORE: &str = "http://v8.1c.ru/8.1/data/core";
+            const XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
+            const XSD: &str = "http://www.w3.org/2001/XMLSchema";
+            node.only_attributes(&["type"], "ValueListType")?;
+            ensure!(
+                schema::value_element_namespace_is_supported(&node.name, node.namespace.as_deref())
+                    && node.type_namespace.as_deref() == Some(CORE)
+                    && node.type_attribute_namespace.as_deref() == Some(XSI)
+                    && node.value_list_attribute_count() == 1,
+                "a ValueListType names an unknown namespace"
+            );
+            ensure!(node.text.trim().is_empty(), "a ValueListType carries text");
+            let [value_type, last_id] = node.children.as_slice() else {
+                bail!("only the measured empty ValueListType has a writer");
+            };
+            ensure!(
+                value_type.name == schema::VALUE_TYPE_ELEMENT
+                    && last_id.name == schema::LAST_ID_ELEMENT
+                    && value_type.namespace.as_deref() == Some(CORE)
+                    && last_id.namespace.as_deref() == Some(CORE),
+                "a ValueListType has unknown members or namespaces"
+            );
+            value_type.only_attributes(&[], "valueType")?;
+            last_id.only_attributes(&["type"], "lastId")?;
+            ensure!(
+                value_type.children.is_empty()
+                    && value_type.text.trim().is_empty()
+                    && value_type.value_list_attribute_count() == 0,
+                "a typed ValueListType has no measured writer"
+            );
+            ensure!(
+                last_id.children.is_empty()
+                    && last_id.text.trim() == schema::EMPTY_LAST_ID
+                    && last_id.xsi_type() == Some(schema::LAST_ID_TYPE)
+                    && last_id.type_namespace.as_deref() == Some(XSD)
+                    && last_id.type_attribute_namespace.as_deref() == Some(XSI)
+                    && last_id.value_list_attribute_count() == 1,
+                "a ValueListType lastId has no measured writer"
+            );
+            Ok(ibcmd_schema::spreadsheet_value_list::empty_stored_value())
         }
         other => bail!("a value of type {other} has no writer"),
     }

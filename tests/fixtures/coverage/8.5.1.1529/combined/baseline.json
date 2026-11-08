@@ -245,6 +245,7 @@
     "CommonTemplates/CovModernSheetBuiltinFont",
     "CommonTemplates/CovModernSheetEmbeddedTable",
     "CommonTemplates/CovModernSpreadsheetTemplate",
+    "CommonTemplates/CovSheetValueListDetail",
     "CommonTemplates/CovSheetVerticalPageBreak",
     "CommonTemplates/CovSpreadsheetFacetTemplate",
     "CommonTemplates/CovSpreadsheetMergedCells",

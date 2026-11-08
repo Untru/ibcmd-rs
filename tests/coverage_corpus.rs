@@ -635,6 +635,349 @@ fn empty_or_untyped_failed_exports_are_never_salvaged() {
 }
 
 #[test]
+fn value_list_detail_preserves_the_complete_public_spreadsheet() {
+    let path = "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml";
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-spreadsheet-facets");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("configuration.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join("export"), version).unwrap();
+        let expected = fs::read(set.join("native").join(path)).unwrap();
+        assert!(
+            exported.files.get(path) == Some(&expected),
+            "{platform}: the complete native ValueList detail spreadsheet must survive"
+        );
+    }
+}
+
+#[test]
+fn value_list_detail_public_xml_compiles_without_loss() {
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        let xml = fs::read(coverage_paths::root().join("coverage").join(platform)
+            .join("corpus-spreadsheet-facets/native/CommonTemplates/CovSheetValueListDetail/Ext/Template.xml")).unwrap();
+        let body =
+            ibcmd_compiler::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None)
+                .expect("the native ValueList detail spreadsheet must compile");
+        let actual = ibcmd_moxel::extract_moxel_body_xml(
+            &body,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            |_| None,
+            None,
+        )
+        .unwrap();
+        // The source-asset pipeline applies this shared XML 2.21 projection
+        // after the MOXCEL codec, independently of its stored body revision.
+        let actual = if platform == "8.5.1.1150" {
+            ibcmd_1c_text::declare_palette_namespace_beside_style(actual.into_bytes())
+        } else {
+            actual.into_bytes()
+        };
+        assert!(actual == xml, "{platform}: complete XML after compilation");
+    }
+}
+
+#[test]
+fn value_list_detail_refuses_unclassified_source_members() {
+    let xml = fs::read_to_string(coverage_paths::root()
+        .join("coverage/8.3.27.2214/corpus-spreadsheet-facets/native/CommonTemplates/CovSheetValueListDetail/Ext/Template.xml")).unwrap();
+    for invalid in [
+        xml.replace(
+            "<v8:valueType/>",
+            "<v8:valueType><v8:Type>xs:string</v8:Type></v8:valueType>",
+        ),
+        xml.replace("<v8:valueType/>", "<v8:valueType/><v8:valueType/>"),
+        xml.replace("<v8:valueType/>", "<v8:valueType unknown=\"1\"/>"),
+        xml.replace("<v8:valueType/>", "<v8:item/>"),
+        xml.replace("<v8:valueType/>", "unclassified<v8:valueType/>"),
+        xml.replace(
+            "<v8:lastId xsi:type=\"xs:decimal\">0",
+            "<v8:lastId xsi:type=\"xs:decimal\">1",
+        ),
+        xml.replace(
+            "<v8:lastId xsi:type=\"xs:decimal\">0",
+            "<v8:lastId xsi:type=\"xs:string\">0",
+        ),
+        xml.replace(
+            "<v8:lastId xsi:type=\"xs:decimal\">0",
+            "<v8:lastId extra=\"1\" xsi:type=\"xs:decimal\">0",
+        ),
+        xml.replace(
+            "<v8:valueType/>",
+            "<v8:valueType xmlns:v8=\"urn:unknown\"/>",
+        ),
+        xml.replace(
+            "xsi:type=\"v8:ValueListType\"",
+            "xmlns:v8=\"urn:unknown\" xsi:type=\"v8:ValueListType\"",
+        ),
+        xml.replace(
+            "<v8:lastId xsi:type",
+            "<v8:lastId xmlns:xs=\"urn:unknown\" xsi:type",
+        ),
+    ] {
+        assert_ne!(invalid, xml);
+        assert!(
+            ibcmd_compiler::compiler::bodies::mxl_native::write_native_moxel_body(
+                invalid.as_bytes(),
+                None
+            )
+            .is_err(),
+            "an unmeasured ValueList member must not compile"
+        );
+    }
+}
+
+#[test]
+fn value_list_detail_refuses_unmeasured_storage_before_xml() {
+    let xml = fs::read(coverage_paths::root()
+        .join("coverage/8.3.27.2214/corpus-spreadsheet-facets/native/CommonTemplates/CovSheetValueListDetail/Ext/Template.xml")).unwrap();
+    let body = ibcmd_compiler::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None)
+        .unwrap()
+        .replace("\r\n", "");
+    let value = ibcmd_schema::spreadsheet_value_list::empty_stored_value();
+    assert!(body.contains(&value));
+    for malformed in [
+        value.replace("{6,", "{7,"),
+        value.replace("1e512aab", "1e512aac"),
+        value.replace(",0,0,{0}", ",1,0,{0}"),
+        value.replace("{0}", "{1,{\"S\",\"item\"}}"),
+        value.replace("{\"Pattern\"}", "{\"Pattern\",\"S\"}"),
+        value.replace("},0,0}", "},1,0}"),
+        value.replace("},0,0}", "},0,1}"),
+        value.replace("},0,0}", "},0,0,0}"),
+        value.replace("},0,0}}", "},0,0},0}"),
+        format!(
+            "{{\"#\",{}}}",
+            ibcmd_schema::spreadsheet_value_list::TYPE_ID
+        ),
+        value.replacen("\"#\"", "\"S\"", 1),
+    ] {
+        assert_ne!(malformed, value);
+        let text = body.replacen(&value, &malformed, 1);
+        assert!(
+            ibcmd_moxel::parse_moxel_spreadsheet_text(&text, &BTreeMap::new(), |_| None).is_none(),
+            "the legacy embedded route must refuse an unmeasured ValueList profile"
+        );
+        assert!(
+            ibcmd_moxel::extract_moxel_body_xml(
+                &text,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                |_| None,
+                None
+            )
+            .is_err(),
+            "the typed source route must refuse before producing XML"
+        );
+    }
+}
+
+#[test]
+fn value_list_detail_namespace_boundaries_are_closed() {
+    let xml = fs::read_to_string(coverage_paths::root()
+        .join("coverage/8.3.27.2214/corpus-spreadsheet-facets/native/CommonTemplates/CovSheetValueListDetail/Ext/Template.xml")).unwrap();
+    let mut accepted = Vec::new();
+    for (label, invalid) in [
+        (
+            "unqualified type attribute",
+            xml.replace(
+                "<d xsi:type=",
+                "<d xmlns=\"http://www.w3.org/2001/XMLSchema-instance\" type=",
+            ),
+        ),
+        (
+            "foreign owner element namespace",
+            xml.replace("<d xsi:type=", "<d xmlns=\"urn:unknown\" xsi:type="),
+        ),
+        (
+            "ordinary xmlnsUnknown on list",
+            xml.replace("<d xsi:type=", "<d xmlnsUnknown=\"x\" xsi:type="),
+        ),
+        (
+            "ordinary xmlnsUnknown on valueType",
+            xml.replace("<v8:valueType/>", "<v8:valueType xmlnsUnknown=\"x\"/>"),
+        ),
+        (
+            "ordinary xmlnsUnknown on lastId",
+            xml.replace(
+                "<v8:lastId xsi:type=",
+                "<v8:lastId xmlnsUnknown=\"x\" xsi:type=",
+            ),
+        ),
+        (
+            "second type attribute",
+            xml.replace(
+                "<d xsi:type=",
+                "<d xmlns:other=\"urn:unknown\" other:type=\"v8:ValueListType\" xsi:type=",
+            ),
+        ),
+    ] {
+        assert_ne!(invalid, xml);
+        if ibcmd_compiler::compiler::bodies::mxl_native::write_native_moxel_body(
+            invalid.as_bytes(),
+            None,
+        )
+        .is_ok()
+        {
+            accepted.push(label);
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "unclassified namespace/attribute inputs accepted: {accepted:?}"
+    );
+}
+
+#[test]
+fn value_list_detail_declaration_is_not_mistaken_for_a_stored_value() {
+    let xml = fs::read_to_string(coverage_paths::root()
+        .join("coverage/8.3.27.2214/corpus-spreadsheet-facets/native/CommonTemplates/CovSheetValueListDetail/Ext/Template.xml")).unwrap();
+    let start = xml.find("\t\t\t\t\t<d xsi:type=").unwrap();
+    let end = start + xml[start..].find("</d>\r\n").unwrap() + "</d>\r\n".len();
+    let mut declaration = xml;
+    declaration.replace_range(start..end, "");
+    declaration = declaration.replace(
+        "<fillType>Text</fillType>",
+        &format!(
+            "<fillType>Text</fillType><valueType><v8:TypeId>{}</v8:TypeId></valueType>",
+            ibcmd_schema::spreadsheet_value_list::TYPE_ID
+        ),
+    );
+    let body = ibcmd_compiler::compiler::bodies::mxl_native::write_native_moxel_body(
+        declaration.as_bytes(),
+        None,
+    )
+    .unwrap();
+    let actual = ibcmd_moxel::extract_moxel_body_xml(
+        &body,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        |id| {
+            id.eq_ignore_ascii_case(ibcmd_schema::spreadsheet_value_list::TYPE_ID)
+                .then_some("v8:ValueListType")
+        },
+        None,
+    )
+    .unwrap();
+    assert!(actual.contains(&format!(
+        "<v8:TypeId>{}</v8:TypeId>",
+        ibcmd_schema::spreadsheet_value_list::TYPE_ID
+    )));
+    assert!(!actual.contains("<d xsi:type="));
+}
+
+#[test]
+fn value_list_detail_unmeasured_cf_profiles_refuse_the_target_file() {
+    use ibcmd_cf::{
+        archive::decode_packed_archive,
+        preamble::{PreambleMode, write_format16_archive_to_vec},
+    };
+    use ibcmd_core::{artifact::StorageProfileId, limits::ResourceLimits};
+    use ibcmd_v8::writer::{Format16Document, Format16Element, Format16Payload};
+    let set = coverage_paths::root().join("coverage/8.3.27.2214/corpus-spreadsheet-facets");
+    let archive = decode_packed_archive(
+        std::io::Cursor::new(decode_base64(
+            &fs::read(set.join("configuration.cf.b64")).unwrap(),
+        )),
+        ResourceLimits::default(),
+        StorageProfileId::parse("storage:value-list-profile-test").unwrap(),
+    )
+    .unwrap();
+    let (metadata, _, entries) = archive.into_parts();
+    let entries = entries
+        .into_iter()
+        .map(|entry| entry.into_parts())
+        .collect::<Vec<_>>();
+    let descriptor =
+        fs::read_to_string(set.join("native/CommonTemplates/CovSheetValueListDetail.xml")).unwrap();
+    let id = descriptor
+        .split("uuid=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let key = format!("{id}.0");
+    let plain = String::from_utf8(
+        ibcmd_module_blob::inflate_raw(&entries.iter().find(|(name, _)| name == &key).unwrap().1)
+            .unwrap(),
+    )
+    .unwrap();
+    let target = "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml";
+    let expected = fs::read(set.join("native").join(target)).unwrap();
+    for (label, replacement) in [
+        ("positive", None),
+        ("unknown-pattern", Some("UnknownPattern")),
+        ("typed-pattern", Some("Pattern\",\"S")),
+    ] {
+        let temp = TempDirectory::new();
+        let mut changed = entries.clone();
+        if let Some(replacement) = replacement {
+            let mutated = plain.replace("\"Pattern\"", &format!("\"{replacement}\""));
+            assert_ne!(mutated, plain);
+            changed.iter_mut().find(|(name, _)| name == &key).unwrap().1 =
+                ibcmd_module_blob::deflate_raw(mutated.as_bytes()).unwrap();
+        }
+        let elements = changed
+            .iter()
+            .map(|(name, payload)| {
+                Format16Element::named(name, Some(Format16Payload::from_bytes(payload)))
+            })
+            .collect();
+        let mut document = Format16Document::new(metadata.storage_version(), elements);
+        let bytes = write_format16_archive_to_vec(
+            &PreambleMode::preserve(metadata.raw_preamble().to_vec()).unwrap(),
+            &mut document,
+        )
+        .unwrap();
+        let input = temp.0.join("profile.cf");
+        let out = temp.0.join("export");
+        fs::write(&input, bytes).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args(["cf", "export"])
+            .arg(&input)
+            .arg(&out)
+            .args(["--source-version", "2.20"])
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        if replacement.is_none() {
+            assert!(
+                output.status.success(),
+                "positive reconstructed CF: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert_eq!(fs::read(out.join(target)).unwrap(), expected);
+        } else {
+            assert_eq!(
+                output.status.code(),
+                Some(2),
+                "{label}: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert!(
+                !out.join(target).exists(),
+                "{label}: unmeasured profile published a target file"
+            );
+            let diagnostic = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(diagnostic.contains("spreadsheet"), "{label}: {diagnostic}");
+        }
+    }
+}
+
+#[test]
 fn coverage_sets_hold_their_baseline() {
     let sets = coverage_sets();
     assert!(
