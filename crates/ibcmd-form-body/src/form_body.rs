@@ -9253,7 +9253,10 @@ pub(super) fn parse_form_dynamic_list_key_fields(field: &str) -> Vec<String> {
 /// the only type id the property carries across UT 11.5.27.75's 1 947 bags.
 const FORM_DYNAMIC_LIST_KEY_FIELDS_TYPE_ID: &str = "51e7a0d2-530b-11d4-b98a-008048da3034";
 
-pub(super) fn parse_form_spreadsheet_document_settings(
+/// The embedded spreadsheet projection, also used to reject a compiled
+/// record which cannot retain its complete admitted settings document.
+#[doc(hidden)]
+pub fn parse_form_spreadsheet_document_settings(
     field: &str,
     value_types: &[ConstantValueType],
     object_refs: &BTreeMap<String, String>,

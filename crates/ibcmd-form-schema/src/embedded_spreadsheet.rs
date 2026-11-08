@@ -16,6 +16,18 @@ pub const MERGE: &str = "merge";
 pub const TEXT_FILL: &str = "Text";
 pub const ABSOLUTE_FONT: &str = "Absolute";
 
+pub const SHEET_NAMESPACE: &str = "http://v8.1c.ru/8.2/data/spreadsheet";
+pub const CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
+pub const FORM_NAMESPACE: &str = "http://v8.1c.ru/8.3/xcf/logform";
+pub const XSI_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
+
+/// Namespace scope of the existing embedded-spreadsheet decoder projection.
+pub fn validation_document(fragment: &str) -> String {
+    format!(
+        "<mxl:settings xmlns:mxl=\"{SHEET_NAMESPACE}\" xmlns:v8=\"{CORE_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">{fragment}</mxl:settings>"
+    )
+}
+
 pub fn text_cell(format: usize, localized: &str) -> String {
     format!("{{16,{format},{localized},0}}")
 }

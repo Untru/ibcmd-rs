@@ -8,10 +8,10 @@ use ibcmd_1c_text::format_1c_string;
 use ibcmd_form_schema::embedded_spreadsheet as stored;
 use ibcmd_xml::{AttributeKind, XmlElement, XmlNode, XmlReader};
 
-const SHEET_NS: &str = "http://v8.1c.ru/8.2/data/spreadsheet";
-const CORE_NS: &str = "http://v8.1c.ru/8.1/data/core";
-const FORM_NS: &str = "http://v8.1c.ru/8.3/xcf/logform";
-const XSI_NS: &str = "http://www.w3.org/2001/XMLSchema-instance";
+use stored::{
+    CORE_NAMESPACE as CORE_NS, FORM_NAMESPACE as FORM_NS, SHEET_NAMESPACE as SHEET_NS,
+    XSI_NAMESPACE as XSI_NS,
+};
 
 type Namespaces = BTreeMap<String, String>;
 
@@ -65,6 +65,7 @@ fn attribute<'a>(element: &'a XmlElement, name: &str) -> Option<&'a str> {
         })
 }
 
+#[derive(Debug, PartialEq, Eq)]
 struct Node {
     name: String,
     attributes: BTreeMap<String, String>,
@@ -113,6 +114,9 @@ impl Node {
                 XmlNode::Text(text) => node.text.push_str(text.value()),
                 _ => bail!("embedded spreadsheet contains unsupported XML content"),
             }
+        }
+        if !node.children.is_empty() && node.text.trim().is_empty() {
+            node.text.clear();
         }
         Ok(node)
     }
@@ -190,26 +194,34 @@ pub(super) fn with_text_cells(form: &str, attribute_name: &str) -> Result<Option
                 ensure!(!settings_seen, "spreadsheet attribute repeats Settings");
                 settings_seen = true;
                 let scope = namespaces(settings, &scope);
-                fn has_cells(element: &XmlElement, inherited: &Namespaces) -> Result<bool> {
-                    let mut pending = vec![(element, inherited.clone(), 0)];
-                    while let Some((element, inherited, depth)) = pending.pop() {
-                        ensure!(
-                            depth < 64,
-                            "embedded spreadsheet nesting exceeds codec limit"
-                        );
-                        let scope = namespaces(element, &inherited);
-                        if element.name().local() == stored::CELL
-                            && namespace(element, &scope) == Some(SHEET_NS)
+                fn has_cells(element: &XmlElement, inherited: &Namespaces) -> bool {
+                    for item in selection_elements(element) {
+                        let scope = namespaces(item, inherited);
+                        if item.name().local() != stored::ROW_ITEM
+                            || namespace(item, &scope) != Some(SHEET_NS)
                         {
-                            return Ok(true);
+                            continue;
                         }
-                        for child in selection_elements(element) {
-                            pending.push((child, scope.clone(), depth + 1));
+                        for row in selection_elements(item) {
+                            let scope = namespaces(row, &scope);
+                            if row.name().local() != stored::ROW
+                                || namespace(row, &scope) != Some(SHEET_NS)
+                            {
+                                continue;
+                            }
+                            for cell in selection_elements(row) {
+                                let scope = namespaces(cell, &scope);
+                                if cell.name().local() == stored::CELL
+                                    && namespace(cell, &scope) == Some(SHEET_NS)
+                                {
+                                    return true;
+                                }
+                            }
                         }
                     }
-                    Ok(false)
+                    false
                 }
-                if !has_cells(settings, &scope)? {
+                if !has_cells(settings, &scope) {
                     continue;
                 }
                 let valid_type = settings.attributes().iter().any(|a| match a.kind() {
@@ -269,7 +281,24 @@ pub(super) fn with_text_cells(form: &str, attribute_name: &str) -> Result<Option
     if !has_cells {
         return Ok(None);
     }
-    encode(&settings).map(Some)
+    let record = encode(&settings)?;
+    let types = [ibcmd_1c_vocab::ConstantValueType::Reference {
+        reference: format!("mxl:{}", stored::DOCUMENT_TYPE),
+    }];
+    let fragment = ibcmd_form_body::form_body::parse_form_spreadsheet_document_settings(
+        &record,
+        &types,
+        &BTreeMap::new(),
+    )
+    .ok_or_else(|| anyhow!("compiled embedded spreadsheet cannot be read completely"))?;
+    let root = stored::validation_document(&fragment);
+    let decoded = XmlReader::from_slice(root.as_bytes())?;
+    let decoded = Node::read(decoded.root(), &Namespaces::new())?;
+    ensure!(
+        decoded.children == settings.children,
+        "compiled embedded spreadsheet would change its complete Settings document"
+    );
+    Ok(Some(record))
 }
 
 fn encode(settings: &Node) -> Result<String> {
@@ -433,6 +462,10 @@ fn encode(settings: &Node) -> Result<String> {
                         .one("v8:lang")?
                         .ok_or_else(|| anyhow!("text item has no language"))?
                         .value()?;
+                    ensure!(
+                        language_ids.contains(lang),
+                        "cell text names an undeclared language"
+                    );
                     let value = item
                         .one("v8:content")?
                         .ok_or_else(|| anyhow!("text item has no content"))?
@@ -673,6 +706,28 @@ mod tests {
     }
 
     #[test]
+    fn merge_columns_are_not_cells_in_the_existing_named_area_cohort() {
+        let xml = format!(
+            "<Form xmlns=\"{FORM_NS}\" xmlns:mxl=\"{SHEET_NS}\" xmlns:xsi=\"{XSI_NS}\"><Attributes><Attribute name=\"Sheet\"><Settings xsi:type=\"mxl:SpreadsheetDocument\">\
+             <mxl:rowsItem><mxl:index>0</mxl:index><mxl:row><mxl:empty>true</mxl:empty></mxl:row></mxl:rowsItem>\
+             <mxl:merge><mxl:r>0</mxl:r><mxl:c>0</mxl:c><mxl:w>1</mxl:w></mxl:merge>\
+             <mxl:namedItem xsi:type=\"mxl:NamedItemCells\"><mxl:name>Area</mxl:name><mxl:area><mxl:type>Rectangle</mxl:type><mxl:beginRow>0</mxl:beginRow><mxl:endRow>1</mxl:endRow><mxl:beginColumn>0</mxl:beginColumn><mxl:endColumn>1</mxl:endColumn></mxl:area></mxl:namedItem>\
+             </Settings></Attribute></Attributes></Form>"
+        );
+        assert_eq!(with_text_cells(&xml, "Sheet").unwrap(), None);
+    }
+
+    #[test]
+    fn an_unused_font_table_entry_is_not_silently_dropped() {
+        let source = form();
+        let begin = source.find("<mxl:font ").unwrap();
+        let end = begin + source[begin..].find("/>").unwrap() + 2;
+        let font = &source[begin..end];
+        let xml = source.replace(font, &format!("{font}{font}"));
+        assert!(with_text_cells(&xml, "Sheet").is_err());
+    }
+
+    #[test]
     fn unclassified_cell_content_and_wrong_namespaces_refuse() {
         for (before, after) in [
             ("<mxl:f>1</mxl:f>", "<mxl:f>1</mxl:f><mxl:v>7</mxl:v>"),
@@ -684,6 +739,7 @@ mod tests {
             ("<mxl:font>0</mxl:font>", "<mxl:font>1</mxl:font>"),
             ("<mxl:vgRows>1", "<mxl:vgRows>2"),
             ("<v8:content>", "<v8:content xmlns:v8=\"urn:wrong\">"),
+            ("<v8:lang>ru</v8:lang>", "<v8:lang>fr</v8:lang>"),
             ("<mxl:tl>", "<mxl:tl xmlns:mxl=\"urn:wrong\">"),
             (
                 "xsi:type=\"mxl:SpreadsheetDocument\"",
