@@ -26706,6 +26706,11 @@ pub fn form_settings_composer_member(
         // `{3,{286,…},{10009},{10002}}` -> `…CurrentData.ItemGroupFields.Field`).
         Selection => &[
             ("0", "SelectionAvailableFields", Some(AvailableFields)),
+            (
+                ibcmd_form_schema::FORM_SETTINGS_SELECTION_USE_MEMBER.1,
+                ibcmd_form_schema::FORM_SETTINGS_SELECTION_USE_MEMBER.0,
+                None,
+            ),
             ("10001", "TitlePicture", None),
             ("10002", "Title", None),
             ("10003", "Placement", None),

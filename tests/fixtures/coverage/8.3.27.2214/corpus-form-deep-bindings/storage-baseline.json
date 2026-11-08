@@ -5,10 +5,11 @@
     "CommonForms/CovDeepBindingTemplate.xml",
     "CommonForms/CovDeepBindingTemplate/Ext/Form.xml",
     "CommonForms/CovDeepComposerBinding.xml",
+    "CommonForms/CovDeepComposerBinding/Ext/Form.xml",
     "CommonForms/CovDeepProductBinding.xml",
     "CommonForms/CovDeepProductBinding/Ext/Form.xml",
     "Configuration.xml",
-    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+    "Languages/Русский.xml",
     "Reports/CovBindingReport.xml"
   ]
 }
