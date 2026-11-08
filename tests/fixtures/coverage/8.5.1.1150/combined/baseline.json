@@ -155,6 +155,7 @@
     "CommonForms/CovCompatibleFormTemplate",
     "CommonForms/CovCompatiblePictureFont",
     "CommonForms/CovDeepBindingTemplate",
+    "CommonForms/CovDeepComposerBinding",
     "CommonForms/CovDeepProductBinding",
     "CommonForms/CovEmbeddedSpreadsheetCells",
     "CommonForms/CovExplanation_Cov",
