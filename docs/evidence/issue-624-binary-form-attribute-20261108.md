@@ -4,8 +4,8 @@ Refs #624.
 
 ## Candidate and inputs
 
-- Code commit: `aaee327935a61197f9007bd5875201a57ad65911`; base `54b796f64da5daed3714acdf7810581fe0e58778`.
-- `cargo build --locked --profile iter --no-default-features`; `ibcmd-rs 0.4.1`, SHA-256 `a668238807fe1add57b5323dae2f63149078576ab06341959cf97bd651a0f0d7`.
+- Code commit: `af6a4cc26d5d09ec620daddcde9edd84946b39b4`; base `54b796f64da5daed3714acdf7810581fe0e58778`.
+- `cargo build --locked --profile iter --no-default-features`; `ibcmd-rs 0.4.1`, SHA-256 `0b06463b39eb340c6d882a801a54f727c208788b26cd3cd3f52cf31451c83d82`.
 - macOS 26.6.2 arm64; Rust 1.95.0; `LANG=ru_RU.UTF-8` on both sides.
 - Pinned `1c-fixtures`: `8d138b896f462c3053d16076cbabf0ffe5030c1c`. The existing `corpus-form-settings` variant `CovPictureTitleFontEnterOnInput` supplies the native XML and the binary attribute; it is already part of the combined configurations.
 - Saved 8.3.27.2214 / 8.5.1.1150 XML remains the offline oracle. Fresh native runs use 8.3.27.2214 and 8.5.1.1529; no fresh 8.5.1.1150 runtime measurement is claimed.
@@ -16,11 +16,12 @@ Refs #624.
 ## Failing first and local checks
 
 - On the base plus the new coverage regression, `cargo test --locked -p ibcmd-rs --test integration coverage_corpus::native_binary_form_attribute_compiles_for_both_dialects --no-default-features` failed: `Form Attribute type is not supported yet: xs:base64Binary` (0 passed, 1 failed). It now passes for both saved dialects.
-- `cargo test --locked -p ibcmd-form-writer binary_form_attribute_qualif` — 4 passed. The tests check binary lengths, Variable/Fixed coding, mixed types, CDATA, unknown/empty/duplicate qualifiers, nested nodes and direct text.
+- `cargo test --locked -p ibcmd-form-writer binary_form_attribute_qualif` — 5 passed. The tests check binary lengths, Variable/Fixed coding, mixed types, CDATA, unknown/empty/duplicate qualifiers, nested nodes and direct text.
 - An added `<Length/>` case first failed with `accepted invalid binary qualifiers: <v8:Length/>`; the nested case first failed with `accepted invalid binary qualifiers: <v8:Length>1<v8:Extra/>6</v8:Length>`. Both now refuse before encoding.
 - A new `Length unexpected="x"` test first failed with `accepted unsupported binary qualifier attribute`. Unknown attributes and `xsi:nil` on Length, AllowedLength and BinaryDataQualifiers now refuse before encoding, including an empty container. Namespace declarations remain allowed; their positive tests preserve the encoded qualifier values. This check applies only to the newly admitted binary qualifier subtree.
+- A `Length xmlns:v8="urn:unsupported"` case first failed with `accepted unsupported binary qualifier namespace`. The new subtree now resolves element namespaces and requires the core URI for its container and leaves, rejecting foreign and unbound names. Correct core names with an arbitrary prefix or default namespace, and unused namespace declarations, preserve the same pattern. Other form qualifiers retain their previous namespace behavior.
 - `cargo xtask affected` selected the form-writer crate, schema crate and `coverage_corpus` suite.
-- `cargo xtask check` — 6 steps passed. Form writer: 41 passed, 1 existing ignored; schema: 130 passed; coverage: 6 passed. No existing expectation was weakened.
+- `cargo xtask check` — 6 steps passed. Form writer: 42 passed, 1 existing ignored; schema: 130 passed; coverage: 6 passed. No existing expectation was weakened.
 - Physical-adapter policy passes without a baseline change.
 - `cargo test --locked -p ibcmd-rs --test integration coverage_round_trip:: --no-default-features -- --nocapture` — 4 passed. It reported eight #624 entries as no longer refused. Only these eight entries were removed from `round-trip.json`; the repeated audit passed with the remaining gaps unchanged.
 
