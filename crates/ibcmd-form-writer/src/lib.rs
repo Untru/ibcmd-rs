@@ -15841,17 +15841,26 @@ fn replace_form_save_data_in_settings(
 
 fn replace_form_vertical_scroll(layout: &mut String, value: FormXmlVerticalScroll) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
-    let tail_start = form_layout_child_items_tail_start(layout, &fields)
-        .ok_or_else(|| anyhow!("Form VerticalScroll has no bounded root trailer"))?;
-    let trailer = fields[tail_start..]
+    let values = fields
         .iter()
         .map(|range| layout[range.clone()].trim())
         .collect::<Vec<_>>();
-    let root = fields.first().map(|range| layout[range.clone()].trim());
-    let schema = ibcmd_form_schema::FormRootVerticalScrollSchema::from_raw_layout(root, &trailer);
-    let schema = schema.ok_or_else(|| anyhow!("unsupported Form VerticalScroll root trailer"))?;
+    let root = values.first().copied();
+    let located = form_layout_child_items_tail_start(layout, &fields).and_then(|start| {
+        ibcmd_form_schema::FormRootVerticalScrollSchema::from_overlay_layout(
+            root,
+            &values[start..],
+            value,
+        )
+        .map(|schema| (start, schema))
+    });
+    let located = located.or_else(|| {
+        ibcmd_form_schema::FormRootVerticalScrollSchema::locate_native_overlay(&values, value)
+    });
+    let (tail_start, schema) =
+        located.ok_or_else(|| anyhow!("unsupported Form VerticalScroll root trailer"))?;
     let assignments = schema
-        .assignments(&trailer, value)
+        .assignments(&values[tail_start..], value)
         .ok_or_else(|| anyhow!("unsupported Form VerticalScroll qualifier/mode pair"))?;
     let replacements = assignments.map(|(slot, code)| (fields[tail_start + slot].clone(), code));
     for (range, code) in replacements.into_iter().rev() {
