@@ -33,6 +33,12 @@ Rust 1.95.0, macOS ARM64; canonical short `TMPDIR=/private/tmp`,
   including rejection of an unexpected empty or duplicated rights element.
 - `cargo xtask affected`: selects form-body, form-schema and coverage_corpus.
 - `cargo xtask check`: 6 PASS, including the full coverage suite.
+- Staged-tree `cargo xtask ci` on
+  `cd0b1721a2f76492aa465471959571f309fb5cc8`: 29 PASS, no failed or skipped
+  steps. Workspace crates: 4708 passed / 89 existing ignored; root integration
+  suites: 554 passed / 4 existing ignored; root library: 904 passed / 7 existing
+  ignored. Temporary directories are empty. Release build, SBOM and release
+  audit of the offline matrix were not run.
 - Physical-adapter policy: PASS, without changing its baseline. Duplicating
   the new field kind in the caller was rejected; schema-owned admission
   eliminates the duplicate rule instead.
@@ -58,6 +64,19 @@ native, including explicit false controls. All eight complete root target
 Form.xml comparisons agree; the eight nested target files retain unrelated
 companion-ID differences tracked by #596. Source `.1CD` hashes stay unchanged
 after candidate exports.
+
+Final measured code: `cd0b1721a2f76492aa465471959571f309fb5cc8` (clean checkout).
+`cargo build --locked --profile iter` passed; binary reports
+`ibcmd-rs 0.4.1`, SHA-256
+`0c8be8bc9fac50925f7f5fe6b51d7f2fa03f017e9816efecfa3b2d444ce8c490`.
+The final native replay uses matching public 2214/1529 source profiles on
+2214/1529 runtimes respectively. Four native create/export commands and four
+candidate CF/DB exports exit zero. All sixteen complete UserVisible values
+agree and all eight full root target files agree byte for byte. All eight
+nested full target files retain the documented #596 companion-ID differences.
+Both source database SHA-256 values are unchanged. Candidate children again
+have empty PATH. This replay supplements the earlier 1150-input/1529-runtime
+compatibility control.
 
 Commands, with fresh `<scratch>` directories:
 
