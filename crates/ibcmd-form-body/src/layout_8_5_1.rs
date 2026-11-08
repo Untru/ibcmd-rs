@@ -656,6 +656,7 @@ pub fn bag_revision(
         ("37", "14", "3", 14) => ("3", 0),
         ("37", "15", "4", 14) => ("3", 1),
         ("37", "17", "1", 16) => ("1", 0),
+        ("37", "18", "2", 14) => ("2", 0),
         // A planner field (19): the БСП 8.5 extension ServiceDesk keeps the same
         // form as its 8.3.27 version, and the bag has the same revision and
         // length in both (its event list gains `BeforeCreate`, which the event

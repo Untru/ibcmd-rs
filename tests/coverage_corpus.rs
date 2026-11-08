@@ -25,6 +25,260 @@ use sha2::{Digest, Sha256};
 
 const DUMP_INFO: &str = "ConfigDumpInfo.xml";
 
+#[test]
+fn period_field_matches_complete_native_children_in_all_public_profiles() {
+    let relative = "CommonForms/CovPeriodField/Ext/Form.xml";
+    let sets = coverage_sets()
+        .into_iter()
+        .filter(|set| set.join("native").join(relative).is_file())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sets.len(),
+        9,
+        "all public period-field storage profiles are exercised"
+    );
+    for set in sets {
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(set.join("manifest.json")).unwrap()).unwrap();
+        let version = manifest["evidence"]["source_version"].as_str().unwrap();
+        let build = manifest["set"].as_str().unwrap();
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("set.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join("out"), version).unwrap();
+        let actual = exported
+            .files
+            .get(relative)
+            .expect("PeriodField form must be published");
+        let expected = fs::read(set.join("native").join(relative)).unwrap();
+        let subtree = |bytes: &[u8]| {
+            let xml = std::str::from_utf8(bytes).unwrap();
+            let start = xml
+                .find("\t<ChildItems>")
+                .expect("native PeriodField child collection");
+            let end =
+                xml[start..].find("\t</ChildItems>").unwrap() + start + "\t</ChildItems>".len();
+            xml[start..end].to_owned()
+        };
+        assert_eq!(
+            subtree(actual),
+            subtree(&expected),
+            "{build}: complete PeriodField subtree"
+        );
+    }
+}
+
+#[test]
+fn period_field_matches_complete_native_form_in_both_editions() {
+    let relative = "CommonForms/CovPeriodField/Ext/Form.xml";
+    for (build, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(build)
+            .join("corpus-managed-forms");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("set.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join("out"), version).unwrap();
+        assert_eq!(
+            exported.files.get(relative),
+            Some(&fs::read(set.join("native").join(relative)).unwrap()),
+            "{build}: complete PeriodField form"
+        );
+    }
+}
+
+#[test]
+fn period_field_native_xml_compiles_in_both_editions() {
+    for build in ["8.3.27.2214", "8.5.1.1150"] {
+        let path = coverage_paths::root()
+            .join("coverage")
+            .join(build)
+            .join("corpus-managed-forms/native/CommonForms/CovPeriodField/Ext/Form.xml");
+        ibcmd_form_writer::compile_native_form_body_through(
+            &fs::read(path).unwrap(),
+            None,
+            None,
+            None,
+        )
+        .unwrap_or_else(|error| panic!("{build}: PeriodField native XML refuses: {error:#}"));
+    }
+}
+
+#[test]
+fn period_field_unmeasured_xml_properties_refuse() {
+    for build in ["8.3.27.2214", "8.5.1.1150"] {
+        let path = coverage_paths::root()
+            .join("coverage")
+            .join(build)
+            .join("corpus-managed-forms/native/CommonForms/CovPeriodField/Ext/Form.xml");
+        let xml = fs::read_to_string(path).unwrap();
+        for property in ["BackColor", "Font", "Events", "UnknownPeriodProperty"] {
+            let changed = xml.replace(
+                "<PeriodField name=\"Period\" id=\"1\">",
+                &format!("<PeriodField name=\"Period\" id=\"1\"><{property}/>"),
+            );
+            let error = ibcmd_form_writer::compile_native_form_body_through(
+                changed.as_bytes(),
+                None,
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("not measured"),
+                "{build}: {property}: {error:#}"
+            );
+        }
+        for malformed in [
+            "<PeriodField name=\"Period\" id=\"1\" unknown=\"1\">",
+            "<PeriodField name=\"Period\" id=\"1\"><Width>1</Width><Width>2</Width>",
+            "<PeriodField name=\"Period\" id=\"1\"><xr:Width>1</xr:Width>",
+        ] {
+            let changed = xml.replace("<PeriodField name=\"Period\" id=\"1\">", malformed);
+            let error = ibcmd_form_writer::compile_native_form_body_through(
+                changed.as_bytes(),
+                None,
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("PeriodField"),
+                "{build}: {error:#}"
+            );
+        }
+    }
+}
+
+#[test]
+fn period_field_public_xml_bootstrap_preserves_complete_form() {
+    let relative = "CommonForms/CovPeriodField/Ext/Form.xml";
+    for (build, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let native = coverage_paths::root()
+            .join("coverage")
+            .join(build)
+            .join("corpus-managed-forms/native");
+        for geometry in [false, true] {
+            let mut expected = fs::read(native.join(relative)).unwrap();
+            if geometry {
+                expected = String::from_utf8(expected).unwrap().replace(
+                "<PeriodField name=\"Period\" id=\"1\">",
+                "<PeriodField name=\"Period\" id=\"1\">\r\n\t\t\t<Width>35</Width>\r\n\t\t\t<AutoMaxWidth>false</AutoMaxWidth>\r\n\t\t\t<MaxWidth>40</MaxWidth>\r\n\t\t\t<Height>3</Height>\r\n\t\t\t<AutoMaxHeight>false</AutoMaxHeight>\r\n\t\t\t<MaxHeight>5</MaxHeight>\r\n\t\t\t<HorizontalStretch>false</HorizontalStretch>\r\n\t\t\t<VerticalStretch>false</VerticalStretch>").into_bytes();
+            }
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("tree");
+            for (name, mut bytes) in read_tree(&native) {
+                if name.starts_with("CommonForms/")
+                    && name != "CommonForms/CovPeriodField.xml"
+                    && !name.starts_with("CommonForms/CovPeriodField/")
+                {
+                    continue;
+                }
+                if name == "Configuration.xml" {
+                    bytes = String::from_utf8(bytes)
+                        .unwrap()
+                        .split_inclusive('\n')
+                        .filter(|line| {
+                            !line.contains("<CommonForm>")
+                                || line.contains("<CommonForm>CovPeriodField</CommonForm>")
+                        })
+                        .collect::<String>()
+                        .into_bytes();
+                }
+                if name == relative {
+                    bytes = expected.clone();
+                }
+                let destination = tree.join(name);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::write(destination, bytes).unwrap();
+            }
+            let cf = temp.0.join("written.cf");
+            let result = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .args(["cf", "bootstrap", "--base-free", "--platform", build])
+                .arg(&tree)
+                .arg(&cf)
+                .env("PATH", "")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{build}: {}",
+                String::from_utf8_lossy(&result.stdout)
+            );
+            let readback = cf_export(&cf, &temp.0.join("out"), version).unwrap();
+            assert_eq!(
+                readback.files.get(relative),
+                Some(&expected),
+                "{build}: complete PeriodField readback"
+            );
+        }
+    }
+}
+
+#[test]
+fn period_field_unknown_storage_payloads_refuse() {
+    let xml = coverage_paths::root().join(
+        "coverage/8.3.27.2214/corpus-managed-forms/native/CommonForms/CovPeriodField/Ext/Form.xml",
+    );
+    let body = ibcmd_form_writer::compile_native_form_body_through(
+        &fs::read(xml).unwrap(),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    let bag = "{2,0,0,{7,3,0,1,100},{3,4,{0}},{0,1,0},1,1,{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0}";
+    assert!(
+        body.contains(bag),
+        "the exact native period bag must be exercised"
+    );
+    for changed in [
+        bag.replacen("{2,", "{99,", 1),
+        bag.replace("{0,1,0}", "{1,1,0}"),
+        bag.replace(",1,0,0,1,0}", ",1,0,17,1,0}"),
+        bag.replace(",1,1,{3,0,", ",8,1,{3,0,"),
+    ] {
+        let changed = body.replace(bag, &changed);
+        let error = ibcmd_form_body::parse_form_body_plain(&changed).unwrap_err();
+        assert!(error.to_string().contains("PeriodField"), "{error:#}");
+    }
+    let unknown_revision = body.replace(
+        "{37,{1,02023637-7868-4a5f-8576-835a76e0c9ba}",
+        "{99,{1,02023637-7868-4a5f-8576-835a76e0c9ba}",
+    );
+    assert_ne!(unknown_revision, body);
+    assert!(
+        ibcmd_form_body::parse_form_body_plain(&unknown_revision)
+            .unwrap_err()
+            .to_string()
+            .contains("PeriodField")
+    );
+}
+
+#[test]
+fn period_field_storage_validation_bounds_nested_records() {
+    let mut nested = "{0}".to_string();
+    for _ in 0..130 {
+        nested = format!("{{0,{nested}}}");
+    }
+    let body = format!("{{4,{{50,{nested}}},\"\"}}");
+    assert!(
+        ibcmd_form_body::parse_form_body_plain(&body)
+            .unwrap_err()
+            .to_string()
+            .contains("nesting")
+    );
+}
+
 pub(crate) struct TempDirectory(pub(crate) PathBuf);
 
 impl TempDirectory {

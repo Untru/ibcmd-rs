@@ -2689,7 +2689,7 @@ pub struct FormControlBorderSchema {
 impl FormControlBorderSchema {
     pub fn options_slot(item_tag: &str, top_level_offset: usize) -> Option<usize> {
         match item_tag {
-            "LabelField" | "PictureField" if top_level_offset <= 1 => {
+            "LabelField" | "PictureField" | "PeriodField" if top_level_offset <= 1 => {
                 Some(FormFieldSchema::OPTIONS_BASE_SLOT + top_level_offset)
             }
             "CalendarField" if top_level_offset == 0 => Some(FormFieldSchema::OPTIONS_BASE_SLOT),
@@ -2738,6 +2738,11 @@ impl FormControlBorderSchema {
             ("37", 59, "CalendarField", 0, Some("8"), 24, Some("6")) => {
                 (18, FormControlBorderStyle::Single)
             }
+            ("37", 59, "PeriodField", 0, Some("18"), 14, Some("2"))
+            | ("37", 60, "PeriodField", 1, Some("18"), 14, Some("2")) => (
+                FormPeriodFieldSchema::BORDER,
+                FormControlBorderStyle::Single,
+            ),
             _ => return None,
         };
         Some(Self {
@@ -3510,6 +3515,7 @@ impl FormFieldTitleLocationSchema {
             "GraphicalSchemaField" => "14",
             "HTMLDocumentField" => "15",
             "FormattedDocumentField" => "17",
+            "PeriodField" => "18",
             // Slot 7 reads `0` on all five `PDFDocumentField` items of UT
             // 11.5.27.75 and the platform writes `<TitleLocation>None</TitleLocation>`
             // on all five, the same code-to-value pair the other field kinds use.
@@ -4147,6 +4153,120 @@ pub fn form_output_code(value: Option<&str>) -> Option<&'static str> {
     }
 }
 
+/// The unchanged period-field property bag of the public native form corpus.
+/// Both saved editions use revision 2 and fourteen members. Native controls
+/// on 8.3.27.2214 and 8.5.1.1529 vary the geometry independently of the
+/// common field record.
+pub struct FormPeriodFieldSchema;
+
+impl FormPeriodFieldSchema {
+    pub const XML_TAG: &'static str = "PeriodField";
+    pub fn is_item_tag(tag: &str) -> bool {
+        tag == Self::XML_TAG
+    }
+    pub const WIDTH: usize = 1;
+    pub const HEIGHT: usize = 2;
+    pub const FONT: usize = 3;
+    pub const TEXT_COLOR: usize = 4;
+    pub const EVENTS: usize = 5;
+    pub const HORIZONTAL_STRETCH: usize = 6;
+    pub const VERTICAL_STRETCH: usize = 7;
+    pub const BORDER: usize = 8;
+    pub const AUTO_MAX_WIDTH: usize = 9;
+    pub const MAX_WIDTH: usize = 10;
+    pub const AUTO_MAX_HEIGHT: usize = 12;
+    pub const MAX_HEIGHT: usize = 13;
+
+    pub fn supports_xml_property(name: &str) -> bool {
+        matches!(
+            name,
+            "Width"
+                | "Height"
+                | "HorizontalStretch"
+                | "VerticalStretch"
+                | "AutoMaxWidth"
+                | "MaxWidth"
+                | "AutoMaxHeight"
+                | "MaxHeight"
+                | "ContextMenu"
+                | "ExtendedTooltip"
+        )
+    }
+
+    pub fn supports_xml_attribute(name: &[u8]) -> bool {
+        matches!(name, b"name" | b"id")
+    }
+
+    pub fn events_are_measured(events: &str) -> bool {
+        events
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+            == "{0,1,0}"
+    }
+
+    pub fn record_length_is_measured(fields: &[&str]) -> bool {
+        let offset = usize::from(fields.get(5).is_some_and(|value| value.starts_with('{')));
+        matches!(
+            (fields.first().copied(), fields.len().saturating_sub(offset)),
+            (Some("37"), 59) | (Some("48"), 74)
+        )
+    }
+
+    pub fn options_slot_for_record(fields: &[&str]) -> Option<usize> {
+        let identity = fields.get(1)?.strip_prefix('{')?.strip_suffix('}')?;
+        let (_, class) = identity.split_once(',')?;
+        if class.trim() != "02023637-7868-4a5f-8576-835a76e0c9ba" {
+            return None;
+        }
+        let offset = usize::from(fields.get(5).is_some_and(|value| value.starts_with('{')));
+        (fields.get(5 + offset).copied() == Some("18"))
+            .then_some(FormFieldSchema::OPTIONS_BASE_SLOT + offset)
+    }
+
+    pub fn item_tag_from_raw_layout(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
+        (matches!(wrapper, "37" | "48") && Self::options_slot_for_record(fields).is_some())
+            .then_some(Self::XML_TAG)
+    }
+
+    /// Admit the measured geometry cohort; event and appearance variants
+    /// remain errors until independently measured rather than disappearing.
+    pub fn options_are_measured(options: &[&str]) -> bool {
+        if options.len() != 14 || options.first().copied() != Some("2") {
+            return false;
+        }
+        let compact = |value: &str| {
+            value
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+        };
+        [Self::WIDTH, Self::HEIGHT, Self::MAX_WIDTH, Self::MAX_HEIGHT]
+            .iter()
+            .all(|slot| options[*slot].parse::<u32>().is_ok())
+            && [
+                Self::HORIZONTAL_STRETCH,
+                Self::VERTICAL_STRETCH,
+                Self::AUTO_MAX_WIDTH,
+                Self::AUTO_MAX_HEIGHT,
+            ]
+            .iter()
+            .all(|slot| matches!(options[*slot], "0" | "1"))
+            && matches!(
+                compact(options[Self::FONT]).as_str(),
+                "{7,3,0,1,100}" | "{8,3,0,1,100}"
+            )
+            && matches!(
+                compact(options[Self::TEXT_COLOR]).as_str(),
+                "{3,4,{0}}" | "{4,4,{0},4}"
+            )
+            && compact(options[Self::EVENTS]) == "{0,1,0}"
+            && compact(options[Self::BORDER])
+                == "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}"
+            && options[11] == "0"
+    }
+}
+
 impl FormFieldSchema {
     pub const OPTIONS_BASE_SLOT: usize = 39;
 
@@ -4193,6 +4313,7 @@ impl FormFieldSchema {
             "14" => Some("GraphicalSchemaField"),
             "15" => Some("HTMLDocumentField"),
             "17" => Some("FormattedDocumentField"),
+            "18" => Some("PeriodField"),
             _ => None,
         }
     }
@@ -4211,6 +4332,7 @@ impl FormFieldSchema {
                 | "GraphicalSchemaField"
                 | "HTMLDocumentField"
                 | "FormattedDocumentField"
+                | "PeriodField"
         )
     }
 
@@ -4272,6 +4394,16 @@ impl FormFieldSchema {
             // neither element on any of their 89 items and read the unset shape
             // in both slots throughout.
             "FormattedDocumentField" => ("17", 16, "1", Some(6), Some(7), Some(8)),
+            // The public native managed-form corpus in both saved editions
+            // uses this unchanged fourteen-member period-field bag.
+            "PeriodField" => (
+                "18",
+                14,
+                "2",
+                Some(FormPeriodFieldSchema::TEXT_COLOR),
+                None,
+                None,
+            ),
             // The PDF viewer field carries one member more than the other
             // field kinds at the same head offset: all five of UT
             // 11.5.27.75's `PDFDocumentField` items spell a 60-member

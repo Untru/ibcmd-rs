@@ -16510,6 +16510,9 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
 }
 
 pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
+    if ibcmd_form_schema::FormPeriodFieldSchema::is_item_tag(tag) {
+        return true;
+    }
     matches!(
         tag,
         "InputField"
@@ -17415,6 +17418,24 @@ struct FormDocumentFieldGeometry {
 }
 
 const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
+    (
+        ibcmd_form_schema::FormPeriodFieldSchema::XML_TAG,
+        FormDocumentFieldGeometry {
+            discriminator: "2",
+            len: 14,
+            width: Some((ibcmd_form_schema::FormPeriodFieldSchema::WIDTH, "0")),
+            height: Some((ibcmd_form_schema::FormPeriodFieldSchema::HEIGHT, "0")),
+            max_width: Some(ibcmd_form_schema::FormPeriodFieldSchema::MAX_WIDTH),
+            max_height: Some(ibcmd_form_schema::FormPeriodFieldSchema::MAX_HEIGHT),
+            auto_max_width: Some(ibcmd_form_schema::FormPeriodFieldSchema::AUTO_MAX_WIDTH),
+            auto_max_height: Some(ibcmd_form_schema::FormPeriodFieldSchema::AUTO_MAX_HEIGHT),
+            horizontal_stretch: Some(ibcmd_form_schema::FormPeriodFieldSchema::HORIZONTAL_STRETCH),
+            vertical_stretch: Some(ibcmd_form_schema::FormPeriodFieldSchema::VERTICAL_STRETCH),
+            edit: None,
+            enable_start_drag: None,
+            font: Some(ibcmd_form_schema::FormPeriodFieldSchema::FONT),
+        },
+    ),
     (
         "HTMLDocumentField",
         FormDocumentFieldGeometry {
@@ -22284,6 +22305,11 @@ fn normalize_form_item_record_revision<'a>(fields: &[&'a str]) -> Option<Vec<&'a
 }
 
 pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
+    if let Some(tag) =
+        ibcmd_form_schema::FormPeriodFieldSchema::item_tag_from_raw_layout(wrapper, fields)
+    {
+        return Some(tag);
+    }
     match wrapper {
         "22" => match fields
             .get(

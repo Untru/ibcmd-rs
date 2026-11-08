@@ -216,6 +216,7 @@
     "CommonForms/CovNavigationAccountingRegister",
     "CommonForms/CovNavigationChartOfAccounts",
     "CommonForms/CovNavigationTemplate",
+    "CommonForms/CovPeriodField",
     "CommonForms/CovPictureTitleFontEnterOnInput",
     "CommonForms/CovPictureTitleFontStyleItem",
     "CommonForms/CovPlannerField",

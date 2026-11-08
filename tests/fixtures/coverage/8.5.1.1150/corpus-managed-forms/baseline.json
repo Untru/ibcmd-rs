@@ -4,6 +4,7 @@
     "CovEmbeddedSpreadsheetCells",
     "CovFormEventOnOpen",
     "CovManagedFormTemplate",
+    "CovPeriodField",
     "CovPlannerField",
     "configuration"
   ]
