@@ -145,8 +145,13 @@ validation passed with pinned `@fission-ai/openspec@1.6.0`; no workflow gate
 is added. The record was written after measuring the discrepancy and code
 fix, rather than presented as a prior proposal.
 
-The complete gate is being repeated with the final evidence and new OpenSpec
-record tracked. At author handoff that second run is still active; its result
-is pending and is not counted as a second successful run. The measured source
-and iter binary are unchanged. Independent review must wait for that run to
-finish.
+The final repeated gate with tracked OpenSpec and evidence completed with
+29 PASS and no skipped local stage (workspace 4710 passed, integration and
+library passed; existing ignored tests retained). Independent fresh-context
+review approved HEAD 51338cfa2629baf9fdc96c6e9796dfc383556afa after rerunning
+check (six PASS) and fresh CF/export/verified-import/native-apply/export
+routes on both installed builds: 30/30 complete file comparisons across six
+trees, zero differences and stable database hashes. Parent review read the
+production diff and independently reran compiler picture tests (18 PASS)
+and the nine-archive public regression (one PASS). Exact 1150 equality is
+not claimed; the original oracle remains unchanged. Refs #618.
