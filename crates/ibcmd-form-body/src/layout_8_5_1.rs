@@ -18,7 +18,7 @@
 //! to use. The conversion is fail-closed: a record revision or property-bag
 //! shape this table does not name is refused, never passed through.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Result, anyhow, bail};
 
@@ -227,9 +227,16 @@ pub fn down_convert_form_body_8_5_1(
     body: &ParsedFormBodyBlob,
 ) -> Result<(ParsedFormBodyBlob, FormFactsV8_5_1)> {
     let mut facts = FormFactsV8_5_1::default();
-    let mut root = parse_node(&body.layout)?;
+    // Appended services may disappear in conversion but still consume native
+    // IDs. Assign on the complete raw tree before dropping those members.
+    let numbering = crate::form_body::unidentified_form_item_numbering(&body.layout);
+    let layout = numbering
+        .as_ref()
+        .map_or(body.layout.as_str(), |(layout, _)| layout.as_str());
+    let assigned = numbering.as_ref().map(|(_, assigned)| assigned);
+    let mut root = parse_node(layout)?;
     root = convert_primitives(root, &mut facts);
-    root = convert_items(root, &mut facts)?;
+    root = convert_items(root, &mut facts, assigned)?;
     root = convert_values_and_commands(root, &mut facts)?;
     if !facts.unknown_palette_colors.is_empty() {
         bail!(
@@ -282,7 +289,7 @@ pub fn down_convert_form_body_8_5_1(
         } else if block.trim_start().starts_with('{') {
             let node = parse_node(block)?;
             let node = convert_primitives(node, &mut facts);
-            let node = convert_items(node, &mut facts)?;
+            let node = convert_items(node, &mut facts, None)?;
             let node = convert_values_and_commands(node, &mut facts)?;
             trailing.push(node.to_text());
         } else {
@@ -674,17 +681,26 @@ pub fn bag_revision(
     })
 }
 
-fn convert_items(node: Node, facts: &mut FormFactsV8_5_1) -> Result<Node> {
+fn convert_items(
+    node: Node,
+    facts: &mut FormFactsV8_5_1,
+    assigned: Option<&BTreeSet<String>>,
+) -> Result<Node> {
     let Node::List(members) = node else {
         return Ok(node);
     };
     let mut members = members
         .into_iter()
-        .map(|member| convert_items(member, facts))
+        .map(|member| convert_items(member, facts, assigned))
         .collect::<Result<Vec<_>>>()?;
     let Some(id) = item_identity(&members).map(ToOwned::to_owned) else {
         return Ok(Node::List(members));
     };
+    // These records were anonymous in the input. Numbering must not make
+    // the converter admit a previously unmeasured property-bag profile.
+    if assigned.is_some_and(|assigned| assigned.contains(&id)) {
+        return Ok(Node::List(members));
+    }
     let revision = members[0].leaf().unwrap_or_default().to_owned();
     let (v8_3, appended) = item_revision(&revision)
         .ok_or_else(|| anyhow!("8.5 form item {id} declares unknown record revision {revision}"))?;
@@ -803,6 +819,25 @@ pub fn group_event_name_8_5_1(id: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numbering_keeps_anonymous_conversion_admission_without_relaxing_explicit_items() {
+        let anonymous = format!(
+            r#"{{22,{{0}},0,0,0,10,"Deferred",{}}}"#,
+            std::iter::repeat_n("0", 13).collect::<Vec<_>>().join(",")
+        );
+        let (numbered, assigned) =
+            crate::form_body::unidentified_form_item_numbering(&anonymous).unwrap();
+        let expected = parse_node(&numbered).unwrap();
+        let mut facts = FormFactsV8_5_1::default();
+        assert_eq!(
+            convert_items(expected.clone(), &mut facts, Some(&assigned)).unwrap(),
+            expected
+        );
+        assert!(facts.items.is_empty());
+        // The same explicit record still fails its unmeasured bag profile.
+        assert!(convert_items(expected, &mut FormFactsV8_5_1::default(), None).is_err());
+    }
 
     #[test]
     fn round_trips_a_tuple_with_strings_and_base64() {

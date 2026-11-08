@@ -1003,7 +1003,7 @@ const FORM_ITEM_IDENTITY_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
 /// The layout with every item stored without an id (`{0}` in place of its
 /// `{id, uuid}` identity) given one, as the platform numbers them when it
 /// writes the form: from one past the greatest id the form holds, in
-/// document order, with each container's services before its regular children.
+/// document order: core services, regular children, then appended 8.5 services.
 /// Quoted text does not contribute identities. A form loaded from XML that
 /// names no table additions gets
 /// its tables' `SearchStringAddition`/`ViewStatusAddition`/
@@ -1012,6 +1012,12 @@ const FORM_ITEM_IDENTITY_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
 /// 20..32, the first table's nine before the second's (fixture
 /// `unnumbered_additions`). `None` when no item lacks an id.
 pub fn with_unidentified_form_items_numbered(layout: &str) -> Option<String> {
+    unidentified_form_item_numbering(layout).map(|(layout, _)| layout)
+}
+
+/// The raw numbering plan also identifies newly assigned records, so layout
+/// conversion keeps their original anonymous-record admission policy.
+pub(crate) fn unidentified_form_item_numbering(layout: &str) -> Option<(String, BTreeSet<String>)> {
     const UNIDENTIFIED: &str = "{0},";
     if !layout.contains(UNIDENTIFIED) {
         return None;
@@ -1038,6 +1044,15 @@ pub fn with_unidentified_form_items_numbered(layout: &str) -> Option<String> {
         .then(|| (wrapper_start, wrapper, scalars[3]))
     };
 
+    let is_8_5 = split_1c_braced_fields(layout, 0)?
+        .first()
+        .is_some_and(|revision| revision.trim() == crate::layout_8_5_1::FORM_ROOT_REVISION_8_5_1);
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum Phase {
+        Service,
+        Child,
+        Appended,
+    }
     let mut pending = vec![(layout, false)];
     let mut order = Vec::new();
     let mut greatest = 0_i64;
@@ -1075,14 +1090,39 @@ pub fn with_unidentified_form_items_numbered(layout: &str) -> Option<String> {
         {
             greatest = greatest.max(id);
         }
-        // UUID-prefixed members are regular children; an owner's services
-        // have no such prefix. The writer emits services before children.
-        // The explicit stack preserves that order without recursive nesting.
-        for child in [true, false] {
+        // The 8.5 writer numbers the old services, regular children, then
+        // appended services. Use the converter's revision-owned tail bounds.
+        let item_header = match fields.as_slice() {
+            [_, identity, ..] => {
+                let identity_at = identity.as_ptr() as usize - layout.as_ptr() as usize;
+                (layout[identity_at..].starts_with(UNIDENTIFIED)
+                    && unidentified_at(identity_at).is_some_and(|(owner, _, _)| owner == at))
+                    || split_1c_braced_fields(identity, 0).is_some_and(|parts| {
+                        matches!(parts.as_slice(), [id, class]
+                            if class.trim() == FORM_ITEM_IDENTITY_UUID
+                                && id.trim().parse::<i64>().is_ok())
+                    })
+            }
+            _ => false,
+        };
+        let appended_start = (is_8_5 && item_header)
+            .then(|| {
+                fields
+                    .first()
+                    .and_then(|revision| crate::layout_8_5_1::item_revision(revision.trim()))
+            })
+            .flatten()
+            .and_then(|(_, appended)| fields.len().checked_sub(appended));
+        for phase in [Phase::Appended, Phase::Child, Phase::Service] {
             for (index, field) in fields.iter().enumerate().rev() {
-                if field.trim_start().starts_with('{')
-                    && form_member_follows_child_kind(&fields, index) == child
-                {
+                let member_phase = if appended_start.is_some_and(|start| index >= start) {
+                    Phase::Appended
+                } else if form_member_follows_child_kind(&fields, index) {
+                    Phase::Child
+                } else {
+                    Phase::Service
+                };
+                if field.trim_start().starts_with('{') && member_phase == phase {
                     pending.push((field, hidden));
                 }
             }
@@ -1105,7 +1145,8 @@ pub fn with_unidentified_form_items_numbered(layout: &str) -> Option<String> {
         copied = at + UNIDENTIFIED.len();
     }
     numbered.push_str(&layout[copied..]);
-    Some(numbered)
+    let assigned = numbers.values().map(ToString::to_string).collect();
+    Some((numbered, assigned))
 }
 
 /// The items with every explicit `Usual` behavior dropped, as the platform

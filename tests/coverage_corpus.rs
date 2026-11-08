@@ -937,3 +937,71 @@ fn container_service_ids_match_native_before_child_items() {
         assert_eq!(compared, 4);
     }
 }
+
+#[test]
+fn stored_context_column_service_ids_match_native() {
+    let temp = TempDirectory::new();
+    for (platform, version) in [
+        ("8.3.27.2214", "2.20"),
+        ("8.5.1.1150", "2.21"),
+        ("8.5.1.1529", "2.21"),
+    ] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-stored-context-panels");
+        let cf = temp.0.join(format!("{platform}.cf"));
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join(platform), version).unwrap();
+        let path = "CommonForms/CovContextTableReadOnlyColumns/Ext/Form.xml";
+        let selected = |bytes: &[u8]| {
+            form_item_identities(bytes)
+                .into_iter()
+                .filter(|(_, name, _)| {
+                    matches!(
+                        name.as_str(),
+                        "ValueКонтекстноеМеню" | "ValueРасширеннаяПодсказка"
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let expected = selected(&fs::read(set.join("native").join(path)).unwrap());
+        assert_eq!(expected.len(), 2);
+        assert_eq!(
+            selected(exported.files.get(path).unwrap()),
+            expected,
+            "{platform}/{path}"
+        );
+    }
+}
+
+#[test]
+fn planner_service_ids_include_native_reserved_actions_panel() {
+    let temp = TempDirectory::new();
+    let set = coverage_paths::root().join("coverage/8.5.1.1529/corpus-navigation-commands");
+    let cf = temp.0.join("set.cf");
+    fs::write(
+        &cf,
+        decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+    )
+    .unwrap();
+    let exported = cf_export(&cf, &temp.0.join("out"), "2.21").unwrap();
+    let native = read_tree(&set.join("native"));
+    let mut compared = 0;
+    for (path, bytes) in native
+        .iter()
+        .filter(|(path, _)| path.ends_with("/Form.xml"))
+    {
+        assert_eq!(
+            form_item_identities(exported.files.get(path).unwrap()),
+            form_item_identities(bytes),
+            "{path}"
+        );
+        compared += 1;
+    }
+    assert_eq!(compared, 12);
+}
