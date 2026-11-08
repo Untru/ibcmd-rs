@@ -864,3 +864,24 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn native_binary_form_attribute_compiles_for_both_dialects() {
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        let form = coverage_paths::root().join("coverage").join(platform).join(
+            "corpus-form-settings/native/CommonForms/CovPictureTitleFontEnterOnInput/Ext/Form.xml",
+        );
+        let xml = fs::read(&form).unwrap();
+        let body = ibcmd_form_writer::compile_native_form_body_through(&xml, None, None, None)
+            .unwrap_or_else(|error| {
+                panic!("{platform}: native binary form attribute refused: {error:#}")
+            });
+        assert!(
+            body.split_whitespace()
+                .collect::<String>()
+                .contains(r#"{"Pattern",{"R"}}"#),
+            "{platform}: binary attribute pattern was lost"
+        );
+        ibcmd_form_body::parse_form_body_plain(&body).unwrap();
+    }
+}

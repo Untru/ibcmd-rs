@@ -58,6 +58,7 @@ use ibcmd_form_schema::{
     form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
     form_tooltip_representation_supports_xml_tag, normalize_form_table_command_bar_location_xml,
 };
+use ibcmd_schema::form_source_defaults::{FormBinaryDataQualifier, FormBinaryDataType};
 use ibcmd_schema::{
     FormTextDocumentContextMenuMultiplicity, bundled_dcs_conditional_appearance_policy,
     bundled_dcs_filter_policy, bundled_dcs_form_attributes_conditional_appearance_policy,
@@ -314,6 +315,8 @@ pub struct FormXmlAttribute {
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
     date_fractions: Option<String>,
+    binary_length: Option<String>,
+    binary_allowed_length: Option<String>,
     main_attribute: Option<bool>,
     #[doc(hidden)]
     pub settings: Option<FormXmlDynamicListSettings>,
@@ -8095,6 +8098,17 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
         match event {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                if path_is(
+                    &path,
+                    &FORM_ATTRIBUTE_PATH,
+                    &["Type", "BinaryDataQualifiers"],
+                ) && FormBinaryDataQualifier::from_xml_local_name(&local).is_none()
+                {
+                    return Err(anyhow!(
+                        "unsupported Form Attribute BinaryDataQualifiers/{local}"
+                    ));
+                }
+
                 // Cleared on every open. The list of names this used to
                 // test was extended three times in one day, each time
                 // after a property was found reading the text of the
@@ -8607,6 +8621,16 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                if path_is(
+                    &path,
+                    &FORM_ATTRIBUTE_PATH,
+                    &["Type", "BinaryDataQualifiers"],
+                ) {
+                    return Err(anyhow!(
+                        "empty or unsupported Form Attribute BinaryDataQualifiers/{local}"
+                    ));
+                }
+
                 // `<v8:lang/>` and `<v8:content/>` are empty strings of a
                 // localized item -- a title can name one language as "" --
                 // and never reach the text arm either.
@@ -9544,6 +9568,9 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
                 }
             }
             Ok(Event::CData(text)) => {
+                if form_attribute_binary_qualifier_part(&path).is_some() {
+                    text_value.push_str(text.xml_content()?.as_ref());
+                }
                 if path_ends_with_for_child_control_border(&path, &current_child_items)
                     && !text.xml_content()?.trim().is_empty()
                     && let Some(item) = current_child_items.last_mut()
@@ -10371,6 +10398,23 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
                             .and_then(|attribute| attribute.use_always.as_mut())
                         {
                             list.push(nested_text.trim().to_string());
+                        }
+                    }
+                    _ if form_attribute_binary_qualifier_part(&path).is_some() => {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            let part = form_attribute_binary_qualifier_part(&path).unwrap();
+                            let target = match part {
+                                FormBinaryDataQualifier::Length => &mut attribute.binary_length,
+                                FormBinaryDataQualifier::AllowedLength => {
+                                    &mut attribute.binary_allowed_length
+                                }
+                            };
+                            if target.replace(text_value.trim().to_owned()).is_some() {
+                                return Err(anyhow!(
+                                    "duplicate Form Attribute BinaryDataQualifiers/{}",
+                                    part.xml_local_name()
+                                ));
+                            }
                         }
                     }
                     // A `<v8:TypeSet>` is one entry of the type pattern, and
@@ -13159,6 +13203,8 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         number_fraction_digits: None,
         number_allowed_sign: None,
         date_fractions: None,
+        binary_length: None,
+        binary_allowed_length: None,
         main_attribute: None,
         settings: None,
         element_type: None,
@@ -22224,19 +22270,35 @@ fn format_form_attribute_type_pattern(
         .chain(attribute.types.iter())
         .cloned()
         .collect::<Vec<_>>();
-    let value_types = parse_metadata_type_pattern_elements(
-        "Form Attribute",
-        &ordered,
-        attribute.string_length.clone(),
-        attribute.string_allowed_length.clone(),
-        attribute.number_digits.clone(),
-        attribute.number_fraction_digits.clone(),
-        attribute.number_allowed_sign.clone(),
-        attribute.date_fractions.clone(),
-        StringAllowedLengthCoding::VariableIsOne,
-        source,
-        true,
-    )?;
+    let value_types = ordered
+        .iter()
+        .map(|type_name| {
+            if let Some(binary) = FormBinaryDataType::from_xml(
+                type_name,
+                attribute.binary_length.as_deref(),
+                attribute.binary_allowed_length.as_deref(),
+            )
+            .map_err(anyhow::Error::msg)?
+            {
+                return Ok(MetadataTypePatternElement::BinaryData {
+                    length: binary.length,
+                    allowed_length_flag: binary.allowed_length_flag,
+                });
+            }
+            parse_metadata_type_pattern_element(
+                "Form Attribute",
+                type_name,
+                attribute.string_length.as_deref(),
+                attribute.string_allowed_length.as_deref(),
+                attribute.number_digits.as_deref(),
+                attribute.number_fraction_digits.as_deref(),
+                attribute.number_allowed_sign.as_deref(),
+                attribute.date_fractions.as_deref(),
+                StringAllowedLengthCoding::VariableIsOne,
+                source,
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(format_metadata_type_pattern(&value_types))
 }
 
@@ -23402,6 +23464,11 @@ pub enum MetadataTypePatternElement {
     Reference {
         type_id: String,
     },
+    /// A form attribute's binary data, stored as `{"R"}` or `{"R",<length>,<allowed length>}`.
+    BinaryData {
+        length: u32,
+        allowed_length_flag: u8,
+    },
     /// `v8:Null`, stored as `{"L"}`.
     Null,
 }
@@ -23805,6 +23872,11 @@ pub fn format_metadata_type_pattern_element(value_type: &MetadataTypePatternElem
             fractions: Some(mark),
         } => format!(r#"{{"D","{mark}"}}"#),
         MetadataTypePatternElement::Reference { type_id } => format!("{{\"#\",{type_id}}}"),
+        MetadataTypePatternElement::BinaryData { length: 0, .. } => r#"{"R"}"#.to_string(),
+        MetadataTypePatternElement::BinaryData {
+            length,
+            allowed_length_flag,
+        } => format!(r#"{{"R",{length},{allowed_length_flag}}}"#),
         MetadataTypePatternElement::Null => r#"{"L"}"#.to_string(),
     }
 }
@@ -23928,6 +24000,21 @@ fn form_type_spec_part<'a>(path: &'a [String], owner: &[&str], wrapped: bool) ->
     None
 }
 
+fn form_attribute_binary_qualifier_part(path: &[String]) -> Option<FormBinaryDataQualifier> {
+    [
+        FormBinaryDataQualifier::Length,
+        FormBinaryDataQualifier::AllowedLength,
+    ]
+    .into_iter()
+    .find(|part| {
+        path_is(
+            path,
+            &FORM_ATTRIBUTE_PATH,
+            &["Type", "BinaryDataQualifiers", part.xml_local_name()],
+        )
+    })
+}
+
 /// Every text node a form's declared types read, in all four places.
 ///
 /// Two spellings were unread wherever a type is declared: `<v8:TypeSet>`,
@@ -23936,7 +24023,8 @@ fn form_type_spec_part<'a>(path: &'a [String], owner: &[&str], wrapped: bool) ->
 /// `{"D","T"}`. A column's own type, its title and its `<FillCheck>`, and a
 /// value list's element type, were not read at all.
 fn path_ends_with_for_form_type_text(path: &[String]) -> bool {
-    path_is(path, &FORM_ATTRIBUTE_PATH, &["Type", "TypeSet"])
+    form_attribute_binary_qualifier_part(path).is_some()
+        || path_is(path, &FORM_ATTRIBUTE_PATH, &["Type", "TypeSet"])
         || path_is(
             path,
             &FORM_ATTRIBUTE_PATH,
@@ -24226,6 +24314,83 @@ mod tests {
         r#"xmlns:xs="http://www.w3.org/2001/XMLSchema" "#,
         r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">"#,
     );
+
+    #[test]
+    fn binary_form_attribute_qualifiers_preserve_values_and_mixed_types() -> anyhow::Result<()> {
+        for (qualifiers, length, flag, expected) in [
+            ("", 0, 1, r#"{"Pattern",{"B"},{"R"}}"#),
+            (
+                "<v8:Length>0</v8:Length><v8:AllowedLength>Variable</v8:AllowedLength>",
+                0,
+                1,
+                r#"{"Pattern",{"B"},{"R"}}"#,
+            ),
+            (
+                "<v8:Length>16</v8:Length><v8:AllowedLength>Variable</v8:AllowedLength>",
+                16,
+                1,
+                r#"{"Pattern",{"B"},{"R",16,1}}"#,
+            ),
+            (
+                "<v8:Length><![CDATA[16]]></v8:Length><v8:AllowedLength>Fixed</v8:AllowedLength>",
+                16,
+                0,
+                r#"{"Pattern",{"B"},{"R",16,0}}"#,
+            ),
+        ] {
+            let xml = format!(
+                "{FORM_XML_HEAD}<Attributes><Attribute name=\"Payload\" id=\"1\"><Type><v8:Type>xs:boolean</v8:Type><v8:Type>xs:base64Binary</v8:Type><v8:BinaryDataQualifiers>{qualifiers}</v8:BinaryDataQualifiers></Type></Attribute></Attributes></Form>"
+            );
+            let properties = super::parse_form_xml_body_properties(xml.as_bytes())?;
+            let pattern =
+                super::format_form_attribute_type_pattern(&properties.attributes[0], None)?;
+            assert_eq!(pattern, expected);
+            let parsed = ibcmd_1c_vocab::parse_form_metadata_type_pattern(
+                &pattern,
+                &std::collections::BTreeMap::new(),
+                || false,
+            )
+            .unwrap();
+            assert_eq!(
+                parsed,
+                vec![
+                    ibcmd_1c_vocab::ConstantValueType::Boolean,
+                    ibcmd_1c_vocab::ConstantValueType::BinaryData {
+                        length,
+                        allowed_length_flag: flag
+                    }
+                ]
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn binary_form_attribute_qualifiers_fail_closed() {
+        for qualifiers in [
+            "<v8:Length/>",
+            "<v8:AllowedLength/>",
+            "<v8:Length>-1</v8:Length>",
+            "<v8:Length>4294967296</v8:Length>",
+            "<v8:Length>invalid</v8:Length>",
+            "<v8:AllowedLength>Unknown</v8:AllowedLength>",
+            "<v8:Length>0</v8:Length><v8:AllowedLength>Fixed</v8:AllowedLength>",
+            "<v8:Length>1</v8:Length><v8:Length>2</v8:Length>",
+            "<v8:Extra/>",
+        ] {
+            let xml = format!(
+                "{FORM_XML_HEAD}<Attributes><Attribute name=\"Payload\" id=\"1\"><Type><v8:Type>xs:base64Binary</v8:Type><v8:BinaryDataQualifiers>{qualifiers}</v8:BinaryDataQualifiers></Type></Attribute></Attributes></Form>"
+            );
+            let result =
+                super::parse_form_xml_body_properties(xml.as_bytes()).and_then(|properties| {
+                    super::format_form_attribute_type_pattern(&properties.attributes[0], None)
+                });
+            assert!(
+                result.is_err(),
+                "accepted invalid binary qualifiers: {qualifiers}"
+            );
+        }
+    }
 
     #[test]
     fn choice_list_localized_content_preserves_stored_carriage_returns() -> anyhow::Result<()> {
