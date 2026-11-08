@@ -128,7 +128,13 @@ This report is staged before the full gate so the tracked-file guards see
 it. Final staged CI on the corrected code completed29PASS, including workspace,
 root integration and root library; existing ignored tests retained.
 The earlier failed gate is explicitly recorded above and is not a PASS.
-Independent fresh-context review is pending.
+Independent fresh-context review APPROVE at f053eafd: check seven PASS,
+round-trip four PASS, metadata-blob230 PASS, whole native form and whole
+stored-body regressions PASS. The reviewer independently repeated the final
+native matrix in separate databases/output directories: all30 target
+commands0,48/48 complete-file comparisons equal and stable database hashes;
+full1529 routes retain only the same reproduced TitleFont refusal. Parent
+performed the implementation and all original checks recorded above.
 
 ## Native matrix hashes
 
