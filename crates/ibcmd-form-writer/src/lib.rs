@@ -7488,19 +7488,53 @@ pub fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
                     ));
                 }
                 if local == ibcmd_form_schema::FormPeriodFieldSchema::XML_TAG {
+                    if period_depth.is_some() {
+                        return Err(anyhow!("nested PeriodField is not measured"));
+                    }
                     if event.name().as_ref() != local.as_bytes() {
                         return Err(anyhow!("qualified PeriodField is not measured"));
                     }
+                    let mut attribute_count = 0;
                     for attribute in event.attributes() {
                         let attribute = attribute?;
-                        if !ibcmd_form_schema::FormPeriodFieldSchema::supports_xml_attribute(
+                        if !ibcmd_form_schema::FormPeriodFieldSchema::xml_attribute_is_measured(
                             attribute.key.as_ref(),
+                            &attribute.unescape_value()?,
                         ) {
                             return Err(anyhow!("PeriodField attribute is not measured"));
                         }
+                        attribute_count += 1;
+                    }
+                    if attribute_count
+                        != ibcmd_form_schema::FormPeriodFieldSchema::XML_ATTRIBUTE_COUNT
+                    {
+                        return Err(anyhow!(
+                            "PeriodField requires its measured name and id attributes"
+                        ));
                     }
                     period_properties.clear();
                     period_depth = Some(depth + 1);
+                }
+                if period_depth == Some(depth)
+                    && !ibcmd_form_schema::FormPeriodFieldSchema::is_xml_service_property(&local)
+                {
+                    if event.attributes().next().is_some() {
+                        return Err(anyhow!(
+                            "PeriodField scalar <{local}> attributes are not measured"
+                        ));
+                    }
+                    let value = reader
+                        .read_text(event.name())
+                        .context("failed to read PeriodField scalar")?;
+                    if !ibcmd_form_schema::FormPeriodFieldSchema::xml_scalar_is_measured(
+                        &local, &value,
+                    ) {
+                        return Err(anyhow!(
+                            "PeriodField scalar <{local}> value or shape is not measured"
+                        ));
+                    }
+                    buffer.clear();
+                    continue;
                 }
                 if depth == 0 {
                     if root_seen || local != "Form" {
@@ -7512,10 +7546,20 @@ pub fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                if local == ibcmd_form_schema::FormPeriodFieldSchema::XML_TAG {
+                    return Err(anyhow!("empty PeriodField is not measured"));
+                }
                 if period_depth == Some(depth)
                     && !ibcmd_form_schema::FormPeriodFieldSchema::supports_xml_property(&local)
                 {
                     return Err(anyhow!("PeriodField property <{local}> is not measured"));
+                }
+                if period_depth == Some(depth)
+                    && !ibcmd_form_schema::FormPeriodFieldSchema::is_xml_service_property(&local)
+                {
+                    return Err(anyhow!(
+                        "empty PeriodField scalar <{local}> is not measured"
+                    ));
                 }
                 if period_depth == Some(depth)
                     && (event.name().as_ref() != local.as_bytes()
@@ -7544,6 +7588,14 @@ pub fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
                 if depth == 0 {
                     root_closed = true;
                 }
+            }
+            Ok(Event::Text(text)) if period_depth == Some(depth) => {
+                if !text.xml_content()?.trim().is_empty() {
+                    return Err(anyhow!("PeriodField mixed text is not measured"));
+                }
+            }
+            Ok(Event::CData(_)) if period_depth == Some(depth) => {
+                return Err(anyhow!("PeriodField mixed CDATA is not measured"));
             }
             Ok(Event::Text(text)) if depth == 0 => {
                 if !text

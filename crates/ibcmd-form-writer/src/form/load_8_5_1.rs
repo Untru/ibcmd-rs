@@ -308,6 +308,8 @@ fn down_convert_xml_2_21_form_as(
     items_root: Option<&Path>,
     layout: FormLayout,
 ) -> Result<(String, FormLoadFactsV8_5_1)> {
+    // Check source facets before the projection can remove an unsupported one.
+    crate::validate_form_xml_document(xml.as_bytes())?;
     let mut facts = FormLoadFactsV8_5_1::default();
     let mut edits = XmlEdits::new_lenient(xml)?;
     let root = edits

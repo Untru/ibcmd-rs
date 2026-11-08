@@ -4161,6 +4161,7 @@ pub struct FormPeriodFieldSchema;
 
 impl FormPeriodFieldSchema {
     pub const XML_TAG: &'static str = "PeriodField";
+    pub const XML_ATTRIBUTE_COUNT: usize = 2;
     pub fn is_item_tag(tag: &str) -> bool {
         tag == Self::XML_TAG
     }
@@ -4193,8 +4194,29 @@ impl FormPeriodFieldSchema {
         )
     }
 
-    pub fn supports_xml_attribute(name: &[u8]) -> bool {
-        matches!(name, b"name" | b"id")
+    pub fn xml_attribute_is_measured(name: &[u8], value: &str) -> bool {
+        match name {
+            b"name" => !value.is_empty(),
+            b"id" => value.parse::<i64>().is_ok_and(|id| id > 0),
+            _ => false,
+        }
+    }
+
+    pub fn is_xml_service_property(name: &str) -> bool {
+        matches!(name, "ContextMenu" | "ExtendedTooltip")
+    }
+
+    pub fn xml_scalar_is_measured(name: &str, value: &str) -> bool {
+        let value = value.trim();
+        match name {
+            "Width" | "Height" | "MaxWidth" | "MaxHeight" => value
+                .parse::<u32>()
+                .is_ok_and(|number| number.to_string() == value),
+            "HorizontalStretch" | "VerticalStretch" | "AutoMaxWidth" | "AutoMaxHeight" => {
+                matches!(value, "true" | "false")
+            }
+            _ => false,
+        }
     }
 
     pub fn events_are_measured(events: &str) -> bool {

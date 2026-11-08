@@ -203,6 +203,11 @@ fn period_field_unmeasured_xml_properties_refuse() {
             "<PeriodField name=\"Period\" id=\"1\" unknown=\"1\">",
             "<PeriodField name=\"Period\" id=\"1\"><Width>1</Width><Width>2</Width>",
             "<PeriodField name=\"Period\" id=\"1\"><xr:Width>1</xr:Width>",
+            "<PeriodField name=\"Period\">",
+            "<PeriodField id=\"1\">",
+            "<PeriodField name=\"\" id=\"1\">",
+            "<PeriodField name=\"Period\" id=\"0\">",
+            "<PeriodField name=\"Period\" id=\"1\">unexpected text",
         ] {
             let changed = xml.replace("<PeriodField name=\"Period\" id=\"1\">", malformed);
             let error = ibcmd_form_writer::compile_native_form_body_through(
@@ -215,6 +220,47 @@ fn period_field_unmeasured_xml_properties_refuse() {
             assert!(
                 error.to_string().contains("PeriodField"),
                 "{build}: {error:#}"
+            );
+        }
+    }
+}
+
+#[test]
+fn period_field_unmeasured_scalar_shapes_refuse() {
+    for build in ["8.3.27.2214", "8.5.1.1150"] {
+        let path = coverage_paths::root()
+            .join("coverage")
+            .join(build)
+            .join("corpus-managed-forms/native/CommonForms/CovPeriodField/Ext/Form.xml");
+        let xml = fs::read_to_string(path).unwrap();
+        for scalar in [
+            "<Width/>",
+            "<Width></Width>",
+            "<Width> </Width>",
+            "<Width><Value>35</Value></Width>",
+            "<Width other=\"x\">35</Width>",
+            "<Width><![CDATA[35]]></Width>",
+            "<Width>&#51;&#53;</Width>",
+            "<Width>-1</Width>",
+            "<Width>not-number</Width>",
+            "<Width>4294967296</Width>",
+            "<HorizontalStretch/>",
+            "<AutoMaxHeight>2</AutoMaxHeight>",
+        ] {
+            let changed = xml.replace(
+                "<PeriodField name=\"Period\" id=\"1\">",
+                &format!("<PeriodField name=\"Period\" id=\"1\">{scalar}"),
+            );
+            let error = ibcmd_form_writer::compile_native_form_body_through(
+                changed.as_bytes(),
+                None,
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("PeriodField"),
+                "{build}: {scalar}: {error:#}"
             );
         }
     }
