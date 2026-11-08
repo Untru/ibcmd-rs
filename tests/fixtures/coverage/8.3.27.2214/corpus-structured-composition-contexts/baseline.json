@@ -1,0 +1,18 @@
+{
+  "equal": [
+    "CovStructuredChartPointGroupAppearance",
+    "CovStructuredChartPointGroupOutput",
+    "CovStructuredChartSeriesGroupAppearance",
+    "CovStructuredChartSeriesGroupOutput",
+    "CovStructuredCompositionTemplate",
+    "CovStructuredGroupAppearance",
+    "CovStructuredGroupOutput",
+    "CovStructuredMultipleSettingsGroupOutput",
+    "CovStructuredNestedGroupAppearance",
+    "CovStructuredNestedGroupOutput",
+    "CovStructuredTableColumnGroupAppearance",
+    "CovStructuredTableColumnGroupOutput",
+    "CovStructuredTableRowGroupAppearance",
+    "CovStructuredTableRowGroupOutput"
+  ]
+}

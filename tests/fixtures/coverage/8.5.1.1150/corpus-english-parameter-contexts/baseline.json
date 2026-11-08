@@ -1,0 +1,11 @@
+{
+  "equal": [
+    "CovEnglishParametersCalculatedAppearance",
+    "CovEnglishParametersConditionalAppearance",
+    "CovEnglishParametersFieldAppearance",
+    "CovEnglishParametersFieldInput",
+    "CovEnglishParametersOutput",
+    "CovEnglishParametersParameterInput",
+    "CovEnglishRulesTemplate"
+  ]
+}

@@ -184,6 +184,8 @@ pub(super) fn selected_configuration_source_asset_index_needs_with_metadata(
         }
     }) {
         needs.object_refs = true;
+        // The configuration root determines standard DCS parameter spelling.
+        needs.field_refs = true;
     }
     if metadata_texts.iter().any(|row| {
         row.object_code == Some(4)

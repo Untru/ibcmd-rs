@@ -5,6 +5,7 @@
 mod comparison;
 pub mod config_dump_info;
 pub mod dcs;
+pub mod dcs_parameters;
 pub mod dcs_schema;
 pub mod dcs_storage;
 pub mod dcs_template;

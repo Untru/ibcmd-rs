@@ -2763,6 +2763,12 @@ fn write_source_asset_inner(
                     body.plaintext().to_vec()
                 }
             };
+            let content = if context.metadata_field_declarations.english_script() {
+                ibcmd_xml::dcs_parameters::with_english_parameter_names(&content)
+                    .with_context(|| "failed to write English data-composition parameter names")?
+            } else {
+                content
+            };
             // A schema stored by 8.5 declares the palette namespace on its
             // settings roots; 8.3.27 writes no such declaration (15 templates
             // of one 8.3.27 corpus, `ExchangePlans/ОбменССайтом/Templates/
