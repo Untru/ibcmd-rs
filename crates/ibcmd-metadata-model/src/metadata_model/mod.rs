@@ -206,11 +206,11 @@ pub fn validate_orphan_characteristics_source(
     context: &DescriptorContext,
 ) -> Result<()> {
     use ibcmd_schema::characteristics as schema;
-    let doc = MetadataXml::parse(xml)?;
+    let roots = ibcmd_metadata_blob::xml::parse_element_forest_raw_line_breaks(xml)?;
     let mut fields = Vec::new();
     // Detection precedes owner/Properties selection: compact accessors select
     // the first matching wrapper and would otherwise hide an orphan profile.
-    let mut candidates = vec![(&doc.root, false)];
+    let mut candidates = roots.iter().map(|root| (root, false)).collect::<Vec<_>>();
     while let Some((element, in_characteristics)) = candidates.pop() {
         let in_characteristics = in_characteristics || element.name == schema::PROPERTY;
         if in_characteristics && schema::is_identity_field(&element.name) {
@@ -257,7 +257,7 @@ pub fn validate_orphan_characteristics_source(
         }
     }
     // Source whitespace is never an empty source in the new profile.
-    let mut pending = vec![&doc.root];
+    let mut pending = roots.iter().collect::<Vec<_>>();
     while let Some(element) = pending.pop() {
         if element.name == schema::PROPERTY {
             let mut groups = element.children.iter().collect::<Vec<_>>();

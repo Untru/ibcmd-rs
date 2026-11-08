@@ -165,12 +165,25 @@ pub fn parse_element_tree_raw_line_breaks(xml: &[u8]) -> Result<Element> {
     parse_element_tree_with(xml, false)
 }
 
+/// Retains every top-level envelope for bounded admission before a caller
+/// selects one owner. This compact reader remains lenient about document roots;
+/// callers admitting a detected profile must validate the original XML strictly.
+pub fn parse_element_forest_raw_line_breaks(xml: &[u8]) -> Result<Vec<Element>> {
+    parse_element_forest_with(xml, false)
+}
+
 fn parse_element_tree_with(xml: &[u8], normalize_line_breaks: bool) -> Result<Element> {
+    parse_element_forest_with(xml, normalize_line_breaks)?
+        .pop()
+        .ok_or_else(|| anyhow!("XML has no root element"))
+}
+
+fn parse_element_forest_with(xml: &[u8], normalize_line_breaks: bool) -> Result<Vec<Element>> {
     let xml = xml.strip_prefix(b"\xef\xbb\xbf").unwrap_or(xml);
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut stack: Vec<Element> = Vec::new();
-    let mut root: Option<Element> = None;
+    let mut roots = Vec::new();
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(start)) => stack.push(element_from_start(&start)?),
@@ -178,14 +191,14 @@ fn parse_element_tree_with(xml: &[u8], normalize_line_breaks: bool) -> Result<El
                 let element = element_from_start(&start)?;
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(element),
-                    None => root = Some(element),
+                    None => roots.push(element),
                 }
             }
             Ok(Event::End(_)) => {
                 let element = stack.pop().ok_or_else(|| anyhow!("unbalanced XML"))?;
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(element),
-                    None => root = Some(element),
+                    None => roots.push(element),
                 }
             }
             Ok(Event::Text(text)) => {
@@ -219,7 +232,7 @@ fn parse_element_tree_with(xml: &[u8], normalize_line_breaks: bool) -> Result<El
         }
         buffer.clear();
     }
-    root.ok_or_else(|| anyhow!("XML has no root element"))
+    Ok(roots)
 }
 
 fn resolve_reference(name: &str) -> Result<String> {
@@ -247,6 +260,23 @@ fn resolve_reference(name: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admission_forest_keeps_every_root_without_changing_legacy_selection() {
+        let source = b"<First/><Second/>";
+        let roots = parse_element_forest_raw_line_breaks(source).unwrap();
+        assert_eq!(
+            roots
+                .iter()
+                .map(|root| root.name.as_str())
+                .collect::<Vec<_>>(),
+            ["First", "Second"]
+        );
+        assert_eq!(
+            parse_element_tree_raw_line_breaks(source).unwrap().name,
+            "Second"
+        );
+    }
 
     #[test]
     fn reads_local_names_attributes_text_and_entities() {

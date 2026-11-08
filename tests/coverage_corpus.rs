@@ -874,6 +874,22 @@ fn orphan_characteristics_reject_hidden_duplicate_envelopes() {
         let owner_end = original.find("</Catalog>").unwrap() + "</Catalog>".len();
         let cases = [
             (
+                "orphan in first XML root",
+                format!(
+                    "{}{}",
+                    original,
+                    &without[without.find("<MetaDataObject ").unwrap()..]
+                ),
+            ),
+            (
+                "orphan in last XML root",
+                format!(
+                    "{}{}",
+                    without,
+                    &original[original.find("<MetaDataObject ").unwrap()..]
+                ),
+            ),
+            (
                 "hidden block after empty canonical block",
                 without
                     .replace("</Properties>", "<Characteristics/></Properties>")
