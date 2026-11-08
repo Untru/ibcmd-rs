@@ -158,7 +158,7 @@ pub fn install_unadmitted_form_asset(db: &Path, opaque: bool) {
     let body = if opaque {
         // A diagnosed opaque ChoiceList is normally an observational report,
         // rather than a conversion error. Selected export must reject it too.
-        format!("{{4,{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{0}}}}")
+        format!("{{4,{{50,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{0}}}}")
     } else {
         format!("{{4,{{0}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{4,1,{attribute}}}}}")
     }.into_bytes();
