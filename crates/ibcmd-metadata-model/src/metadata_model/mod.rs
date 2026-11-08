@@ -198,6 +198,63 @@ pub fn md_base(uuid: &str, properties: &Element) -> Brace {
     ]
 }
 
+fn orphan_characteristics_admission_source(xml: &[u8]) -> Result<(Vec<Element>, bool)> {
+    use ibcmd_metadata_blob::xml::ElementTextEvent;
+    use ibcmd_schema::characteristics as schema;
+    struct Frame {
+        characteristics: bool,
+        filter_value: bool,
+        identity_scope: bool,
+        probe: Option<schema::OrphanMarkerProbe>,
+    }
+    let mut frames: Vec<Frame> = Vec::new();
+    let mut observed_marker = false;
+    let roots =
+        ibcmd_metadata_blob::xml::parse_element_forest_raw_line_breaks_with_events(xml, |event| {
+            match event {
+                ElementTextEvent::Start(name) => {
+                    let characteristics =
+                        frames.last().is_some_and(|parent| parent.characteristics)
+                            || name == schema::PROPERTY;
+                    // A new candidate container cannot hide behind a disguised
+                    // filter wrapper; a real filter union does not name fields.
+                    let filter_value = name != schema::PROPERTY
+                        && (frames.last().is_some_and(|parent| parent.filter_value)
+                            || name == schema::FILTER_VALUE);
+                    let identity_scope = frames.last().is_some_and(|parent| parent.identity_scope)
+                        || (characteristics && !filter_value && schema::is_identity_field(name));
+                    frames.push(Frame {
+                        characteristics,
+                        filter_value,
+                        identity_scope,
+                        probe: identity_scope.then(schema::OrphanMarkerProbe::default),
+                    });
+                }
+                ElementTextEvent::Text(text) => {
+                    if !observed_marker {
+                        for frame in frames.iter_mut().rev() {
+                            if let Some(probe) = frame.probe.as_mut() {
+                                probe.observe(text);
+                                if probe.is_marker() {
+                                    observed_marker = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                ElementTextEvent::End => {
+                    frames.pop();
+                }
+            }
+        })?;
+    observed_marker |= frames
+        .iter()
+        .filter_map(|frame| frame.probe.as_ref())
+        .any(schema::OrphanMarkerProbe::is_marker);
+    Ok((roots, observed_marker))
+}
+
 /// Admits only the newly supported detached-marker profile through the strict
 /// codec. Older profiles retain their existing admission contract.
 pub fn validate_orphan_characteristics_source(
@@ -206,7 +263,7 @@ pub fn validate_orphan_characteristics_source(
     context: &DescriptorContext,
 ) -> Result<()> {
     use ibcmd_schema::characteristics as schema;
-    let roots = ibcmd_metadata_blob::xml::parse_element_forest_raw_line_breaks(xml)?;
+    let (roots, observed_marker) = orphan_characteristics_admission_source(xml)?;
     let mut fields = Vec::new();
     // Detection precedes owner/Properties selection: compact accessors select
     // the first matching wrapper and would otherwise hide an orphan profile.
@@ -223,10 +280,7 @@ pub fn validate_orphan_characteristics_source(
                 .map(|child| (child, in_characteristics)),
         );
     }
-    if !fields
-        .iter()
-        .any(|field| schema::orphan_standard_attribute_marker(field.text.trim()).is_some())
-    {
+    if !observed_marker {
         return Ok(());
     }
     ibcmd_xml::metadata::validate_characteristics_document(
@@ -409,5 +463,71 @@ mod adopted_default_tests {
         assert!(absent_on_adopted(properties, "CodeLength"));
         assert!(!absent_on_adopted(properties, "UseStandardCommands"));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod orphan_admission_tests {
+    use super::orphan_characteristics_admission_source;
+
+    #[test]
+    fn identity_detection_observes_ordered_descendants_but_excludes_filter_union() {
+        for value in [
+            "-2<Unknown>tail</Unknown>",
+            "<Unknown>-2</Unknown><Extra>tail</Extra>",
+            "<Unknown>-2</Unknown>",
+            "-<Unknown>2</Unknown>",
+            "<Unknown>-</Unknown>2",
+            "<Unknown>-</Unknown><Unknown>2</Unknown>",
+            "-<![CDATA[2]]>",
+            "&#45;2",
+        ] {
+            let xml = format!(
+                "<Owner><Characteristics><KeyField>{value}</KeyField></Characteristics></Owner>"
+            );
+            assert!(
+                orphan_characteristics_admission_source(xml.as_bytes())
+                    .unwrap()
+                    .1,
+                "{value}"
+            );
+        }
+        for value in ["-2", "<![CDATA[-2]]>", "<KeyField>-2</KeyField>"] {
+            let xml = format!(
+                "<Owner><Characteristics><TypesFilterValue>{value}</TypesFilterValue></Characteristics></Owner>"
+            );
+            assert!(
+                !orphan_characteristics_admission_source(xml.as_bytes())
+                    .unwrap()
+                    .1,
+                "{value}"
+            );
+        }
+        for value in [
+            "0:11111111-2111-4111-8111-111111111111",
+            "0:11111111<![CDATA[-2]]>111-4111-8111-111111111111",
+        ] {
+            let xml = format!(
+                "<Owner><Characteristics><KeyField>{value}</KeyField></Characteristics></Owner>"
+            );
+            assert!(
+                !orphan_characteristics_admission_source(xml.as_bytes())
+                    .unwrap()
+                    .1,
+                "{value}"
+            );
+        }
+        let disguised = b"<Owner><TypesFilterValue><Characteristics><KeyField>-2</KeyField></Characteristics></TypesFilterValue></Owner>";
+        assert!(
+            orphan_characteristics_admission_source(disguised)
+                .unwrap()
+                .1
+        );
+        let unfinished = b"<Closed/><Owner><Characteristics><KeyField><Unknown>-</Unknown>2";
+        assert!(
+            orphan_characteristics_admission_source(unfinished)
+                .unwrap()
+                .1
+        );
     }
 }

@@ -165,15 +165,33 @@ pub fn parse_element_tree_raw_line_breaks(xml: &[u8]) -> Result<Element> {
     parse_element_tree_with(xml, false)
 }
 
+/// Ordered lexical text events from the compact reader. Names are local names;
+/// these events support bounded detection, never namespace admission.
+pub enum ElementTextEvent<'a> {
+    Start(&'a str),
+    Text(&'a str),
+    End,
+}
+
 /// Retains closed and unfinished top-level envelopes for bounded admission before a caller
 /// selects one owner. This compact reader remains lenient about document roots;
 /// callers admitting a detected profile must validate the original XML strictly.
 pub fn parse_element_forest_raw_line_breaks(xml: &[u8]) -> Result<Vec<Element>> {
-    parse_element_forest_with(xml, false, true)
+    parse_element_forest_raw_line_breaks_with_events(xml, |_| {})
+}
+
+/// Retains the admission forest while observing semantic text in source order,
+/// including descendant text, CDATA and decoded entity references. Unfinished
+/// elements stay open in the event stream and are retained in the forest.
+pub fn parse_element_forest_raw_line_breaks_with_events(
+    xml: &[u8],
+    events: impl FnMut(ElementTextEvent<'_>),
+) -> Result<Vec<Element>> {
+    parse_element_forest_with(xml, false, true, events)
 }
 
 fn parse_element_tree_with(xml: &[u8], normalize_line_breaks: bool) -> Result<Element> {
-    parse_element_forest_with(xml, normalize_line_breaks, false)?
+    parse_element_forest_with(xml, normalize_line_breaks, false, |_| {})?
         .pop()
         .ok_or_else(|| anyhow!("XML has no root element"))
 }
@@ -182,6 +200,7 @@ fn parse_element_forest_with(
     xml: &[u8],
     normalize_line_breaks: bool,
     retain_unfinished: bool,
+    mut events: impl FnMut(ElementTextEvent<'_>),
 ) -> Result<Vec<Element>> {
     let xml = xml.strip_prefix(b"\xef\xbb\xbf").unwrap_or(xml);
     let mut reader = Reader::from_reader(xml);
@@ -190,9 +209,15 @@ fn parse_element_forest_with(
     let mut roots = Vec::new();
     loop {
         match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(start)) => stack.push(element_from_start(&start)?),
+            Ok(Event::Start(start)) => {
+                let element = element_from_start(&start)?;
+                events(ElementTextEvent::Start(&element.name));
+                stack.push(element);
+            }
             Ok(Event::Empty(start)) => {
                 let element = element_from_start(&start)?;
+                events(ElementTextEvent::Start(&element.name));
+                events(ElementTextEvent::End);
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(element),
                     None => roots.push(element),
@@ -200,6 +225,7 @@ fn parse_element_forest_with(
             }
             Ok(Event::End(_)) => {
                 let element = stack.pop().ok_or_else(|| anyhow!("unbalanced XML"))?;
+                events(ElementTextEvent::End);
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(element),
                     None => roots.push(element),
@@ -214,20 +240,23 @@ fn parse_element_forest_with(
                     };
                     let value = quick_xml::escape::unescape(value.as_ref())
                         .context("bad XML text escape")?;
+                    events(ElementTextEvent::Text(&value));
                     current.text.push_str(&value);
                 }
             }
             Ok(Event::CData(data)) => {
                 if let Some(current) = stack.last_mut() {
-                    current
-                        .text
-                        .push_str(&String::from_utf8_lossy(data.as_ref()));
+                    let value = String::from_utf8_lossy(data.as_ref());
+                    events(ElementTextEvent::Text(&value));
+                    current.text.push_str(&value);
                 }
             }
             Ok(Event::GeneralRef(reference)) => {
                 if let Some(current) = stack.last_mut() {
                     let name = String::from_utf8_lossy(reference.as_ref()).into_owned();
-                    current.text.push_str(&resolve_reference(&name)?);
+                    let value = resolve_reference(&name)?;
+                    events(ElementTextEvent::Text(&value));
+                    current.text.push_str(&value);
                 }
             }
             Ok(Event::Eof) => break,

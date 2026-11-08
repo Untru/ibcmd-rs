@@ -874,6 +874,13 @@ fn orphan_characteristics_reject_hidden_duplicate_envelopes() {
         let owner_end = original.find("</Catalog>").unwrap() + "</Catalog>".len();
         let mut cases = vec![
             (
+                "disguised filter wrapper",
+                without.replace(
+                    "</Catalog>",
+                    &format!("<TypesFilterValue>{block}</TypesFilterValue></Catalog>"),
+                ),
+            ),
+            (
                 "orphan in first XML root",
                 format!(
                     "{}{}",
@@ -953,6 +960,58 @@ fn orphan_characteristics_reject_hidden_duplicate_envelopes() {
             let end = original.find(closing).unwrap();
             cases.push((closing, format!("{}{}", without, &original[start..end])));
         }
+        for (direct, unfinished, value) in [
+            (
+                "direct marker then tail",
+                "direct marker then tail at EOF",
+                "-2<Unknown>tail</Unknown>",
+            ),
+            (
+                "descendant marker then tail",
+                "descendant marker then tail at EOF",
+                "<Unknown>-2</Unknown><Extra>tail</Extra>",
+            ),
+            (
+                "wrapped marker",
+                "wrapped marker at EOF",
+                "<Unknown>-2</Unknown>",
+            ),
+            (
+                "split marker",
+                "split marker at EOF",
+                "<Unknown>-</Unknown><Unknown>2</Unknown>",
+            ),
+            (
+                "mixed prefix",
+                "mixed prefix at EOF",
+                "-<Unknown>2</Unknown>",
+            ),
+            (
+                "mixed suffix",
+                "mixed suffix at EOF",
+                "<Unknown>-</Unknown>2",
+            ),
+            (
+                "wrapped CDATA",
+                "wrapped CDATA at EOF",
+                "<Unknown><![CDATA[-2]]></Unknown>",
+            ),
+            (
+                "mixed CDATA",
+                "mixed CDATA at EOF",
+                "<Unknown>-</Unknown><![CDATA[2]]>",
+            ),
+        ] {
+            let changed = original.replacen(
+                "<xr:KeyField>-2</xr:KeyField>",
+                &format!("<xr:KeyField>{value}</xr:KeyField>"),
+                1,
+            );
+            cases.push((direct, changed.clone()));
+            let start = changed.find("<MetaDataObject ").unwrap();
+            let end = changed.find("</MetaDataObject>").unwrap();
+            cases.push((unfinished, format!("{}{}", without, &changed[start..end])));
+        }
         for (label, changed) in cases {
             let temp = TempDirectory::new();
             let tree = temp.0.join("source");
@@ -987,6 +1046,92 @@ fn orphan_characteristics_reject_hidden_duplicate_envelopes() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn orphan_characteristics_accept_equivalent_text_and_keep_filter_value_outside_identity() {
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let source = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics/native");
+        let native = read_tree(&source);
+        let descriptor = "Catalogs/CovOrphanCharacteristics.xml";
+        let original = String::from_utf8(native[descriptor].clone()).unwrap();
+        for (label, value) in [
+            ("CDATA", "<![CDATA[-2]]>"),
+            ("split CDATA suffix", "-<![CDATA[2]]>"),
+            ("split CDATA prefix", "<![CDATA[-]]>2"),
+            ("entity", "&#45;2"),
+            ("filter string", "-1"),
+            ("UUID text", "-1"),
+            ("UUID split CDATA", "-1"),
+        ] {
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("source");
+            let mut changed = original.replacen(
+                "<xr:KeyField>-2</xr:KeyField>",
+                &format!("<xr:KeyField>{value}</xr:KeyField>"),
+                1,
+            );
+            let mut expected = native.clone();
+            if label == "filter string" {
+                changed = changed.replace(
+                    "<xr:TypesFilterValue xsi:type=\"xs:boolean\">true</xr:TypesFilterValue>",
+                    "<xr:TypesFilterValue xsi:type=\"xs:string\">-2</xr:TypesFilterValue>",
+                );
+                expected.insert(descriptor.to_string(), changed.as_bytes().to_vec());
+            }
+            if label.starts_with("UUID") {
+                let tag = "<xr:TypesFilterField>";
+                let old = original
+                    .split_once(tag)
+                    .unwrap()
+                    .1
+                    .split_once("</")
+                    .unwrap()
+                    .0;
+                let uuid = "0:11111111-2111-4111-8111-111111111111";
+                let lexical = if label == "UUID split CDATA" {
+                    "0:11111111<![CDATA[-2]]>111-4111-8111-111111111111"
+                } else {
+                    uuid
+                };
+                let canonical = changed.replacen(old, uuid, 1);
+                changed = changed.replacen(old, lexical, 1);
+                expected.insert(descriptor.to_string(), canonical.as_bytes().to_vec());
+            }
+            for (path, bytes) in &native {
+                let destination = tree.join(path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::write(
+                    destination,
+                    if path == descriptor {
+                        changed.as_bytes()
+                    } else {
+                        bytes
+                    },
+                )
+                .unwrap();
+            }
+            let cf = temp.0.join("result.cf");
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .env("PATH", "")
+                .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+                .arg(&tree)
+                .arg(&cf)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{platform}: {label}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let exported = cf_export(&cf, &temp.0.join("export"), version).unwrap();
+            assert!(exported.refusal.is_none(), "{platform}: {label}");
+            assert_eq!(exported.files, expected, "{platform}: {label}");
+        }
+    }
 }
 
 #[test]
