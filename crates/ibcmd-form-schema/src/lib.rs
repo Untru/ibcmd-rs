@@ -9,6 +9,8 @@
 //! depends on none of them, so it builds once and in parallel with the root
 //! crate.
 
+pub mod embedded_spreadsheet;
+
 /// Placeholder for a trailing member a short record or property-bag revision
 /// does not carry.  Deliberately unparseable as a 1C scalar, quoted string or
 /// block, so a reader that reaches one refuses (doctrine point 2) instead of

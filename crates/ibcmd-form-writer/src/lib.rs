@@ -20,6 +20,7 @@
 //! the slice at once and fails the guard until its record is reviewed.
 
 pub mod dynamic_list;
+mod embedded_spreadsheet;
 pub mod form_chart;
 pub mod form_planner;
 
@@ -6046,6 +6047,9 @@ pub fn native_rights(
 /// uuid where the skeleton has member 40's 0. The language record's third
 /// member is what a load from XML writes, 1. Anything else refuses.
 fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<String> {
+    if let Some(record) = embedded_spreadsheet::with_text_cells(form_text, attribute)? {
+        return Ok(record);
+    }
     let refuse = || anyhow!("an embedded mxl:SpreadsheetDocument with cells has no writer yet");
     let head = format!("<Attribute name=\"{attribute}\"");
     let start = form_text.find(&head).ok_or_else(refuse)?;
