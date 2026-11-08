@@ -198,6 +198,81 @@ pub fn md_base(uuid: &str, properties: &Element) -> Brace {
     ]
 }
 
+/// Admits only the newly supported detached-marker profile through the strict
+/// codec. Older profiles retain their existing admission contract.
+pub fn validate_orphan_characteristics_source(
+    kind: &str,
+    xml: &[u8],
+    context: &DescriptorContext,
+) -> Result<()> {
+    use ibcmd_schema::characteristics as schema;
+    let doc = MetadataXml::parse(xml)?;
+    let mut fields = Vec::new();
+    if let Some(properties) = doc.object()?.child("Properties") {
+        let mut pending = properties
+            .children
+            .iter()
+            .filter(|e| e.name == schema::PROPERTY)
+            .collect::<Vec<_>>();
+        while let Some(element) = pending.pop() {
+            if schema::is_identity_field(&element.name) {
+                fields.push(element);
+            }
+            pending.extend(&element.children);
+        }
+    }
+    if !fields
+        .iter()
+        .any(|field| schema::orphan_standard_attribute_marker(field.text.trim()).is_some())
+    {
+        return Ok(());
+    }
+    ibcmd_xml::metadata::validate_characteristics_document(
+        &ibcmd_xml::XmlReader::from_slice(xml)?,
+        kind,
+    )?;
+    for field in fields {
+        if field.text != field.text.trim() {
+            bail!("Characteristic field identity is not canonical");
+        }
+        if let Some(raw) = schema::detached_uuid(&field.text) {
+            let uuid = ibcmd_core::identity::ObjectUuid::parse(raw)?.to_string();
+            if uuid == uuid::Uuid::nil().to_string()
+                || context.index.objects_by_uuid.contains_key(&uuid)
+                || context
+                    .index
+                    .children
+                    .values()
+                    .any(|known| known.eq_ignore_ascii_case(&uuid))
+                || context
+                    .index
+                    .configuration_uuid
+                    .as_ref()
+                    .is_some_and(|known| known.eq_ignore_ascii_case(&uuid))
+            {
+                bail!("detached characteristic UUID is nil or already has a metadata identity");
+            }
+        }
+    }
+    // Source whitespace is never an empty source in the new profile.
+    let mut pending = vec![doc.object()?];
+    while let Some(element) = pending.pop() {
+        if element.name == schema::PROPERTY {
+            let mut groups = element.children.iter().collect::<Vec<_>>();
+            while let Some(child) = groups.pop() {
+                if let Some(from) = child.attr(schema::SOURCE_ATTRIBUTE)
+                    && from != from.trim()
+                {
+                    bail!("Characteristic source is not canonical");
+                }
+                groups.extend(&child.children);
+            }
+        }
+        pending.extend(&element.children);
+    }
+    Ok(())
+}
+
 /// Compiles one metadata XML into the inflated text of its Config row
 /// (BOM included).
 pub fn compile_descriptor(
@@ -206,6 +281,7 @@ pub fn compile_descriptor(
     xml: &[u8],
     context: &DescriptorContext,
 ) -> Result<Vec<u8>> {
+    validate_orphan_characteristics_source(kind, xml, context)?;
     let configuration_document = if kind == "Configuration" {
         let document = ibcmd_xml::XmlReader::from_slice(xml)?;
         ibcmd_xml::metadata::parse_configuration_mobile_functionalities(&document)?;

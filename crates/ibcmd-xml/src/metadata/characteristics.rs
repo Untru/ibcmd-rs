@@ -205,6 +205,49 @@ pub(super) fn project_characteristics(
     Ok(())
 }
 
+/// Validates the original descriptor's Characteristics before a compact DOM can
+/// discard qualified attributes or mixed-content structure.
+pub fn validate_characteristics_document(
+    document: &crate::XmlDocument,
+    owner_kind: &str,
+) -> Result<(), MetadataDecodeError> {
+    use super::common::{MD_NAMESPACE, resolve_namespaces};
+    let root = document.root();
+    let uris = resolve_namespaces(root)?;
+    let invalid =
+        || MetadataDecodeError::InvalidEnvelope("Characteristics owner envelope is not exact");
+    if !typed(root, "MetaDataObject", Some(MD_NAMESPACE), &uris) {
+        return Err(invalid());
+    }
+    let owners = strict_element_children(root)?;
+    if owners.len() != 1 || !typed(owners[0], owner_kind, Some(MD_NAMESPACE), &uris) {
+        return Err(invalid());
+    }
+    let properties = strict_element_children(owners[0])?
+        .into_iter()
+        .filter(|e| e.name().local() == "Properties")
+        .collect::<Vec<_>>();
+    if properties.len() != 1 || !typed(properties[0], "Properties", Some(MD_NAMESPACE), &uris) {
+        return Err(invalid());
+    }
+    let blocks = strict_element_children(properties[0])?
+        .into_iter()
+        .filter(|e| e.name().local() == ibcmd_schema::characteristics::PROPERTY)
+        .collect::<Vec<_>>();
+    if blocks.len() != 1
+        || !typed(
+            blocks[0],
+            ibcmd_schema::characteristics::PROPERTY,
+            Some(MD_NAMESPACE),
+            &uris,
+        )
+    {
+        return Err(invalid());
+    }
+    decode_characteristics(blocks[0], &uris)?;
+    Ok(())
+}
+
 fn decode_characteristics(
     element: &XmlElement,
     uris: &ResolvedNamespaces,

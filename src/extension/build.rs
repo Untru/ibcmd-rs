@@ -108,6 +108,7 @@ pub(crate) fn compile_descriptor(
     xml: &[u8],
     context: &DescriptorContext,
 ) -> Result<Vec<u8>> {
+    crate::metadata_model::validate_orphan_characteristics_source(kind, xml, context)?;
     let doc = MetadataXml::parse(xml)?;
     let original = doc.object()?;
     let mut element = original.clone();

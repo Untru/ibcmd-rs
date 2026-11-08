@@ -748,6 +748,112 @@ fn orphan_characteristics_reject_unknown_markers_before_publication() {
 }
 
 #[test]
+fn orphan_characteristics_reject_padded_detached_sources_and_uuids() {
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        let source = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics/native");
+        let native = read_tree(&source);
+        let descriptor = "Catalogs/CovOrphanCharacteristics.xml";
+        let original = String::from_utf8(native[descriptor].clone()).unwrap();
+        let mut cases = Vec::new();
+        for attribute in ["from=\" \"", "from=\"\t \"", ""] {
+            cases.push((
+                format!("values source {attribute:?}"),
+                original.replacen(
+                    "<xr:CharacteristicValues from=\"\">",
+                    &format!("<xr:CharacteristicValues {attribute}>"),
+                    1,
+                ),
+            ));
+        }
+        for tag in ["TypesFilterField", "ObjectField"] {
+            let open = format!("<xr:{tag}>");
+            let value = original
+                .split_once(&open)
+                .unwrap()
+                .1
+                .split_once("</")
+                .unwrap()
+                .0;
+            for padded in [format!(" {value}"), format!("{value} ")] {
+                cases.push((
+                    format!("padded {tag}"),
+                    original.replacen(
+                        &format!("{open}{value}</xr:{tag}>"),
+                        &format!("{open}{padded}</xr:{tag}>"),
+                        1,
+                    ),
+                ));
+            }
+        }
+        for replacement in [
+            "<xr:KeyField>-2<Unknown/></xr:KeyField>",
+            "<xr:KeyField Unknown=\"yes\">-2</xr:KeyField>",
+        ] {
+            cases.push((
+                replacement.to_string(),
+                original.replacen("<xr:KeyField>-2</xr:KeyField>", replacement, 1),
+            ));
+        }
+        let owner_uuid = original
+            .split_once("uuid=\"")
+            .unwrap()
+            .1
+            .split_once('"')
+            .unwrap()
+            .0;
+        for tag in ["TypesFilterField", "ObjectField"] {
+            let open = format!("<xr:{tag}>");
+            let value = original
+                .split_once(&open)
+                .unwrap()
+                .1
+                .split_once("</")
+                .unwrap()
+                .0;
+            for uuid in ["00000000-0000-0000-0000-000000000000", owner_uuid] {
+                cases.push((
+                    format!("{tag} invalid detached UUID {uuid}"),
+                    original.replacen(
+                        &format!("{open}{value}</xr:{tag}>"),
+                        &format!("{open}0:{uuid}</xr:{tag}>"),
+                        1,
+                    ),
+                ));
+            }
+        }
+        for (label, changed) in cases {
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("source");
+            for (path, bytes) in &native {
+                let destination = tree.join(path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::write(
+                    destination,
+                    if path == descriptor {
+                        changed.as_bytes()
+                    } else {
+                        bytes
+                    },
+                )
+                .unwrap();
+            }
+            let cf = temp.0.join("refused.cf");
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+                .arg(&tree)
+                .arg(&cf)
+                .output()
+                .unwrap();
+            assert!(!output.status.success(), "{platform}: accepted {label}");
+            assert!(!cf.exists(), "{platform}: published {label}");
+        }
+    }
+}
+
+#[test]
 fn coverage_sets_hold_their_baseline() {
     let sets = coverage_sets();
     assert!(

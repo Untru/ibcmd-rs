@@ -16,6 +16,27 @@ pub fn orphan_standard_attribute_marker(text: &str) -> Option<i32> {
         .then_some(ORPHAN_STANDARD_ATTRIBUTE_MARKER)
 }
 
+/// XML vocabulary for identity-bearing fields, excluding the filter union value.
+pub const PROPERTY: &str = "Characteristics";
+pub fn is_identity_field(name: &str) -> bool {
+    matches!(
+        name,
+        "KeyField"
+            | "TypesFilterField"
+            | "DataPathField"
+            | "MultipleValuesUseField"
+            | "ObjectField"
+            | "TypeField"
+            | "ValueField"
+            | "MultipleValuesKeyField"
+            | "MultipleValuesOrderField"
+    )
+}
+/// The detached UUID spelling has a closed physical discriminator.
+pub fn detached_uuid(text: &str) -> Option<&str> {
+    text.strip_prefix("0:")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
