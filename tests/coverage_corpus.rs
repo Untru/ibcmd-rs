@@ -896,11 +896,17 @@ fn form_space_shortcut_matches_both_native_profiles() {
             )
             .unwrap();
             let native = fs::read(set.join("native").join(relative)).unwrap();
-            assert!(String::from_utf8_lossy(&native).contains("<Shortcut>Space</Shortcut>"));
-            assert_eq!(
-                String::from_utf8_lossy(exported.files.get(relative).unwrap()),
-                String::from_utf8_lossy(&native),
-                "{platform}: {relative}"
+            assert!(
+                std::str::from_utf8(&native)
+                    .unwrap()
+                    .contains("<Shortcut>Space</Shortcut>")
+            );
+            let actual = exported.files.get(relative).unwrap();
+            assert!(
+                actual == &native,
+                "{platform}: {relative}: native {}, exported {}",
+                sha256_hex(&native),
+                sha256_hex(actual)
             );
         }
     }
