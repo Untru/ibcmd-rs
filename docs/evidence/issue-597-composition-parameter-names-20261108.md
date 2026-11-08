@@ -182,3 +182,21 @@ failures. The complete gate was then rerun successfully on the unchanged
 code. The temporary base worktree and its target were removed after the
 audit; the candidate code commit and iter binary hash remain unchanged.
 
+## Independent final review
+
+Fresh-context critic: **APPROVE** at
+`022a80048e9a5baac533233f4f2ec3ef0c3c9dc8`. Independently reran all seven
+`cargo xtask check` steps and the observed-problems test (590 equal / 656
+known symptoms); replayed all 36 CF/fileDB controls (312 complete Template.xml
+files equal, four unchanged empty-picture refusals, source hashes unchanged),
+four selected exports and six locale controls. Four additional native exports
+from fresh disposable database copies compared 28 templates exactly. The
+reviewer authenticated all 69 dictionary pairs against paired native trees
+and verified 353 baseline additions with no removals.
+
+Parent verification read the production diff and reran the four XML-pass
+unit tests, the selected-index regression and the exact 44-template public
+corpus regression: 4/4, 1/1 and 1/1 PASS. The four documented empty-picture
+refusals match the symptom and exact variant of #618; that fix is excluded
+from this independent PR. This final evidence commit changes no code,
+tests or baseline.
