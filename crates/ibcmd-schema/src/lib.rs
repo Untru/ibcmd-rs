@@ -18947,3 +18947,5 @@ pub mod websocket_client;
 
 /// Native collection envelopes preserve absence independently of item count.
 pub mod optional_metadata_collection;
+
+pub mod information_register_policy;

@@ -722,3 +722,56 @@ fn coverage_empty_html_stored_record_has_a_precise_known_gap() {
         let _: Value = serde_json::from_slice(&bytes).unwrap();
     }
 }
+
+#[test]
+fn stored_nonperiodic_register_main_filter_matches_native_descriptor() {
+    use ibcmd_metadata_model::metadata_model::{
+        DescriptorContext,
+        export::{ExportContext, NameIndex, export_descriptor},
+        objects::parts::compatibility,
+    };
+    for (platform, version) in [("8.3.27.2342", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("informationregisters");
+        let native = set.join("native");
+        let path = "InformationRegisters/CovMainFilterOnPeriod_true.xml";
+        let context = DescriptorContext::new(&native, version).unwrap();
+        let object = context
+            .index
+            .objects
+            .get("InformationRegister.CovMainFilterOnPeriod_true")
+            .unwrap();
+        let cf = decode(&fs::read(set.join("configuration.cf.b64")).unwrap());
+        let mut reader = StreamingReader::open_default(Cursor::new(cf)).unwrap();
+        let position = reader
+            .index()
+            .entries
+            .iter()
+            .position(|entry| entry.name == object.uuid)
+            .unwrap();
+        let packed = reader.read_entry_data(position).unwrap().unwrap();
+        let row = ibcmd_cf::payload::decode_payload(
+            PayloadEncoding::RawDeflate,
+            &packed,
+            ResourceLimits::default(),
+        )
+        .unwrap();
+        let exported = export_descriptor(
+            "InformationRegister",
+            row.bytes(),
+            &ExportContext {
+                names: NameIndex::from_config_index(&context.index),
+                version: version.into(),
+                compat: compatibility(&context),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            exported.as_bytes(),
+            fs::read(native.join(path)).unwrap(),
+            "{platform}/{path}: complete native descriptor"
+        );
+    }
+}
