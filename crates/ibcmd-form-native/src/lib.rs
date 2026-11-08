@@ -1967,10 +1967,44 @@ pub fn native_field_kind(tag: &str) -> Option<u8> {
         "GraphicalSchemaField" => 14,
         "HTMLDocumentField" => 15,
         "FormattedDocumentField" => 17,
+        "PeriodField" => 18,
         "PlannerField" => 19,
         "PDFDocumentField" => 20,
         _ => return None,
     })
+}
+
+/// Revision-2 period-field bag. Native controls in both installed editions
+/// retain its geometry and the shared appearance encodings unchanged.
+pub struct NativePeriodPayload<'a> {
+    pub width: &'a str,
+    pub height: &'a str,
+    pub font: &'a str,
+    pub text_color: &'a str,
+    pub border: &'a str,
+    pub horizontal_stretch: bool,
+    pub vertical_stretch: bool,
+    pub auto_max_width: bool,
+    pub max_width: &'a str,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
+}
+
+pub fn format_period_payload(payload: &NativePeriodPayload<'_>) -> String {
+    format!(
+        "{{2,{},{},{},{},{{0,1,0}},{},{},{},{},{},0,{},{}}}",
+        payload.width,
+        payload.height,
+        payload.font,
+        payload.text_color,
+        u8::from(payload.horizontal_stretch),
+        u8::from(payload.vertical_stretch),
+        payload.border,
+        u8::from(payload.auto_max_width),
+        payload.max_width,
+        u8::from(payload.auto_max_height),
+        payload.max_height,
+    )
 }
 
 /// How a tri-state boolean reads: 2 when the item names neither value.

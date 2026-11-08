@@ -535,6 +535,7 @@ pub const FIELD_TAGS: &[&str] = &[
     "TrackBarField",
     "ChartField",
     "PlannerField",
+    ibcmd_form_schema::FormPeriodFieldSchema::XML_TAG,
     "PDFDocumentField",
 ];
 

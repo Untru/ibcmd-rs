@@ -173,6 +173,7 @@
     "CommonForms/CovLayoutTemplate",
     "CommonForms/CovManagedFormTemplate",
     "CommonForms/CovMobilePermissionMessages",
+    "CommonForms/CovPeriodField",
     "CommonForms/CovPictureTitleFontEnterOnInput",
     "CommonForms/CovPictureTitleFontStyleItem",
     "CommonForms/CovPlannerField",

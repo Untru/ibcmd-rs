@@ -28,7 +28,6 @@
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row b33dc671-f3f5-580b-bc3d-95e055bdc6bd.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
-        "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
@@ -122,8 +121,7 @@
         "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row d6492747-e412-535e-872e-032ea2e9d83b.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 15832655-0024-59aa-8548-6e6b3576abcb.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row f632ae58-e692-5695-9a81-f23d68e106d3.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
-        "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row 96b9a6d0-8b49-52ff-a56b-4f97b33890ec.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
-        "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 6be980d2-8e85-56f0-a9ba-bce9af9f8f48.0: the native form writer refuses it: <PeriodField> has no writer yet"
+        "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row 96b9a6d0-8b49-52ff-a56b-4f97b33890ec.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured"
       }
     },
     "8.3.27.2214/corpus-mobile-permission-messages": {
@@ -262,7 +260,6 @@
         "CommonForms/CovFacetTableExcludesDeselectAll.xml": "#622: base-free stage has no base Config row 07dcfda4-2360-5b5f-8707-870f01bb0809.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
-        "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonForms/CovVisualGraphicalSchemaFieldBorderColor_0365cb28dc31.xml": "#600: base-free stage has no base Config row 6c7dac84-ea7f-5eaa-b001-ababd77e1127.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -399,8 +396,7 @@
         "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row d6492747-e412-535e-872e-032ea2e9d83b.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 15832655-0024-59aa-8548-6e6b3576abcb.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row f632ae58-e692-5695-9a81-f23d68e106d3.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
-        "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row 96b9a6d0-8b49-52ff-a56b-4f97b33890ec.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
-        "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 6be980d2-8e85-56f0-a9ba-bce9af9f8f48.0: the native form writer refuses it: <PeriodField> has no writer yet"
+        "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row 96b9a6d0-8b49-52ff-a56b-4f97b33890ec.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured"
       }
     },
     "8.5.1.1150/corpus-mobile-permission-messages": {
@@ -646,7 +642,6 @@
         "CommonForms/CovModernUsualGroupBackColorPalette.xml": "#599: base-free stage has no base Config row eb862cd3-8d62-577c-be46-fee8e8107902.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonForms/CovNavigationAccountingRegister.xml": "#678: base-free stage has no base Config row 1289184c-c2ae-5157-980e-7246acafa53e.0: the native form writer refuses it: no measured ordinal for AccountingRegister.StandardCommand.OpenList",
         "CommonForms/CovNavigationChartOfAccounts.xml": "#678: base-free stage has no base Config row ef0d272a-c208-522f-a1f8-d9c9009a0954.0: the native form writer refuses it: no measured ordinal for ChartOfAccounts.StandardCommand.OpenList",
-        "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovPlannerBackCommand.xml": "#600: base-free stage has no base Config row ac5f54ce-3f53-57c3-9269-c79e883c0ea7.0: the native form writer refuses it: no measured uuid for Form.Item.Planner.StandardCommand.Back on <PlannerField>",
         "CommonForms/CovRecordSetRowPicture.xml": "#680: base-free stage has no base Config row c99762ed-2e17-5dfd-b004-ee0eb39d5cca.0: the native form writer refuses it: a table's <RowPictureDataPath> names Rows.Active, which the writer cannot place",
@@ -882,7 +877,6 @@
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row b33dc671-f3f5-580b-bc3d-95e055bdc6bd.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
-        "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
@@ -963,7 +957,6 @@
         "CommonForms/CovFacetTableExcludesDeselectAll.xml": "#622: base-free stage has no base Config row 07dcfda4-2360-5b5f-8707-870f01bb0809.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
-        "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonForms/CovVisualGraphicalSchemaFieldBorderColor_0365cb28dc31.xml": "#600: base-free stage has no base Config row 6c7dac84-ea7f-5eaa-b001-ababd77e1127.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -1114,7 +1107,6 @@
         "CommonForms/CovModernUsualGroupBackColorPalette.xml": "#599: base-free stage has no base Config row eb862cd3-8d62-577c-be46-fee8e8107902.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonForms/CovNavigationAccountingRegister.xml": "#678: base-free stage has no base Config row 1289184c-c2ae-5157-980e-7246acafa53e.0: the native form writer refuses it: no measured ordinal for AccountingRegister.StandardCommand.OpenList",
         "CommonForms/CovNavigationChartOfAccounts.xml": "#678: base-free stage has no base Config row ef0d272a-c208-522f-a1f8-d9c9009a0954.0: the native form writer refuses it: no measured ordinal for ChartOfAccounts.StandardCommand.OpenList",
-        "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovPlannerBackCommand.xml": "#600: base-free stage has no base Config row ac5f54ce-3f53-57c3-9269-c79e883c0ea7.0: the native form writer refuses it: no measured uuid for Form.Item.Planner.StandardCommand.Back on <PlannerField>",
         "CommonForms/CovRecordSetRowPicture.xml": "#680: base-free stage has no base Config row c99762ed-2e17-5dfd-b004-ee0eb39d5cca.0: the native form writer refuses it: a table's <RowPictureDataPath> names Rows.Active, which the writer cannot place",

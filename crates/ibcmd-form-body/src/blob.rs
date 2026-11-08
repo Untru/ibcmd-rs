@@ -138,5 +138,50 @@ fn validate_form_body_layout(layout: &str) -> Result<()> {
             "Form body layout field does not start with a numeric marker"
         ));
     }
+    validate_period_field_records(layout)?;
+    Ok(())
+}
+
+fn validate_period_field_records(record: &str) -> Result<()> {
+    use ibcmd_form_schema::FormPeriodFieldSchema;
+    let mut pending = vec![(record, 0_usize)];
+    while let Some((record, depth)) = pending.pop() {
+        if depth > ibcmd_core::limits::DEFAULT_MAX_CONTAINER_DEPTH {
+            return Err(anyhow!(
+                "Form body nesting exceeds the fixed container depth limit"
+            ));
+        }
+        let ranges = scan_braced_fields(record, 0)?;
+        let fields = ranges
+            .iter()
+            .map(|range| record[range.clone()].trim())
+            .collect::<Vec<_>>();
+        if let Some(slot) = FormPeriodFieldSchema::options_slot_for_record(&fields) {
+            if !FormPeriodFieldSchema::record_header_is_measured(&fields) {
+                return Err(anyhow!("PeriodField has an unmeasured record header"));
+            }
+            let bag = fields
+                .get(slot)
+                .ok_or_else(|| anyhow!("PeriodField has no property bag"))?;
+            let bag_ranges = scan_braced_fields(bag, 0)?;
+            let options = bag_ranges
+                .iter()
+                .map(|range| bag[range.clone()].trim())
+                .collect::<Vec<_>>();
+            if !FormPeriodFieldSchema::options_are_measured(&options) {
+                return Err(anyhow!(
+                    "PeriodField has an unmeasured property bag; no form is published"
+                ));
+            }
+        }
+        for field in fields {
+            if field
+                .strip_prefix('{')
+                .is_some_and(|rest| !rest.starts_with('#'))
+            {
+                pending.push((field, depth + 1));
+            }
+        }
+    }
     Ok(())
 }
