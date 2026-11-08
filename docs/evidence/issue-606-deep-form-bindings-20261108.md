@@ -228,5 +228,12 @@ files remain unchanged from code commit 4873840b; only evidence Markdown has
 been updated since the clean binary build. No temporary diagnostic source
 remains; no unrelated assertion, fixture lifetime or test threading was
 changed to obtain this result. The original source-tree limitations above
-remain explicit. Fresh-context review and the coordinator's independent
-rerun are pending; neither is claimed complete here.
+remain explicit. Fresh-context independent review is APPROVE with no actionable findings.
+The reviewer independently passed check7, strict round-trip4, stored rows4,
+physical policy and whitespace validation; both new complete-chain tests
+failed as intended in isolated scratch code with previous production logic.
+Its fresh native replay passes30 commands,20 complete target forms and124
+complete-tree files with verified imports/native applies and stable read
+hashes. The coordinator read the production diff and independently reran
+all three deep-binding regressions (49 public profiles included):three PASS.
+All reviewer/parent processes are terminal.
