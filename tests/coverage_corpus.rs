@@ -978,6 +978,58 @@ fn value_list_detail_unmeasured_cf_profiles_refuse_the_target_file() {
 }
 
 #[test]
+fn value_list_detail_public_spreadsheet_writer_refuses_manually_constructed_unknown_values() {
+    use ibcmd_moxel::{MoxelCellValue, MoxelRow};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    let xml = fs::read(coverage_paths::root()
+        .join("coverage/8.3.27.2214/corpus-spreadsheet-facets/native/CommonTemplates/CovSheetValueListDetail/Ext/Template.xml")).unwrap();
+    let body =
+        ibcmd_compiler::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None).unwrap();
+    let mut spreadsheet =
+        ibcmd_moxel::parse_moxel_spreadsheet_text(&body, &BTreeMap::new(), |_| None).unwrap();
+    assert_eq!(
+        ibcmd_moxel::format_moxel_spreadsheet_xml(&spreadsheet)
+            .unwrap()
+            .as_bytes(),
+        xml
+    );
+    let unsupported = ibcmd_moxel::parse_moxel_cell_value(
+        &ibcmd_schema::spreadsheet_value_list::empty_stored_value()
+            .replace("\"Pattern\"", "\"UnknownPattern\""),
+    )
+    .unwrap();
+    for detail in [false, true] {
+        let mut cell = ibcmd_moxel::parse_moxel_cell("{2,0,{\"S\",\"known\"}}", 0).unwrap();
+        let nested = MoxelCellValue::Array(vec![
+            MoxelCellValue::Text("before".into()),
+            MoxelCellValue::Structure(vec![("nested".into(), unsupported.clone())]),
+        ]);
+        if detail {
+            cell.detail_value = Some(nested);
+        } else {
+            cell.value = Some(nested);
+        }
+        spreadsheet.rows.push(MoxelRow {
+            index: 1,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![cell],
+        });
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            ibcmd_moxel::format_moxel_spreadsheet_xml(&spreadsheet)
+        }));
+        let diagnostic = result
+            .expect("the public spreadsheet writer must not panic")
+            .expect_err("the complete spreadsheet must be refused");
+        assert_eq!(diagnostic.stage(), ibcmd_moxel::MxlDiagnosticStage::Writer);
+        assert_eq!(diagnostic.code(), "mxl.writer.value-list-profile");
+        spreadsheet.rows.pop();
+    }
+}
+
+#[test]
 fn coverage_sets_hold_their_baseline() {
     let sets = coverage_sets();
     assert!(
