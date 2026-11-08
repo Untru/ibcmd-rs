@@ -21,7 +21,7 @@ markers attached to a resolved source remain refusals.
 Before the fix, both new complete-tree regressions failed: CF export omitted
 the Catalog descriptor; base-free bootstrap refused `unresolved reference -2`.
 After the fix, both editions export and bootstrap/re-export all three
-application files exactly. Sixty-two malformed marker/source/structure/UUID
+application files exactly. Seventy-six malformed marker/source/structure/UUID
 combinations refuse bootstrap before publishing a CF. Lower-level controls cover the exact marker
 domain and the existing source-bound `-2` → Catalog.Code interpretation.
 
@@ -61,8 +61,8 @@ No test was disabled. The physical-adapter policy guard passed unchanged.
 ## Native evidence
 
 The clean iter build is code commit
-`ecff8b2e66ae5f8d6b89d8db79565efc6c189db1`, binary SHA-256
-`22b24aa35cc9bb376e129955de7bb87dc165e9f49e9c9c5d8a82b29589560669`.
+`f7603a61b21be925f2009245bf00e1f0751a8f6a`, binary SHA-256
+`84939399e33d584815c4fb7f6a9cea906204e057798cca9219e58b6f266e5875`.
 It was built with Rust 1.95.0 using `cargo build --locked --profile iter`.
 The [native receipt](orphan-characteristics-native-20261108.json) binds the
 native tool versions/hashes, CF inputs, twenty command exits and all tree hashes.
@@ -104,7 +104,7 @@ their existing admission boundary. No dependency edge or policy baseline changed
 
 Failing-first controls reproduced whitespace normalization, unknown child and
 attribute loss, and nil/known UUID publication. The final clean iter binary
-refuses all 52 additional actual-process controls (26 per runtime) without a CF.
+refuses all 66 additional actual-process controls (33 per runtime) without a CF.
 All negative process controls run with an empty PATH.
 
 A follow-up failing-first regression reproduced twelve silent publications on
@@ -116,10 +116,15 @@ when the compact parser selected a final clean XML root and discarded the
 preceding orphan root. The bounded detector now uses a compact forest retaining
 all top-level roots; the legacy tree API keeps its original last-root selection.
 Strict reading of the detected profile rejects multiple roots. Both root orders
-are process-tested on both archived editions. Strict admission requires every
-candidate Characteristics block to be the unique canonical block consumed by compilation.
+are process-tested on both archived editions. A further EOF regression showed
+that an unfinished second envelope could disappear from the compact forest.
+Admission now reconstructs the entire unfinished element stack for detection,
+while the legacy tree API still selects the final closed root. Seven EOF
+positions, from the outer root through the marker field, are refused on both
+archived editions. Strict admission requires every candidate
+Characteristics block to be the unique canonical block consumed by compilation.
 
-The permanent integration regressions exercise 62 negative combinations on
+The permanent integration regressions exercise 76 negative combinations on
 the two archived editions. No exception from strict admission has a fallback.
 
 The initial CI attempt used an overlong TMPDIR and was superseded. Final

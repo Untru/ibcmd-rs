@@ -3,10 +3,10 @@
   "base": "54b796f64da5daed3714acdf7810581fe0e58778",
   "fixture_commit": "8d138b896f462c3053d16076cbabf0ffe5030c1c",
   "code": {
-    "commit": "ecff8b2e66ae5f8d6b89d8db79565efc6c189db1",
-    "tree": "618867412147dc094ad57b93a5b3e59b91f38891",
+    "commit": "f7603a61b21be925f2009245bf00e1f0751a8f6a",
+    "tree": "caa9d7353eaf04a946f5251b166982a5eee0e850",
     "clean": true,
-    "binary_sha256": "22b24aa35cc9bb376e129955de7bb87dc165e9f49e9c9c5d8a82b29589560669",
+    "binary_sha256": "84939399e33d584815c4fb7f6a9cea906204e057798cca9219e58b6f266e5875",
     "version": "ibcmd-rs 0.4.1"
   },
   "native_tools": [
@@ -249,8 +249,8 @@
       "left_files": 4,
       "right_files": 4,
       "differences": [],
-      "left_tree_sha256": "eed5eae6b2175d4b9b7e17ce17b4c0cf395e5086d123d771cf4a6963847b689c",
-      "right_tree_sha256": "eed5eae6b2175d4b9b7e17ce17b4c0cf395e5086d123d771cf4a6963847b689c"
+      "left_tree_sha256": "5c5b0deef8fed60a10ae074246dc91b497ba5a391fdc3fde7a4647bc0a22afe5",
+      "right_tree_sha256": "5c5b0deef8fed60a10ae074246dc91b497ba5a391fdc3fde7a4647bc0a22afe5"
     },
     {
       "comparison": "8.3.27.2214-imported-native-application",
@@ -285,8 +285,8 @@
       "left_files": 4,
       "right_files": 4,
       "differences": [],
-      "left_tree_sha256": "366e51ab511d94ecce91c494a6a8c941b5525bc35f28137b442c2fa7edf4b734",
-      "right_tree_sha256": "366e51ab511d94ecce91c494a6a8c941b5525bc35f28137b442c2fa7edf4b734"
+      "left_tree_sha256": "d44811600911ce7e9eaa8de893dbdefa1ccc12cca3fd411458ce7a096e2e0dfe",
+      "right_tree_sha256": "d44811600911ce7e9eaa8de893dbdefa1ccc12cca3fd411458ce7a096e2e0dfe"
     },
     {
       "comparison": "8.5.1.1529-imported-native-application",
@@ -310,16 +310,16 @@
   "service_classification": [
     {
       "runtime": "8.3.27.2214",
-      "native_control_sha256": "67876eb7dae906c60e1a668519052d951bc602a75e67325da092149fd2242df6",
-      "own_import_native_export_sha256": "2ffced0a866d48ac1bb831f6452b8f2e74f5d23350532bae01f8dc9eb2160b54",
+      "native_control_sha256": "ae17097898650afd00b19e5a20ab144bd4fe09cb7ef606e7821907b34d075d5d",
+      "own_import_native_export_sha256": "27de1b5bb4ffcba3cec50f701ec9a9589e28eee42a4194c555331fef8c1d51bf",
       "changed_config_version_attributes": 3,
       "unexpected_changes": [],
       "no_other_byte_changes": true
     },
     {
       "runtime": "8.5.1.1529",
-      "native_control_sha256": "89fc43973a5eb4daa4f5fe8b7e0a7f961f84e3e2b1f4ebc8b9cf23d154fd1d65",
-      "own_import_native_export_sha256": "8d56d163d2215012571bc8105525a309ff7771a4afbd892792e2e4a1f094d0f9",
+      "native_control_sha256": "c46f267cab8549bc7076232b0aba44fff910bc7d92f8a9fe2b38b0beb308df7d",
+      "own_import_native_export_sha256": "69def8038b7072cea0ca80436e9600bdc51c5c72c13cab459989694175a21557",
       "changed_config_version_attributes": 3,
       "unexpected_changes": [],
       "no_other_byte_changes": true
@@ -483,6 +483,48 @@
       "published": false
     },
     {
+      "runtime": "8.3.27.2214",
+      "case": "EOF before </MetaDataObject>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "EOF before </Catalog>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "EOF before </Properties>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "EOF before </Characteristics>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "EOF before </xr:Characteristic>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "EOF before </xr:CharacteristicTypes>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "EOF before </xr:KeyField>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
       "runtime": "8.5.1.1529",
       "case": "key-child",
       "exit_code": 2,
@@ -637,6 +679,48 @@
       "case": "orphan in last XML root",
       "exit_code": 2,
       "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "EOF before </MetaDataObject>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "EOF before </Catalog>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "EOF before </Properties>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "EOF before </Characteristics>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "EOF before </xr:Characteristic>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "EOF before </xr:CharacteristicTypes>",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "EOF before </xr:KeyField>",
+      "exit_code": 2,
+      "published": false
     }
   ],
   "measurement_code_commit": "2e028962591a2f142b57fa201a365eda0f244461",
@@ -725,6 +809,13 @@
   "multiple_root_controls_before": {
     "code_commit": "ca3f37c592e90a48c550d8aad54a245522d6c6e9",
     "case": "orphan in first XML root",
+    "saved_editions": 2,
+    "exit_code": 0,
+    "published_cf": true
+  },
+  "unfinished_envelope_controls_before": {
+    "head": "e73925191a4c9e6e29590b904ed07f808248883b",
+    "cases_per_saved_edition": 7,
     "saved_editions": 2,
     "exit_code": 0,
     "published_cf": true
