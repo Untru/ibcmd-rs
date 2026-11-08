@@ -722,3 +722,55 @@ fn coverage_empty_html_stored_record_has_a_precise_known_gap() {
         let _: Value = serde_json::from_slice(&bytes).unwrap();
     }
 }
+
+#[test]
+fn native_root_85_scroll_overlay_preserves_the_complete_stored_body() {
+    let set = coverage_paths::root().join("coverage/8.5.1.1150/corpus-form-settings");
+    let metadata =
+        fs::read_to_string(set.join("native/CommonForms/CovVerticalScrollAlways.xml")).unwrap();
+    let uuid = metadata
+        .split("<CommonForm uuid=\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    let cf = decode(&fs::read(set.join("configuration.cf.b64")).unwrap());
+    let mut reader = StreamingReader::open_default(Cursor::new(cf)).unwrap();
+    let position = reader
+        .index()
+        .entries
+        .iter()
+        .position(|entry| entry.name == format!("{uuid}.0"))
+        .unwrap();
+    let packed = reader.read_entry_data(position).unwrap().unwrap();
+    let original = ibcmd_form_writer::parse_form_body_blob(&packed).unwrap();
+    let fields = ibcmd_form_body::record_text::scan_braced_fields(&original.layout, 0).unwrap();
+    assert_eq!(&original.layout[fields[0].clone()], "59");
+    let start = fields.len() - 36;
+    assert_eq!(&original.layout[fields[start + 22].clone()], "{59,0}");
+    for (mode, qualifier, value) in [
+        ("use", "1", "1"),
+        ("useIfNecessary", "2", "2"),
+        ("useWithoutStretch", "0", "3"),
+    ] {
+        let xml = format!(
+            "<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" version=\"2.21\"><VerticalScroll>{mode}</VerticalScroll></Form>"
+        );
+        let updated =
+            ibcmd_metadata_blob::pack_form_body_blob_from_form_xml(&packed, xml.as_bytes(), None)
+                .unwrap();
+        let actual = ibcmd_form_writer::parse_form_body_blob(&updated.blob).unwrap();
+        let mut expected = original.clone();
+        expected
+            .layout
+            .replace_range(fields[start + 15].clone(), value);
+        expected
+            .layout
+            .replace_range(fields[start + 5].clone(), qualifier);
+        assert_eq!(
+            actual, expected,
+            "{mode}: complete native body including opaque trailing fields"
+        );
+    }
+}

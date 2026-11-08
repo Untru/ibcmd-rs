@@ -182,6 +182,7 @@
     "CommonForms/CovSettingsFormTemplate",
     "CommonForms/CovTemplate",
     "CommonForms/CovUseStandardCommands_false",
+    "CommonForms/CovVerticalScrollAlways",
     "CommonModules/CovClientManagedApplication_true",
     "CommonModules/CovClientOrdinaryApplication_false",
     "CommonModules/CovExternalConnection_true",

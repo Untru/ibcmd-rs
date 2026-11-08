@@ -6602,10 +6602,56 @@ impl FormRootGroupingSchema {
     }
 }
 
+/// Native root scrolling uses a qualifier and a mode, not one repeated code.
+/// The public form-settings `use` case stores 1/1 on 8.3.27 and 8.5.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum FormRootVerticalScroll {
+    Use,
+    UseIfNecessary,
+    UseWithoutStretch,
+}
+
+impl FormRootVerticalScroll {
+    pub fn from_xml(value: &str) -> Option<Self> {
+        match value {
+            "use" => Some(Self::Use),
+            "useIfNecessary" => Some(Self::UseIfNecessary),
+            "useWithoutStretch" => Some(Self::UseWithoutStretch),
+            _ => None,
+        }
+    }
+
+    pub const fn xml(self) -> &'static str {
+        match self {
+            Self::Use => "use",
+            Self::UseIfNecessary => "useIfNecessary",
+            Self::UseWithoutStretch => "useWithoutStretch",
+        }
+    }
+
+    pub const fn storage_parts(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Use => ("1", "1"),
+            Self::UseIfNecessary => ("2", "2"),
+            Self::UseWithoutStretch => ("0", "3"),
+        }
+    }
+
+    fn from_storage(qualifier: &str, mode: &str) -> Option<Self> {
+        match (qualifier, mode) {
+            ("1", "1") => Some(Self::Use),
+            ("2", "2") => Some(Self::UseIfNecessary),
+            ("0", "3") => Some(Self::UseWithoutStretch),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FormRootVerticalScrollSchema {
     qualifier_slot: usize,
     mode_slot: usize,
+    complete_trailer: bool,
 }
 
 impl FormRootVerticalScrollSchema {
@@ -6627,18 +6673,99 @@ impl FormRootVerticalScrollSchema {
         Some(Self {
             qualifier_slot: Self::QUALIFIER_SLOT.checked_add(blocks)?,
             mode_slot: Self::MODE_SLOT.checked_add(blocks)?,
+            complete_trailer: true,
+        })
+    }
+
+    /// Overlay reads native 8.5's unchanged core before its appended tail.
+    /// Historical partial root-59 overlays retain the two pre-existing modes;
+    /// the newly supported `use` value requires a complete evidenced trailer.
+    pub fn from_overlay_layout(
+        root_discriminator: Option<&str>,
+        trailer: &[&str],
+        value: FormRootVerticalScroll,
+    ) -> Option<Self> {
+        if let Some(schema) = Self::from_raw_layout(root_discriminator, trailer) {
+            return Some(schema);
+        }
+        if root_discriminator != Some("59") {
+            return None;
+        }
+        const V85_APPENDED_FIELDS: usize = 12;
+        const VERSION_FROM_CORE_END: usize = 2;
+        const LEGACY_PARTIAL_FIELDS: usize = 17;
+        if let Some(core_len) = trailer.len().checked_sub(V85_APPENDED_FIELDS) {
+            let core = &trailer[..core_len];
+            if let Some(blocks) = form_root_trailer_optional_blocks(Some("50"), core)
+                && core
+                    .get(core_len.checked_sub(VERSION_FROM_CORE_END)?)
+                    .is_some_and(|marker| marker.trim() == "{59,0}")
+            {
+                return Some(Self {
+                    qualifier_slot: Self::QUALIFIER_SLOT.checked_add(blocks)?,
+                    mode_slot: Self::MODE_SLOT.checked_add(blocks)?,
+                    complete_trailer: true,
+                });
+            }
+        }
+        if value != FormRootVerticalScroll::Use
+            && trailer.len() == LEGACY_PARTIAL_FIELDS
+            && matches!(trailer, [empty, second_empty, count, ..]
+                if empty.trim() == "\"\"" && second_empty.trim() == "\"\"" && count.trim() == "0")
+        {
+            return Some(Self {
+                qualifier_slot: Self::QUALIFIER_SLOT,
+                mode_slot: Self::MODE_SLOT,
+                complete_trailer: false,
+            });
+        }
+        None
+    }
+
+    /// Locate a root-59 overlay by its bounded trailer, including when there
+    /// are no ordinary child items for the historical pair walker to find.
+    pub fn locate_native_overlay(
+        fields: &[&str],
+        value: FormRootVerticalScroll,
+    ) -> Option<(usize, Self)> {
+        if fields.first().map(|field| field.trim()) != Some("59") {
+            return None;
+        }
+        fields.iter().enumerate().find_map(|(start, _)| {
+            Self::from_overlay_layout(Some("59"), &fields[start..], value)
+                .map(|schema| (start, schema))
         })
     }
 
     pub fn vertical_scroll(self, trailer: &[&str]) -> Option<&'static str> {
-        match (
-            trailer.get(self.qualifier_slot).map(|field| field.trim()),
-            trailer.get(self.mode_slot).map(|field| field.trim()),
-        ) {
-            (Some("2"), Some("2")) => Some("useIfNecessary"),
-            (Some("0"), Some("3")) => Some("useWithoutStretch"),
-            _ => None,
+        let value = FormRootVerticalScroll::from_storage(
+            trailer.get(self.qualifier_slot)?.trim(),
+            trailer.get(self.mode_slot)?.trim(),
+        )?;
+        (self.complete_trailer || value != FormRootVerticalScroll::Use).then_some(value.xml())
+    }
+
+    /// Both edits are derived from the same bounded trailer. Unknown input
+    /// pairs refuse before either member is replaced; 0/0 is the omitted value.
+    pub fn assignments(
+        self,
+        trailer: &[&str],
+        value: FormRootVerticalScroll,
+    ) -> Option<[(usize, &'static str); 2]> {
+        if !self.complete_trailer && value == FormRootVerticalScroll::Use {
+            return None;
         }
+        let qualifier = trailer.get(self.qualifier_slot)?.trim();
+        let mode = trailer.get(self.mode_slot)?.trim();
+        let original = FormRootVerticalScroll::from_storage(qualifier, mode);
+        if (qualifier, mode) != ("0", "0")
+            && (original.is_none()
+                || (!self.complete_trailer && original == Some(FormRootVerticalScroll::Use)))
+        {
+            return None;
+        }
+        let (qualifier, mode) = value.storage_parts();
+        Some([(self.qualifier_slot, qualifier), (self.mode_slot, mode)])
     }
 }
 
@@ -10151,5 +10278,128 @@ mod form_layout_policy_tests {
         assert_eq!(form_nondefault_percent_scale("100"), None);
         assert_eq!(form_nondefault_percent_scale("0100"), Some("0100".into()));
         assert_eq!(form_nondefault_percent_scale("1,0"), None);
+    }
+}
+
+#[cfg(test)]
+mod vertical_scroll_use_tests {
+    use super::{FormRootVerticalScroll, FormRootVerticalScrollSchema};
+
+    #[test]
+    fn native_85_overlay_requires_its_complete_core_and_appended_tail() {
+        let mut trailer = vec!["0"; 36];
+        trailer[0] = "\"\"";
+        trailer[1] = "\"\"";
+        trailer[22] = "{59,0}";
+        let schema = FormRootVerticalScrollSchema::from_overlay_layout(
+            Some("59"),
+            &trailer,
+            FormRootVerticalScroll::Use,
+        )
+        .unwrap();
+        assert_eq!(
+            schema.assignments(&trailer, FormRootVerticalScroll::Use),
+            Some([(5, "1"), (15, "1")])
+        );
+        trailer[22] = "{60,0}";
+        assert!(
+            FormRootVerticalScrollSchema::from_overlay_layout(
+                Some("59"),
+                &trailer,
+                FormRootVerticalScroll::Use
+            )
+            .is_none()
+        );
+        trailer[22] = "{59,0}";
+        trailer.push("0");
+        assert!(
+            FormRootVerticalScrollSchema::from_overlay_layout(
+                Some("59"),
+                &trailer,
+                FormRootVerticalScroll::Use
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn historical_partial_overlay_retains_old_modes_but_refuses_new_use() {
+        let mut trailer = vec!["0"; 17];
+        trailer[0] = "\"\"";
+        trailer[1] = "\"\"";
+        let schema = FormRootVerticalScrollSchema::from_overlay_layout(
+            Some("59"),
+            &trailer,
+            FormRootVerticalScroll::UseIfNecessary,
+        )
+        .unwrap();
+        assert_eq!(
+            schema.assignments(&trailer, FormRootVerticalScroll::UseIfNecessary),
+            Some([(5, "2"), (15, "2")])
+        );
+        assert_eq!(
+            schema.assignments(&trailer, FormRootVerticalScroll::UseWithoutStretch),
+            Some([(5, "0"), (15, "3")])
+        );
+        assert_eq!(
+            schema.assignments(&trailer, FormRootVerticalScroll::Use),
+            None
+        );
+        trailer[5] = "1";
+        trailer[15] = "1";
+        assert_eq!(schema.vertical_scroll(&trailer), None);
+        assert_eq!(
+            schema.assignments(&trailer, FormRootVerticalScroll::UseIfNecessary),
+            None
+        );
+        assert!(
+            FormRootVerticalScrollSchema::from_overlay_layout(
+                Some("59"),
+                &trailer,
+                FormRootVerticalScroll::Use
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn native_use_pair_decodes_in_each_known_root_trailer() {
+        for (root, count, length) in [("50", 0, 24), ("50", 1, 25), ("49", 1, 24)] {
+            for (xml, qualifier, mode) in [
+                ("use", "1", "1"),
+                ("useIfNecessary", "2", "2"),
+                ("useWithoutStretch", "0", "3"),
+            ] {
+                let mut trailer = vec!["0"; length];
+                trailer[2] = if count == 0 { "0" } else { "1" };
+                trailer[5 + count] = qualifier;
+                trailer[15 + count] = mode;
+                let schema =
+                    FormRootVerticalScrollSchema::from_raw_layout(Some(root), &trailer).unwrap();
+                assert_eq!(
+                    schema.vertical_scroll(&trailer),
+                    Some(xml),
+                    "root {root}, count {count}"
+                );
+                assert_eq!(
+                    schema.assignments(&trailer, FormRootVerticalScroll::from_xml(xml).unwrap()),
+                    Some([(5 + count, qualifier), (15 + count, mode)])
+                );
+                trailer[5 + count] = "9";
+                assert_eq!(schema.vertical_scroll(&trailer), None);
+                assert_eq!(
+                    schema.assignments(&trailer, FormRootVerticalScroll::Use),
+                    None
+                );
+                assert!(
+                    FormRootVerticalScrollSchema::from_raw_layout(Some("999"), &trailer).is_none()
+                );
+                trailer.pop();
+                assert!(
+                    FormRootVerticalScrollSchema::from_raw_layout(Some(root), &trailer).is_none()
+                );
+            }
+        }
+        assert_eq!(FormRootVerticalScroll::from_xml("unsupported"), None);
     }
 }

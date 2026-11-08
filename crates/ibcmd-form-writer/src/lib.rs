@@ -826,11 +826,7 @@ pub enum FormXmlUseForFoldersAndItems {
     FoldersAndItems,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum FormXmlVerticalScroll {
-    UseIfNecessary,
-    UseWithoutStretch,
-}
+type FormXmlVerticalScroll = ibcmd_form_schema::FormRootVerticalScroll;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlConversationsRepresentation {
@@ -6969,10 +6965,7 @@ fn format_native_form_body(
     let tail = ibcmd_form_native::format_root_tail(&ibcmd_form_native::NativeRootTail {
         scale: properties.root_scalars.get("Scale").map(String::as_str),
         auto_url: properties.auto_url.unwrap_or(true),
-        vertical_scroll: properties.vertical_scroll.map(|scroll| match scroll {
-            FormXmlVerticalScroll::UseIfNecessary => "useIfNecessary",
-            FormXmlVerticalScroll::UseWithoutStretch => "useWithoutStretch",
-        }),
+        vertical_scroll: properties.vertical_scroll.map(FormXmlVerticalScroll::xml),
         scaling_mode: properties.scaling_mode.map(|mode| match mode {
             FormXmlScalingMode::Normal => "Normal",
             FormXmlScalingMode::Compact => "Compact",
@@ -15255,11 +15248,8 @@ fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseFor
 }
 
 fn parse_form_vertical_scroll_xml(value: &str) -> Result<FormXmlVerticalScroll> {
-    match value {
-        "useIfNecessary" => Ok(FormXmlVerticalScroll::UseIfNecessary),
-        "useWithoutStretch" => Ok(FormXmlVerticalScroll::UseWithoutStretch),
-        other => Err(anyhow!("unsupported Form VerticalScroll: {other}")),
-    }
+    FormXmlVerticalScroll::from_xml(value)
+        .ok_or_else(|| anyhow!("unsupported Form VerticalScroll: {value}"))
 }
 
 fn parse_form_conversations_representation_xml(
@@ -15851,19 +15841,29 @@ fn replace_form_save_data_in_settings(
 
 fn replace_form_vertical_scroll(layout: &mut String, value: FormXmlVerticalScroll) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
-    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
-        return Ok(());
-    };
-    let code = form_vertical_scroll_code(value);
-    let mut replacements = Vec::<Range<usize>>::new();
-    for index in [tail_start + 5, tail_start + 15] {
-        if let Some(range) = fields.get(index)
-            && matches!(layout[range.clone()].trim(), "0" | "2")
-        {
-            replacements.push(range.clone());
-        }
-    }
-    for range in replacements.into_iter().rev() {
+    let values = fields
+        .iter()
+        .map(|range| layout[range.clone()].trim())
+        .collect::<Vec<_>>();
+    let root = values.first().copied();
+    let located = form_layout_child_items_tail_start(layout, &fields).and_then(|start| {
+        ibcmd_form_schema::FormRootVerticalScrollSchema::from_overlay_layout(
+            root,
+            &values[start..],
+            value,
+        )
+        .map(|schema| (start, schema))
+    });
+    let located = located.or_else(|| {
+        ibcmd_form_schema::FormRootVerticalScrollSchema::locate_native_overlay(&values, value)
+    });
+    let (tail_start, schema) =
+        located.ok_or_else(|| anyhow!("unsupported Form VerticalScroll root trailer"))?;
+    let assignments = schema
+        .assignments(&values[tail_start..], value)
+        .ok_or_else(|| anyhow!("unsupported Form VerticalScroll qualifier/mode pair"))?;
+    let replacements = assignments.map(|(slot, code)| (fields[tail_start + slot].clone(), code));
+    for (range, code) in replacements.into_iter().rev() {
         layout.replace_range(range, code);
     }
     Ok(())
@@ -16313,13 +16313,6 @@ fn form_update_on_data_change_code(value: FormXmlUpdateOnDataChange) -> &'static
     match value {
         FormXmlUpdateOnDataChange::Auto => "0",
         FormXmlUpdateOnDataChange::DontUpdate => "1",
-    }
-}
-
-fn form_vertical_scroll_code(value: FormXmlVerticalScroll) -> &'static str {
-    match value {
-        FormXmlVerticalScroll::UseIfNecessary => "2",
-        FormXmlVerticalScroll::UseWithoutStretch => "0",
     }
 }
 
@@ -24397,6 +24390,82 @@ mod tests {
             super::form_body_command_entry_identity(command)?,
             Some(("5".to_owned(), "КомандаОК".to_owned()))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn vertical_scroll_use_compiles_to_the_complete_native_root_tail() -> anyhow::Result<()> {
+        let xml = format!(
+            "{FORM_XML_HEAD}<VerticalScroll>use</VerticalScroll><AutoCommandBar name=\"FormCommandBar\" id=\"-1\"/></Form>"
+        );
+        let properties = super::parse_form_xml_body_properties(xml.as_bytes())?;
+        let plain = super::format_native_form_body(None, &properties, "", None, None)?;
+        let body = super::parse_form_body_plain(&plain)?;
+        let fields = super::scan_braced_fields(&body.layout, 0)?;
+        let start = super::form_layout_child_items_tail_start(&body.layout, &fields).unwrap();
+        let actual = fields[start..]
+            .iter()
+            .map(|range| body.layout[range.clone()].trim())
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            actual,
+            r#""","",0,1,"",1,0,0,0,0,0,3,3,0,0,1,100,1,1,0,0,0,{50,0},1"#
+        );
+        Ok(())
+    }
+
+    fn root_layout_with_scroll(value: &str) -> anyhow::Result<String> {
+        let xml = format!(
+            "{FORM_XML_HEAD}<VerticalScroll>{value}</VerticalScroll><AutoCommandBar name=\"FormCommandBar\" id=\"-1\"/></Form>"
+        );
+        let properties = super::parse_form_xml_body_properties(xml.as_bytes())?;
+        let plain = super::format_native_form_body(None, &properties, "", None, None)?;
+        Ok(super::parse_form_body_plain(&plain)?.layout)
+    }
+
+    #[test]
+    fn scroll_overlay_preserves_the_complete_layout_for_every_known_transition()
+    -> anyhow::Result<()> {
+        for from in ["use", "useIfNecessary", "useWithoutStretch"] {
+            for to in ["use", "useIfNecessary", "useWithoutStretch"] {
+                let mut actual = root_layout_with_scroll(from)?;
+                super::replace_form_vertical_scroll(
+                    &mut actual,
+                    super::parse_form_vertical_scroll_xml(to)?,
+                )?;
+                assert_eq!(actual, root_layout_with_scroll(to)?, "{from} -> {to}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn scroll_overlay_refuses_unknown_pairs_before_mutating() -> anyhow::Result<()> {
+        let mut layout = root_layout_with_scroll("use")?;
+        let fields = super::scan_braced_fields(&layout, 0)?;
+        let start = super::form_layout_child_items_tail_start(&layout, &fields).unwrap();
+        let trailer = fields[start..]
+            .iter()
+            .map(|range| layout[range.clone()].trim())
+            .collect::<Vec<_>>();
+        let schema =
+            ibcmd_form_schema::FormRootVerticalScrollSchema::from_raw_layout(Some("50"), &trailer)
+                .unwrap();
+        let [(qualifier, _), _] = schema
+            .assignments(&trailer, ibcmd_form_schema::FormRootVerticalScroll::Use)
+            .unwrap();
+        layout.replace_range(fields[start + qualifier].clone(), "9");
+        let before = layout.clone();
+        assert!(
+            super::replace_form_vertical_scroll(
+                &mut layout,
+                ibcmd_form_schema::FormRootVerticalScroll::Use
+            )
+            .is_err()
+        );
+        assert_eq!(layout, before);
+        assert!(super::parse_form_vertical_scroll_xml("unsupported").is_err());
         Ok(())
     }
 
