@@ -113,14 +113,22 @@ checks all three modes against the entire parsed native form body, including
 module and trailing metadata. This also covers a form with no ordinary child
 items. Schema tests cover wrong marker, extra member and partial 1/1 refusal.
 The policy gate passes without changing its baseline; the seven-step check
-passes. Initial native measurements above will be repeated on the corrected
-clean binary before final acceptance.
+passes. The corrected clean code commit `ff8c84c25f3a466ce0d4f4a7e40b9961f3b11a02` produced final iter
+SHA-256 `c05bca9034107d14c24541615fe39b5dbf3838bf2fa8d1cf814e926bfa378342`. The complete matrix was repeated with new
+candidate databases and output directories: all thirty target commands
+return0, all six cases retain their complete four-file trees (48/48 file
+comparisons across both post-apply readers). Full-set CF/file routes retain
+exactly the separately reproduced TitleFont refusal on1529; both selected
+routes return0 and their complete target forms match. All database hashes
+remain stable around reads. Native control references remain unchanged.
 
 ## Final gate and review
 
 This report is staged before the full gate so the tracked-file guards see
-it. Final native, gate and independent review results are added after they
-complete; interrupted or failed development invocations are not passed gates.
+it. Final staged CI on the corrected code completed29PASS, including workspace,
+root integration and root library; existing ignored tests retained.
+The earlier failed gate is explicitly recorded above and is not a PASS.
+Independent fresh-context review is pending.
 
 ## Native matrix hashes
 
