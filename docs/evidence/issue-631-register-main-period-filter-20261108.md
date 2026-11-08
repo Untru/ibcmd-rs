@@ -49,5 +49,7 @@ their hashes around reads. No SQL Server evidence is claimed.
 
 ## Final gate and review
 
-This initial report is tracked before full CI. Full staged CI and independent
-fresh-context review are pending; failed or interrupted runs are not PASS.
+The initial report was tracked before the full gate. Final staged CI
+completed29PASS with no skipped local stage: workspace, root integration,
+root library and cleanup all passed. Independent fresh-context review is
+pending; failed or interrupted runs are not PASS.
