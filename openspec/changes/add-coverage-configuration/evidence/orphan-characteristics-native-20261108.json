@@ -3,10 +3,10 @@
   "base": "54b796f64da5daed3714acdf7810581fe0e58778",
   "fixture_commit": "8d138b896f462c3053d16076cbabf0ffe5030c1c",
   "code": {
-    "commit": "120049160bc2c8987ffbd8d4bf258a8cd72dc67f",
-    "tree": "f1b8bc60f8927173d8a5f175acda9824b3808fff",
+    "commit": "ecff8b2e66ae5f8d6b89d8db79565efc6c189db1",
+    "tree": "618867412147dc094ad57b93a5b3e59b91f38891",
     "clean": true,
-    "binary_sha256": "1fc598592ac33f3aef1b480f52545712a6a8a3a3660e48b1309e04ed55a119b6",
+    "binary_sha256": "22b24aa35cc9bb376e129955de7bb87dc165e9f49e9c9c5d8a82b29589560669",
     "version": "ibcmd-rs 0.4.1"
   },
   "native_tools": [
@@ -249,8 +249,8 @@
       "left_files": 4,
       "right_files": 4,
       "differences": [],
-      "left_tree_sha256": "9540d17c240c31604955a8e60dca9d7fddafe149595f10c138cfecac605cdc8c",
-      "right_tree_sha256": "9540d17c240c31604955a8e60dca9d7fddafe149595f10c138cfecac605cdc8c"
+      "left_tree_sha256": "eed5eae6b2175d4b9b7e17ce17b4c0cf395e5086d123d771cf4a6963847b689c",
+      "right_tree_sha256": "eed5eae6b2175d4b9b7e17ce17b4c0cf395e5086d123d771cf4a6963847b689c"
     },
     {
       "comparison": "8.3.27.2214-imported-native-application",
@@ -285,8 +285,8 @@
       "left_files": 4,
       "right_files": 4,
       "differences": [],
-      "left_tree_sha256": "a20e54d11b4015f34087b52185623349f6dddca9a6d786eef78e75a9db8a39bd",
-      "right_tree_sha256": "a20e54d11b4015f34087b52185623349f6dddca9a6d786eef78e75a9db8a39bd"
+      "left_tree_sha256": "366e51ab511d94ecce91c494a6a8c941b5525bc35f28137b442c2fa7edf4b734",
+      "right_tree_sha256": "366e51ab511d94ecce91c494a6a8c941b5525bc35f28137b442c2fa7edf4b734"
     },
     {
       "comparison": "8.5.1.1529-imported-native-application",
@@ -310,16 +310,16 @@
   "service_classification": [
     {
       "runtime": "8.3.27.2214",
-      "native_control_sha256": "07ab55b47207600ef858a64e0a9df118aa0bf7bb179c749f54eacab1cbb1b09e",
-      "own_import_native_export_sha256": "76870cc6a6ac0ded7b1882658cc620aad46d49e87c45e88e662fb48e3a91d2b5",
+      "native_control_sha256": "67876eb7dae906c60e1a668519052d951bc602a75e67325da092149fd2242df6",
+      "own_import_native_export_sha256": "2ffced0a866d48ac1bb831f6452b8f2e74f5d23350532bae01f8dc9eb2160b54",
       "changed_config_version_attributes": 3,
       "unexpected_changes": [],
       "no_other_byte_changes": true
     },
     {
       "runtime": "8.5.1.1529",
-      "native_control_sha256": "f9b649d693cc63188c5cb3c25d98c40af18ac66aeab0ee826cde6e7e91549263",
-      "own_import_native_export_sha256": "71c14463ffb4da09b96605780a5c3a11a47430319941ba85e771b617cb23aeb5",
+      "native_control_sha256": "89fc43973a5eb4daa4f5fe8b7e0a7f961f84e3e2b1f4ebc8b9cf23d154fd1d65",
+      "own_import_native_export_sha256": "8d56d163d2215012571bc8105525a309ff7771a4afbd892792e2e4a1f094d0f9",
       "changed_config_version_attributes": 3,
       "unexpected_changes": [],
       "no_other_byte_changes": true
@@ -435,6 +435,54 @@
       "published": false
     },
     {
+      "runtime": "8.3.27.2214",
+      "case": "duplicate Properties",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "foreign duplicate Properties",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "foreign hidden Characteristics",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "duplicate owner",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "hidden after empty canonical block",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "hidden outside Properties",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "orphan in first XML root",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "orphan in last XML root",
+      "exit_code": 2,
+      "published": false
+    },
+    {
       "runtime": "8.5.1.1529",
       "case": "key-child",
       "exit_code": 2,
@@ -541,6 +589,54 @@
       "case": "ObjectField-0:7e0b67b0-c6d3-5a06-bbaf-b78f89c06903",
       "exit_code": 2,
       "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "duplicate Properties",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "foreign duplicate Properties",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "foreign hidden Characteristics",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "duplicate owner",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "hidden after empty canonical block",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "hidden outside Properties",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "orphan in first XML root",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "orphan in last XML root",
+      "exit_code": 2,
+      "published": false
     }
   ],
   "measurement_code_commit": "2e028962591a2f142b57fa201a365eda0f244461",
@@ -618,5 +714,19 @@
     "Native runtime 8.5.1.1529; archived 8.5.1.1150 remains an offline oracle.",
     "Disposable file infobases only; MSSQL not exercised.",
     "No private configuration or new marker-domain evidence."
-  ]
+  ],
+  "failing_first_duplicate_envelope_code_commit": "9011945cfaf3a6fa03982482e9fb4dfb0ee67a7b",
+  "duplicate_envelope_controls_before": {
+    "cases_per_saved_edition": 6,
+    "saved_editions": 2,
+    "exit_code": 0,
+    "published_cf": true
+  },
+  "multiple_root_controls_before": {
+    "code_commit": "ca3f37c592e90a48c550d8aad54a245522d6c6e9",
+    "case": "orphan in first XML root",
+    "saved_editions": 2,
+    "exit_code": 0,
+    "published_cf": true
+  }
 }
