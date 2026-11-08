@@ -179,7 +179,7 @@ Full staged `cargo xtask ci --keep-going` completes with terminal exit0:
 and root library904 tests pass; existing ignored89/4/7 are unchanged.
 Temporary-directory cleanup passes. All new source/tests were tracked before
 the gate; subsequent edits only extend this evidence Markdown. No test was
-ignored, relabelled or removed. Fresh-context review remains pending. No exact1150 runtime, SQL Server, full combined
+ignored, relabelled or removed. The first independent review subsequently found the CRLF defect below. No exact1150 runtime, SQL Server, full combined
 import, local release build, SBOM or release-audit claim.
 
 ## Review finding: exact duplicated descriptions
@@ -202,8 +202,7 @@ The prior candidate hash/gates above remain historical positive results;
 the corrected complete-Configuration regressions now pass on both saved
 editions (nine negative mutations and18 positive controls). Physical policy
 passes without refresh and the repeated inner loop completes9 PASS.
-Current matched corpus, clean iter/native replay, full staged CI and
-re-review of this correction remain pending.
+The corrected candidate is reverified through the gate below.
 
 ## Corrected candidate gate
 
@@ -236,5 +235,11 @@ with terminal exit0:29 PASS, zero failures/skipped local steps; workspace4709,
 root integration555 and root library904 pass, with unchanged existing
 ignored89/4/7. Temporary-directory cleanup passes. All current source/tests
 were tracked before this gate. Subsequent changes only extend evidence.
-The same independent critic is asked to re-review this corrected revision;
-APPROVE is still pending and the original REQUEST_CHANGES is retained above.
+The same independent critic re-reviewed clean58e9af85 and returned APPROVE,
+with no remaining findings. Its original standalone newline probe was
+recompiled and now rejects the inconsistent description on BOTH saved
+editions. Independent check9 passes again; fresh native workflows on both
+runtimes pass16 commands,24 complete application-file comparisons and8
+same-candidate files. The broader corrected18-case receipts were also
+reviewed. All review processes are terminal. The original REQUEST_CHANGES
+and its red-first regression remain documented above.
