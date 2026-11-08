@@ -864,3 +864,31 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn vertical_scroll_use_matches_complete_native_forms() {
+    let temp = TempDirectory::new();
+    for (platform, version, set_name) in [
+        ("8.3.27.2214", "2.20", "corpus-form-settings"),
+        ("8.5.1.1150", "2.21", "corpus-form-settings"),
+        ("8.5.1.1529", "2.21", "combined"),
+    ] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join(set_name);
+        let cf = temp.0.join(format!("{platform}.cf"));
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join(platform), version).unwrap();
+        let path = "CommonForms/CovVerticalScrollAlways/Ext/Form.xml";
+        assert_eq!(
+            exported.files.get(path).unwrap(),
+            &fs::read(set.join("native").join(path)).unwrap(),
+            "{platform}/{path}"
+        );
+    }
+}

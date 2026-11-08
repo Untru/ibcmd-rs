@@ -30,7 +30,6 @@
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
-        "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
         "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
@@ -102,8 +101,7 @@
     "8.3.27.2214/corpus-form-settings": {
       "refused": {
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row 24181860-6aef-54ac-88c7-e15ab8090824.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
-        "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row 659dbafc-02a9-5b15-ac24-1ce7c3fcb17e.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
-        "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use"
+        "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row 659dbafc-02a9-5b15-ac24-1ce7c3fcb17e.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary"
       }
     },
     "8.3.27.2214/corpus-graphical-schema-image": {
@@ -264,7 +262,6 @@
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
-        "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonForms/CovVisualGraphicalSchemaFieldBorderColor_0365cb28dc31.xml": "#600: base-free stage has no base Config row 6c7dac84-ea7f-5eaa-b001-ababd77e1127.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovVisualLabelDecorationFont_5be5224c3ca1.xml": "#599: base-free stage has no base Config row 6ca220d1-ae1b-52fa-a95a-4eca38192356.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_6351b0913aeb.xml": "#599: base-free stage has no base Config row 5e8ab11c-f1af-57a2-ada0-9c5769cb7a98.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
@@ -379,8 +376,7 @@
     "8.5.1.1150/corpus-form-settings": {
       "refused": {
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row 24181860-6aef-54ac-88c7-e15ab8090824.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
-        "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row 659dbafc-02a9-5b15-ac24-1ce7c3fcb17e.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
-        "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use"
+        "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row 659dbafc-02a9-5b15-ac24-1ce7c3fcb17e.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary"
       }
     },
     "8.5.1.1150/corpus-graphical-schema-image": {
@@ -653,7 +649,6 @@
         "CommonForms/CovReportExcludePreview.xml": "#680: unsupported Form ExcludedCommand: Preview",
         "CommonForms/CovTableOnlyDeselectAll.xml": "#622: base-free stage has no base Config row 993df2df-1bb4-5652-bf0b-1b8d32b12c66.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "CommonForms/CovTableOnlySelectAll.xml": "#622: base-free stage has no base Config row 6f0015a4-18ca-53f0-abc4-cc24c6a32b8c.0: the native form writer refuses it: <Table> excludes SelectAll, which has no measured uuid",
-        "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonForms/CovVisualGraphicalSchemaFieldBorderColor_0365cb28dc31.xml": "#600: base-free stage has no base Config row 6c7dac84-ea7f-5eaa-b001-ababd77e1127.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovVisualLabelDecorationFont_5be5224c3ca1.xml": "#599: base-free stage has no base Config row 6ca220d1-ae1b-52fa-a95a-4eca38192356.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_6351b0913aeb.xml": "#599: base-free stage has no base Config row 5e8ab11c-f1af-57a2-ada0-9c5769cb7a98.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
@@ -884,7 +879,6 @@
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
-        "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
         "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
@@ -965,7 +959,6 @@
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
-        "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonForms/CovVisualGraphicalSchemaFieldBorderColor_0365cb28dc31.xml": "#600: base-free stage has no base Config row 6c7dac84-ea7f-5eaa-b001-ababd77e1127.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovVisualLabelDecorationFont_5be5224c3ca1.xml": "#599: base-free stage has no base Config row 6ca220d1-ae1b-52fa-a95a-4eca38192356.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_6351b0913aeb.xml": "#599: base-free stage has no base Config row 5e8ab11c-f1af-57a2-ada0-9c5769cb7a98.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
@@ -1121,7 +1114,6 @@
         "CommonForms/CovReportExcludePreview.xml": "#680: unsupported Form ExcludedCommand: Preview",
         "CommonForms/CovTableOnlyDeselectAll.xml": "#622: base-free stage has no base Config row 993df2df-1bb4-5652-bf0b-1b8d32b12c66.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "CommonForms/CovTableOnlySelectAll.xml": "#622: base-free stage has no base Config row 6f0015a4-18ca-53f0-abc4-cc24c6a32b8c.0: the native form writer refuses it: <Table> excludes SelectAll, which has no measured uuid",
-        "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonForms/CovVisualGraphicalSchemaFieldBorderColor_0365cb28dc31.xml": "#600: base-free stage has no base Config row 6c7dac84-ea7f-5eaa-b001-ababd77e1127.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovVisualLabelDecorationFont_5be5224c3ca1.xml": "#599: base-free stage has no base Config row 6ca220d1-ae1b-52fa-a95a-4eca38192356.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovVisualLabelDecorationFont_6351b0913aeb.xml": "#599: base-free stage has no base Config row 5e8ab11c-f1af-57a2-ada0-9c5769cb7a98.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",

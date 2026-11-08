@@ -5,6 +5,7 @@
     "CovRootCollapseImportance",
     "CovRootEventChoiceProcessing",
     "CovSettingsFormTemplate",
+    "CovVerticalScrollAlways",
     "configuration"
   ]
 }

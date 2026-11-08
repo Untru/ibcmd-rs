@@ -8546,7 +8546,7 @@ pub fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
 pub struct NativeRootTail<'a> {
     /// `<AutoURL>`, which is on unless the form turns it off.
     pub auto_url: bool,
-    /// `<VerticalScroll>`: `useIfNecessary` or `useWithoutStretch`. It is read
+    /// `<VerticalScroll>`: `use`, `useIfNecessary` or `useWithoutStretch`. It is read
     /// twice, and not the same way both times -- `useWithoutStretch` writes 0
     /// in the first place and 3 in the second.
     pub vertical_scroll: Option<&'a str>,
@@ -8664,12 +8664,20 @@ const ROOT_SPACING: &[(&str, &str)] = &[
 pub fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
     let scroll = root_code(
         tail.vertical_scroll,
-        &[("useIfNecessary", "2"), ("useWithoutStretch", "0")],
+        &[
+            ("use", "1"),
+            ("useIfNecessary", "2"),
+            ("useWithoutStretch", "0"),
+        ],
         "0",
     )?;
     let scroll_again = root_code(
         tail.vertical_scroll,
-        &[("useIfNecessary", "2"), ("useWithoutStretch", "3")],
+        &[
+            ("use", "1"),
+            ("useIfNecessary", "2"),
+            ("useWithoutStretch", "3"),
+        ],
         "0",
     )?;
     let group = root_code(
@@ -11975,6 +11983,18 @@ mod tests {
     }
 
     /// The root record's tail, with the bytes ERP УХ stores.
+    #[test]
+    fn root_vertical_scroll_use_has_both_native_qualifiers() {
+        assert_eq!(
+            format_root_tail(&NativeRootTail {
+                vertical_scroll: Some("use"),
+                ..NativeRootTail::default()
+            })
+            .as_deref(),
+            Some(r#""","",0,1,"",1,0,0,0,0,0,3,3,0,0,1,100,1,1,0,0,0,{50,0},1"#)
+        );
+    }
+
     #[test]
     fn writes_the_root_tails_the_platform_stores() {
         // The smallest form of the corpus: it turns AutoURL off and scrolls
