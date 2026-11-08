@@ -26426,3 +26426,54 @@ fn form_body_empty_auto_command_bar_rule_has_no_corpus_owner_literals() {
         assert!(!production.contains(owner_literal), "{owner_literal}");
     }
 }
+
+#[test]
+fn unnumbered_container_services_precede_child_services() {
+    let identified = |id| format!("{{{id},{FORM_ITEM_IDENTITY_UUID}}}");
+    let make = |group: &str, child_tip: &str, group_tip: &str| {
+        format!(
+            r#"{{50,{{22,{group},0,0,0,5,"Group",1,11111111-1111-4111-8111-111111111111,{{37,{},0,0,0,2,"Field",{{12,{child_tip},0,0,0,0,"FieldTip"}}}},{{12,{group_tip},0,0,0,0,"GroupTip"}}}}}}"#,
+            identified(6)
+        )
+    };
+    let source = make("{0}", "{0}", "{0}");
+    let expected = make(&identified(7), &identified(9), &identified(8));
+    assert_eq!(
+        with_unidentified_form_items_numbered(&source),
+        Some(expected)
+    );
+}
+
+#[test]
+fn item_numbering_does_not_rewrite_identity_like_quoted_text() {
+    let layout = r#"{50,"Caption {22,{0},0,0,0,9,""Quoted""}"}"#;
+    assert_eq!(with_unidentified_form_items_numbered(layout), None);
+}
+
+#[test]
+fn quoted_identity_does_not_raise_the_next_form_item_id() {
+    let make = |identity: &str| {
+        format!(
+            r#"{{50,"Caption {{999,{FORM_ITEM_IDENTITY_UUID}}}",{{22,{identity},0,0,0,9,"Real"}}}}"#
+        )
+    };
+    let source = make("{0}");
+    let expected = make(&format!("{{1,{FORM_ITEM_IDENTITY_UUID}}}"));
+    assert_eq!(
+        with_unidentified_form_items_numbered(&source),
+        Some(expected)
+    );
+}
+
+#[test]
+fn quoted_hidden_group_does_not_hide_real_form_items() {
+    let make = |identity: &str| {
+        format!(r#"{{50,"Caption {{22,{{0}},0,0,0,7,""Text""",{{22,{identity},0,0,0,9,"Real"}}}}"#)
+    };
+    let source = make("{0}");
+    let expected = make(&format!("{{1,{FORM_ITEM_IDENTITY_UUID}}}"));
+    assert_eq!(
+        with_unidentified_form_items_numbered(&source),
+        Some(expected)
+    );
+}

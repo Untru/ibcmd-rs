@@ -1003,7 +1003,9 @@ const FORM_ITEM_IDENTITY_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
 /// The layout with every item stored without an id (`{0}` in place of its
 /// `{id, uuid}` identity) given one, as the platform numbers them when it
 /// writes the form: from one past the greatest id the form holds, in
-/// document order. A form loaded from XML that names no table additions gets
+/// document order, with each container's services before its regular children.
+/// Quoted text does not contribute identities. A form loaded from XML that
+/// names no table additions gets
 /// its tables' `SearchStringAddition`/`ViewStatusAddition`/
 /// `SearchControlAddition` (and their context menus and tooltips) created
 /// this way; 8.3.27.2214 dumps them numbered 33, 34, … behind items 1..7 and
@@ -1011,7 +1013,9 @@ const FORM_ITEM_IDENTITY_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
 /// `unnumbered_additions`). `None` when no item lacks an id.
 pub fn with_unidentified_form_items_numbered(layout: &str) -> Option<String> {
     const UNIDENTIFIED: &str = "{0},";
-    let identity_tail = format!(",{FORM_ITEM_IDENTITY_UUID}}}");
+    if !layout.contains(UNIDENTIFIED) {
+        return None;
+    }
     // An unidentified item: `{<wrapper>,{0},a,b,c,d,"<name>"` with four
     // plain scalars between the identity and the name; answers the record's
     // opening brace, its wrapper and its fourth scalar (the kind code of a
@@ -1033,45 +1037,71 @@ pub fn with_unidentified_form_items_numbered(layout: &str) -> Option<String> {
             }))
         .then(|| (wrapper_start, wrapper, scalars[3]))
     };
-    // The form's hidden navigator group (`22` of kind `7`, stored without an
-    // id with its tooltip) is never written, and nothing inside it is
-    // numbered.
-    let mut skip_until = 0;
-    let mut positions = Vec::new();
-    for (at, _) in layout.match_indices(UNIDENTIFIED) {
-        if at < skip_until {
+
+    let mut pending = vec![(layout, false)];
+    let mut order = Vec::new();
+    let mut greatest = 0_i64;
+    while let Some((value, inherited_hidden)) = pending.pop() {
+        let value = value.trim();
+        let at = (value.as_ptr() as usize).checked_sub(layout.as_ptr() as usize)?;
+        let unidentified = layout[at..]
+            .starts_with(UNIDENTIFIED)
+            .then(|| unidentified_at(at))
+            .flatten();
+        if unidentified.is_none()
+            && !value.contains(UNIDENTIFIED)
+            && !value.contains(FORM_ITEM_IDENTITY_UUID)
+        {
             continue;
         }
-        let Some((start, wrapper, kind)) = unidentified_at(at) else {
-            continue;
-        };
-        if wrapper == "22" && kind == "7" {
-            skip_until = scan_1c_braced_value(layout, start).unwrap_or(layout.len());
-            continue;
+        let fields = split_1c_braced_fields(value, 0)?;
+        // The hidden navigator group and its descendants are not published.
+        // Recognize its actual identity field, never matching caption text.
+        let hidden = inherited_hidden
+            || fields.iter().any(|field| {
+                let field_at = field.as_ptr() as usize - layout.as_ptr() as usize;
+                layout[field_at..].starts_with(UNIDENTIFIED)
+                    && unidentified_at(field_at).is_some_and(|(start, wrapper, kind)| {
+                        start == at
+                            && ibcmd_form_schema::form_item_is_hidden_navigator(wrapper, kind)
+                    })
+            });
+        if unidentified.is_some() && !hidden {
+            order.push(at);
         }
-        positions.push(at);
+        if let [id, class] = fields.as_slice()
+            && class.trim() == FORM_ITEM_IDENTITY_UUID
+            && let Ok(id) = id.trim().parse::<i64>()
+        {
+            greatest = greatest.max(id);
+        }
+        // UUID-prefixed members are regular children; an owner's services
+        // have no such prefix. The writer emits services before children.
+        // The explicit stack preserves that order without recursive nesting.
+        for child in [true, false] {
+            for (index, field) in fields.iter().enumerate().rev() {
+                if field.trim_start().starts_with('{')
+                    && form_member_follows_child_kind(&fields, index) == child
+                {
+                    pending.push((field, hidden));
+                }
+            }
+        }
     }
-    if positions.is_empty() {
+    if order.is_empty() {
         return None;
     }
-    let greatest = layout
-        .match_indices(&identity_tail)
-        .filter_map(|(at, _)| {
-            let head = &layout[..at];
-            let start = head.rfind('{')?;
-            head[start + 1..].trim().parse::<i64>().ok()
-        })
-        .max()
-        .unwrap_or(0)
-        .max(0);
+    let numbers = order
+        .iter()
+        .enumerate()
+        .map(|(offset, at)| (*at, greatest + 1 + offset as i64))
+        .collect::<BTreeMap<_, _>>();
+    let positions = order.into_iter().collect::<BTreeSet<_>>();
     let mut numbered = String::with_capacity(layout.len() + positions.len() * 48);
     let mut copied = 0;
-    for (offset, at) in positions.into_iter().enumerate() {
+    for at in positions {
         numbered.push_str(&layout[copied..at]);
-        numbered.push_str(&format!(
-            "{{{},{FORM_ITEM_IDENTITY_UUID}}},",
-            greatest + 1 + offset as i64
-        ));
+        numbered.push_str(&format!("{{{},{FORM_ITEM_IDENTITY_UUID}}},", numbers[&at]));
         copied = at + UNIDENTIFIED.len();
     }
     numbered.push_str(&layout[copied..]);
