@@ -17,8 +17,11 @@ it does not scan arbitrary nested records for a convenient revision marker.
 The converted legacy root retains the revision tuple at its true boundary.
 The fact pass receives twelve logical members in their original order and a
 separate classification of the known generated records. Unknown payloads or
-ambiguous boundaries are errors. A declared revision-59 root cannot silently
-use the generic legacy path after that error.
+ambiguous boundaries are errors. A declared revision-59 root cannot silently use the generic legacy path
+at a source-publication boundary. The existing low-level compatibility API
+also accepts legacy root-59 fragments; it uses a fully validated bounded
+trailer to select modern conversion. Source export, adopted-base export,
+physical-stage matching and source materialization use the strict boundary.
 
 Searching for the last tuple beginning with 59 was rejected: unrelated data
 can carry such a tuple. Keeping a fixed offset was rejected because each

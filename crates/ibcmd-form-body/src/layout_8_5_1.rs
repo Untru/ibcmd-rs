@@ -196,8 +196,8 @@ pub struct FormFactsV8_5_1 {
     pub unknown_palette_colors: Vec<String>,
 }
 
-/// Selects a declared 8.5 body; the converter validates the complete profile.
-/// Unknown declared-8.5 shapes must not fall back to the generic legacy path.
+/// Selects a declared 8.5 body at a source-publication boundary. Unknown
+/// declared shapes must not fall back to the generic compatibility reader.
 pub fn is_form_body_8_5_1(body: &ParsedFormBodyBlob) -> bool {
     body.layout
         .trim_start()
@@ -209,20 +209,30 @@ pub fn is_form_body_8_5_1(body: &ParsedFormBodyBlob) -> bool {
         })
 }
 
+/// The low-level fragment reader also supports legacy root-59 fragments.
+/// This predicate proves a modern trailer; it is not a publication gate.
+pub fn has_valid_form_body_8_5_1_trailer(body: &ParsedFormBodyBlob) -> bool {
+    root_trailer_schema(&body.layout).is_some()
+}
+
+fn classify_root_member(fields: &[&str], index: usize) -> FormRootV85TrailerMember {
+    let Some(raw) = fields.get(index).map(|field| field.trim()) else {
+        return FormRootV85TrailerMember::Other;
+    };
+    if raw.starts_with('{') {
+        ibcmd_1c_text::split_1c_braced_fields(raw, 0)
+            .map_or(FormRootV85TrailerMember::Other, |record| {
+                FormRootV85TrailerMember::record(&record)
+            })
+    } else {
+        FormRootV85TrailerMember::scalar(raw)
+    }
+}
+
 fn root_trailer_schema(layout: &str) -> Option<FormRootV85TrailerSchema> {
     let fields = ibcmd_1c_text::split_1c_braced_fields(layout, 0)?;
     FormRootV85TrailerSchema::from_raw_layout(fields.first().copied(), fields.len(), |index| {
-        let Some(raw) = fields.get(index).map(|field| field.trim()) else {
-            return FormRootV85TrailerMember::Other;
-        };
-        if raw.starts_with('{') {
-            ibcmd_1c_text::split_1c_braced_fields(raw, 0)
-                .map_or(FormRootV85TrailerMember::Other, |record| {
-                    FormRootV85TrailerMember::record(&record)
-                })
-        } else {
-            FormRootV85TrailerMember::scalar(raw)
-        }
+        classify_root_member(&fields, index)
     })
 }
 
@@ -876,6 +886,16 @@ mod tests {
             trailing: Vec::new(),
             trailing_fields: 0,
         }
+    }
+
+    #[test]
+    fn legacy_revision_59_fragment_requires_explicit_compatibility_reader() {
+        let mut body = optional_panel_body(0);
+        body.layout =
+            "{59,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"Bar\",{1,0}}}".to_owned();
+        assert!(is_form_body_8_5_1(&body));
+        assert!(!has_valid_form_body_8_5_1_trailer(&body));
+        assert!(down_convert_form_body_8_5_1(&body).is_err());
     }
 
     #[test]
