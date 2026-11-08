@@ -1,0 +1,622 @@
+{
+  "issue": 626,
+  "base": "54b796f64da5daed3714acdf7810581fe0e58778",
+  "fixture_commit": "8d138b896f462c3053d16076cbabf0ffe5030c1c",
+  "code": {
+    "commit": "120049160bc2c8987ffbd8d4bf258a8cd72dc67f",
+    "tree": "f1b8bc60f8927173d8a5f175acda9824b3808fff",
+    "clean": true,
+    "binary_sha256": "1fc598592ac33f3aef1b480f52545712a6a8a3a3660e48b1309e04ed55a119b6",
+    "version": "ibcmd-rs 0.4.1"
+  },
+  "native_tools": [
+    {
+      "runtime": "8.3.27.2214",
+      "binary_sha256": "1a35bba7883a7fdf9a8678392e4b1520df452995ce005ff225f94594e70cfe25",
+      "version_output": "8.3.27.2214",
+      "version_exit": 0
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "binary_sha256": "40f74bfb8237465acc934aaea4b8d40557602bdc0ab37fc5bb389023166d2ffb",
+      "version_output": "8.5.1.1529",
+      "version_exit": 0
+    }
+  ],
+  "baseline_commands": [
+    {
+      "runtime": "8.3.27.2214",
+      "saved": "8.3.27.2214",
+      "step": "create",
+      "exit": 0
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "saved": "8.3.27.2214",
+      "step": "export",
+      "exit": 0
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "saved": "8.5.1.1150",
+      "step": "create",
+      "exit": 0
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "saved": "8.5.1.1150",
+      "step": "export",
+      "exit": 0
+    }
+  ],
+  "native_commands": [
+    {
+      "step": "8.3.27.2214-ours-export-native",
+      "tool": "ibcmd-rs",
+      "exit_code": 0
+    },
+    {
+      "step": "8.3.27.2214-native-empty",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.3.27.2214-ours-import-default",
+      "tool": "ibcmd-rs",
+      "exit_code": 0
+    },
+    {
+      "step": "8.3.27.2214-native-apply",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.3.27.2214-native-export-import",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.3.27.2214-ours-export-import",
+      "tool": "ibcmd-rs",
+      "exit_code": 0
+    },
+    {
+      "step": "8.3.27.2214-native-xml-control",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.3.27.2214-native-export-xml-control",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.5.1.1529-ours-export-native",
+      "tool": "ibcmd-rs",
+      "exit_code": 0
+    },
+    {
+      "step": "8.5.1.1529-native-empty",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.5.1.1529-ours-import-default",
+      "tool": "ibcmd-rs",
+      "exit_code": 0
+    },
+    {
+      "step": "8.5.1.1529-native-apply",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.5.1.1529-native-export-import",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.5.1.1529-ours-export-import",
+      "tool": "ibcmd-rs",
+      "exit_code": 0
+    },
+    {
+      "step": "8.5.1.1529-native-xml-control",
+      "tool": "ibcmd",
+      "exit_code": 0
+    },
+    {
+      "step": "8.5.1.1529-native-export-xml-control",
+      "tool": "ibcmd",
+      "exit_code": 0
+    }
+  ],
+  "baseline_hashes": [
+    {
+      "runtime": "8.3.27.2214",
+      "saved": "8.3.27.2214",
+      "input_cf_sha256": "9c69aa23e06fd5c81b5b7bb95944f832b3c6fe2ad214d37c7540226dd6a39ca0",
+      "native": {
+        "sha256": "3b2030db322ebbb54992e46653b3f6a81f83ce10ae1509a272d90f398ae84c95",
+        "files": [
+          {
+            "path": "Catalogs/CovOrphanCharacteristics.xml",
+            "sha256": "2b24616e17454f9de5adab18dec1ea26c4ac51ebf3a0f6bb09093791b6f7a942",
+            "size": 5491
+          },
+          {
+            "path": "ConfigDumpInfo.xml",
+            "sha256": "0eab25f7c6e64eaa716713800af5f8b3a2542ad5255b77dabdc6d5e5274a260b",
+            "size": 794
+          },
+          {
+            "path": "Configuration.xml",
+            "sha256": "af65a1c204f64aa6ef135bc0235c94f40632bc87cf45f2deaf14175f7c89b8e3",
+            "size": 10354
+          },
+          {
+            "path": "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+            "sha256": "6b08f5aa864e291924f7ac6ef047e7d335aaaaef691e891ac693e00d07e60510",
+            "size": 1251
+          }
+        ]
+      },
+      "fixture": {
+        "sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897",
+        "files": [
+          {
+            "path": "Catalogs/CovOrphanCharacteristics.xml",
+            "sha256": "2b24616e17454f9de5adab18dec1ea26c4ac51ebf3a0f6bb09093791b6f7a942",
+            "size": 5491
+          },
+          {
+            "path": "Configuration.xml",
+            "sha256": "af65a1c204f64aa6ef135bc0235c94f40632bc87cf45f2deaf14175f7c89b8e3",
+            "size": 10354
+          },
+          {
+            "path": "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+            "sha256": "6b08f5aa864e291924f7ac6ef047e7d335aaaaef691e891ac693e00d07e60510",
+            "size": 1251
+          }
+        ]
+      }
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "saved": "8.5.1.1150",
+      "input_cf_sha256": "bdfa6acfe2501b6938fb1db2aeab57fcd74a831c5509fa62b3da78da61f51f64",
+      "native": {
+        "sha256": "cbb4028b0cc8f8581c3002e1ae44547bdc99b0711d3000cc76ee5a9a4812501a",
+        "files": [
+          {
+            "path": "Catalogs/CovOrphanCharacteristics.xml",
+            "sha256": "3053239442708edb0bc437cee579529a2ee0dcb7ce2fed4959113b77220bec09",
+            "size": 5546
+          },
+          {
+            "path": "ConfigDumpInfo.xml",
+            "sha256": "c65a9bacf11824cc0db37cb0f1539a97fb93185ac538399c5e5ec06d083af776",
+            "size": 794
+          },
+          {
+            "path": "Configuration.xml",
+            "sha256": "171e7d75486631a8a85e7d01db291f969973d239661d118aea53d10e70c34911",
+            "size": 11111
+          },
+          {
+            "path": "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+            "sha256": "b68f52aa273e40687376424154d065ff625e6ae96f510171cf939bc6f8b7ccf6",
+            "size": 1306
+          }
+        ]
+      },
+      "fixture": {
+        "sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265",
+        "files": [
+          {
+            "path": "Catalogs/CovOrphanCharacteristics.xml",
+            "sha256": "3053239442708edb0bc437cee579529a2ee0dcb7ce2fed4959113b77220bec09",
+            "size": 5546
+          },
+          {
+            "path": "Configuration.xml",
+            "sha256": "171e7d75486631a8a85e7d01db291f969973d239661d118aea53d10e70c34911",
+            "size": 11111
+          },
+          {
+            "path": "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+            "sha256": "b68f52aa273e40687376424154d065ff625e6ae96f510171cf939bc6f8b7ccf6",
+            "size": 1306
+          }
+        ]
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "comparison": "8.3.27.2214-native-input-own-export",
+      "include_config_dump_info": true,
+      "left_files": 4,
+      "right_files": 4,
+      "differences": [],
+      "left_tree_sha256": "3b2030db322ebbb54992e46653b3f6a81f83ce10ae1509a272d90f398ae84c95",
+      "right_tree_sha256": "3b2030db322ebbb54992e46653b3f6a81f83ce10ae1509a272d90f398ae84c95"
+    },
+    {
+      "comparison": "8.3.27.2214-same-imported-base-native-own",
+      "include_config_dump_info": true,
+      "left_files": 4,
+      "right_files": 4,
+      "differences": [],
+      "left_tree_sha256": "9540d17c240c31604955a8e60dca9d7fddafe149595f10c138cfecac605cdc8c",
+      "right_tree_sha256": "9540d17c240c31604955a8e60dca9d7fddafe149595f10c138cfecac605cdc8c"
+    },
+    {
+      "comparison": "8.3.27.2214-imported-native-application",
+      "include_config_dump_info": false,
+      "left_files": 3,
+      "right_files": 3,
+      "differences": [],
+      "left_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897",
+      "right_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897"
+    },
+    {
+      "comparison": "8.3.27.2214-native-vs-own-import-application",
+      "include_config_dump_info": false,
+      "left_files": 3,
+      "right_files": 3,
+      "differences": [],
+      "left_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897",
+      "right_tree_sha256": "e5ccbd49e39205023486b7a2e0ca5296e6291ab7e2d6e3e016a99dd86e76a897"
+    },
+    {
+      "comparison": "8.5.1.1529-native-input-own-export",
+      "include_config_dump_info": true,
+      "left_files": 4,
+      "right_files": 4,
+      "differences": [],
+      "left_tree_sha256": "cbb4028b0cc8f8581c3002e1ae44547bdc99b0711d3000cc76ee5a9a4812501a",
+      "right_tree_sha256": "cbb4028b0cc8f8581c3002e1ae44547bdc99b0711d3000cc76ee5a9a4812501a"
+    },
+    {
+      "comparison": "8.5.1.1529-same-imported-base-native-own",
+      "include_config_dump_info": true,
+      "left_files": 4,
+      "right_files": 4,
+      "differences": [],
+      "left_tree_sha256": "a20e54d11b4015f34087b52185623349f6dddca9a6d786eef78e75a9db8a39bd",
+      "right_tree_sha256": "a20e54d11b4015f34087b52185623349f6dddca9a6d786eef78e75a9db8a39bd"
+    },
+    {
+      "comparison": "8.5.1.1529-imported-native-application",
+      "include_config_dump_info": false,
+      "left_files": 3,
+      "right_files": 3,
+      "differences": [],
+      "left_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265",
+      "right_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265"
+    },
+    {
+      "comparison": "8.5.1.1529-native-vs-own-import-application",
+      "include_config_dump_info": false,
+      "left_files": 3,
+      "right_files": 3,
+      "differences": [],
+      "left_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265",
+      "right_tree_sha256": "8a8e12c31f6669739217891567a8c481e203837b7d7a8ebcc5b5bfacc0a0a265"
+    }
+  ],
+  "service_classification": [
+    {
+      "runtime": "8.3.27.2214",
+      "native_control_sha256": "07ab55b47207600ef858a64e0a9df118aa0bf7bb179c749f54eacab1cbb1b09e",
+      "own_import_native_export_sha256": "76870cc6a6ac0ded7b1882658cc620aad46d49e87c45e88e662fb48e3a91d2b5",
+      "changed_config_version_attributes": 3,
+      "unexpected_changes": [],
+      "no_other_byte_changes": true
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "native_control_sha256": "f9b649d693cc63188c5cb3c25d98c40af18ac66aeab0ee826cde6e7e91549263",
+      "own_import_native_export_sha256": "71c14463ffb4da09b96605780a5c3a11a47430319941ba85e771b617cb23aeb5",
+      "changed_config_version_attributes": 3,
+      "unexpected_changes": [],
+      "no_other_byte_changes": true
+    }
+  ],
+  "negative_controls": [
+    {
+      "runtime": "8.3.27.2214",
+      "case": "key-child",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "key-attribute",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "CharacteristicTypes-'from=\" \"'",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "CharacteristicTypes-'from=\"\\t \"'",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "CharacteristicTypes-''",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "CharacteristicValues-'from=\" \"'",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "CharacteristicValues-'from=\"\\t \"'",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "CharacteristicValues-''",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "marker-' -2 '",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "marker-'-2 '",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "TypesFilterField- 0:8819d20a-c08a-51e6-a785-989f7956c436",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "TypesFilterField-0:8819d20a-c08a-51e6-a785-989f7956c436 ",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "TypesFilterField-0:00000000-0000-0000-0000-000000000000",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "TypesFilterField-0:7e0b67b0-c6d3-5a06-bbaf-b78f89c06903",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "ObjectField- 0:f9bdc705-5711-5281-b8bb-5cc0f02e8d3e",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "ObjectField-0:f9bdc705-5711-5281-b8bb-5cc0f02e8d3e ",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "ObjectField-0:00000000-0000-0000-0000-000000000000",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.3.27.2214",
+      "case": "ObjectField-0:7e0b67b0-c6d3-5a06-bbaf-b78f89c06903",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "key-child",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "key-attribute",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "CharacteristicTypes-'from=\" \"'",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "CharacteristicTypes-'from=\"\\t \"'",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "CharacteristicTypes-''",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "CharacteristicValues-'from=\" \"'",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "CharacteristicValues-'from=\"\\t \"'",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "CharacteristicValues-''",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "marker-' -2 '",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "marker-'-2 '",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "TypesFilterField- 0:8819d20a-c08a-51e6-a785-989f7956c436",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "TypesFilterField-0:8819d20a-c08a-51e6-a785-989f7956c436 ",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "TypesFilterField-0:00000000-0000-0000-0000-000000000000",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "TypesFilterField-0:7e0b67b0-c6d3-5a06-bbaf-b78f89c06903",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "ObjectField- 0:f9bdc705-5711-5281-b8bb-5cc0f02e8d3e",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "ObjectField-0:f9bdc705-5711-5281-b8bb-5cc0f02e8d3e ",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "ObjectField-0:00000000-0000-0000-0000-000000000000",
+      "exit_code": 2,
+      "published": false
+    },
+    {
+      "runtime": "8.5.1.1529",
+      "case": "ObjectField-0:7e0b67b0-c6d3-5a06-bbaf-b78f89c06903",
+      "exit_code": 2,
+      "published": false
+    }
+  ],
+  "measurement_code_commit": "2e028962591a2f142b57fa201a365eda0f244461",
+  "cf_fixed_minus_base": {
+    "8.3.27.2214-xml-2.20-combined": {
+      "newly_equal": [
+        "Catalogs/CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    },
+    "8.3.27.2214-xml-2.20-combined-native85-storage": {
+      "newly_equal": [
+        "Catalogs/CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    },
+    "8.3.27.2214-xml-2.20-combined-stored-command-panels": {
+      "newly_equal": [
+        "Catalogs/CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    },
+    "8.3.27.2214-xml-2.20-corpus-orphan-characteristics": {
+      "newly_equal": [
+        "CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    },
+    "8.5.1.1150-xml-2.21-combined": {
+      "newly_equal": [
+        "Catalogs/CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    },
+    "8.5.1.1150-xml-2.21-combined-stored-command-panels": {
+      "newly_equal": [
+        "Catalogs/CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    },
+    "8.5.1.1150-xml-2.21-corpus-orphan-characteristics": {
+      "newly_equal": [
+        "CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    },
+    "8.5.1.1529-xml-2.21-combined": {
+      "newly_equal": [
+        "Catalogs/CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    },
+    "8.5.1.1529-xml-2.21-combined-stored-command-panels": {
+      "newly_equal": [
+        "Catalogs/CovOrphanCharacteristics"
+      ],
+      "equal_delta": 1
+    }
+  },
+  "stored_fixed_minus_base": {
+    "8.3.27.2214/corpus-orphan-characteristics": {
+      "new_equal": [
+        "Catalogs/CovOrphanCharacteristics.xml"
+      ],
+      "lost_equal": []
+    },
+    "8.5.1.1150/corpus-orphan-characteristics": {
+      "new_equal": [
+        "Catalogs/CovOrphanCharacteristics.xml"
+      ],
+      "lost_equal": []
+    }
+  },
+  "limits": [
+    "Native runtime 8.5.1.1529; archived 8.5.1.1150 remains an offline oracle.",
+    "Disposable file infobases only; MSSQL not exercised.",
+    "No private configuration or new marker-domain evidence."
+  ]
+}
