@@ -5,7 +5,6 @@
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
-        "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
@@ -141,11 +140,6 @@
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0"
       }
     },
-    "8.3.27.2214/corpus-orphan-characteristics": {
-      "refused": {
-        "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2"
-      }
-    },
     "8.3.27.2214/corpus-owned-catalog-forms": {
       "refused": {
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
@@ -238,7 +232,6 @@
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
-        "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
@@ -439,11 +432,6 @@
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0"
       }
     },
-    "8.5.1.1150/corpus-orphan-characteristics": {
-      "refused": {
-        "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2"
-      }
-    },
     "8.5.1.1150/corpus-owned-catalog-forms": {
       "refused": {
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
@@ -534,7 +522,6 @@
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
-        "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
@@ -859,7 +846,6 @@
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
-        "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
@@ -939,7 +925,6 @@
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
-        "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
@@ -1002,7 +987,6 @@
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
-        "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",

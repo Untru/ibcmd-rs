@@ -73,6 +73,7 @@
     "Catalogs/CovNetworkGamma",
     "Catalogs/CovObjectPresentation_Cov",
     "Catalogs/CovOrphanCatalogTemplate",
+    "Catalogs/CovOrphanCharacteristics",
     "Catalogs/CovOwnedCatalogTemplate",
     "Catalogs/CovOwnedProducts",
     "Catalogs/CovOwnedProductsAlt",

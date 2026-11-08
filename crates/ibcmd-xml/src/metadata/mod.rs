@@ -29,7 +29,7 @@ mod websocket_client;
 pub use business_objects::{register_catalog_codec, register_document_codec};
 pub use characteristics::{
     CharacteristicsXmlError, render_cct_characteristics_xml, render_characteristics_xml,
-    render_metadata_characteristics_xml,
+    render_metadata_characteristics_xml, validate_characteristics_document,
 };
 pub use children::{CctTemplateChildrenError, append_cct_template_children};
 pub use common::{

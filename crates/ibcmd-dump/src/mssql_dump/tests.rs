@@ -8,7 +8,9 @@ use crate::metadata_owner_graph::{
 };
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
-use ibcmd_core::characteristics::{CharacteristicFilterValue, CharacteristicReference};
+use ibcmd_core::characteristics::{
+    CharacteristicField, CharacteristicFilterValue, CharacteristicReference,
+};
 use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::semantic::semantic_digest;
 use ibcmd_core::validate::validate_configuration;
@@ -50863,6 +50865,42 @@ fn decode(value: &str) -> Result<Characteristics, CharacteristicsDiagnostic> {
         &BTreeMap::new(),
         &references(),
     )
+}
+
+#[test]
+fn orphan_characteristic_marker_is_preserved_without_inventing_a_source() {
+    let decode = |marker: &str, source: &CharacteristicReference| {
+        characteristics::decode_field(
+            CharacteristicsOwnerFamily::Catalog,
+            0,
+            &field(marker),
+            CharacteristicRole::KeyField,
+            source,
+            &references(),
+        )
+    };
+    let orphan = CharacteristicReference::empty_source();
+    assert_eq!(
+        decode("-2", &orphan).unwrap(),
+        CharacteristicField::UnresolvedStandardAttribute(-2)
+    );
+    for marker in ["-3", "1", "-02", "-2147483649"] {
+        assert_eq!(
+            decode(marker, &orphan).unwrap_err().reason,
+            CharacteristicsReason::UnsupportedMarker
+        );
+    }
+    let bound = CharacteristicReference::new("Catalog.Types", None).unwrap();
+    assert_eq!(
+        decode("-2", &bound).unwrap().reference().unwrap().path(),
+        "Catalog.Types.StandardAttribute.Code"
+    );
+    assert_eq!(
+        decode(&format!("0,{FIELD_UUID}"), &orphan)
+            .unwrap_err()
+            .reason,
+        CharacteristicsReason::ReferenceOutsideSource
+    );
 }
 
 #[test]

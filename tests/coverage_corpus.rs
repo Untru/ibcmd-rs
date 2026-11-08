@@ -635,6 +635,506 @@ fn empty_or_untyped_failed_exports_are_never_salvaged() {
 }
 
 #[test]
+fn orphan_characteristics_export_matches_complete_native_trees() {
+    for (platform, source_version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("configuration.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join("export"), source_version).unwrap();
+        assert!(
+            exported.refusal.is_none(),
+            "{platform}: {:?}",
+            exported.refusal
+        );
+        assert_eq!(exported.files, read_tree(&set.join("native")), "{platform}");
+    }
+}
+
+#[test]
+fn orphan_characteristics_bootstrap_matches_complete_native_trees() {
+    for (platform, source_version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("configuration.cf");
+        let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+            .arg(set.join("native"))
+            .arg(&cf)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{platform}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let exported = cf_export(&cf, &temp.0.join("export"), source_version).unwrap();
+        assert!(
+            exported.refusal.is_none(),
+            "{platform}: {:?}",
+            exported.refusal
+        );
+        assert_eq!(exported.files, read_tree(&set.join("native")), "{platform}");
+    }
+}
+
+#[test]
+fn orphan_characteristics_reject_unknown_markers_before_publication() {
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        let source = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics/native");
+        for (marker, source_attribute) in [
+            ("-3", "from=\"\""),
+            ("1", "from=\"\""),
+            ("-02", "from=\"\""),
+            ("-2147483649", "from=\"\""),
+            ("-2", ""),
+            ("-2", "from=\"Catalog.CovOrphanCharacteristics\""),
+            ("-2", "from=\" \""),
+            ("-2", "from=\"\t \""),
+            (" -2 ", "from=\"\""),
+            ("-2 ", "from=\"\""),
+        ] {
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("source");
+            for (path, bytes) in read_tree(&source) {
+                let destination = tree.join(&path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                let bytes = if path == "Catalogs/CovOrphanCharacteristics.xml" {
+                    String::from_utf8(bytes)
+                        .unwrap()
+                        .replace(
+                            "<xr:KeyField>-2</xr:KeyField>",
+                            &format!("<xr:KeyField>{marker}</xr:KeyField>"),
+                        )
+                        .replacen(
+                            "<xr:CharacteristicTypes from=\"\">",
+                            &format!("<xr:CharacteristicTypes {source_attribute}>"),
+                            1,
+                        )
+                        .into_bytes()
+                } else {
+                    bytes
+                };
+                fs::write(destination, bytes).unwrap();
+            }
+            let cf = temp.0.join("refused.cf");
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+                .arg(&tree)
+                .arg(&cf)
+                .output()
+                .unwrap();
+            assert!(
+                !output.status.success(),
+                "{platform}: accepted {marker} {source_attribute}"
+            );
+            assert!(!cf.exists(), "{platform}: published {marker}");
+        }
+    }
+}
+
+#[test]
+fn orphan_characteristics_reject_padded_detached_sources_and_uuids() {
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        let source = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics/native");
+        let native = read_tree(&source);
+        let descriptor = "Catalogs/CovOrphanCharacteristics.xml";
+        let original = String::from_utf8(native[descriptor].clone()).unwrap();
+        let mut cases = Vec::new();
+        for attribute in ["from=\" \"", "from=\"\t \"", ""] {
+            cases.push((
+                format!("values source {attribute:?}"),
+                original.replacen(
+                    "<xr:CharacteristicValues from=\"\">",
+                    &format!("<xr:CharacteristicValues {attribute}>"),
+                    1,
+                ),
+            ));
+        }
+        for tag in ["TypesFilterField", "ObjectField"] {
+            let open = format!("<xr:{tag}>");
+            let value = original
+                .split_once(&open)
+                .unwrap()
+                .1
+                .split_once("</")
+                .unwrap()
+                .0;
+            for padded in [format!(" {value}"), format!("{value} ")] {
+                cases.push((
+                    format!("padded {tag}"),
+                    original.replacen(
+                        &format!("{open}{value}</xr:{tag}>"),
+                        &format!("{open}{padded}</xr:{tag}>"),
+                        1,
+                    ),
+                ));
+            }
+        }
+        for replacement in [
+            "<xr:KeyField>-2<Unknown/></xr:KeyField>",
+            "<xr:KeyField Unknown=\"yes\">-2</xr:KeyField>",
+        ] {
+            cases.push((
+                replacement.to_string(),
+                original.replacen("<xr:KeyField>-2</xr:KeyField>", replacement, 1),
+            ));
+        }
+        let owner_uuid = original
+            .split_once("uuid=\"")
+            .unwrap()
+            .1
+            .split_once('"')
+            .unwrap()
+            .0;
+        for tag in ["TypesFilterField", "ObjectField"] {
+            let open = format!("<xr:{tag}>");
+            let value = original
+                .split_once(&open)
+                .unwrap()
+                .1
+                .split_once("</")
+                .unwrap()
+                .0;
+            for uuid in ["00000000-0000-0000-0000-000000000000", owner_uuid] {
+                cases.push((
+                    format!("{tag} invalid detached UUID {uuid}"),
+                    original.replacen(
+                        &format!("{open}{value}</xr:{tag}>"),
+                        &format!("{open}0:{uuid}</xr:{tag}>"),
+                        1,
+                    ),
+                ));
+            }
+        }
+        for (label, changed) in cases {
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("source");
+            for (path, bytes) in &native {
+                let destination = tree.join(path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::write(
+                    destination,
+                    if path == descriptor {
+                        changed.as_bytes()
+                    } else {
+                        bytes
+                    },
+                )
+                .unwrap();
+            }
+            let cf = temp.0.join("refused.cf");
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+                .arg(&tree)
+                .arg(&cf)
+                .output()
+                .unwrap();
+            assert!(!output.status.success(), "{platform}: accepted {label}");
+            assert!(!cf.exists(), "{platform}: published {label}");
+        }
+    }
+}
+
+#[test]
+fn orphan_characteristics_reject_hidden_duplicate_envelopes() {
+    let mut failures = Vec::new();
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        let source = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics/native");
+        let native = read_tree(&source);
+        let descriptor = "Catalogs/CovOrphanCharacteristics.xml";
+        let original = String::from_utf8(native[descriptor].clone()).unwrap();
+        let start = original.find("<Characteristics>").unwrap();
+        let end = original[start..].find("</Characteristics>").unwrap()
+            + start
+            + "</Characteristics>".len();
+        let block = &original[start..end];
+        let without = format!("{}{}", &original[..start], &original[end..]);
+        let owner_start = original.find("<Catalog ").unwrap();
+        let owner_end = original.find("</Catalog>").unwrap() + "</Catalog>".len();
+        let mut cases = vec![
+            (
+                "disguised filter wrapper",
+                without.replace(
+                    "</Catalog>",
+                    &format!("<TypesFilterValue>{block}</TypesFilterValue></Catalog>"),
+                ),
+            ),
+            (
+                "orphan in first XML root",
+                format!(
+                    "{}{}",
+                    original,
+                    &without[without.find("<MetaDataObject ").unwrap()..]
+                ),
+            ),
+            (
+                "orphan in last XML root",
+                format!(
+                    "{}{}",
+                    without,
+                    &original[original.find("<MetaDataObject ").unwrap()..]
+                ),
+            ),
+            (
+                "hidden block after empty canonical block",
+                without
+                    .replace("</Properties>", "<Characteristics/></Properties>")
+                    .replace(
+                        "</Catalog>",
+                        &format!("<Unknown>{block}</Unknown></Catalog>"),
+                    ),
+            ),
+            (
+                "hidden block outside Properties",
+                without.replace(
+                    "</Catalog>",
+                    &format!("<Unknown>{block}</Unknown></Catalog>"),
+                ),
+            ),
+            (
+                "duplicate Properties",
+                without.replace(
+                    "</Catalog>",
+                    &format!("<Properties>{block}</Properties></Catalog>"),
+                ),
+            ),
+            (
+                "foreign duplicate Properties",
+                without.replace(
+                    "</Catalog>",
+                    &format!("<Properties xmlns=\"urn:unknown\">{block}</Properties></Catalog>"),
+                ),
+            ),
+            (
+                "foreign hidden Characteristics",
+                without.replace(
+                    "</Catalog>",
+                    &format!(
+                        "<Properties>{}</Properties></Catalog>",
+                        block.replace(
+                            "<Characteristics>",
+                            "<Characteristics xmlns=\"urn:unknown\">"
+                        )
+                    ),
+                ),
+            ),
+            (
+                "duplicate owner",
+                without.replace(
+                    "</MetaDataObject>",
+                    &format!("{}</MetaDataObject>", &original[owner_start..owner_end]),
+                ),
+            ),
+        ];
+        for closing in [
+            "</MetaDataObject>",
+            "</Catalog>",
+            "</Properties>",
+            "</Characteristics>",
+            "</xr:Characteristic>",
+            "</xr:CharacteristicTypes>",
+            "</xr:KeyField>",
+        ] {
+            let start = original.find("<MetaDataObject ").unwrap();
+            let end = original.find(closing).unwrap();
+            cases.push((closing, format!("{}{}", without, &original[start..end])));
+        }
+        for (direct, unfinished, value) in [
+            (
+                "direct marker then tail",
+                "direct marker then tail at EOF",
+                "-2<Unknown>tail</Unknown>",
+            ),
+            (
+                "descendant marker then tail",
+                "descendant marker then tail at EOF",
+                "<Unknown>-2</Unknown><Extra>tail</Extra>",
+            ),
+            (
+                "wrapped marker",
+                "wrapped marker at EOF",
+                "<Unknown>-2</Unknown>",
+            ),
+            (
+                "split marker",
+                "split marker at EOF",
+                "<Unknown>-</Unknown><Unknown>2</Unknown>",
+            ),
+            (
+                "mixed prefix",
+                "mixed prefix at EOF",
+                "-<Unknown>2</Unknown>",
+            ),
+            (
+                "mixed suffix",
+                "mixed suffix at EOF",
+                "<Unknown>-</Unknown>2",
+            ),
+            (
+                "wrapped CDATA",
+                "wrapped CDATA at EOF",
+                "<Unknown><![CDATA[-2]]></Unknown>",
+            ),
+            (
+                "mixed CDATA",
+                "mixed CDATA at EOF",
+                "<Unknown>-</Unknown><![CDATA[2]]>",
+            ),
+        ] {
+            let changed = original.replacen(
+                "<xr:KeyField>-2</xr:KeyField>",
+                &format!("<xr:KeyField>{value}</xr:KeyField>"),
+                1,
+            );
+            cases.push((direct, changed.clone()));
+            let start = changed.find("<MetaDataObject ").unwrap();
+            let end = changed.find("</MetaDataObject>").unwrap();
+            cases.push((unfinished, format!("{}{}", without, &changed[start..end])));
+        }
+        for (label, changed) in cases {
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("source");
+            for (path, bytes) in &native {
+                let destination = tree.join(path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::write(
+                    destination,
+                    if path == descriptor {
+                        changed.as_bytes()
+                    } else {
+                        bytes
+                    },
+                )
+                .unwrap();
+            }
+            let cf = temp.0.join("refused.cf");
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .env("PATH", "")
+                .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+                .arg(&tree)
+                .arg(&cf)
+                .output()
+                .unwrap();
+            if output.status.success() || cf.exists() {
+                failures.push(format!(
+                    "{platform}: {label}: exit={:?}, published={}",
+                    output.status.code(),
+                    cf.exists()
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn orphan_characteristics_accept_equivalent_text_and_keep_filter_value_outside_identity() {
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let source = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics/native");
+        let native = read_tree(&source);
+        let descriptor = "Catalogs/CovOrphanCharacteristics.xml";
+        let original = String::from_utf8(native[descriptor].clone()).unwrap();
+        for (label, value) in [
+            ("CDATA", "<![CDATA[-2]]>"),
+            ("split CDATA suffix", "-<![CDATA[2]]>"),
+            ("split CDATA prefix", "<![CDATA[-]]>2"),
+            ("entity", "&#45;2"),
+            ("filter string", "-1"),
+            ("UUID text", "-1"),
+            ("UUID split CDATA", "-1"),
+        ] {
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("source");
+            let mut changed = original.replacen(
+                "<xr:KeyField>-2</xr:KeyField>",
+                &format!("<xr:KeyField>{value}</xr:KeyField>"),
+                1,
+            );
+            let mut expected = native.clone();
+            if label == "filter string" {
+                changed = changed.replace(
+                    "<xr:TypesFilterValue xsi:type=\"xs:boolean\">true</xr:TypesFilterValue>",
+                    "<xr:TypesFilterValue xsi:type=\"xs:string\">-2</xr:TypesFilterValue>",
+                );
+                expected.insert(descriptor.to_string(), changed.as_bytes().to_vec());
+            }
+            if label.starts_with("UUID") {
+                let tag = "<xr:TypesFilterField>";
+                let old = original
+                    .split_once(tag)
+                    .unwrap()
+                    .1
+                    .split_once("</")
+                    .unwrap()
+                    .0;
+                let uuid = "0:11111111-2111-4111-8111-111111111111";
+                let lexical = if label == "UUID split CDATA" {
+                    "0:11111111<![CDATA[-2]]>111-4111-8111-111111111111"
+                } else {
+                    uuid
+                };
+                let canonical = changed.replacen(old, uuid, 1);
+                changed = changed.replacen(old, lexical, 1);
+                expected.insert(descriptor.to_string(), canonical.as_bytes().to_vec());
+            }
+            for (path, bytes) in &native {
+                let destination = tree.join(path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::write(
+                    destination,
+                    if path == descriptor {
+                        changed.as_bytes()
+                    } else {
+                        bytes
+                    },
+                )
+                .unwrap();
+            }
+            let cf = temp.0.join("result.cf");
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .env("PATH", "")
+                .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+                .arg(&tree)
+                .arg(&cf)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{platform}: {label}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let exported = cf_export(&cf, &temp.0.join("export"), version).unwrap();
+            assert!(exported.refusal.is_none(), "{platform}: {label}");
+            assert_eq!(exported.files, expected, "{platform}: {label}");
+        }
+    }
+}
+
+#[test]
 fn coverage_sets_hold_their_baseline() {
     let sets = coverage_sets();
     assert!(

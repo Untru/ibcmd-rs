@@ -995,7 +995,29 @@ fn characteristics(node: &Brace, context: &ExportContext) -> Result<Element> {
             match fields.get(index) {
                 // Layouts that stop short write the undefined sentinel.
                 None => Ok("-1".to_string()),
-                Some(value) => field_text(item(list(value)?, 1)?, base, names),
+                Some(value) => {
+                    let payload = item(list(value)?, 1)?;
+                    if base.is_empty() {
+                        match list(payload)? {
+                            [marker] if ibcmd_schema::characteristics::orphan_standard_attribute_marker(atom(marker)?).is_some() => {
+                                return Ok(atom(marker)?.to_owned());
+                            }
+                            [kind, uuid] if ibcmd_schema::characteristics::is_uuid_field_kind(atom(kind)?) => {
+                                if atom(uuid)? == crate::metadata_model::brace::NIL_UUID {
+                                    bail!("an unresolved characteristic field has a nil UUID");
+                                }
+                                if names.name(atom(uuid)?).is_some() {
+                                    bail!("a resolved characteristic field has no source");
+                                }
+                                let uuid = ibcmd_core::identity::ObjectUuid::parse(atom(uuid)?)
+                                    .map_err(|error| anyhow!("invalid unresolved characteristic field: {error}"))?;
+                                return Ok(format!("0:{uuid}"));
+                            }
+                            _ => {}
+                        }
+                    }
+                    field_text(payload, base, names)
+                }
             }
         };
         let types = el("xr:CharacteristicTypes")
