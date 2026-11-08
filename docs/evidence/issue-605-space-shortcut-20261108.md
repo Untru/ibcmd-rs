@@ -30,8 +30,12 @@ Rust 1.95.0, macOS ARM64. The pinned corpus is
   Twelve newly equal Space variants are added across eight baselines;
   unrelated newly equal variants are not added. Five newly equal target Form.xml
   paths are also added to stored-row baselines after a machine-readable measurement.
+  Eight resolved Space writer-refusal allowances are removed from the round-trip
+  ledger, so recurrence is an unlisted failure.
 - `cargo test --locked -p ibcmd-rs --test integration coverage_storage_records:: --no-default-features -- --nocapture`:
   4 passed, no storage baseline regression.
+- `coverage_round_trip::` on the built integration binary: 4 passed after
+  removing the eight resolved Space writer refusal allowances.
 
 ## Native checks
 
