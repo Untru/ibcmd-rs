@@ -759,7 +759,7 @@ fn mobile_permission_messages_round_trip_the_complete_configuration() {
             expected,
             "{platform}: complete Configuration.xml including permission description"
         );
-        for mutation in 0..8 {
+        for mutation in 0..9 {
             let mut damaged = ibcmd_restructure::brace::parse_row(&row).unwrap();
             assert_eq!(mutate_mobile_permission_record(&mut damaged, mutation), 1);
             let bytes = ibcmd_restructure::brace::serialize_row(&damaged);
@@ -822,6 +822,7 @@ fn mutate_mobile_permission_record(
                         description[2] =
                             Brace::str("different from the legacy capability description")
                     }
+                    8 => description[2] = Brace::str("Coverage\r\n permission"),
                     _ => unreachable!(),
                 }
             }

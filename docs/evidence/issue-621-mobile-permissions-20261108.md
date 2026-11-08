@@ -70,7 +70,7 @@ audits reproduce identical Configuration refusals:height on2214/1150,
 height plus TaxiEnableVersion8_5 on1529. This independently confirms the
 six next #678 expectations; it does not claim combined import succeeds.
 
-## Fresh native controls and final candidate
+## Fresh native controls and initial review candidate
 
 All seven names on both builds, plus empty and multiple descriptions,
 were regenerated through official create/import/apply/export/save:90 native
@@ -181,3 +181,26 @@ Temporary-directory cleanup passes. All new source/tests were tracked before
 the gate; subsequent edits only extend this evidence Markdown. No test was
 ignored, relabelled or removed. Fresh-context review remains pending. No exact1150 runtime, SQL Server, full combined
 import, local release build, SBOM or release-audit claim.
+
+## Review finding: exact duplicated descriptions
+
+The fresh-context critic returned REQUEST_CHANGES despite the positive
+native matrix and29-PASS gate above. The new dynamic legacy description
+cross-check reused a textual helper that removes CRLF everywhere, including
+inside quoted descriptions. The reviewer reproduced an inconsistent record
+on both saved editions:only the tail text changes from Coverage permission
+to Coverage+CRLF+space+permission, while the older description stays unchanged;
+the decoder incorrectly accepts it. This is a real fail-closed defect, not a
+pre-existing failure or a passing review.
+
+A ninth malformed-record mutation adds exactly that newline and was observed
+RED before changing production:the complete Configuration regression fails
+with `8.3.27.2214: malformed mobile record 8 must refuse`. The fix compares
+complete Brace values structurally, preserving every quoted character,
+through a schema-owned name for the existing older permission-table field.
+The prior candidate hash/gates above remain historical positive results;
+the corrected complete-Configuration regressions now pass on both saved
+editions (nine negative mutations and18 positive controls). Physical policy
+passes without refresh and the repeated inner loop completes9 PASS.
+Current matched corpus, clean iter/native replay, full staged CI and
+re-review of this correction remain pending.

@@ -647,8 +647,16 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
                 .ok_or_else(|| anyhow!("mobile permission has no measured legacy capability"))
         })
         .collect::<Result<BTreeMap<_, _>>>()?;
-    let expected_51 = serialize(&permission_flags(&permissions, &descriptions)).replace("\r\n", "");
-    expect(t, 51, &expected_51)?;
+    let expected_permissions = permission_flags(&permissions, &descriptions);
+    if item(
+        t,
+        ibcmd_schema::configuration_mobile::LEGACY_PERMISSION_TABLE_FIELD,
+    )? != &expected_permissions
+    {
+        bail!(
+            "legacy mobile permission flags or descriptions disagree with the functionality table"
+        );
+    }
     let mut functionalities = el("UsedMobileApplicationFunctionalities");
     for (id, name) in FUNCTIONALITIES {
         functionalities.children.push(

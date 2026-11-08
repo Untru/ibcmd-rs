@@ -80,6 +80,9 @@ pub fn legacy_permission_id(permission: u32) -> Option<u32> {
     }
 }
 
+/// Property-tuple field carrying legacy permission flags and descriptions.
+pub const LEGACY_PERMISSION_TABLE_FIELD: usize = 51;
+
 /// The counted pair table starts after its version and pair count.
 pub fn functionality_tail_start(pair_count: usize) -> Option<usize> {
     pair_count.checked_add(2)
