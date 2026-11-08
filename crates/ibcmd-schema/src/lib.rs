@@ -18769,6 +18769,16 @@ pub mod metadata_storage_facts {
 /// Shared metadata child record shapes and standard-field registries.
 /// The SQL adapter owns byte parsing; these facts also serve metadata writers.
 pub mod metadata_child_storage_facts {
+    /// Exact owner-family storage elements measured in native CF archives.
+    pub fn additional_indexes_body_suffix(owner_kind: &str) -> Option<&'static str> {
+        match owner_kind {
+            "Catalog" => Some("1d"),
+            "Document" => Some("3"),
+            "AccumulationRegister" => Some("4"),
+            _ => None,
+        }
+    }
+
     /// Catalog root standard attributes, shared by row encoding and index decoding.
     pub const CATALOG_STANDARD_FIELDS: &[(&str, i64)] = &[
         ("PredefinedDataName", -13),
