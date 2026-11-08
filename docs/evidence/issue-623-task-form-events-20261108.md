@@ -71,7 +71,74 @@ cargo test --locked -p ibcmd-rs --test integration coverage_storage_records:: --
 cargo test --locked -p ibcmd-rs --test integration coverage_round_trip:: --no-default-features
 ```
 
-The initial evidence will be tracked before full CI. Clean iter provenance,
-default verified imports, native apply/re-export, full staged CI and fresh
-independent review remain pending. Pending, skipped or failed runs are not
-counted as successful gates.
+## Recovered final binary and native matrix
+
+An earlier iter invocation ended101 while external scratch deletion removed
+its log and worktree. It supplied neither a valid binary nor a product-failure
+diagnosis and is not a passing gate. The committed change and pinned corpus
+were restored; all controls below were regenerated in protected directories.
+Earlier red-first and matched-corpus results above were observed before that
+scratch loss. The final staged gate reruns the fixed suites after recovery.
+
+Clean code commit `be3cf39885eec3c1bc1f1b2888e175bfc5f6f1c9`, Rust1.95.0/macOS ARM64.
+Fresh iter version `ibcmd-rs 0.4.1`, SHA-256
+`595d46930fac7f10bcf700673e013d93e4cf209b8a127488a8227f90280e84ed`. Version output does not embed the commit;
+the clean checkout and binary hash bind the run. Both exact public raw
+fixture hashes were re-extracted and matched the table above.
+
+Fresh source-control create/export:four commands return0, twelve application
+files match their saved native oracles. Final candidate matrix:sixteen
+commands return0, including both default-verified imports and both native
+applies. Both audits compile four descriptors/eight rows with zero failures.
+CF, fileDB, native post-apply and own post-apply exports match all six
+application files on each build:48/48 complete-file comparisons, no XML or
+whitespace normalization. All four matrix databases retain their hashes
+around reads (six recorded native/own checks); input CF/XML remain unchanged.
+No --no-verify is used.
+
+| Runtime | Saved CF | Files per route | Equal routes | Application tree SHA-256 |
+|---|---|---:|---:|---|
+| 8.3.27.2214 | 8.3.27.2214 | 6 | 4/4 | 2637c473e691e7522f570211473b71f8f4855d1aa7cb61856c6032b3425be4d9 |
+| 8.5.1.1529 | 8.5.1.1150 | 6 | 4/4 | dfd8e7191382c112b55f0f858bb72e5742a79c1fdbc7bb591241d3daf22635fa |
+
+Tree hashes cover sorted relative path,NUL,fileSHA256,NUL,byte length,LF.
+They exclude the generated ConfigDumpInfo.xml, measured separately below.
+
+### Service-version control
+
+CF/file reads also match the complete seven-file source trees. After import,
+native and own exports of each same candidate database match all seven files
+including ConfigDumpInfo.xml:14/14 additional direct file comparisons.
+Against the original source manifest, five configVersion values differ per
+build; every other byte is unchanged. These are reported differences, not
+normalized whole-file equality.
+
+An independent official native XML-import control on each build creates a
+new empty database, imports the same source, applies and exports it. All
+eight commands return0; all twelve application files match. It independently
+changes the same five configVersion attributes and no other bytes. This
+classifies the new-generation service tokens without concealing a data loss.
+
+```text
+native ibcmd infobase create --db-path=<control> --create-database --locale=ru_RU --load=<exact-public.cf> --apply --force --data=<unique>
+native ibcmd infobase config export --db-path=<control> <native> --data=<unique>
+ibcmd-rs audit-empty-stage <native> <empty-rows> --platform=<build> --output=<audit.json>
+ibcmd-rs cf export <exact-public.cf> <cf-output> --source-version=<2.20-or-2.21>
+ibcmd-rs infobase config export --db-path=<control> --platform=<build> <file-output>
+native ibcmd infobase create --db-path=<candidate> --create-database --locale=ru_RU --data=<unique>
+ibcmd-rs infobase config import --db-path=<candidate> --platform=<build> <native>
+native ibcmd infobase config apply --db-path=<candidate> --force --data=<unique>
+native ibcmd infobase config export --db-path=<candidate> <post-native> --data=<unique>
+ibcmd-rs infobase config export --db-path=<candidate> --platform=<build> <post-ours>
+```
+
+Native binary SHA-256:
+- 8.3.27.2214: `1a35bba7883a7fdf9a8678392e4b1520df452995ce005ff225f94594e70cfe25`.
+- 8.5.1.1529: `40f74bfb8237465acc934aaea4b8d40557602bdc0ab37fc5bb389023166d2ffb`.
+
+## Final gate and review
+
+All evidence/new tests are tracked before full CI. Full staged CI and fresh
+independent review remain pending; pending, skipped or failed runs are not
+counted as successful gates. No fresh1150 runtime, SQL Server, release build,
+SBOM or release audit is claimed by these targeted native controls.
