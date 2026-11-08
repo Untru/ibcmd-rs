@@ -1,0 +1,32 @@
+{
+  "equal": [
+    "CovCompatTableAllowRootChoice_true",
+    "CovCompatTableAutoAddIncomplete_false",
+    "CovCompatTableAutoInsertNewRow_true",
+    "CovCompatTableChangeRowOrder_false",
+    "CovCompatTableChangeRowSet_false",
+    "CovCompatTableChoiceFoldersAndItems_Folders",
+    "CovCompatTableCommandBarLocation_None",
+    "CovCompatTableCurrentRowUse_SelectionPresentationAndChoice",
+    "CovCompatTableEnableDrag_true",
+    "CovCompatTableEnableStartDrag_true",
+    "CovCompatTableFooter_true",
+    "CovCompatTableHeader_false",
+    "CovCompatTableHeightControlVariant_UseContentHeight",
+    "CovCompatTableHeight_1",
+    "CovCompatTableHorizontalLines_false",
+    "CovCompatTableHorizontalScrollBar_DontUse",
+    "CovCompatTableReadOnly_true",
+    "CovCompatTableRepresentation_List",
+    "CovCompatTableRowSelectionMode_Row",
+    "CovCompatTableSearchControlLocation_None",
+    "CovCompatTableSearchStringLocation_None",
+    "CovCompatTableSelectionMode_SingleRow",
+    "CovCompatTableSkipOnInput_false",
+    "CovCompatTableTitleLocation_Top",
+    "CovCompatTableVerticalLines_false",
+    "CovCompatTableViewStatusLocation_None",
+    "CovCompatTableVisible_false",
+    "CovCompatTableWidth_51"
+  ]
+}

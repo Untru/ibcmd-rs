@@ -3,6 +3,7 @@
     "CovExchangePlanHistory",
     "CovNavigationAccountingRegister",
     "CovNavigationChartOfAccounts",
-    "CovNavigationTemplate"
+    "CovNavigationTemplate",
+    "CovTableOnlySelectAll"
   ]
 }

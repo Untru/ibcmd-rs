@@ -864,3 +864,54 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+fn assert_empty_85_table_command_bar(platform: &str, set_name: &str, form: &str, version: &str) {
+    let set = coverage_paths::root()
+        .join("coverage")
+        .join(platform)
+        .join(set_name);
+    let scratch = TempDirectory::new();
+    let cf = scratch.0.join("configuration.cf");
+    fs::write(
+        &cf,
+        decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+    )
+    .unwrap();
+    let exported = cf_export(&cf, &scratch.0.join("out"), version).unwrap();
+    let path = format!("CommonForms/{form}/Ext/Form.xml");
+    let native = fs::read_to_string(set.join("native").join(&path)).unwrap();
+    let expected = native
+        .lines()
+        .find(|line| line.contains("<AutoCommandBar") && line.contains("id=\"3\""))
+        .unwrap()
+        .trim();
+    assert!(
+        expected.ends_with("/>"),
+        "native panel must be empty: {expected}"
+    );
+    let actual = std::str::from_utf8(exported.files.get(&path).unwrap()).unwrap();
+    assert!(
+        actual.lines().any(|line| line.trim() == expected),
+        "{platform}/{set_name}: missing native empty panel {expected}\n{actual}"
+    );
+}
+
+#[test]
+fn empty_85_table_command_bar_matches_native_xml_2_20() {
+    assert_empty_85_table_command_bar(
+        "8.3.27.2214",
+        "corpus-cross-forms-from85",
+        "CovCompatibleTable",
+        "2.20",
+    );
+}
+
+#[test]
+fn empty_85_table_command_bar_matches_native_xml_2_21() {
+    assert_empty_85_table_command_bar(
+        "8.5.1.1150",
+        "corpus-dynamic-list-table-values",
+        "CovDynamicTableFolders",
+        "2.21",
+    );
+}

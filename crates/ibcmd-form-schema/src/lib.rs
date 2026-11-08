@@ -777,7 +777,7 @@ impl FormRootAutoCommandBarSchema {
         }
         let marker = match fields.get(FormNestedAutoCommandBarSchema::MARKER_SLOT) {
             Some(raw) => Some(
-                parse_root_auto_command_bar_marker(raw)
+                parse_revision_one_auto_command_bar_marker(raw)
                     .or_else(|| parse_nested_auto_command_bar_marker(raw))?,
             ),
             None => None,
@@ -828,6 +828,10 @@ fn parse_auto_command_bar_marker_fields<const N: usize>(raw: &str) -> Option<[&s
 }
 
 fn parse_nested_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarMarker> {
+    // Revision one is shared by the root and nested panels in 8.5 records.
+    if let Some(marker) = parse_revision_one_auto_command_bar_marker(raw) {
+        return Some(marker);
+    }
     let marker = parse_auto_command_bar_marker_fields::<3>(raw)?;
     if marker[0] != "0" {
         return None;
@@ -850,7 +854,7 @@ fn parse_nested_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarM
     })
 }
 
-fn parse_root_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarMarker> {
+fn parse_revision_one_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarMarker> {
     let marker = parse_auto_command_bar_marker_fields::<4>(raw)?;
     if marker[0] != "1" || marker[3] != "0" {
         return None;
@@ -907,6 +911,24 @@ mod nested_auto_command_bar_tests {
         assert_eq!(configured.horizontal_align(), Some("Right"));
         assert!(!configured.autofill());
         assert!(!configured.is_empty_shape());
+    }
+
+    #[test]
+    fn revision_one_nested_command_bars_preserve_empty_and_configured_shapes() {
+        let empty = parse(&fixture("{1,0,1,0}", 29), Some("9")).unwrap();
+        assert!(empty.is_empty_shape());
+        assert!(empty.autofill());
+        assert_eq!(empty.horizontal_align(), None);
+        for marker in ["{1,2,1,0}", "{1,0,0,0}"] {
+            assert!(
+                !parse(&fixture(marker, 29), Some("9"))
+                    .unwrap()
+                    .is_empty_shape()
+            );
+        }
+        for marker in ["{1,0,1,1}", "{1,0,1}", "{1,0,1,0,0}", "{2,0,1,0}"] {
+            assert!(parse(&fixture(marker, 29), Some("9")).is_none(), "{marker}");
+        }
     }
 
     #[test]
