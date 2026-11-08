@@ -157,5 +157,13 @@ root integration:554 passed/0 failed/4 existing ignored;
 root library:904 passed/0 failed/7 existing ignored.
 The temporary directory check passes. Release build, native micro-corpus parity,
 SBOM and release audit are not run locally and are not claimed. Independent
-fresh-context review remains pending. Failed or interrupted development
+fresh-context review is APPROVE for this scoped Refs #613 change, with no
+actionable findings. The reviewer independently passes check7, strict
+round-trip4, observed-problems1 and physical policy; its fresh native
+matrix matches96/96 full files. Independent full base/fixed imports again
+remove only the own refusal (11→10) and preserve database/source hashes.
+An additional duplicate-language native/candidate probe matches4/4 files.
+The parent read all production changes and semantically verified the policy
+registry delta; schema2, writer6 and all-nine-public-form regressions were
+independently rerun successfully. All review/parent processes are terminal. Failed or interrupted development
 invocations above are not passing gates.
