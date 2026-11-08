@@ -21,15 +21,13 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow, bail};
+use ibcmd_form_schema::{FormRootV85TrailerMember, FormRootV85TrailerSchema};
 
 use crate::ParsedFormBodyBlob;
 
 /// Layout revision of a platform 8.5 managed-form root.
-pub const FORM_ROOT_REVISION_8_5_1: &str = "59";
+pub const FORM_ROOT_REVISION_8_5_1: &str = FormRootV85TrailerSchema::REVISION;
 const FORM_ROOT_REVISION_8_3: &str = "50";
-/// Members the 8.5 root trailer appends after the 8.3.27 trailer.
-const ROOT_TRAILER_APPENDED_8_5_1: usize = 12;
-
 const FORM_ITEM_CLASS_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
 const FORM_COMMAND_CLASS_UUID: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
 const FORM_CHOICE_LIST_VALUE_UUID: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
@@ -179,6 +177,9 @@ pub struct FormItemFactsV8_5_1 {
 pub struct FormFactsV8_5_1 {
     /// The 12 members the root trailer appends.
     pub root_tail: Vec<Node>,
+    /// Validated empty internal generated panels; native publishes no XML
+    /// element for this storage-only state.
+    pub generated_root_panels: Vec<Node>,
     /// The member 8.5 appends to every choice-list value (its picture), in
     /// document order.
     pub choice_value_pictures: Vec<Node>,
@@ -195,37 +196,44 @@ pub struct FormFactsV8_5_1 {
     pub unknown_palette_colors: Vec<String>,
 }
 
+/// Selects a declared 8.5 body; the converter validates the complete profile.
+/// Unknown declared-8.5 shapes must not fall back to the generic legacy path.
 pub fn is_form_body_8_5_1(body: &ParsedFormBodyBlob) -> bool {
-    let declares_revision = body
-        .layout
+    body.layout
         .trim_start()
         .strip_prefix('{')
         .map(|rest| rest.trim_start())
         .is_some_and(|rest| {
             rest.strip_prefix(FORM_ROOT_REVISION_8_5_1)
-                .is_some_and(|after| after.trim_start().starts_with(','))
-        });
-    // The revision alone is a number any hand-made record can carry; an 8.5
-    // root also ends in its trailer, whose own `{59,...}` revision tuple sits
-    // 14 members from the end.
-    declares_revision
-        && ibcmd_1c_text::split_1c_braced_fields(&body.layout, 0).is_some_and(|fields| {
-            fields.len() > ROOT_TRAILER_APPENDED_8_5_1 + 2
-                && fields[fields.len() - ROOT_TRAILER_APPENDED_8_5_1 - 2]
-                    .trim_start()
-                    .strip_prefix('{')
-                    .is_some_and(|rest| {
-                        rest.trim_start()
-                            .strip_prefix(FORM_ROOT_REVISION_8_5_1)
-                            .is_some_and(|after| after.trim_start().starts_with(','))
-                    })
+                .is_some_and(|after| after.trim_start().starts_with([',', '}']))
         })
+}
+
+fn root_trailer_schema(layout: &str) -> Option<FormRootV85TrailerSchema> {
+    let fields = ibcmd_1c_text::split_1c_braced_fields(layout, 0)?;
+    FormRootV85TrailerSchema::from_raw_layout(fields.first().copied(), fields.len(), |index| {
+        let Some(raw) = fields.get(index).map(|field| field.trim()) else {
+            return FormRootV85TrailerMember::Other;
+        };
+        if raw.starts_with('{') {
+            ibcmd_1c_text::split_1c_braced_fields(raw, 0)
+                .map_or(FormRootV85TrailerMember::Other, |record| {
+                    FormRootV85TrailerMember::record(&record)
+                })
+        } else {
+            FormRootV85TrailerMember::scalar(raw)
+        }
+    })
 }
 
 /// Down-converts one 8.5 form body into the 8.3.27 shape the form codec reads.
 pub fn down_convert_form_body_8_5_1(
     body: &ParsedFormBodyBlob,
 ) -> Result<(ParsedFormBodyBlob, FormFactsV8_5_1)> {
+    let profile = root_trailer_schema(&body.layout);
+    let Some(profile) = profile else {
+        bail!("8.5 form root trailer is unsupported or ambiguous");
+    };
     let mut facts = FormFactsV8_5_1::default();
     let mut root = parse_node(&body.layout)?;
     root = convert_primitives(root, &mut facts);
@@ -244,11 +252,18 @@ pub fn down_convert_form_body_8_5_1(
         bail!("8.5 form layout does not declare root revision 59");
     }
     root_members[0] = Node::Leaf(FORM_ROOT_REVISION_8_3.to_owned());
-    let kept = root_members
-        .len()
-        .checked_sub(ROOT_TRAILER_APPENDED_8_5_1)
-        .ok_or_else(|| anyhow!("8.5 form root is shorter than its appended trailer"))?;
-    facts.root_tail = root_members.split_off(kept);
+    let kept = profile.appended_start();
+    let physical_tail = root_members.split_off(kept);
+    facts.root_tail = profile
+        .logical_members()
+        .iter()
+        .map(|index| physical_tail[*index].clone())
+        .collect();
+    facts.generated_root_panels = profile
+        .generated_panels()
+        .iter()
+        .map(|index| physical_tail[*index].clone())
+        .collect();
     facts.root_scale = kept
         .checked_sub(8)
         .and_then(|index| root_members.get(index))
@@ -256,10 +271,7 @@ pub fn down_convert_form_body_8_5_1(
         .filter(|value| is_int(value))
         .map(str::to_owned);
     // The trailer's own revision tuple sits one member before its end.
-    let revision_index = root_members
-        .len()
-        .checked_sub(2)
-        .ok_or_else(|| anyhow!("8.5 form root trailer is too short"))?;
+    let revision_index = profile.revision_index();
     match &mut root_members[revision_index] {
         Node::List(members)
             if members.first().and_then(Node::leaf) == Some(FORM_ROOT_REVISION_8_5_1) =>
@@ -812,5 +824,151 @@ mod tests {
             node.to_text(),
             "{4,{59,0,\"a,\"\"b}\"},{#base64:QUJD\r\nREVG},{},{1,}}"
         );
+    }
+
+    fn generated_panel(id: i32) -> String {
+        let mut fields = vec!["0".to_owned(); 29];
+        for (slot, value) in [
+            (0, "22"),
+            (2, "1"),
+            (5, "9"),
+            (6, "\"Generated\""),
+            (7, "{1,0}"),
+            (8, "{1,0}"),
+            (10, "1"),
+            (14, "2"),
+            (15, "2"),
+            (16, "{4,4,{0},4}"),
+            (17, "{8,3,0,1,100}"),
+            (18, "{0,0,0}"),
+            (19, "1"),
+            (20, "{1,0,1,0}"),
+            (22, "1"),
+            (26, "3"),
+            (27, "3"),
+        ] {
+            fields[slot] = value.to_owned();
+        }
+        fields[1] = format!("{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}}");
+        format!("{{{}}}", fields.join(","))
+    }
+
+    fn optional_panel_body(mask: u8) -> ParsedFormBodyBlob {
+        let mut fields = vec!["59".to_owned()];
+        fields.extend(vec!["0".to_owned(); 12]);
+        fields.extend(["{59,0}".to_owned(), "1".to_owned()]);
+        for slot in 0..12 {
+            if let Some(role) = [2, 3, 9].iter().position(|candidate| *candidate == slot) {
+                if mask & (1 << role) != 0 {
+                    fields.push("1".to_owned());
+                    fields.push(generated_panel(-2 - role as i32));
+                } else {
+                    fields.push("0".to_owned());
+                }
+            } else {
+                fields.push("0".to_owned());
+            }
+        }
+        ParsedFormBodyBlob {
+            revision: crate::FormBodyRevision::V4,
+            layout: format!("{{{}}}", fields.join(",")),
+            module_text: String::new(),
+            trailing: Vec::new(),
+            trailing_fields: 0,
+        }
+    }
+
+    #[test]
+    fn optional_root_panels_do_not_hide_the_85_profile() {
+        for mask in 0..8 {
+            let body = optional_panel_body(mask);
+            assert!(is_form_body_8_5_1(&body), "mask={mask}");
+            let (converted, facts) = down_convert_form_body_8_5_1(&body).unwrap();
+            let mut expected = vec!["50".to_owned()];
+            expected.extend(vec!["0".to_owned(); 12]);
+            expected.extend(["{50,0}".to_owned(), "1".to_owned()]);
+            assert_eq!(
+                converted.layout,
+                format!("{{{}}}", expected.join(",")),
+                "mask={mask}"
+            );
+            let logical = (0..12)
+                .map(|slot| {
+                    Node::Leaf(
+                        if [2, 3, 9]
+                            .iter()
+                            .position(|candidate| *candidate == slot)
+                            .is_some_and(|role| mask & (1 << role) != 0)
+                        {
+                            "1"
+                        } else {
+                            "0"
+                        }
+                        .to_owned(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(facts.root_tail, logical, "mask={mask}");
+            assert_eq!(
+                facts.generated_root_panels.len(),
+                mask.count_ones() as usize
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_optional_panel_flag_refuses_the_declared_85_profile() {
+        let mut body = optional_panel_body(0);
+        let Node::List(mut fields) = parse_node(&body.layout).unwrap() else {
+            panic!()
+        };
+        fields[17] = Node::Leaf("2".to_owned());
+        body.layout = Node::List(fields).to_text();
+        assert!(is_form_body_8_5_1(&body));
+        assert!(down_convert_form_body_8_5_1(&body).is_err());
+    }
+
+    #[test]
+    fn malformed_optional_panel_payloads_and_extra_members_refuse() {
+        for defect in 0..7 {
+            let mut body = optional_panel_body(1);
+            let Node::List(mut fields) = parse_node(&body.layout).unwrap() else {
+                panic!()
+            };
+            match defect {
+                0 => fields[18] = Node::Leaf("0".to_owned()),
+                1 => fields[18] = parse_node(&generated_panel(-3)).unwrap(),
+                2 => {
+                    let Node::List(panel) = &mut fields[18] else {
+                        panic!()
+                    };
+                    panel[1] = parse_node("{-2,00000000-0000-0000-0000-000000000000}").unwrap();
+                }
+                3 => {
+                    let Node::List(panel) = &mut fields[18] else {
+                        panic!()
+                    };
+                    panel[20] = parse_node("{1,1,1,0}").unwrap();
+                }
+                4 => fields[13] = parse_node("{50,0}").unwrap(),
+                5 => fields.push(Node::Leaf("0".to_owned())),
+                6 => {
+                    let Node::List(panel) = &mut fields[18] else {
+                        panic!()
+                    };
+                    panel[6] = Node::Leaf("\"one\"junk\"two\"".to_owned());
+                }
+                _ => unreachable!(),
+            }
+            body.layout = Node::List(fields).to_text();
+            assert!(is_form_body_8_5_1(&body));
+            assert!(
+                down_convert_form_body_8_5_1(&body).is_err(),
+                "defect={defect}"
+            );
+        }
+        let mut legacy = optional_panel_body(0);
+        legacy.layout = legacy.layout.replacen("{59,", "{50,", 1);
+        assert!(!is_form_body_8_5_1(&legacy));
     }
 }

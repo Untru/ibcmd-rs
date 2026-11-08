@@ -20,6 +20,9 @@
 /// *malformed*.
 pub const FORM_ABSENT_MEMBER: &str = "\u{1}absent";
 
+mod root_v85_trailer;
+pub use root_v85_trailer::{FormRootV85TrailerMember, FormRootV85TrailerSchema};
+
 mod table_hierarchy;
 pub use table_hierarchy::FormTableHierarchyPanelLocationSchema;
 

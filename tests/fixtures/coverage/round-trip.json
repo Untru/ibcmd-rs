@@ -341,16 +341,10 @@
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row c8f2aec6-8ba2-5e66-96da-95c01a6fd755.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured"
       }
     },
-    "8.5.1.1150/corpus-form-bound-scalars": {
-      "gaps": {
-        "CovBoundTableHierarchyPanelLocation_None": "#594 #595 #602 #632: CommonForms/CovBoundTableHierarchyPanelLocation_None/Ext/Form.xml differs"
-      }
-    },
     "8.5.1.1150/corpus-form-compatible-scalars": {
       "gaps": {
         "CovCompatTableAllowRootChoice_true": "#594 #632: CommonForms/CovCompatTableAllowRootChoice_true/Ext/Form.xml differs",
-        "CovCompatTableChoiceFoldersAndItems_Folders": "#594 #632: CommonForms/CovCompatTableChoiceFoldersAndItems_Folders/Ext/Form.xml differs",
-        "CovCompatTableHierarchyPanelLocation_None": "#594 #602 #632: CommonForms/CovCompatTableHierarchyPanelLocation_None/Ext/Form.xml differs"
+        "CovCompatTableChoiceFoldersAndItems_Folders": "#594 #632: CommonForms/CovCompatTableChoiceFoldersAndItems_Folders/Ext/Form.xml differs"
       }
     },
     "8.5.1.1150/corpus-form-deep-bindings": {
@@ -372,8 +366,7 @@
     "8.5.1.1150/corpus-form-observed-scalars": {
       "gaps": {
         "CovTableAllowRootChoice_true": "#594 #632: CommonForms/CovTableAllowRootChoice_true/Ext/Form.xml differs",
-        "CovTableChoiceFoldersAndItems_Folders": "#594 #632: CommonForms/CovTableChoiceFoldersAndItems_Folders/Ext/Form.xml differs",
-        "CovTableHierarchyPanelLocation_None": "#594 #602 #632: CommonForms/CovTableHierarchyPanelLocation_None/Ext/Form.xml differs"
+        "CovTableChoiceFoldersAndItems_Folders": "#594 #632: CommonForms/CovTableChoiceFoldersAndItems_Folders/Ext/Form.xml differs"
       }
     },
     "8.5.1.1150/corpus-form-settings": {
@@ -449,12 +442,6 @@
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place"
-      }
-    },
-    "8.5.1.1150/corpus-owned-observed-scalars": {
-      "gaps": {
-        "CovObservedOwner": "#594 #595 #602 #632: Catalogs/CovObservedOwner/Forms/CovOwnedScalarTableHierarchyPanelLocation_None/Ext/Form.xml differs",
-        "CovOwnedScalarTemplate": "#594 #595 #602 #632: Catalogs/CovOwnedScalarTemplate/Forms/CovOwnedScalarTableHierarchyPanelLocation_None/Ext/Form.xml differs"
       }
     },
     "8.5.1.1150/corpus-reference-network": {
