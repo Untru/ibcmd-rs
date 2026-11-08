@@ -813,13 +813,19 @@ mod tests {
         );
         let xml = render_characteristics_xml(&model, "").unwrap();
         assert!(xml.contains("<xr:KeyField>-2</xr:KeyField>"));
-        for replacement in ["-3", "1", "-02", "-2147483649"] {
+        for replacement in ["-3", "1", "-02", "-2147483649", " -2 ", "-2 "] {
             assert!(
                 decode_fixture(&fixture.replace(">-2<", &format!(">{replacement}<"))).is_err(),
                 "{replacement}"
             );
         }
         assert!(decode_fixture(&fixture.replace("from=\"\"", "from=\"Catalog.Types\"")).is_err());
+        for source in [" ", "\t "] {
+            assert!(
+                decode_fixture(&fixture.replace("from=\"\"", &format!("from=\"{source}\"")))
+                    .is_err()
+            );
+        }
     }
 
     #[test]

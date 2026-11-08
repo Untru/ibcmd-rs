@@ -703,6 +703,10 @@ fn orphan_characteristics_reject_unknown_markers_before_publication() {
             ("-2147483649", "from=\"\""),
             ("-2", ""),
             ("-2", "from=\"Catalog.CovOrphanCharacteristics\""),
+            ("-2", "from=\" \""),
+            ("-2", "from=\"\t \""),
+            (" -2 ", "from=\"\""),
+            ("-2 ", "from=\"\""),
         ] {
             let temp = TempDirectory::new();
             let tree = temp.0.join("source");

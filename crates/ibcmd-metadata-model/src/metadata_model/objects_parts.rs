@@ -398,18 +398,22 @@ impl<'a> Obj<'a> {
 
     /// `{1,<field>,0}`, `-1` for none.
     fn characteristic_field(&self, text: Option<&str>, source: &Element) -> Result<Brace> {
-        let text = text.map(str::trim).unwrap_or("-1");
+        let raw_text = text.unwrap_or("-1");
+        let text = raw_text.trim();
         let field = match text {
             "" | "-1" => brace_list![num(-1)],
             "0" => brace_list![num(0)],
             _ if ibcmd_schema::characteristics::orphan_standard_attribute_marker(text)
                 .is_some() =>
             {
-                if source
-                    .attr(ibcmd_schema::characteristics::SOURCE_ATTRIBUTE)
-                    .is_none_or(|from| !from.trim().is_empty())
+                if raw_text != text
+                    || source
+                        .attr(ibcmd_schema::characteristics::SOURCE_ATTRIBUTE)
+                        .is_none_or(|from| !from.is_empty())
                 {
-                    bail!("an unresolved characteristic standard attribute has a source");
+                    bail!(
+                        "an unresolved characteristic standard attribute requires its exact marker and an empty source"
+                    );
                 }
                 brace_list![num(i64::from(
                     ibcmd_schema::characteristics::orphan_standard_attribute_marker(text).unwrap()
