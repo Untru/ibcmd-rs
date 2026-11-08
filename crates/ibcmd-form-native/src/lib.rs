@@ -168,8 +168,8 @@ pub const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
 /// measured on 2 451 ERP УХ and 148 BSP command records and 112 item records:
 /// letters and digits are their upper-case ASCII, `F1`..`F12` 112..123,
 /// `Num 0`..`Num 9` 96..105, `Num *` 106, `Num +` 107, `Num -` 109, `Num .`
-/// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Any other key is
-/// refused.
+/// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Public coverage
+/// form command records additionally measure `Space` 32. Any other key is refused.
 pub fn format_native_shortcut(text: &str) -> Option<String> {
     let text = text.trim();
     // `Num +` ends in the separator itself, so it is split off first.
@@ -185,6 +185,7 @@ pub fn format_native_shortcut(text: &str) -> Option<String> {
         "BackSpace" => 8,
         "Enter" => 13,
         "Esc" => 27,
+        "Space" => 32,
         "Num *" => 106,
         "Num +" => 107,
         "Num -" => 109,
@@ -10113,6 +10114,21 @@ fn resolve_metadata_data_path_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn space_shortcuts_keep_the_measured_key_and_modifiers() {
+        for (text, raw) in [
+            ("Space", "{0,32,0}"),
+            ("Shift+Space", "{0,32,4}"),
+            ("Ctrl+Space", "{0,32,8}"),
+            ("Ctrl+Alt+Shift+Space", "{0,32,28}"),
+        ] {
+            assert_eq!(format_native_shortcut(text).as_deref(), Some(raw));
+        }
+        for text in ["Spacebar", "Unknown+Space", "F13", "Num 10"] {
+            assert_eq!(format_native_shortcut(text), None, "{text}");
+        }
+    }
 
     #[test]
     fn extension_activation_colors_match_native_coverage() {

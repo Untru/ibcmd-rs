@@ -6,6 +6,7 @@
     "Catalogs/CovOwnedBindingCatalog/Forms/EventsForm.xml",
     "Catalogs/CovOwnedBindingCatalog/Forms/EventsForm/Ext/Form.xml",
     "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+    "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm/Ext/Form.xml",
     "Catalogs/CovOwnedBindingCatalog/Forms/TableForm.xml",
     "Catalogs/CovOwnedCatalogTemplate.xml",
     "Catalogs/CovOwnedDefinedCatalog.xml",

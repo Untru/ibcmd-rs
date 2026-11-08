@@ -78,6 +78,9 @@ pub fn parse_common_command_shortcut_value_with_style(
     let key = match key_code {
         8 => "BackSpace".to_string(),
         13 => "Enter".to_string(),
+        // Native-proven form command variants in corpus-owned-catalog-forms
+        // and corpus-form-facets store Space as {0,32,0} in both profiles.
+        32 => "Space".to_string(),
         48..=57 => char::from_u32(u32::from(key_code))?.to_string(),
         65..=90 => char::from_u32(u32::from(key_code))?.to_string(),
         96..=105 => format!("Num {}", key_code - 96),
@@ -341,5 +344,30 @@ pub fn command_interface_standard_command_for_code(kind: &str, code: &str) -> Op
         ("2", "Catalog") => Some("CreateFolder"),
         ("2", "ChartOfCharacteristicTypes") => Some("Create"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn space_shortcuts_use_the_same_key_name_on_each_host() {
+        for style in [ShortcutModifierStyle::Windows, ShortcutModifierStyle::Macos] {
+            assert_eq!(
+                parse_common_command_shortcut_value_with_style("{0,32,0}", style).as_deref(),
+                Some("Space")
+            );
+            assert_eq!(
+                parse_common_command_shortcut_value_with_style("{0,32,28}", style),
+                Some(format!("{}+{}+Shift+Space", style.ctrl(), style.alt()))
+            );
+            for raw in ["{0,32,1}", "{0,108,0}", "{0,32,0,0}"] {
+                assert_eq!(
+                    parse_common_command_shortcut_value_with_style(raw, style),
+                    None
+                );
+            }
+        }
     }
 }

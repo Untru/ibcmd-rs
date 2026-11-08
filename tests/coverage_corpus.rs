@@ -864,3 +864,44 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn form_space_shortcut_matches_both_native_profiles() {
+    let temp = TempDirectory::new();
+    for (platform, source_version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        for (set_name, relative) in [
+            (
+                "corpus-owned-catalog-forms",
+                "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm/Ext/Form.xml",
+            ),
+            (
+                "corpus-form-facets",
+                "CommonForms/CovFacetCommandSpace/Ext/Form.xml",
+            ),
+        ] {
+            let set = coverage_paths::root()
+                .join("coverage")
+                .join(platform)
+                .join(set_name);
+            let cf = temp.0.join(format!("{platform}-{set_name}.cf"));
+            fs::write(
+                &cf,
+                decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+            )
+            .unwrap();
+            let exported = cf_export(
+                &cf,
+                &temp.0.join(format!("{platform}-{set_name}")),
+                source_version,
+            )
+            .unwrap();
+            let native = fs::read(set.join("native").join(relative)).unwrap();
+            assert!(String::from_utf8_lossy(&native).contains("<Shortcut>Space</Shortcut>"));
+            assert_eq!(
+                String::from_utf8_lossy(exported.files.get(relative).unwrap()),
+                String::from_utf8_lossy(&native),
+                "{platform}: {relative}"
+            );
+        }
+    }
+}
