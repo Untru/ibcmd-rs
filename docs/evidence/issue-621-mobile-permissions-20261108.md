@@ -204,3 +204,37 @@ editions (nine negative mutations and18 positive controls). Physical policy
 passes without refresh and the repeated inner loop completes9 PASS.
 Current matched corpus, clean iter/native replay, full staged CI and
 re-review of this correction remain pending.
+
+## Corrected candidate gate
+
+Correction source commit `ee1ac411ac2e967c1bd7ae3286b21a3082a5613e`,
+clean iter SHA-256
+`d844b9338ef2fd31a6c61affca4be764c616daa2c5aaa2595347874527176089`.
+The explicit schema field name addresses the same older table51 as before;
+only the comparison changes, retaining CRLF and every other quoted value.
+No physical-policy exception or fixture/native oracle change is introduced.
+
+Fresh identical-harness base/fixed measurements again pass242 CF sets:
+8060 equal,5039 different,137 exporter refusals, identical verdict and
+first-difference lists. All124 stored sets retain7449 equal files with
+identical equality/difference/exit-code lists. The corrected debug product
+SHA-256 is7a076baf720b5b0497ce6c3512ebe7db1e170379f3841910361a5ce17fdb2dea.
+Round-trip4, observed-problems1, policy and check9 pass after the correction.
+
+The NEW clean iter repeats all18 native cases:144/144 workflow commands
+succeed;216/216 complete application-file comparisons and72/72
+same-candidate full-file comparisons match, including the generated manifest.
+All36 own-read database hash checks and source CF/XML checks stay unchanged.
+All18 audits compile three descriptors/six rows without failure. Application
+hashes are identical to the18 immutable native-control hashes above. These
+are current corrected-code measurements, distinct from the earlier positive
+pre-review matrix. Default verification remains enabled and candidate PATH
+empty; neither text nor XML is normalized for comparison.
+
+A NEW staged `cargo xtask ci --keep-going` after the correction completes
+with terminal exit0:29 PASS, zero failures/skipped local steps; workspace4709,
+root integration555 and root library904 pass, with unchanged existing
+ignored89/4/7. Temporary-directory cleanup passes. All current source/tests
+were tracked before this gate. Subsequent changes only extend evidence.
+The same independent critic is asked to re-review this corrected revision;
+APPROVE is still pending and the original REQUEST_CHANGES is retained above.
