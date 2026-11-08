@@ -244,6 +244,23 @@ pub fn validate_characteristics_document(
     {
         return Err(invalid());
     }
+    // Every candidate block in the original envelope must be the block that
+    // the compiler will consume. A hidden orphan must not validate an empty
+    // canonical block while disappearing from the compiled owner.
+    let mut pending = vec![root];
+    let mut candidates = Vec::new();
+    while let Some(element) = pending.pop() {
+        if element.name().local() == ibcmd_schema::characteristics::PROPERTY {
+            candidates.push(element);
+        }
+        pending.extend(element.children().iter().filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        }));
+    }
+    if candidates.len() != 1 || !std::ptr::eq(candidates[0], blocks[0]) {
+        return Err(invalid());
+    }
     decode_characteristics(blocks[0], &uris)?;
     Ok(())
 }

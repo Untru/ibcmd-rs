@@ -854,6 +854,113 @@ fn orphan_characteristics_reject_padded_detached_sources_and_uuids() {
 }
 
 #[test]
+fn orphan_characteristics_reject_hidden_duplicate_envelopes() {
+    let mut failures = Vec::new();
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        let source = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-orphan-characteristics/native");
+        let native = read_tree(&source);
+        let descriptor = "Catalogs/CovOrphanCharacteristics.xml";
+        let original = String::from_utf8(native[descriptor].clone()).unwrap();
+        let start = original.find("<Characteristics>").unwrap();
+        let end = original[start..].find("</Characteristics>").unwrap()
+            + start
+            + "</Characteristics>".len();
+        let block = &original[start..end];
+        let without = format!("{}{}", &original[..start], &original[end..]);
+        let owner_start = original.find("<Catalog ").unwrap();
+        let owner_end = original.find("</Catalog>").unwrap() + "</Catalog>".len();
+        let cases = [
+            (
+                "hidden block after empty canonical block",
+                without
+                    .replace("</Properties>", "<Characteristics/></Properties>")
+                    .replace(
+                        "</Catalog>",
+                        &format!("<Unknown>{block}</Unknown></Catalog>"),
+                    ),
+            ),
+            (
+                "hidden block outside Properties",
+                without.replace(
+                    "</Catalog>",
+                    &format!("<Unknown>{block}</Unknown></Catalog>"),
+                ),
+            ),
+            (
+                "duplicate Properties",
+                without.replace(
+                    "</Catalog>",
+                    &format!("<Properties>{block}</Properties></Catalog>"),
+                ),
+            ),
+            (
+                "foreign duplicate Properties",
+                without.replace(
+                    "</Catalog>",
+                    &format!("<Properties xmlns=\"urn:unknown\">{block}</Properties></Catalog>"),
+                ),
+            ),
+            (
+                "foreign hidden Characteristics",
+                without.replace(
+                    "</Catalog>",
+                    &format!(
+                        "<Properties>{}</Properties></Catalog>",
+                        block.replace(
+                            "<Characteristics>",
+                            "<Characteristics xmlns=\"urn:unknown\">"
+                        )
+                    ),
+                ),
+            ),
+            (
+                "duplicate owner",
+                without.replace(
+                    "</MetaDataObject>",
+                    &format!("{}</MetaDataObject>", &original[owner_start..owner_end]),
+                ),
+            ),
+        ];
+        for (label, changed) in cases {
+            let temp = TempDirectory::new();
+            let tree = temp.0.join("source");
+            for (path, bytes) in &native {
+                let destination = tree.join(path);
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                fs::write(
+                    destination,
+                    if path == descriptor {
+                        changed.as_bytes()
+                    } else {
+                        bytes
+                    },
+                )
+                .unwrap();
+            }
+            let cf = temp.0.join("refused.cf");
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .env("PATH", "")
+                .args(["cf", "bootstrap", "--base-free", "--platform", platform])
+                .arg(&tree)
+                .arg(&cf)
+                .output()
+                .unwrap();
+            if output.status.success() || cf.exists() {
+                failures.push(format!(
+                    "{platform}: {label}: exit={:?}, published={}",
+                    output.status.code(),
+                    cf.exists()
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
 fn coverage_sets_hold_their_baseline() {
     let sets = coverage_sets();
     assert!(
