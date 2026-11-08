@@ -864,3 +864,67 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn empty_composition_picture_values_survive_the_8_5_writer() {
+    let temp = TempDirectory::new();
+    let path = "CommonTemplates/CovCompositionStandardPictures/Ext/Template.xml";
+    let current_native = fs::read(
+        coverage_paths::root()
+            .join("coverage/8.5.1.1529/combined/native")
+            .join(path),
+    )
+    .unwrap();
+    let values = |xml: &[u8]| {
+        std::str::from_utf8(xml)
+            .unwrap()
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("<dcscor:value ") && line.ends_with(":Picture\"/>"))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let mut compared = 0;
+    for (index, set) in coverage_sets()
+        .into_iter()
+        .filter(|set| {
+            set.join("native").join(path).is_file() && set.join("configuration.cf.b64").is_file()
+        })
+        .enumerate()
+    {
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(set.join("manifest.json")).unwrap()).unwrap();
+        let version = manifest["evidence"]["source_version"].as_str().unwrap();
+        let cf = temp.0.join(format!("{index}.cf"));
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join(format!("out-{index}")), version).unwrap();
+        let actual = exported.files.get(path).unwrap_or_else(|| {
+            panic!(
+                "{}: target template must be exported: {:?}",
+                manifest["set"], exported.refusal
+            )
+        });
+        let classic = fs::read(set.join("native").join(path)).unwrap();
+        let expected = values(if version == "2.21" {
+            &current_native
+        } else {
+            &classic
+        });
+        assert_eq!(expected.len(), 3);
+        assert_eq!(
+            values(actual),
+            expected,
+            "{}: complete native empty picture values",
+            manifest["set"]
+        );
+        compared += 1;
+    }
+    assert!(
+        compared >= 9,
+        "every pinned archive containing the target must be compared"
+    );
+}
