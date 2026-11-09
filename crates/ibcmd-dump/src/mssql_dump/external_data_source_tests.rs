@@ -77,6 +77,7 @@ fn extract_with_current_refs(
         &BTreeMap::new(),
         version,
         &MetadataTypeSetLeafIndex::new(),
+        false,
     )
 }
 

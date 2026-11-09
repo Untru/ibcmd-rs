@@ -3417,6 +3417,8 @@ pub struct ForeignReferences {
     pub objects: BTreeMap<String, String>,
     /// Generated type id → (`cfg:Kind.Name`, InternalInfo category).
     pub types: Vec<(String, String, String)>,
+    /// Internal row identity of the adapted external report, if present.
+    pub external_report_owner: Option<String>,
 }
 
 /// Same as [`export_packed_cf_archive_to_source`] for `(name, packed payload)`
@@ -3783,6 +3785,7 @@ struct DumpRowContext<'a> {
     /// Type ids the object carries from outside its configuration, see
     /// MetadataTypeIndexes::foreign.
     foreign_type_ids: &'a BTreeSet<String>,
+    external_report_owner: Option<&'a str>,
     moxel_generated_types: &'a BTreeMap<String, String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
@@ -4516,6 +4519,7 @@ fn dump_table_rows_with_options_mode(
         type_index: &type_index,
         type_index_collisions: &type_index_collisions,
         foreign_type_ids: &foreign_type_ids,
+        external_report_owner: foreign.and_then(|refs| refs.external_report_owner.as_deref()),
         moxel_generated_types: &moxel_generated_types,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
@@ -6273,6 +6277,7 @@ fn dump_table_rows_streamed(
         type_index: &type_index,
         type_index_collisions: &type_index_collisions,
         foreign_type_ids: &foreign_type_ids,
+        external_report_owner: None,
         moxel_generated_types: &moxel_generated_types,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
@@ -7328,6 +7333,7 @@ fn dump_table_row_bytes(
                 context.subsystem_refs,
                 context.source_version,
                 context.type_set_leaves,
+                context.external_report_owner == Some(row.file_name.as_str()),
             )
         };
         if let Some(validator) = context.selected_metadata_validator {
@@ -13153,6 +13159,7 @@ fn respell_any_ib_ref_by_compatibility(
             indexes,
             &ForeignReferences {
                 objects: BTreeMap::new(),
+                external_report_owner: None,
                 types: vec![(
                     ANY_IB_REF_TYPE_ID.to_owned(),
                     "cfg:AnyRef".to_owned(),
@@ -13569,6 +13576,7 @@ fn extract_metadata_source_xml_from_text_row_with_object_ref_resolutions(
         source_version,
         &mut owner_graph_diagnostic,
         type_set_leaves,
+        false,
     )
 }
 
@@ -13593,6 +13601,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     source_version: InfobaseConfigSourceVersion,
     owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
     type_set_leaves: &MetadataTypeSetLeafIndex,
+    external_report: bool,
 ) -> Option<ExtractedMetadataSourceXml> {
     let uuid = row.file_name.as_str();
     if uuid.contains('.') {
@@ -13962,6 +13971,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             template_refs,
             object_refs,
+            external_report,
         )?;
         format_report_source_xml(header, &report, source_version, type_set_leaves).into_bytes()
     } else if kind == "DataProcessor" {
@@ -14377,6 +14387,7 @@ fn extract_metadata_source_xml_from_text_row_audited(
         // empty one reproduces exactly the spelling this route wrote before
         // the leaves were read at all.
         &MetadataTypeSetLeafIndex::new(),
+        false,
     )
 }
 
@@ -14401,6 +14412,7 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
     type_set_leaves: &MetadataTypeSetLeafIndex,
+    external_report: bool,
 ) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
     let mut owner_graph_diagnostic = None;
     if let Some(extracted) = extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
@@ -14420,6 +14432,7 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
         source_version,
         &mut owner_graph_diagnostic,
         type_set_leaves,
+        external_report,
     ) {
         return Ok(extracted);
     }
@@ -15395,6 +15408,7 @@ fn parse_exchange_plan_attribute(
         object_refs,
         form_refs,
         !nested,
+        false,
     )?;
     let properties = child.properties.as_mut()?;
     properties.indexing = Some(metadata_attribute_indexing_xml(wrapper.get(2)?.trim())?);
@@ -15404,6 +15418,10 @@ fn parse_exchange_plan_attribute(
     Some(child)
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "explicit external report type policy"
+)]
 fn parse_strict_common_metadata_attribute(
     common: Vec<&str>,
     owner_kind: &str,
@@ -15412,15 +15430,18 @@ fn parse_strict_common_metadata_attribute(
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     emit_fill_values: bool,
+    external_report: bool,
 ) -> Option<MetadataChildObject> {
     let (common, child_uuid) = parse_metadata_code27_payload_fields(common)?;
     let header = parse_metadata_header_from_text(common.get(1)?, &child_uuid)?;
-    if !register_common_child_header_matches(&common, &header) {
-        return None;
-    }
-    let value_types = stable_partition_metadata_types(classify_metadata_reference_type_sets(
-        parse_register_common_child_value_types(&common, &header, type_index)?,
-    ));
+    let value_types = if external_report {
+        let pattern = register_common_child_type_pattern(&common, &header)?;
+        parse_external_report_type_pattern(pattern, type_index)?
+    } else {
+        stable_partition_metadata_types(classify_metadata_reference_type_sets(
+            parse_register_common_child_value_types(&common, &header, type_index)?,
+        ))
+    };
     let mut properties = parse_information_register_common_child_properties(
         &common,
         owner_kind,
@@ -15467,6 +15488,7 @@ fn parse_strict_tabular_sections(
     form_refs: &BTreeMap<String, FormSourceReference>,
     child_uuids: &mut BTreeSet<String>,
     root_names: &mut BTreeSet<String>,
+    external_report: bool,
 ) -> Option<Vec<MetadataChildObject>> {
     let mut sections_by_uuid = BTreeMap::new();
     for section in generic_sections {
@@ -15537,33 +15559,45 @@ fn parse_strict_tabular_sections(
         section.child_objects = nested_values
             .iter()
             .map(|value| {
-                let child = match owner_kind {
-                    "ExchangePlan" => parse_exchange_plan_attribute(
-                        value,
-                        owner_name,
-                        exchange_plan_modern_layout,
-                        true,
-                        type_index,
-                        object_refs,
-                        form_refs,
-                    ),
-                    "Report" => parse_report_attribute(
+                let child = if external_report {
+                    parse_report_attribute_with_type_context(
                         value,
                         owner_name,
                         true,
                         type_index,
                         object_refs,
                         form_refs,
-                    ),
-                    "ChartOfCalculationTypes" => parse_chart_of_calculation_types_attribute(
-                        value,
-                        owner_name,
                         true,
-                        type_index,
-                        object_refs,
-                        form_refs,
-                    ),
-                    _ => None,
+                    )
+                } else {
+                    match owner_kind {
+                        "ExchangePlan" => parse_exchange_plan_attribute(
+                            value,
+                            owner_name,
+                            exchange_plan_modern_layout,
+                            true,
+                            type_index,
+                            object_refs,
+                            form_refs,
+                        ),
+                        "Report" => parse_report_attribute(
+                            value,
+                            owner_name,
+                            true,
+                            type_index,
+                            object_refs,
+                            form_refs,
+                        ),
+                        "ChartOfCalculationTypes" => parse_chart_of_calculation_types_attribute(
+                            value,
+                            owner_name,
+                            true,
+                            type_index,
+                            object_refs,
+                            form_refs,
+                        ),
+                        _ => None,
+                    }
                 }?;
                 if !strict_metadata_child_identity_is_unique(&child, child_uuids, &mut nested_names)
                 {
@@ -21861,13 +21895,21 @@ fn parse_register_common_child_value_types(
     child_header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
+    let pattern = register_common_child_type_pattern(common_fields, child_header)?;
+    Some(stable_partition_metadata_types(
+        parse_information_register_type_pattern(pattern, type_index)?,
+    ))
+}
+
+fn register_common_child_type_pattern<'a>(
+    common_fields: &[&'a str],
+    child_header: &MetadataHeader,
+) -> Option<&'a str> {
     if !register_common_child_header_matches(common_fields, child_header) {
         return None;
     }
     let typed_header = split_1c_braced_fields(common_fields.get(1)?, 0)?;
-    Some(stable_partition_metadata_types(
-        parse_information_register_type_pattern(typed_header.get(2)?, type_index)?,
-    ))
+    typed_header.get(2).copied()
 }
 
 fn register_common_child_header_matches(
@@ -22253,26 +22295,80 @@ fn parse_information_register_type_pattern_element(
         }),
         (r##""#""##, 2) => {
             let type_id = parse_uuid_field(fields.get(1)?.trim())?;
-            let Some(reference) = type_index
-                .get(&type_id)
-                .cloned()
-                .or_else(|| information_register_builtin_reference(&type_id).map(str::to_string))
-                .or_else(|| builtin_type_reference(&type_id).map(str::to_string))
-            else {
+            information_register_type_reference(&type_id, type_index).or_else(|| {
                 // A type of the extended configuration (see
                 // `parse_metadata_type_pattern_element_with_builtin`).
-                return extension::active()
+                extension::active()
                     .is_some()
-                    .then_some(ConstantValueType::TypeId { type_id });
-            };
-            if metadata_reference_is_type_set(&reference) {
-                Some(ConstantValueType::ReferenceTypeSet { reference })
-            } else {
-                Some(ConstantValueType::Reference { reference })
-            }
+                    .then_some(ConstantValueType::TypeId { type_id })
+            })
         }
         _ => None,
     }
+}
+
+fn information_register_type_reference(
+    type_id: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<ConstantValueType> {
+    let reference = type_index
+        .get(type_id)
+        .cloned()
+        .or_else(|| information_register_builtin_reference(type_id).map(str::to_owned))
+        .or_else(|| builtin_type_reference(type_id).map(str::to_owned))?;
+    Some(if metadata_reference_is_type_set(&reference) {
+        ConstantValueType::ReferenceTypeSet { reference }
+    } else {
+        ConstantValueType::Reference { reference }
+    })
+}
+
+/// External reports can carry well-formed type identifiers without a name
+/// in copyinfo. Keep those identifiers, while requiring the same strict type
+/// shapes as the configuration report reader.
+fn parse_external_report_type_pattern(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    let fields = split_information_register_braced_fields(value)?;
+    let [r#""Pattern""#, elements @ ..] = fields.as_slice() else {
+        return None;
+    };
+    let mut value_types = elements
+        .iter()
+        .map(|element| {
+            let members = split_information_register_braced_fields(element)?;
+            match members.as_slice() {
+                [r#""L""#] => parse_metadata_type_pattern_element(element, type_index),
+                [r##""#""##, type_id] => {
+                    let type_id =
+                        parse_information_register_non_zero_uuid(type_id)?.to_ascii_lowercase();
+                    Some(
+                        information_register_type_reference(&type_id, type_index).unwrap_or_else(
+                            || {
+                                if type_id == DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID {
+                                    ConstantValueType::Reference {
+                                        reference: DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME
+                                            .to_owned(),
+                                    }
+                                } else {
+                                    ConstantValueType::TypeId { type_id }
+                                }
+                            },
+                        ),
+                    )
+                }
+                _ => parse_information_register_type_pattern_element(element, type_index),
+            }
+        })
+        .collect::<Option<Vec<_>>>()?;
+    // Native external XML groups named types, named sets and unnamed IDs.
+    value_types.sort_by_key(|value_type| match value_type {
+        ConstantValueType::TypeId { .. } => 2,
+        ConstantValueType::ReferenceTypeSet { .. } => 1,
+        _ => 0,
+    });
+    Some(value_types)
 }
 
 fn information_register_builtin_reference(type_id: &str) -> Option<&'static str> {
@@ -26335,6 +26431,7 @@ fn parse_chart_of_accounts_child_collection(
                 object_refs,
                 form_refs,
                 true,
+                false,
             )?;
             if !child_uuids.insert(child.header.uuid.to_ascii_lowercase())
                 || !child_names.insert(child.header.name.to_lowercase())
@@ -29117,6 +29214,7 @@ fn parse_report_properties_from_text(
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
     object_refs: &BTreeMap<String, String>,
+    external_report: bool,
 ) -> Option<ReportProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
@@ -29154,7 +29252,15 @@ fn parse_report_properties_from_text(
         parse_legacy_report_child_templates_from_text(text, template_refs)
     };
     let child_metadata_objects = if strict_layout {
-        parse_strict_report_child_objects(text, uuid, &header, type_index, object_refs, form_refs)?
+        parse_strict_report_child_objects(
+            text,
+            uuid,
+            &header,
+            type_index,
+            object_refs,
+            form_refs,
+            external_report,
+        )?
     } else {
         parse_attribute_tabular_section_child_objects(
             "Report",
@@ -29217,6 +29323,7 @@ fn parse_strict_report_child_objects(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    external_report: bool,
 ) -> Option<Vec<MetadataChildObject>> {
     let root = parse_strict_report_root_fields(text, header)?;
     let direct_values =
@@ -29229,13 +29336,14 @@ fn parse_strict_report_child_objects(
     let mut children = direct_values
         .iter()
         .map(|value| {
-            let child = parse_report_attribute(
+            let child = parse_report_attribute_with_type_context(
                 value,
                 &header.name,
                 false,
                 type_index,
                 object_refs,
                 form_refs,
+                external_report,
             )?;
             strict_metadata_child_identity_is_unique(&child, &mut child_uuids, &mut root_names)
                 .then_some(child)
@@ -29268,6 +29376,7 @@ fn parse_strict_report_child_objects(
         form_refs,
         &mut child_uuids,
         &mut root_names,
+        external_report,
     )?);
     Some(children)
 }
@@ -29279,6 +29388,26 @@ fn parse_report_attribute(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<MetadataChildObject> {
+    parse_report_attribute_with_type_context(
+        value,
+        owner_name,
+        nested,
+        type_index,
+        object_refs,
+        form_refs,
+        false,
+    )
+}
+
+fn parse_report_attribute_with_type_context(
+    value: &str,
+    owner_name: &str,
+    nested: bool,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    external_report: bool,
 ) -> Option<MetadataChildObject> {
     let item = split_information_register_braced_fields(value)?;
     if item.len() != 2 || item.get(1)?.trim() != "0" {
@@ -29305,6 +29434,7 @@ fn parse_report_attribute(
         object_refs,
         form_refs,
         nested,
+        external_report,
     )
 }
 
@@ -29355,6 +29485,7 @@ fn parse_chart_of_calculation_types_attribute(
         object_refs,
         form_refs,
         !nested,
+        false,
     )?;
     let properties = child.properties.as_mut()?;
     properties.indexing = Some(metadata_attribute_indexing_xml(wrapper.get(2)?.trim())?);
@@ -29428,6 +29559,7 @@ fn parse_chart_of_calculation_types_child_objects(
         form_refs,
         &mut child_uuids,
         &mut root_names,
+        false,
     )?;
     child_objects.extend(sections);
     Some(child_objects)

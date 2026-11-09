@@ -54,6 +54,7 @@ fn foreign_object_references_stay_ids_and_a_type_set_may_respell() {
     );
     let foreign = ForeignReferences {
         objects: BTreeMap::new(),
+        external_report_owner: None,
         types: vec![
             (
                 "AAAAAAAA-0000-0000-0000-000000000001".into(),
@@ -549,6 +550,7 @@ fn eds_guard_stored_reference_is_not_marked_foreign() {
         &mut indexes,
         &ForeignReferences {
             objects: BTreeMap::new(),
+            external_report_owner: None,
             types: vec![(
                 id.to_owned(),
                 "cfg:CatalogRef.Foreign".to_owned(),

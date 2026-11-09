@@ -10796,6 +10796,44 @@ fn parses_common_command_parameter_type_pattern() {
     assert!(xml.contains("<v8:Type>xs:string</v8:Type>"));
 }
 
+#[test]
+fn external_report_type_patterns_keep_only_valid_unnamed_ids() {
+    let id = "12345678-0000-4000-8000-000000000001";
+    let index = BTreeMap::new();
+    let pattern = format!(
+        r##"{{"Pattern",{{"#",{id}}},{{"L"}},{{"#",{ANY_IB_REF_TYPE_ID}}},{{"#",{DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID}}}}}"##
+    );
+    assert!(parse_information_register_type_pattern(&pattern, &index).is_none());
+    assert_eq!(
+        parse_external_report_type_pattern(&pattern, &index).unwrap(),
+        [
+            ConstantValueType::Reference {
+                reference: "v8:Null".to_owned()
+            },
+            ConstantValueType::Reference {
+                reference: DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME.to_owned()
+            },
+            ConstantValueType::ReferenceTypeSet {
+                reference: "cfg:AnyIBRef".to_owned()
+            },
+            ConstantValueType::TypeId {
+                type_id: id.to_owned()
+            },
+        ],
+    );
+    for invalid in [
+        r#"{"Pattern",{"L",0}}"#.to_owned(),
+        r##"{"Pattern",{"#",00000000-0000-0000-0000-000000000000}}"##.to_owned(),
+        format!(r##"{{"Pattern",{{"#",{id},0}}}}"##),
+        format!(r##"{{"Pattern",{{"#",{id}}}opaque}}"##),
+    ] {
+        assert!(
+            parse_external_report_type_pattern(&invalid, &index).is_none(),
+            "{invalid}"
+        );
+    }
+}
+
 /// Every pattern below is a byte layout the platform actually wrote into
 /// 1C:Trade Management 11.5.27.75 - `{"L"}` sits beside `{"S"}`, `{"B"}`,
 /// `{"N",…}` and `{"#",<ValueListType>}`, and it also occurs alone. It keeps its
@@ -34287,6 +34325,7 @@ fn audit_strict_filter_criterion(
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_20,
         &MetadataTypeSetLeafIndex::new(),
+        false,
     )
 }
 
@@ -37257,6 +37296,7 @@ fn parse_report_properties_for_child_template_test(
         &BTreeMap::new(),
         template_refs,
         &BTreeMap::new(),
+        false,
     )
 }
 
