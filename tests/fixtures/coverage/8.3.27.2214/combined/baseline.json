@@ -199,6 +199,7 @@
     "CommonTemplates/CovGraphicalSchemaBody",
     "CommonTemplates/CovGraphicalSchemaImage",
     "CommonTemplates/CovGraphicalSchemaPng",
+    "CommonTemplates/CovObservedSheetGroupColours",
     "CommonTemplates/CovSheetVerticalPageBreak",
     "CommonTemplates/CovSpreadsheetFacetTemplate",
     "CommonTemplates/CovSpreadsheetMergedCells",
