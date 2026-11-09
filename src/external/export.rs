@@ -106,7 +106,12 @@ pub fn foreign_references(
     objects
         .entry(main.main_uuid.clone())
         .or_insert_with(|| format!("{}.{}", main.kind.internal_kind(), main.name));
-    mssql_dump::ForeignReferences { objects, types }
+    mssql_dump::ForeignReferences {
+        objects,
+        types,
+        external_report_owner: (main.kind == super::ExternalKind::Report)
+            .then(|| main.object_id.clone()),
+    }
 }
 
 /// An external object's entries as the configuration pipeline reads them:

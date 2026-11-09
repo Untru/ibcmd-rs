@@ -504,6 +504,7 @@ fn nonempty_chart_references_still_require_their_declared_family() {
                 };
                 let scratch = Scratch::new();
                 let foreign = ForeignReferences {
+                    external_report_owner: None,
                     objects: [(reference.clone(), format!("{family}.Referenced"))].into(),
                     types: Vec::new(),
                 };
