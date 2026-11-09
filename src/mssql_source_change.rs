@@ -220,7 +220,12 @@ impl crate::module_blob::OriginalSourceTree for HeldSourceRoot {
     }
 
     fn read_original_path(&self, path: &Path) -> anyhow::Result<Arc<Vec<u8>>> {
-        Ok(HeldSourceRoot::read_original_path(self, path)?)
+        HeldSourceRoot::read_original_path(self, path).map_err(|error| match error {
+            SourceChangeError::SelectedBodyDoesNotExist(_) => {
+                std::io::Error::new(std::io::ErrorKind::NotFound, error).into()
+            }
+            _ => error.into(),
+        })
     }
 
     fn require_unchanged(&self) -> anyhow::Result<()> {
