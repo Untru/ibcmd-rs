@@ -32,7 +32,6 @@
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
-        "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
         "CommonTemplates/CovSheetDashDotted.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetDashDotted/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style DashDotted has no stored code",
         "CommonTemplates/CovSheetGapLine.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetGapLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> with a gap has no writer",
@@ -41,7 +40,6 @@
         "CommonTemplates/CovSheetSandyBrown.xml": "#610: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetSandyBrown/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SandyBrown has no stored code",
         "CommonTemplates/CovSheetValueListDetail.xml": "#614: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetValueListDetail/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a value of type v8:ValueListType has no writer",
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
-        "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
@@ -165,7 +163,6 @@
     },
     "8.3.27.2214/corpus-spreadsheet-facets": {
       "refused": {
-        "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
         "CommonTemplates/CovSheetDashDotted.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetDashDotted/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style DashDotted has no stored code",
         "CommonTemplates/CovSheetGapLine.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetGapLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> with a gap has no writer",
@@ -174,11 +171,6 @@
         "CommonTemplates/CovSheetSandyBrown.xml": "#610: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetSandyBrown/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SandyBrown has no stored code",
         "CommonTemplates/CovSheetValueListDetail.xml": "#614: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetValueListDetail/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a value of type v8:ValueListType has no writer",
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer"
-      }
-    },
-    "8.3.27.2214/corpus-spreadsheet-standard-picture": {
-      "refused": {
-        "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml"
       }
     },
     "8.3.27.2214/corpus-task-form-events": {
@@ -278,7 +270,6 @@
         "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 1707a6fa-41fb-5431-bf0e-d5a6f2a2591f.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row 38943628-21bd-5526-8bcd-a726044c06e7.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
-        "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
         "CommonTemplates/CovSheetDashDotted.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetDashDotted/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style DashDotted has no stored code",
         "CommonTemplates/CovSheetGapLine.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetGapLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> with a gap has no writer",
@@ -287,7 +278,6 @@
         "CommonTemplates/CovSheetSandyBrown.xml": "#610: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetSandyBrown/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SandyBrown has no stored code",
         "CommonTemplates/CovSheetValueListDetail.xml": "#614: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetValueListDetail/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a value of type v8:ValueListType has no writer",
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
-        "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
@@ -469,7 +459,6 @@
     },
     "8.5.1.1150/corpus-spreadsheet-facets": {
       "refused": {
-        "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
         "CommonTemplates/CovSheetDashDotted.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetDashDotted/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style DashDotted has no stored code",
         "CommonTemplates/CovSheetGapLine.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetGapLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> with a gap has no writer",
@@ -478,11 +467,6 @@
         "CommonTemplates/CovSheetSandyBrown.xml": "#610: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetSandyBrown/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SandyBrown has no stored code",
         "CommonTemplates/CovSheetValueListDetail.xml": "#614: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetValueListDetail/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a value of type v8:ValueListType has no writer",
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer"
-      }
-    },
-    "8.5.1.1150/corpus-spreadsheet-standard-picture": {
-      "refused": {
-        "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml"
       }
     },
     "8.5.1.1150/corpus-task-form-events": {
@@ -673,7 +657,6 @@
         "CommonTemplates/CovModernSheetPalette.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetPalette/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: colour pal:Gray names an unknown namespace",
         "CommonTemplates/CovModernSheetSkyBlue.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetSkyBlue/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SkyBlue has no stored code",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
-        "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
         "CommonTemplates/CovSheetDashDotted.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetDashDotted/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style DashDotted has no stored code",
         "CommonTemplates/CovSheetGapLine.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetGapLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> with a gap has no writer",
@@ -682,7 +665,6 @@
         "CommonTemplates/CovSheetSandyBrown.xml": "#610: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetSandyBrown/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SandyBrown has no stored code",
         "CommonTemplates/CovSheetValueListDetail.xml": "#614: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetValueListDetail/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a value of type v8:ValueListType has no writer",
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
-        "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
@@ -886,7 +868,6 @@
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovVerticalScrollAlways.xml": "#604: unsupported Form VerticalScroll: use",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
-        "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
         "CommonTemplates/CovSheetDashDotted.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetDashDotted/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style DashDotted has no stored code",
         "CommonTemplates/CovSheetGapLine.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetGapLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> with a gap has no writer",
@@ -895,7 +876,6 @@
         "CommonTemplates/CovSheetSandyBrown.xml": "#610: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetSandyBrown/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SandyBrown has no stored code",
         "CommonTemplates/CovSheetValueListDetail.xml": "#614: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetValueListDetail/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a value of type v8:ValueListType has no writer",
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
-        "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
@@ -979,7 +959,6 @@
         "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 1707a6fa-41fb-5431-bf0e-d5a6f2a2591f.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row 38943628-21bd-5526-8bcd-a726044c06e7.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
-        "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
         "CommonTemplates/CovSheetDashDotted.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetDashDotted/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style DashDotted has no stored code",
         "CommonTemplates/CovSheetGapLine.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetGapLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> with a gap has no writer",
@@ -988,7 +967,6 @@
         "CommonTemplates/CovSheetSandyBrown.xml": "#610: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetSandyBrown/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SandyBrown has no stored code",
         "CommonTemplates/CovSheetValueListDetail.xml": "#614: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetValueListDetail/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a value of type v8:ValueListType has no writer",
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
-        "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
@@ -1141,7 +1119,6 @@
         "CommonTemplates/CovModernSheetPalette.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetPalette/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: colour pal:Gray names an unknown namespace",
         "CommonTemplates/CovModernSheetSkyBlue.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetSkyBlue/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SkyBlue has no stored code",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
-        "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
         "CommonTemplates/CovSheetDashDotted.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetDashDotted/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style DashDotted has no stored code",
         "CommonTemplates/CovSheetGapLine.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetGapLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> with a gap has no writer",
@@ -1150,7 +1127,6 @@
         "CommonTemplates/CovSheetSandyBrown.xml": "#610: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetSandyBrown/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SandyBrown has no stored code",
         "CommonTemplates/CovSheetValueListDetail.xml": "#614: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetValueListDetail/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a value of type v8:ValueListType has no writer",
         "CommonTemplates/CovSheetVerticalPageBreak.xml": "#609: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <verticalPageBreak> of a SpreadsheetDocument has no writer",
-        "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",

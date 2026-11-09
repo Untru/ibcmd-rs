@@ -10,8 +10,8 @@
 //! (`compiler::bodies::mxl::decode_compatible_mxl`) and the 8.5 primitive
 //! rewrite (`mssql_dump::form::layout_8_5_1`) stay in the root, whose thin
 //! entry points hand this crate the decoded body text. The root also passes
-//! its built-in platform type table as a function, the one table the decoder
-//! asks about a `{"#",<uuid>}` value type. The crate depends on nothing in the
+//! its built-in platform type and picture tables as lookup functions. The
+//! crate depends on nothing in the
 //! root, so a root rebuild reuses it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -2006,6 +2006,7 @@ pub fn extract_moxel_body_xml(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Result<String, MxlDiagnostic> {
     let _scope = SplitCacheScope::new(text);
@@ -2014,6 +2015,7 @@ pub fn extract_moxel_body_xml(
         object_refs,
         generated_types,
         builtin_type_reference,
+        standard_picture_name,
         trace_sink,
     )?;
     write_moxel_spreadsheet_xml(&decoded)
@@ -2027,6 +2029,7 @@ fn decode_moxel_spreadsheet_ir(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Result<DecodedMoxelSpreadsheet, MxlDiagnostic> {
     // The palette is read off the same root fields the spreadsheet is.
@@ -2036,6 +2039,7 @@ fn decode_moxel_spreadsheet_ir(
         object_refs,
         generated_types,
         builtin_type_reference,
+        standard_picture_name,
         trace_sink,
         Some(&mut palette),
     )
@@ -2103,6 +2107,7 @@ pub fn parse_moxel_spreadsheet_text(
         object_refs,
         &NO_MOXEL_GENERATED_TYPES,
         builtin_type_reference,
+        |_| None,
         None,
         None,
     )
@@ -2113,6 +2118,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
     palette: Option<&mut Option<MxlPaletteProvenance>>,
 ) -> Option<MoxelSpreadsheet> {
@@ -2155,7 +2161,8 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     }
     compact_moxel_empty_row_ranges(&mut rows);
     let fonts = parse_moxel_fonts(&fields, object_refs);
-    let pictures = parse_moxel_pictures(&fields, object_refs);
+    let pictures =
+        parse_moxel_pictures_with_standard_names(&fields, object_refs, standard_picture_name);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
     let mut default_format = parse_moxel_default_format(&fields, object_refs);
     let print_settings = parse_moxel_print_settings(&fields);
@@ -6088,6 +6095,14 @@ pub fn parse_moxel_pictures(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<MoxelPicture> {
+    parse_moxel_pictures_with_standard_names(fields, object_refs, |_| None)
+}
+
+fn parse_moxel_pictures_with_standard_names(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
+) -> Vec<MoxelPicture> {
     let shapes = root_shapes(fields);
     for index in 0..fields.len() {
         let count = match shapes
@@ -6122,7 +6137,9 @@ pub fn parse_moxel_pictures(
         }
         let mut pictures = Vec::with_capacity(count);
         for (picture_index, field) in fields[index + 1..=index + count].iter().enumerate() {
-            let Some(mut picture) = parse_moxel_picture(field, object_refs) else {
+            let Some(mut picture) =
+                parse_moxel_picture_with_standard_names(field, object_refs, standard_picture_name)
+            else {
                 pictures.clear();
                 break;
             };
@@ -6142,6 +6159,14 @@ const MOXEL_PICTURE_TRANSPARENCY_FIELD: usize = 6;
 pub fn parse_moxel_picture(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelPicture> {
+    parse_moxel_picture_with_standard_names(text, object_refs, |_| None)
+}
+
+fn parse_moxel_picture_with_standard_names(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
 ) -> Option<MoxelPicture> {
     let fields = split_1c_braced_fields(text, 0)?;
     // The older spreadsheets (root revisions 8/9) store the record one member
@@ -6197,6 +6222,7 @@ pub fn parse_moxel_picture(
             object_refs
                 .get(&uuid)
                 .and_then(|reference| reference.strip_prefix("CommonPicture."))
+                .or_else(|| standard_picture_name(&uuid)?.strip_prefix("StdPicture."))
                 .map(|name| format!("v8ui:{name}"))
         });
     let payload = fields

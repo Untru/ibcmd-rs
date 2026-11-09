@@ -2683,10 +2683,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             "SaveFile" => return Ok("{0,818ab7d0-4654-4542-bd5e-fd9d1352b5a1}".to_string()),
             _ => {}
         }
-        let source = self
-            .source
-            .ok_or_else(|| anyhow!("picture ref {reference} needs the configuration"))?;
-        let uuid = source.resolve_common_picture_uuid(&format!("CommonPicture.{name}"))?;
+        let uuid = ibcmd_metadata_blob::resolve_mxl_picture_uuid(name, self.source)?;
         Ok(format!("{{0,{}}}", uuid.to_ascii_lowercase()))
     }
 }
