@@ -38333,7 +38333,7 @@ fn writes_style_body_xml_to_source_layout() {
                 // `{3,…}` and font values `{7,kind,mask,…}`. Taken from the
                 // extracted `Styles/Основной/Ext/Style.xml` bodies of
                 // Документооборот КОРП 3.0.21.3 and ERP УХ 3.2.12.6.
-                "{{1,8,{{{{-1}},0,{{3,2,{{20}}}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{7,2,0,{{-20}},1,100}}}},{{{{-42}},0,{{3,0,{{14474460}}}}}},{{{{-43}},0,{{3,0,{{15658734}}}}}},{{{{-44}},0,{{3,3,{{-44}}}}}},{{{{0,{color_uuid}}},0,{{3,0,{{13158655}}}}}},{{{{0,{font_uuid}}},1,{{7,2,60,{{-20}},400,0,0,1,1,100}}}}}}"
+                "{{1,9,{{{{-1}},0,{{3,2,{{20}}}}}},{{{{-18}},2,{{3,1,{{-18}},0,0,0}}}},{{{{-20}},1,{{7,2,0,{{-20}},1,100}}}},{{{{-42}},0,{{3,0,{{14474460}}}}}},{{{{-43}},0,{{3,0,{{15658734}}}}}},{{{{-44}},0,{{3,3,{{-44}}}}}},{{{{-46}},0,{{3,2,{{14}}}}}},{{{{0,{color_uuid}}},0,{{3,0,{{13158655}}}}}},{{{{0,{font_uuid}}},1,{{7,2,60,{{-20}},400,0,0,1,1,100}}}}}}"
             )
             .as_bytes(),
         );
@@ -38381,6 +38381,8 @@ fn writes_style_body_xml_to_source_layout() {
     assert!(xml.contains("<Color>#EEEEEE</Color>"));
     assert!(xml.contains("<Item name=\"ActivityColor\">"));
     assert!(xml.contains("<Color>style:ActivityColor</Color>"));
+    assert!(xml.contains("<Item name=\"AccentColor\">"));
+    assert!(xml.contains("<Color>web:CadetBlue</Color>"));
     assert!(xml.contains("<Item name=\"StyleItem.ErrorBackColor\">"));
     assert!(xml.contains("<Color>#FFC8C8</Color>"));
     assert!(xml.contains("<Item name=\"StyleItem.StrikeFont\">"));
