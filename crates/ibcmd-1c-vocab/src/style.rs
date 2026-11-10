@@ -34,6 +34,7 @@ pub fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> 
         -42 => "NavigationColor",
         -43 => "AuxiliaryNavigationColor",
         -44 => "ActivityColor",
+        -46 => "AccentColor",
         -47 => "ImportantColor",
         // Platform 8.5 standard style fonts. 8.5.1.1150 BSP: every form item
         // and style item that carries exactly one style font pairs the code
@@ -64,8 +65,8 @@ pub fn standard_style_item_code_for_name(name: &str) -> Option<i32> {
 
 const STANDARD_STYLE_ITEM_CODES: &[i32] = &[
     -1, -11, -3, -15, -7, -13, -21, -10, -14, -23, -24, -16, -17, -22, -25, -26, -27, -28, -18,
-    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38, -44, -42, -43, -47, -50, -52, -53, -54, -55,
-    -56, -59,
+    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38, -44, -46, -42, -43, -47, -50, -52, -53, -54,
+    -55, -56, -59,
 ];
 
 /// Codes 49/61/78/110/115/117/123/127/129/131 (GhostWhite/Lavender/
@@ -87,14 +88,19 @@ pub fn style_web_color_name(code: i32) -> Option<&'static str> {
         6 => Some("web:Beige"),
         8 => Some("web:Black"),
         10 => Some("web:Blue"),
+        12 => Some("web:Brown"),
+        14 => Some("web:CadetBlue"),
+        19 => Some("web:CornSilk"),
         20 => Some("web:Cream"),
         21 => Some("web:Crimson"),
         26 => Some("web:DarkGray"),
         27 => Some("web:DarkGreen"),
+        30 => Some("web:DarkOliveGreen"),
         31 => Some("web:DarkGreen"),
         23 => Some("web:DarkBlue"),
         33 => Some("web:DarkRed"),
         37 => Some("web:DarkSlateGray"),
+        42 => Some("web:DimGray"),
         // Four indexes the style items of the stand attest and this table did
         // not carry. Each is read off the platform's own `<Value>` for the
         // same object: `43` on `do` `StyleItems/ИзбранныйЭлемент` and two more,
@@ -113,6 +119,7 @@ pub fn style_web_color_name(code: i32) -> Option<&'static str> {
         52 => Some("web:Gray"),
         53 => Some("web:Green"),
         55 => Some("web:HoneyDew"),
+        57 => Some("web:IndianRed"),
         61 => Some("web:Lavender"),
         62 => Some("web:LavenderBlush"),
         // `uh` `StyleItems/ИзмененнаяНастройка` writes `web:LemonChiffon`
@@ -140,6 +147,7 @@ pub fn style_web_color_name(code: i32) -> Option<&'static str> {
         88 => Some("web:MediumGreen"),
         94 => Some("web:Orange"),
         105 => Some("web:Orange"),
+        108 => Some("web:PaleGoldenrod"),
         97 => Some("web:MintCream"),
         98 => Some("web:MistyRose"),
         96 => Some("web:Moccasin"),
@@ -150,6 +158,7 @@ pub fn style_web_color_name(code: i32) -> Option<&'static str> {
         119 => Some("web:Red"),
         120 => Some("web:RosyBrown"),
         121 => Some("web:RoyalBlue"),
+        122 => Some("web:SaddleBrown"),
         123 => Some("web:Salmon"),
         127 => Some("web:Sienna"),
         128 => Some("web:Silver"),
@@ -207,6 +216,41 @@ pub fn style_system_color_name(code: i32) -> Option<&'static str> {
         -42 => Some("style:NavigationColor"),
         -43 => Some("style:AuxiliaryNavigationColor"),
         -44 => Some("style:ActivityColor"),
+        -46 => Some("style:AccentColor"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The style body of `Styles/Стиль1` in `omp-1c-utk` carries the standard
+    /// item `{-46}` (`AccentColor`) between `ActivityColor` and
+    /// `NavigationColor`. Without it the whole style body reader refused the
+    /// body and `ibcmd-rs` could not verify a partial import.
+    #[test]
+    fn accent_color_is_a_standard_style_item() {
+        let (accent_order, accent_name) =
+            standard_style_item_for_code(-46).expect("AccentColor must be a standard style item");
+        assert_eq!(accent_name, "AccentColor");
+        assert_eq!(standard_style_item_code_for_name("AccentColor"), Some(-46));
+        assert_eq!(style_system_color_name(-46), Some("style:AccentColor"));
+        assert_eq!(style_web_color_name(14), Some("web:CadetBlue"));
+        assert_eq!(style_web_color_name(12), Some("web:Brown"));
+        assert_eq!(style_web_color_name(57), Some("web:IndianRed"));
+        for (code, name) in [
+            (19, "web:CornSilk"),
+            (30, "web:DarkOliveGreen"),
+            (42, "web:DimGray"),
+            (108, "web:PaleGoldenrod"),
+            (122, "web:SaddleBrown"),
+        ] {
+            assert_eq!(style_web_color_name(code), Some(name));
+        }
+
+        let (activity_order, _) =
+            standard_style_item_for_code(-44).expect("ActivityColor must be a standard style item");
+        assert_eq!(accent_order, activity_order + 1);
     }
 }
