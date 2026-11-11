@@ -50,6 +50,8 @@ pub fn compile(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Br
 const DATA_LOCK_CONTROL_MODE: &[(&str, i64)] = &[("Automatic", 0), ("Managed", 1)];
 const FULL_TEXT_SEARCH: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1)];
 const DATA_HISTORY: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1)];
+// The native wrapper distinguishes an absent property from explicit DontUse.
+const BINARY_DATA_STORAGE_LOCATION_USE: &[(&str, i64)] = &[("", 0), ("DontUse", 1)];
 const INDEXING: &[(&str, i64)] = &[
     ("DontIndex", 0),
     ("Index", 1),
@@ -284,7 +286,11 @@ impl<'a> Field<'a> {
 
 /// `0,{1,<nil>}`: the tail modern non-dimension fields carry.
 fn storage_tail(items: &mut Vec<Brace>) {
-    items.push(Brace::num(0));
+    storage_tail_with_location(items, Brace::num(0));
+}
+
+fn storage_tail_with_location(items: &mut Vec<Brace>, location_use: Brace) {
+    items.push(location_use);
     items.push(brace_list![Brace::num(1), Brace::nil_uuid()]);
 }
 
@@ -405,7 +411,14 @@ impl InformationRegister {
                 field.code("DataHistory", DATA_HISTORY)?,
             ];
             if modern {
-                storage_tail(&mut items);
+                storage_tail_with_location(
+                    &mut items,
+                    code(
+                        "BinaryDataStorageLocationUse",
+                        field.text("BinaryDataStorageLocationUse"),
+                        BINARY_DATA_STORAGE_LOCATION_USE,
+                    )?,
+                );
             }
             resources.push(wrap(items));
         }
@@ -419,7 +432,14 @@ impl InformationRegister {
                 field.code("DataHistory", DATA_HISTORY)?,
             ];
             if modern {
-                storage_tail(&mut items);
+                storage_tail_with_location(
+                    &mut items,
+                    code(
+                        "BinaryDataStorageLocationUse",
+                        field.text("BinaryDataStorageLocationUse"),
+                        BINARY_DATA_STORAGE_LOCATION_USE,
+                    )?,
+                );
             }
             attributes.push(wrap(items));
         }
@@ -1365,5 +1385,161 @@ mod tests {
         assert_eq!(serialize(&shortcut("F5").unwrap()), "{0,116,0}");
         assert_eq!(serialize(&shortcut("").unwrap()), "{0,0,0}");
         assert!(shortcut("Ctrl+Space").is_err());
+    }
+
+    fn storage_resource_case(
+        platform: &str,
+        version: &str,
+    ) -> (Brace, crate::metadata_model::export::ExportContext) {
+        use crate::metadata_model::export::{ExportContext, NameIndex};
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/1c-fixtures/coverage")
+            .join(platform)
+            .join("corpus-defined-type-resource/native");
+        let path = root.join("InformationRegisters/CovDefinedResourceTemplate.xml");
+        let source = std::fs::read(&path).unwrap();
+        let descriptor = DescriptorContext::new(&root, version).unwrap();
+        let row = crate::metadata_model::compile_descriptor(
+            "InformationRegister",
+            &path,
+            &source,
+            &descriptor,
+        )
+        .unwrap();
+        let context = ExportContext {
+            names: NameIndex::from_config_index(&descriptor.index),
+            version: version.to_owned(),
+            compat: crate::metadata_model::objects::parts::compatibility(&descriptor),
+        };
+        (
+            crate::metadata_model::brace::parse_row(&row).unwrap(),
+            context,
+        )
+    }
+
+    fn first_resource(row: &mut Brace) -> &mut Vec<Brace> {
+        first_field(row, IR_RESOURCES)
+    }
+
+    fn first_field<'a>(row: &'a mut Brace, class: &str) -> &'a mut Vec<Brace> {
+        let collection = row
+            .as_list_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|node| node.at(&[0]).and_then(Brace::as_atom) == Some(class))
+            .unwrap()
+            .as_list_mut()
+            .unwrap();
+        collection[2].as_list_mut().unwrap()[0]
+            .as_list_mut()
+            .unwrap()
+    }
+
+    #[test]
+    fn information_register_resource_compiles_native_binary_storage_location() {
+        for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+            let (mut row, _) = storage_resource_case(platform, version);
+            // The pinned platform-proven ValueStorage resource stores DontUse
+            // in its wrapper, independently of the common attribute body.
+            assert_eq!(first_resource(&mut row)[5], Brace::num(1), "{platform}");
+        }
+    }
+
+    #[test]
+    fn information_register_resource_exports_native_binary_storage_location() {
+        for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+            let (mut row, context) = storage_resource_case(platform, version);
+            // Keep the native wrapper value even while testing a compiler
+            // that does not yet preserve it, so the reader fails independently.
+            first_resource(&mut row)[5] = Brace::num(1);
+            let exported = super::export::decode("InformationRegister", &row, &context).unwrap();
+            let properties = exported
+                .path(&["ChildObjects", "Resource", "Properties"])
+                .unwrap();
+            assert_eq!(
+                properties.child_text("BinaryDataStorageLocationUse"),
+                Some("DontUse"),
+                "{platform}"
+            );
+            assert_eq!(
+                properties.children.last().unwrap().name,
+                "BinaryDataStorageLocationUse"
+            );
+
+            first_resource(&mut row)[5] = Brace::num(0);
+            let absent = super::export::decode("InformationRegister", &row, &context).unwrap();
+            assert!(
+                absent
+                    .path(&[
+                        "ChildObjects",
+                        "Resource",
+                        "Properties",
+                        "BinaryDataStorageLocationUse"
+                    ])
+                    .is_none()
+            );
+
+            first_resource(&mut row)[5] = Brace::num(2);
+            assert!(super::export::decode("InformationRegister", &row, &context).is_err());
+        }
+    }
+
+    #[test]
+    fn information_register_attribute_preserves_the_shared_storage_tail() {
+        for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+            let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/1c-fixtures/coverage")
+                .join(platform)
+                .join("corpus-defined-type-resource/native");
+            let path = root.join("InformationRegisters/CovDefinedResourceTemplate.xml");
+            let mut document = MetadataXml::parse(&std::fs::read(path).unwrap()).unwrap();
+            let children = document.root.children[0]
+                .children
+                .iter_mut()
+                .find(|node| node.name == "ChildObjects")
+                .unwrap();
+            // Synthetic Attribute witness: reuse the native ValueStorage
+            // field body in the Attribute's existing shared-tail profile.
+            // No fresh native Attribute measurement is claimed.
+            children.children.retain(|node| node.name != "Attribute");
+            children
+                .children
+                .iter_mut()
+                .find(|node| node.name == "Resource")
+                .unwrap()
+                .name = "Attribute".to_owned();
+            let descriptor = DescriptorContext::new(&root, version).unwrap();
+            let mut row = compile(&object(&document, "InformationRegister"), &descriptor).unwrap();
+            let field = first_field(&mut row, IR_ATTRIBUTES);
+            assert_eq!(field[0], Brace::num(5));
+            assert_eq!(field[5], Brace::num(1));
+            let context = crate::metadata_model::export::ExportContext {
+                names: crate::metadata_model::export::NameIndex::from_config_index(
+                    &descriptor.index,
+                ),
+                version: version.to_owned(),
+                compat: crate::metadata_model::objects::parts::compatibility(&descriptor),
+            };
+            let exported = super::export::decode("InformationRegister", &row, &context).unwrap();
+            assert_eq!(
+                exported
+                    .path(&["ChildObjects", "Attribute", "Properties"])
+                    .unwrap()
+                    .child_text("BinaryDataStorageLocationUse"),
+                Some("DontUse")
+            );
+            first_field(&mut row, IR_ATTRIBUTES)[5] = Brace::num(0);
+            let absent = super::export::decode("InformationRegister", &row, &context).unwrap();
+            assert!(
+                absent
+                    .path(&[
+                        "ChildObjects",
+                        "Attribute",
+                        "Properties",
+                        "BinaryDataStorageLocationUse"
+                    ])
+                    .is_none()
+            );
+        }
     }
 }
