@@ -1430,6 +1430,16 @@ pub struct FormAutoCommandBar {
     pub(super) child_items: Vec<FormChildItem>,
 }
 
+/// A present embedded document keeps fatal decoder diagnostics until the
+/// fallible writer rejects them; a refusal must never become absent Settings.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum FormSpreadsheetDocumentSettings {
+    Xml(String),
+    Unsupported {
+        diagnostic: ibcmd_moxel::MxlDiagnostic,
+    },
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FormAttribute {
     pub id: String,
@@ -1449,7 +1459,7 @@ pub struct FormAttribute {
     pub use_always: Vec<String>,
     pub functional_options: Vec<String>,
     pub settings: Option<FormDynamicListSettings>,
-    pub spreadsheet_document_settings: Option<String>,
+    pub spreadsheet_document_settings: Option<FormSpreadsheetDocumentSettings>,
     pub design_time_settings: Option<String>,
     pub type_description_settings: Option<Vec<ConstantValueType>>,
     /// The field-map ids of a dynamic list whose field name is outside the
@@ -2265,6 +2275,10 @@ pub enum FormSchemaWriteError {
     WriterRule(WriterRuleLookupError),
     CanonicalDcs(CanonicalDcsSettingsAdapterError),
     DcsSettingsChildren(DcsSettingsChildrenError),
+    UnsupportedSpreadsheetDocumentSettings {
+        attribute: String,
+        diagnostic: ibcmd_moxel::MxlDiagnostic,
+    },
     UnexpectedPolicy {
         rule_id: String,
         expected: &'static str,
@@ -2492,6 +2506,9 @@ fn preflight_form_writer_paths_with_dcs_profiles(
     source_profile: &ProfileId,
     target_profile: &ProfileId,
 ) -> Result<(), FormSchemaWriteError> {
+    for attribute in attributes {
+        validate_form_spreadsheet_document_settings(attribute)?;
+    }
     validate_form_writer_policy_availability_trees(child_items, auto_command_bar_child_items)?;
     preflight_form_choice_parameter_writer_paths(child_items)?;
     if let Some(auto_command_bar_child_items) = auto_command_bar_child_items {
@@ -9257,7 +9274,7 @@ pub(super) fn parse_form_spreadsheet_document_settings(
     field: &str,
     value_types: &[ConstantValueType],
     object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
+) -> Option<FormSpreadsheetDocumentSettings> {
     let is_spreadsheet_document = value_types.iter().any(|value_type| {
         matches!(
             value_type,
@@ -9273,11 +9290,17 @@ pub(super) fn parse_form_spreadsheet_document_settings(
     }
     let body_start = field.find("{8,")?;
     let body_end = scan_1c_braced_value(field, body_start)?;
-    let mut spreadsheet = ibcmd_moxel::parse_moxel_spreadsheet_text(
+    let mut spreadsheet = match ibcmd_moxel::try_parse_moxel_spreadsheet_text(
         &field[body_start..body_end],
         object_refs,
         builtin_type_reference,
-    )?;
+    ) {
+        Ok(Some(spreadsheet)) => spreadsheet,
+        Ok(None) => return None,
+        Err(diagnostic) => {
+            return Some(FormSpreadsheetDocumentSettings::Unsupported { diagnostic });
+        }
+    };
     // Group/header palette slots belong to the standalone spreadsheet
     // projection. The same MOXCEL body embedded as a form attribute does not
     // publish them: across all eight validation corpora, none of the 54 forms
@@ -9287,7 +9310,23 @@ pub(super) fn parse_form_spreadsheet_document_settings(
     // boundary.
     spreadsheet.group_header_colors = [None, None, None, None];
     let document_xml = format_moxel_spreadsheet_xml(&spreadsheet);
-    extract_moxel_document_inner_xml(&document_xml)
+    extract_moxel_document_inner_xml(&document_xml).map(FormSpreadsheetDocumentSettings::Xml)
+}
+
+fn validate_form_spreadsheet_document_settings(
+    attribute: &FormAttribute,
+) -> Result<(), FormSchemaWriteError> {
+    if let Some(FormSpreadsheetDocumentSettings::Unsupported { diagnostic }) =
+        &attribute.spreadsheet_document_settings
+    {
+        return Err(
+            FormSchemaWriteError::UnsupportedSpreadsheetDocumentSettings {
+                attribute: attribute.name.clone(),
+                diagnostic: diagnostic.clone(),
+            },
+        );
+    }
+    Ok(())
 }
 
 pub(super) fn extract_moxel_document_inner_xml(document_xml: &str) -> Option<String> {
@@ -37567,6 +37606,7 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
 ) -> Result<String, FormSchemaWriteError> {
     let mut xml = String::new();
     for attribute in attributes {
+        validate_form_spreadsheet_document_settings(attribute)?;
         xml.push_str(&format!(
             "\t\t<Attribute name=\"{}\" id=\"{}\">\r\n",
             escape_xml_text(&attribute.name),
@@ -37784,7 +37824,8 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
                 dcs_target_profile,
             )?);
             xml.push_str("\t\t\t</Settings>\r\n");
-        } else if let Some(spreadsheet_document_settings) = &attribute.spreadsheet_document_settings
+        } else if let Some(FormSpreadsheetDocumentSettings::Xml(spreadsheet_document_settings)) =
+            &attribute.spreadsheet_document_settings
         {
             xml.push_str(
                 "\t\t\t<Settings xmlns:mxl=\"http://v8.1c.ru/8.2/data/spreadsheet\" xsi:type=\"mxl:SpreadsheetDocument\">\r\n",
