@@ -11,6 +11,17 @@ pub enum ExternalArtifactKind {
 }
 
 impl ExternalArtifactKind {
+    /// Exact native external descriptor profiles. Report v5 appends
+    /// AuxiliaryVariantForm to the v4 header (8.5.1.1150 coverage corpus).
+    pub fn native_header_field_count(self, revision: &str) -> Option<usize> {
+        match (self, revision) {
+            (Self::DataProcessor, "4") => Some(7),
+            (Self::Report, "4") => Some(13),
+            (Self::Report, "5") => Some(14),
+            _ => None,
+        }
+    }
+
     pub fn from_class_id(class_id: &str) -> Option<Self> {
         match class_id.trim().to_ascii_lowercase().as_str() {
             DATA_PROCESSOR_CLASS => Some(Self::DataProcessor),
