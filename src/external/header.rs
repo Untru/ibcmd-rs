@@ -1,6 +1,7 @@
 //! Main row of an external object (`{1,{<main>},1,{<class>,{1,{4,…},N,…}}}`)
 //! and its rewrite into the `DataProcessor` (v17) / `Report` (v19) row that
-//! the configuration pipeline decodes.
+//! the configuration pipeline decodes. External report v5 (8.5.1.1150)
+//! appends AuxiliaryVariantForm and maps to the internal Report v20 row.
 //!
 //! Header field mapping, established on 81 .epf and 22 .erf built by
 //! 8.3.27.2214 against the same objects' configuration rows:
@@ -14,6 +15,10 @@
 //! | report 5, 6 | | 5, 6 |
 //! | report 7, 8, 9 | | 8, 9, 10 |
 //! | report 11, 12 | | 14, 17 |
+//!
+//! The pinned 8.5.1.1150 corpus has 101 report v5 headers with the same
+//! shared fields as their 8.3.27.2342 v4 twins, plus AuxiliaryVariantForm
+//! as the last member (internal Report v20's last member).
 //!
 //! The internal-only fields (standard commands, help in contents, manager
 //! type ids, extended presentation, explanation) are filled neutrally; the
@@ -36,7 +41,7 @@ pub struct ExternalMain {
     /// object module `<id>.0` and help `<id>.1`.
     pub object_id: String,
     pub name: String,
-    /// Header fields, `[0] == "4"`.
+    /// Header fields, including the validated revision (`4` or report `5`).
     pub header: Vec<String>,
     pub collections: Vec<String>,
 }
@@ -71,15 +76,9 @@ pub fn parse_main(main_uuid: &str, text: &str) -> Result<Option<ExternalMain>> {
         bail!("unexpected external object body layout");
     }
     let (header, _) = brace::fields(inner[1], 0).context("external header is not a brace list")?;
-    if header.first() != Some(&"4") {
-        bail!(
-            "unsupported external header version `{}`",
-            header.first().copied().unwrap_or_default()
-        );
-    }
-    let expected = match kind {
-        ExternalKind::DataProcessor => 7,
-        ExternalKind::Report => 13,
+    let revision = header.first().copied().unwrap_or_default();
+    let Some(expected) = kind.native_header_field_count(revision) else {
+        bail!("unsupported external header version `{}`", revision);
     };
     if header.len() != expected {
         bail!(
@@ -168,8 +167,13 @@ pub fn internal_row_text(main: &ExternalMain) -> Result<String> {
                 );
             }
             collections.push(REPORT_COMMANDS.to_owned());
+            let (revision, auxiliary_variant_form) = if h[0] == "5" {
+                ("20", format!(",{}", h.last().context("report v5 tail")?))
+            } else {
+                ("19", String::new())
+            };
             format!(
-                "{{19,{},{},\r\n{},{},{},{},1,{},{},{},0,{m1},{m2},{},\r\n{{0}},\r\n{{0}},{}}}",
+                "{{{revision},{},{},\r\n{},{},{},{},1,{},{},{},0,{m1},{m2},{},\r\n{{0}},\r\n{{0}},{}{auxiliary_variant_form}}}",
                 h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8], h[9], h[11], h[12]
             )
         }
@@ -209,15 +213,20 @@ pub fn external_main_text(main: &ExternalMain, internal: &str, original: &str) -
             )
         }
         ExternalKind::Report => {
-            if h.len() < 18 || h[0] != "19" {
+            let v5 = main.header.first().is_some_and(|revision| revision == "5");
+            if v5 && (h.len() != 19 || h[0] != "20") {
+                bail!("internal report header for external v5 is not v20 with 19 fields");
+            }
+            if !v5 && (h.len() < 18 || h[0] != "19") {
                 bail!("internal report header is not v19");
             }
-            (
-                vec![
-                    h[1], h[2], h[3], h[4], h[5], h[6], h[8], h[9], h[10], "\"\"", h[14], h[17],
-                ],
-                "{e7ff38c0-ec3c-47a0-ae90-20c73ca72246,",
-            )
+            let mut fields = vec![
+                h[1], h[2], h[3], h[4], h[5], h[6], h[8], h[9], h[10], "\"\"", h[14], h[17],
+            ];
+            if v5 {
+                fields.push(h.last().context("report v20 tail")?);
+            }
+            (fields, "{e7ff38c0-ec3c-47a0-ae90-20c73ca72246,")
         }
     };
     let mut collections = Vec::new();
@@ -289,6 +298,67 @@ mod tests {
             let main = parse_main(uuid, text).unwrap().unwrap();
             let internal = internal_row_text(&main).unwrap();
             assert_eq!(external_main_text(&main, &internal, text).unwrap(), text);
+        }
+    }
+
+    fn report_v5(auxiliary_variant_form: &str) -> String {
+        let (outer, _) = brace::fields(MAIN_REPORT, 0).unwrap();
+        let (wrapper, _) = brace::fields(outer[3], 0).unwrap();
+        let (inner, _) = brace::fields(wrapper[1], 0).unwrap();
+        let (header, _) = brace::fields(inner[1], 0).unwrap();
+        MAIN_REPORT.replace(
+            inner[1],
+            &format!("{{5,{},{auxiliary_variant_form}}}", header[1..].join(",")),
+        )
+    }
+
+    #[test]
+    fn report_v5_preserves_auxiliary_variant_form_in_both_directions() {
+        let form = "cccccccc-0000-0000-0000-000000000003";
+        let text = report_v5(form);
+        let main = parse_main("b0509899-141e-4cda-ba24-de8ed9711646", &text)
+            .unwrap()
+            .unwrap();
+        let internal = internal_row_text(&main).unwrap();
+        let (fields, _) = internal_fields(&internal);
+        assert_eq!(fields[0], "20");
+        assert_eq!(fields.len(), 19);
+        assert_eq!(fields.last().unwrap(), form);
+        let old_main = parse_main(&main.main_uuid, MAIN_REPORT).unwrap().unwrap();
+        let (old_fields, _) = internal_fields(&internal_row_text(&old_main).unwrap());
+        assert_eq!(fields[1..fields.len() - 1], old_fields[1..]);
+        assert_eq!(external_main_text(&main, &internal, &text).unwrap(), text);
+
+        let changed = internal.replace(form, "dddddddd-0000-0000-0000-000000000004");
+        assert_eq!(
+            external_main_text(&main, &changed, &text).unwrap(),
+            text.replace(form, "dddddddd-0000-0000-0000-000000000004")
+        );
+    }
+
+    #[test]
+    fn external_header_profiles_and_field_counts_are_exact() {
+        let nil = "00000000-0000-0000-0000-000000000000";
+        let v5 = report_v5(nil);
+        for text in [
+            MAIN_DP.replacen("{4,", "{5,", 1),
+            MAIN_REPORT.replacen("{4,", "{5,", 1),
+            v5.replacen("{5,", "{4,", 1),
+            v5.replacen("{5,", "{6,", 1),
+            v5.replacen("{5,", "{5,0,", 1),
+        ] {
+            assert!(parse_main("b0509899-141e-4cda-ba24-de8ed9711646", &text).is_err());
+        }
+        let main = parse_main("b0509899-141e-4cda-ba24-de8ed9711646", &v5)
+            .unwrap()
+            .unwrap();
+        let internal = internal_row_text(&main).unwrap();
+        assert_eq!(external_main_text(&main, &internal, &v5).unwrap(), v5);
+        for invalid in [
+            internal.replacen("{20,", "{19,", 1),
+            internal.replacen("{20,", "{20,0,", 1),
+        ] {
+            assert!(external_main_text(&main, &invalid, &v5).is_err());
         }
     }
 
