@@ -31,6 +31,26 @@ different colour.
   successfully. Both now refuse. Known overrides preserve the complete
   native XML, and unsupported XML web-colour names also refuse.
 
+The fallible spreadsheet parser retains a typed palette diagnostic for
+embedded form settings. The form IR keeps that diagnostic on the attribute;
+both the ordinary XML writer and its opaque-ChoiceList preflight reject it
+before publishing XML. The two rejection regressions first passed through
+successfully with the settings omitted. Seven focused embedded-settings
+checks now pass, including the known-colour control, and all three compiler
+regressions remain green.
+
+The first remote merge gate also exposed a pre-existing native colour that
+the stricter refusal made fatal: the 8.5.1.1529 modern-spreadsheet set's sole
+kind-2 web slot `{4,2,{129},2}` is paired with native `SkyBlue` backColor.
+Its CF SHA-256 is
+`de37f8c326144b7155d7e3305464165b3ebe5596e7dca62a7235c547e5db8871`;
+the unpacked template-row SHA-256 is
+`905c8ab63fddb6174209e85bb197d7084663cf7312710b60149d116e6c643069`.
+The reader also recognizes this measured ordinal. A whole-variant regression
+first failed with `entry_export_failed`; it requires a successful export and
+every native file byte-equal. Unknown ordinal 4294967295 remains a refusal.
+No stored-row baseline is removed or relaxed.
+
 ```text
 cargo test --locked -p ibcmd-compiler sandy_brown -- --nocapture
 3 passed, 0 failed
@@ -50,10 +70,10 @@ namespace; the CLI test compares the complete native 8.5 bytes too.
 
 ## Offline import and export routes
 
-Measured source tree: commit `a5829f11e1deac59693d93850493967abd3386cd`
+Measured source tree: commit `3fb85dc3ba02885a4194d9a7e7fbbf448e7e330d`
 (equal to the locally compiled tree). Pinned Rust 1.95.0, Windows x86-64 MSVC,
 debug profile with line tables, one Cargo job. Tested executable SHA-256:
-`ac3d14566a3a6ab7acec145f32fd04022af89b3c9ac3fa8f010271fecacc0207`.
+`b80159b0cb8f310a7b3c949a4c1bd1ee3c382036d4557309fd5d871a3979d15c`.
 
 For each native facets source tree, retain `CovSheetSandyBrown.xml` and its
 body directory, omit other CommonTemplates and ConfigDumpInfo.xml, and remove
