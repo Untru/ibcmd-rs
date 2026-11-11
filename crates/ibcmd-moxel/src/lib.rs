@@ -616,7 +616,7 @@ struct RootShapes {
     len: usize,
     shapes: Vec<RootFieldShape>,
     /// The palette span, once located.
-    palette: std::cell::OnceCell<Option<(usize, usize)>>,
+    palette: std::cell::OnceCell<Result<Option<(usize, usize)>, ()>>,
 }
 
 thread_local! {
@@ -2120,6 +2120,12 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let fields = split_braced_bytes(body, 0)?;
     let _root_shapes = RootShapesScope::new(&fields);
     if fields.first()?.trim() != "8" {
+        return None;
+    }
+    // A present but undecodable palette must not become a compact-style
+    // fallback: palette index zero can name a web colour, not a tooltip.
+    locate_moxel_style_ref_palette_span(&fields, object_refs).ok()?;
+    if !moxel_palette_overrides_are_supported(&fields, object_refs) {
         return None;
     }
     let raw_declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
@@ -10385,9 +10391,7 @@ pub fn parse_moxel_style_refs(
     let shapes = root_shapes(fields);
     for (index, field) in fields.iter().enumerate().skip(palette_end) {
         // `{count, (slot, ref) * count}`, `1 <= count <= 2048`.
-        if !root_shape_allows(shapes.as_deref(), index, |shape| {
-            shape.may_be_counted(1, MAX_MOXCEL_STYLE_REFS, 2, 1)
-        }) {
+        if !moxel_palette_override_shape_allows(shapes.as_deref(), index) {
             continue;
         }
         if let Some(overrides) = parse_moxel_indexed_style_ref_overrides(field, object_refs) {
@@ -10426,6 +10430,35 @@ fn parse_moxel_raw_palette_provenance(
 
 const MAX_MOXCEL_STYLE_REFS: usize = 2048;
 
+fn moxel_palette_override_shape_allows(shapes: Option<&RootShapes>, index: usize) -> bool {
+    root_shape_allows(shapes, index, |shape| {
+        shape.may_be_counted(1, MAX_MOXCEL_STYLE_REFS, 2, 1)
+    })
+}
+
+fn moxel_palette_overrides_are_supported(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> bool {
+    let shapes = root_shapes(fields);
+    for (index, field) in fields.iter().enumerate() {
+        if !moxel_palette_override_shape_allows(shapes.as_deref(), index) {
+            continue;
+        }
+        if parse_moxel_indexed_style_ref_overrides_with(
+            field,
+            object_refs,
+            parse_moxel_palette_slot_for_location,
+        )
+        .is_some()
+            && parse_moxel_indexed_style_ref_overrides(field, object_refs).is_none()
+        {
+            return false;
+        }
+    }
+    true
+}
+
 fn parse_moxel_canonical_positive_count(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     if bytes.is_empty() || bytes.first() == Some(&b'0') || !bytes.iter().all(u8::is_ascii_digit) {
@@ -10439,16 +10472,7 @@ fn locate_moxel_style_ref_palette(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<(usize, usize, Vec<Option<String>>)> {
-    let Some(shapes) = root_shapes(fields) else {
-        return locate_moxel_style_ref_palette_in(fields, None, object_refs);
-    };
-    // Which run is the palette does not depend on the object references -- a
-    // slot that names a style item reads with or without them -- so the run
-    // is located once per conversion and only its slots are read per call.
-    let (start, end) = (*shapes.palette.get_or_init(|| {
-        locate_moxel_style_ref_palette_in(fields, Some(&*shapes), &BTreeMap::new())
-            .map(|(start, end, _)| (start, end))
-    }))?;
+    let (start, end) = locate_moxel_style_ref_palette_span(fields, object_refs).ok()??;
     let refs = fields
         .get(start + 1..end)?
         .iter()
@@ -10457,11 +10481,26 @@ fn locate_moxel_style_ref_palette(
     Some((start, end, refs))
 }
 
+fn locate_moxel_style_ref_palette_span(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Result<Option<(usize, usize)>, ()> {
+    let Some(shapes) = root_shapes(fields) else {
+        return locate_moxel_style_ref_palette_in(fields, None, object_refs);
+    };
+    // Which run is the palette does not depend on the object references -- a
+    // slot that names a style item reads with or without them -- so the run
+    // is located once per conversion and only its slots are read per call.
+    *shapes
+        .palette
+        .get_or_init(|| locate_moxel_style_ref_palette_in(fields, Some(&*shapes), &BTreeMap::new()))
+}
+
 fn locate_moxel_style_ref_palette_in(
     fields: &[&str],
     shapes: Option<&RootShapes>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<(usize, usize, Vec<Option<String>>)> {
+) -> Result<Option<(usize, usize)>, ()> {
     // A MOXCEL palette is a single, count-prefixed run in the root.  Do not
     // scan arbitrary nested/positional descriptors: those are common in row,
     // drawing and format data and used to corrupt the palette silently.
@@ -10496,29 +10535,46 @@ fn locate_moxel_style_ref_palette_in(
         let Some(entries) = fields.get(start + 1..end) else {
             continue;
         };
-        let Some(refs) = entries
+        if !entries
             .iter()
-            .map(|entry| parse_moxel_style_ref_slot(entry, object_refs))
-            .collect::<Option<Vec<_>>>()
-        else {
+            .all(|entry| parse_moxel_palette_slot_for_location(entry, object_refs).is_some())
+        {
             continue;
         };
         // A count which stops in the middle of a typed run is not canonical.
         if fields
             .get(end)
-            .and_then(|entry| parse_moxel_style_ref_slot(entry, object_refs))
+            .and_then(|entry| parse_moxel_palette_slot_for_location(entry, object_refs))
             .is_some()
         {
             continue;
         }
-        candidates.push((start, end, refs));
+        if entries
+            .iter()
+            .any(|entry| parse_moxel_style_ref_slot(entry, object_refs).is_none())
+        {
+            return Err(());
+        }
+        candidates.push((start, end));
     }
     // Multiple plausible spans are ambiguous by definition.  Preserve no
     // palette instead of guessing which unrelated root section won.
     if candidates.len() != 1 {
-        return None;
+        return Ok(None);
     }
-    candidates.pop()
+    Ok(candidates.pop())
+}
+
+/// Locate a complete typed run even when a web ordinal cannot be named.
+/// The unresolved slot is rejected before formats can use compact defaults.
+fn parse_moxel_palette_slot_for_location(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<String>> {
+    parse_moxel_style_ref_slot(text, object_refs).or_else(|| {
+        let (kind, payload) = moxel_style_ref_slot_fields(text)?;
+        (kind == "2" && payload.len() == 1).then_some(None)
+    })
 }
 
 /// The palette-override container is one count-prefixed table of
@@ -10541,6 +10597,14 @@ pub fn parse_moxel_indexed_style_ref_overrides(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<(usize, Option<String>)>> {
+    parse_moxel_indexed_style_ref_overrides_with(text, object_refs, parse_moxel_style_ref_slot)
+}
+
+fn parse_moxel_indexed_style_ref_overrides_with(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    parse_slot: fn(&str, &BTreeMap<String, String>) -> Option<Option<String>>,
+) -> Option<Vec<(usize, Option<String>)>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
     if count == 0 || count > MAX_MOXCEL_STYLE_REFS || fields.len() != count * 2 + 1 {
@@ -10549,7 +10613,7 @@ pub fn parse_moxel_indexed_style_ref_overrides(
     let mut overrides = Vec::with_capacity(count);
     for pair in fields.get(1..)?.chunks_exact(2) {
         let slot_index = pair.first()?.trim().parse::<usize>().ok()?;
-        let style_ref = parse_moxel_style_ref_slot(pair.get(1)?, object_refs)?;
+        let style_ref = parse_slot(pair.get(1)?, object_refs)?;
         overrides.push((slot_index, style_ref));
     }
     Some(overrides)
@@ -10614,12 +10678,8 @@ pub fn parse_moxel_style_ref_slot(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<String>> {
-    let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 3 || fields.first()?.trim() != "3" {
-        return None;
-    }
-    let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
-    match fields.get(1)?.trim() {
+    let (kind, payload) = moxel_style_ref_slot_fields(text)?;
+    match kind {
         "0" if payload.len() == 1 => payload
             .first()
             .filter(|value| value.trim().parse::<u32>().is_ok())
@@ -10703,6 +10763,17 @@ pub fn parse_moxel_style_ref_slot(
         }
         _ => None,
     }
+}
+
+fn moxel_style_ref_slot_fields(text: &str) -> Option<(&str, BracedFields<'_>)> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let [revision, kind, payload] = &*fields else {
+        return None;
+    };
+    if revision.trim() != "3" {
+        return None;
+    }
+    Some((kind.trim(), split_1c_braced_fields(payload, 0)?))
 }
 
 #[doc(hidden)]
@@ -10988,6 +11059,9 @@ pub fn parse_moxel_web_color(value: &str) -> Option<String> {
         120 => "RosyBrown",
         121 => "RoyalBlue",
         122 => "SaddleBrown",
+        // Both pinned corpus-spreadsheet-facets profiles pair the sole
+        // kind-2 palette ordinal 124 with native SandyBrown XML (#610).
+        124 => "SandyBrown",
         128 => "Silver",
         130 => "SlateBlue",
         // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
