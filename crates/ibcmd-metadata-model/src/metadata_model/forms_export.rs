@@ -60,6 +60,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         other => bail!("{other} is not a subsystem or form kind"),
     };
     Ok(ObjectNames {
+        type_definition: None,
         uuid: head.uuid.clone(),
         full_name: format!("{kind}.{}", head.name),
         children: Vec::new(),

@@ -254,6 +254,7 @@ pub fn top_level_objects(row: &Brace) -> Result<Vec<(String, String)>> {
 pub(crate) fn names(row: &Brace) -> Result<ObjectNames> {
     let row = read_row(row)?;
     Ok(ObjectNames {
+        type_definition: None,
         uuid: row.uuid,
         full_name: "Configuration".to_string(),
         children: Vec::new(),

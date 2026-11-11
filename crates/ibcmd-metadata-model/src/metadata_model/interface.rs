@@ -246,6 +246,7 @@ impl Interface {
 
     pub(crate) fn names(&self) -> ObjectNames {
         ObjectNames {
+            type_definition: None,
             uuid: self.head.uuid.clone(),
             full_name: format!("Interface.{}", self.head.name),
             children: Vec::new(),

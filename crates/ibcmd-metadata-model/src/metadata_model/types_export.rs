@@ -5,6 +5,8 @@
 //! `types.rs` (platform types, reference families, standard attribute codes),
 //! so each table has one owner; `export::values` re-exports it.
 
+use std::collections::HashSet;
+
 use anyhow::{Result, anyhow, bail};
 
 use super::{
@@ -20,6 +22,61 @@ use crate::metadata_model::xml::Element;
 
 // ---------------------------------------------------------------------------
 // Type descriptions.
+
+/// The native exporter normalizes an empty string FillValue to undefined
+/// only when the declared type's leaves are known to exclude strings.
+/// This rule is specific to FillValue, not other typed-value properties.
+pub(crate) fn fill_value_element(
+    value: &Brace,
+    pattern: &Brace,
+    names: &NameIndex,
+) -> Result<Element> {
+    fn excludes_string(
+        children: &[Element],
+        names: &NameIndex,
+        visiting: &mut HashSet<String>,
+    ) -> Option<bool> {
+        let mut found = false;
+        let mut excludes = true;
+        for child in children {
+            let text = child.text.trim();
+            match child.name.as_str() {
+                "Type" if text == "xs:string" => {
+                    found = true;
+                    excludes = false;
+                }
+                "Type" | "TypeSet" if is_type_set(text) => {
+                    found = true;
+                    let name = text.strip_prefix("cfg:")?;
+                    let definition = names.type_definition(name)?;
+                    if !visiting.insert(name.to_string()) {
+                        return None;
+                    }
+                    let nested = excludes_string(&definition, names, visiting);
+                    visiting.remove(name);
+                    excludes &= nested?;
+                }
+                "TypeSet" | "TypeId" => return None,
+                "Type" if text.is_empty() => return None,
+                "Type" => found = true,
+                _ => {}
+            }
+        }
+        found.then_some(excludes)
+    }
+
+    let empty_string = value.as_list().is_some_and(|fields| {
+        fields.len() == 2 && fields[0].as_str() == Some("S") && fields[1].as_str() == Some("")
+    });
+    if empty_string
+        && excludes_string(&type_children(pattern, names)?, names, &mut HashSet::new())
+            == Some(true)
+    {
+        Ok(el("FillValue").attr("nil", "true"))
+    } else {
+        value_element("FillValue", value, names)
+    }
+}
 
 /// A named type is a type set when it stands for many types: a defined
 /// type, a characteristic, any reference, or every object of one family.
@@ -464,4 +521,229 @@ pub(crate) fn metadata_ref_text(node: &Brace, names: &NameIndex) -> Result<Strin
         .name(uuid)
         .map(str::to_string)
         .unwrap_or_else(|| uuid.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metadata_model::brace::parse_row;
+    use crate::metadata_model::export::{GeneratedTypeName, ObjectNames, object_names};
+    use crate::metadata_model::{DescriptorContext, compile_descriptor};
+    use ibcmd_restructure::brace_list;
+
+    fn reference(id: &str) -> Brace {
+        brace_list![
+            Brace::str("Pattern"),
+            brace_list![Brace::str("#"), Brace::atom(id)]
+        ]
+    }
+
+    #[test]
+    fn fill_value_resolves_named_leaves_and_keeps_unknown_or_cyclic_sets() {
+        let mut names = NameIndex::default();
+        for (id, name, category, pattern) in [
+            (
+                "number",
+                "DefinedType.Number",
+                "DefinedType",
+                r##"{"Pattern",{"N",10,2,0}}"##,
+            ),
+            (
+                "string",
+                "DefinedType.String",
+                "DefinedType",
+                r##"{"Pattern",{"S",10,1}}"##,
+            ),
+            (
+                "nested",
+                "DefinedType.Nested",
+                "DefinedType",
+                r##"{"Pattern",{"#",number}}"##,
+            ),
+            (
+                "characteristic",
+                "Characteristic.Values",
+                "Characteristic",
+                r##"{"Pattern",{"B"},{"#",nested}}"##,
+            ),
+            (
+                "mixed",
+                "DefinedType.Mixed",
+                "DefinedType",
+                r##"{"Pattern",{"#",number},{"#",string}}"##,
+            ),
+            (
+                "cycle",
+                "DefinedType.Cycle",
+                "DefinedType",
+                r##"{"Pattern",{"#",cycle}}"##,
+            ),
+            (
+                "unknown",
+                "DefinedType.Unknown",
+                "DefinedType",
+                r##"{"Pattern",{"#",missing}}"##,
+            ),
+            (
+                "empty",
+                "DefinedType.Empty",
+                "DefinedType",
+                r##"{"Pattern"}"##,
+            ),
+        ] {
+            // Synthetic declarations exercise graph resolution independently
+            // of native record offsets; the snapshot/row test below covers
+            // extraction of declarations from real descriptor layouts.
+            names.add(&ObjectNames {
+                types: vec![GeneratedTypeName {
+                    name: name.to_string(),
+                    category: category.to_string(),
+                    type_id: id.to_string(),
+                    value_id: String::new(),
+                }],
+                type_definition: Some(parse_row(pattern.as_bytes()).unwrap()),
+                ..ObjectNames::default()
+            });
+        }
+        let empty = brace_list![Brace::str("S"), Brace::str("")];
+        for (id, nil) in [
+            ("number", true),
+            ("string", false),
+            ("nested", true),
+            ("characteristic", true),
+            ("mixed", false),
+            ("cycle", false),
+            ("unknown", false),
+            ("empty", false),
+            ("missing", false),
+        ] {
+            let fill = fill_value_element(&empty, &reference(id), &names).unwrap();
+            assert_eq!(Element::attr(&fill, "nil"), nil.then_some("true"), "{id}");
+            assert_eq!(
+                Element::attr(&fill, "type"),
+                (!nil).then_some("xs:string"),
+                "{id}"
+            );
+        }
+        let unknown_set = "a9d5370f-d017-4419-b8db-85a1321dc0a6";
+        names.insert_type(unknown_set, "DefinedType.NoDefinition");
+        let fill = fill_value_element(&empty, &reference(unknown_set), &names).unwrap();
+        assert_eq!(Element::attr(&fill, "type"), Some("xs:string"));
+    }
+
+    #[test]
+    fn type_definitions_come_from_the_xml_snapshot_and_from_native_layout_rows() {
+        use std::{path::PathBuf, sync::Arc};
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/1c-fixtures/coverage");
+        // These paths deliberately do not exist: an in-memory descriptor
+        // snapshot is authoritative and must not be reopened from disk.
+        let root = PathBuf::from("in-memory-fill-value-snapshot");
+        let fixtures = [
+            ("DefinedType", "DefinedTypes/CovResourceType.xml", fixtures.join("8.3.27.2214/corpus-defined-type-resource/native/DefinedTypes/CovResourceType.xml")),
+            ("ChartOfCharacteristicTypes", "ChartsOfCharacteristicTypes/CovTemplate.xml", fixtures.join("8.3.27.2342/chartsofcharacteristictypes/native/ChartsOfCharacteristicTypes/CovTemplate.xml")),
+        ];
+        // Synthetic whitespace and a nested alias exercise the XML spelling
+        // accepted by type_pattern_items while retaining native row layouts.
+        let mut descriptors = fixtures
+            .iter()
+            .map(|(kind, relative, native)| {
+                let xml = std::fs::read_to_string(native).unwrap();
+                let replacement = if *kind == "DefinedType" {
+                    "<v8:Type> xs:string </v8:Type>"
+                } else {
+                    "<v8:TypeSet> cfg:DefinedType.CovNumeric </v8:TypeSet>"
+                };
+                (
+                    *kind,
+                    *relative,
+                    Arc::new(
+                        xml.replacen("<v8:Type>xs:string</v8:Type>", replacement, 1)
+                            .into_bytes(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let numeric = r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20"><DefinedType uuid="6bc7759a-d282-46e6-a1e6-4eb146988f25"><InternalInfo><xr:GeneratedType name="DefinedType.CovNumeric" category="DefinedType"><xr:TypeId>e8d28550-c509-4df0-b340-95bed3e0c564</xr:TypeId><xr:ValueId>63545e6e-24b1-473f-a6f9-4825af4560a5</xr:ValueId></xr:GeneratedType></InternalInfo><Properties><Name>CovNumeric</Name><Synonym/><Comment/><Type><v8:Type> xs:decimal </v8:Type></Type></Properties></DefinedType></MetaDataObject>"#;
+        descriptors.push((
+            "DefinedType",
+            "DefinedTypes/CovNumeric.xml",
+            Arc::new(numeric.as_bytes().to_vec()),
+        ));
+        let files = descriptors
+            .iter()
+            .map(|(_, relative, bytes)| (root.join(relative), bytes.clone()))
+            .collect::<Vec<_>>();
+        let source = DescriptorContext::with_files(&root, "2.20", &files).unwrap();
+        assert_eq!(source.index.type_definitions.len(), 3);
+        let from_xml = NameIndex::from_config_index(&source.index);
+        let mut from_rows = NameIndex::default();
+        for ((kind, _, _), (path, bytes)) in descriptors.iter().zip(&files) {
+            let row = compile_descriptor(kind, path, bytes, &source).unwrap();
+            from_rows.add(&object_names(kind, &parse_row(&row).unwrap()).unwrap());
+        }
+        // Also cover the parallel name-index builder's merge operation.
+        let mut merged = NameIndex::default();
+        merged.absorb(from_rows);
+        let empty = brace_list![Brace::str("S"), Brace::str("")];
+        for (name, nil) in [
+            ("DefinedType.CovResourceType", false),
+            ("Characteristic.CovTemplate", true),
+            ("DefinedType.CovNumeric", true),
+        ] {
+            let expected = from_xml.type_definition(name).unwrap();
+            assert!(!expected.is_empty());
+            let from_row = merged.type_definition(name).unwrap();
+            assert_eq!(
+                crate::metadata_model::types::type_pattern(
+                    Some(&el("Type").children(from_row)),
+                    &source
+                )
+                .unwrap(),
+                crate::metadata_model::types::type_pattern(
+                    Some(&el("Type").children(expected)),
+                    &source
+                )
+                .unwrap(),
+                "{name}"
+            );
+            let pattern = reference(&source.index.generated_types[name].type_id);
+            for index in [&from_xml, &merged] {
+                let fill = fill_value_element(&empty, &pattern, index).unwrap();
+                assert_eq!(Element::attr(&fill, "nil"), nil.then_some("true"), "{name}");
+                assert_eq!(
+                    Element::attr(&fill, "type"),
+                    (!nil).then_some("xs:string"),
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fill_value_preserves_nonempty_and_nonstring_values() {
+        let names = NameIndex::default();
+        let pattern = parse_row(br##"{"Pattern",{"N",10,2,0}}"##).unwrap();
+        for value in [
+            r##"{"S","explicit"}"##,
+            r##"{"N",0}"##,
+            r##"{"B",0}"##,
+            r##"{"U"}"##,
+        ] {
+            let value = parse_row(value.as_bytes()).unwrap();
+            assert_eq!(
+                crate::metadata_model::export::write_document(
+                    &fill_value_element(&value, &pattern, &names).unwrap(),
+                    "2.20"
+                ),
+                crate::metadata_model::export::write_document(
+                    &value_element("FillValue", &value, &names).unwrap(),
+                    "2.20"
+                )
+            );
+        }
+        let empty = brace_list![Brace::str("S"), Brace::str("")];
+        let minimum = value_element("MinValue", &empty, &names).unwrap();
+        assert_eq!(Element::attr(&minimum, "type"), Some("xs:string"));
+    }
 }

@@ -15,7 +15,9 @@ use crate::metadata_model::export::values::{
 use crate::metadata_model::export::{
     Build, ExportContext, NameIndex, atom, el, item, leaf, list, number, short, string, xml_text,
 };
-use crate::metadata_model::types::export::{data_path_text, type_element, value_element};
+use crate::metadata_model::types::export::{
+    data_path_text, fill_value_element, type_element, value_element,
+};
 use crate::metadata_model::xml::Element;
 
 // ---------------------------------------------------------------------------
@@ -150,7 +152,7 @@ pub(crate) fn attribute_properties(
     if with_fill {
         properties = properties
             .child(leaf("FillFromFillingValue", bool_text(&slots[20])?))
-            .child(value_element("FillValue", &slots[19], names)?);
+            .child(fill_value_element(&slots[19], item(typed, 2)?, names)?);
     }
     properties = properties
         .child(leaf("FillChecking", code_text(&slots[13], FILL_CHECKING)?))
@@ -298,7 +300,10 @@ pub(crate) fn attribute_elements(
             "FillFromFillingValue",
             leaf("FillFromFillingValue", bool_text(&slots[20])?),
         ),
-        ("FillValue", value_element("FillValue", &slots[19], names)?),
+        (
+            "FillValue",
+            fill_value_element(&slots[19], item(typed, 2)?, names)?,
+        ),
         (
             "FillChecking",
             leaf("FillChecking", code_text(&slots[13], FILL_CHECKING)?),
@@ -361,4 +366,68 @@ pub(crate) fn typed_header_elements(node: &Brace, names: &NameIndex) -> Result<(
         header(item(typed, 1)?)?,
         type_element("Type", item(typed, 2)?, names)?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metadata_model::attribute::attribute_body;
+    use crate::metadata_model::objects::parts::Compat;
+    use crate::metadata_model::types::tests::{context, element};
+
+    #[test]
+    fn empty_string_fill_value_follows_the_declared_type_in_both_attribute_readers() {
+        let source = context();
+        let context = ExportContext {
+            names: NameIndex::from_config_index(&source.index),
+            version: "2.20".to_string(),
+            compat: Compat(8, 3, 27),
+        };
+        let owner = Owner {
+            kind: "Catalog",
+            full_name: "Catalog.Test",
+        };
+        for (types, nil) in [
+            ("<v8:Type>xs:decimal</v8:Type>", true),
+            ("<v8:Type>xs:boolean</v8:Type>", true),
+            ("<v8:Type>xs:dateTime</v8:Type>", true),
+            ("<v8:Type>cfg:CatalogRef.Валюты</v8:Type>", true),
+            ("<v8:Type>xs:string</v8:Type>", false),
+            (
+                "<v8:Type>xs:decimal</v8:Type><v8:Type>xs:string</v8:Type>",
+                false,
+            ),
+            ("", false),
+        ] {
+            let properties = element(&format!(
+                "<Properties><Name>Test</Name><Type>{types}</Type><FillValue xsi:type=\"xs:string\"/></Properties>"
+            ));
+            let body = attribute_body("a3ac4b22-1387-4c02-b605-2ff9b5776314", &properties, &source)
+                .unwrap();
+            assert_eq!(
+                body.at(&[19]),
+                Some(&ibcmd_restructure::brace_list![
+                    Brace::str("S"),
+                    Brace::str("")
+                ])
+            );
+            let direct = attribute_properties(&body, true, Vec::new(), owner, &context).unwrap();
+            let mut ordered = attribute_elements(&body, owner, &context).unwrap();
+            for fill in [
+                Element::child(&direct, "FillValue").unwrap().clone(),
+                ordered.take("FillValue").unwrap(),
+            ] {
+                assert_eq!(
+                    Element::attr(&fill, "nil"),
+                    nil.then_some("true"),
+                    "{types}"
+                );
+                assert_eq!(
+                    Element::attr(&fill, "type"),
+                    (!nil).then_some("xs:string"),
+                    "{types}"
+                );
+            }
+        }
+    }
 }

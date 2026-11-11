@@ -1527,6 +1527,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     let object_name = head.name.clone();
     let full_name = format!("{kind}.{object_name}");
     let mut out = ObjectNames {
+        type_definition: None,
         uuid: head.uuid.clone(),
         full_name: full_name.clone(),
         children: Vec::new(),
@@ -1534,6 +1535,9 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     };
     let mut position = 0;
     for slot in layout.slots {
+        if matches!(slot, Slot::TypePattern("Type")) && kind == "ChartOfCharacteristicTypes" {
+            out.type_definition = Some(item(owner_record, position)?.clone());
+        }
         if let Slot::Generated(category) = slot {
             out.types.push(GeneratedTypeName {
                 name: generated_type_name(kind, category, &head.name, None),

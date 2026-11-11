@@ -704,6 +704,7 @@ pub fn owned_names(kind: &str, row: &Brace, owner: &str) -> Result<ObjectNames> 
     }
     let children = inline_children(kind, &parsed, &full_name)?;
     Ok(ObjectNames {
+        type_definition: None,
         uuid: head.uuid,
         full_name,
         children,

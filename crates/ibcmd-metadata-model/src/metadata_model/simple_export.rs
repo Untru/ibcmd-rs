@@ -718,6 +718,9 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         other => bail!("{other} is not a simple kind"),
     };
     Ok(ObjectNames {
+        type_definition: (kind == "DefinedType")
+            .then(|| item(fields, 4).cloned())
+            .transpose()?,
         uuid: head.uuid.clone(),
         full_name: format!("{kind}.{}", head.name),
         children,

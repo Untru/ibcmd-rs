@@ -348,6 +348,7 @@ pub fn decode(row: &Brace, names: &NameIndex) -> Result<Element> {
 pub fn names(row: &Brace) -> Result<ObjectNames> {
     let record = Record::from_brace(row)?;
     Ok(ObjectNames {
+        type_definition: None,
         uuid: record.head.uuid.clone(),
         full_name: format!("{}.{}", schema::KIND, record.head.name),
         children: Vec::new(),
