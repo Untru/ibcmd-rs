@@ -29191,7 +29191,7 @@ fn parse_report_properties_from_text(
         ),
         default_variant_form: parse_owner_form_ref(fields.get(10).copied(), form_refs, object_refs),
         auxiliary_variant_form: record_8_5_1
-            .then(|| parse_catalog_form_ref(fields.get(18).copied(), form_refs)),
+            .then(|| parse_owner_form_ref(fields.last().copied(), form_refs, object_refs)),
         variants_storage: parse_metadata_object_ref(fields.get(8).copied(), object_refs),
         settings_storage: parse_metadata_object_ref(fields.get(9).copied(), object_refs),
         include_help_in_contents: parse_1c_bool_field(fields.get(11).copied()).unwrap_or(false),
