@@ -47,3 +47,9 @@ The model preserves the explicit property in both directions and keeps
 omitted/zero values omitted. The separate `FillValue` normalization defect
 (#628) remains outside this patch; this evidence does not claim byte parity
 for the whole register or completion of all #629 acceptance criteria.
+
+The complementary FillValue normalization is submitted separately in
+[PR #712](https://github.com/Untru/ibcmd-rs/pull/712). Its focused measurement
+of these same native register records leaves only the storage-location
+property difference covered here; neither branch claims a combined merge
+or a live database round trip.
