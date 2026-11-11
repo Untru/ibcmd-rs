@@ -32,6 +32,28 @@ fn external_report_matches_native_dump() {
     assert_tree_eq(&dir.join("expected"), &out);
 }
 
+#[test]
+fn external_report_v5_matches_the_pinned_native_dump() {
+    use crate::coverage_corpus::{TempDirectory, cf_export, decode_base64, read_tree};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/1c-fixtures/coverage/8.5.1.1150/external/erf-attributes");
+    let temp = TempDirectory::new();
+    let input = temp.0.join("report.erf");
+    std::fs::write(
+        &input,
+        decode_base64(&std::fs::read(root.join("variants/CovTemplate.erf.b64")).unwrap()),
+    )
+    .unwrap();
+    let actual = cf_export(&input, &temp.0.join("export"), "2.21").unwrap();
+    assert!(actual.refusal.is_none(), "{:?}", actual.refusal);
+    let expected: std::collections::BTreeMap<_, _> = read_tree(&root.join("native"))
+        .into_iter()
+        .filter(|(path, _)| path == "CovTemplate.xml" || path.starts_with("CovTemplate/"))
+        .collect();
+    assert!(!expected.is_empty());
+    assert_eq!(actual.files, expected);
+}
+
 fn assert_exports_to(input: &std::path::Path, expected: &std::path::Path, tag: &str) {
     let out = temp_dir(tag);
     let run = export(input, &out);
