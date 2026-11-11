@@ -1,6 +1,6 @@
 # External report v5 descriptors (#553)
 
-## Inputs and implementation
+## Initial measurement inputs and implementation
 
 - Source: `77d81bfc89ed962708d5b716e30b199d47cc86e1`, tree
   `89640735e579ff907bfeae4f2eb164437ad3bca1`.
@@ -80,3 +80,30 @@ The author and a fresh-context critic reviewed the source and found no
 correctness defect. Full local gates and the final critic assessment
 remain recorded in PR #710. No fresh native 8.5 run or SQL/database mutation
 was performed for these measurements.
+
+## Verification after the copyinfo correction
+
+Source commit `5e2b53471ea36d57b7a4122921592bb662ac509e` includes the
+owner-form resolver correction and its failing-first regression. The initial
+native-corpus measurement above is retained as a historical measurement;
+the nonempty copyinfo case is synthetic and has no fresh native oracle.
+
+On pinned Rust 1.95.0 / Windows x86-64 MSVC, with one Cargo job,
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only` and `RUST_TEST_THREADS=1`:
+
+```text
+cargo xtask check --base upstream/master
+6 passed
+
+cargo xtask ci
+29 passed, no SKIP
+workspace crates: 4708 passed, 0 failed, 90 existing ignored
+root integration suites: 518 passed, 0 failed, 4 existing ignored
+root library: 897 passed, 0 failed, 7 existing ignored
+temporary directory left empty: PASS
+```
+
+The check includes the dump crate's foreign-common-form regression and the
+external-export suite. The full gate retains every existing corpus and
+policy check. Release build, native micro-corpus parity, SBOM and release
+audit are separate remote matrix checks and were not run locally.
