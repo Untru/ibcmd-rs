@@ -27,8 +27,9 @@ The existing CF reader independently defines this field as `0` = omitted,
 ## Regression evidence
 
 The tests compile the native resource XML in both dialects and assert the
-measured wrapper field. With the old writer they fail with `left: Some(0)`,
-`right: Some(1)`. A reader test starts with the native field `1`, verifies
+measured wrapper field. With the old writer they fail with `0` versus `1`
+(the assertions print `Brace::Atom` values). A reader test starts with the
+native field `1`, verifies
 `DontUse` in its native property position, verifies omission for `0`, and
 rejects an unknown code.
 
@@ -40,6 +41,13 @@ It is not a fresh native measurement of a ValueStorage attribute.
 `cargo test --locked -p ibcmd-metadata-model`: **71 passed, 0 failed**.
 The independent critic verified both CF descriptors and the policy guard,
 and approved the final source and synthetic-test scope without findings.
+
+A focused public-API probe exports the actual native register descriptors
+with a name index from the profile's native XML. On both platforms the
+storage-location property and all other XML lines now match native except
+the separate FillValue normalization (#628). An independent critic repeated
+that probe and obtained the same result. This is descriptor API evidence,
+not a live database round trip.
 
 ## Scope
 
