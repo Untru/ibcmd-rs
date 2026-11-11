@@ -21,9 +21,10 @@ use super::{
     SEQUENCE_DIMENSIONS, TEMPLATES,
 };
 use super::{
-    DATA_HISTORY, DATA_LOCK_CONTROL_MODE, EDIT_TYPE, FULL_TEXT_SEARCH, INDEXING,
-    INFORMATION_REGISTER_PERIODICITY, MOVE_BOUNDARY_ON_POSTING, NUMBER_ALLOWED_LENGTH,
-    NUMBER_PERIODICITY, NUMBER_TYPE, REGISTER_TYPE, TYPE_REDUCTION_MODE, WRITE_MODE,
+    BINARY_DATA_STORAGE_LOCATION_USE, DATA_HISTORY, DATA_LOCK_CONTROL_MODE, EDIT_TYPE,
+    FULL_TEXT_SEARCH, INDEXING, INFORMATION_REGISTER_PERIODICITY, MOVE_BOUNDARY_ON_POSTING,
+    NUMBER_ALLOWED_LENGTH, NUMBER_PERIODICITY, NUMBER_TYPE, REGISTER_TYPE, TYPE_REDUCTION_MODE,
+    WRITE_MODE,
 };
 use crate::metadata_model::brace::Brace;
 use crate::metadata_model::export::values::{
@@ -236,6 +237,8 @@ fn standard_attributes(
 enum Tail {
     Flag(&'static str),
     Code(&'static str, &'static [(&'static str, i64)]),
+    /// The empty vocabulary value means the property is absent in XML.
+    OptionalCode(&'static str, &'static [(&'static str, i64)]),
     Reference(&'static str),
     /// A property the older rows do not store: its XML default.
     Default(&'static str, &'static str),
@@ -263,6 +266,14 @@ fn field(
             }
             Tail::Flag(name) => flag(name, item(record, position)?)?,
             Tail::Code(name, table) => code(name, item(record, position)?, table)?,
+            Tail::OptionalCode(name, table) => {
+                let element = code(name, item(record, position)?, table)?;
+                position += 1;
+                if !element.text.is_empty() {
+                    elements.push(element);
+                }
+                continue;
+            }
             Tail::Reference(name) => reference(name, item(record, position)?, context)?,
         };
         elements.push(element);
@@ -285,24 +296,31 @@ fn field_in_order(
 ) -> Result<Element> {
     let body = item(record, 1)?;
     let head = attribute_header(body)?;
-    let mut by_name: HashMap<&str, Element> = HashMap::new();
+    let mut by_name: HashMap<&str, Option<Element>> = HashMap::new();
     let mut position = 2;
     for slot in stored {
         let (name, element) = match slot {
             Tail::Default(name, value) => {
-                by_name.insert(name, leaf(name, *value));
+                by_name.insert(name, Some(leaf(name, *value)));
                 continue;
             }
-            Tail::Flag(name) => (*name, flag(name, item(record, position)?)?),
-            Tail::Code(name, table) => (*name, code(name, item(record, position)?, table)?),
-            Tail::Reference(name) => (*name, reference(name, item(record, position)?, context)?),
+            Tail::Flag(name) => (*name, Some(flag(name, item(record, position)?)?)),
+            Tail::Code(name, table) => (*name, Some(code(name, item(record, position)?, table)?)),
+            Tail::OptionalCode(name, table) => {
+                let element = code(name, item(record, position)?, table)?;
+                (*name, (!element.text.is_empty()).then_some(element))
+            }
+            Tail::Reference(name) => (
+                *name,
+                Some(reference(name, item(record, position)?, context)?),
+            ),
         };
         by_name.insert(name, element);
         position += 1;
     }
     let mut elements = Vec::with_capacity(xml_order.len());
     for name in xml_order {
-        elements.push(
+        elements.extend(
             by_name
                 .remove(name)
                 .ok_or_else(|| anyhow!("{tag} wrapper has no <{name}>"))?,
@@ -593,11 +611,17 @@ fn information_register(row: &Brace, context: &ExportContext) -> Result<Element>
             "ExecuteAfterWriteDataHistoryVersionProcessing",
             row.slot(38)?,
         )?);
-    let plain_tail = [
+    let mut plain_tail = vec![
         Tail::Code("Indexing", INDEXING),
         Tail::Code("FullTextSearch", FULL_TEXT_SEARCH),
         Tail::Code("DataHistory", DATA_HISTORY),
     ];
+    if modern {
+        plain_tail.push(Tail::OptionalCode(
+            "BinaryDataStorageLocationUse",
+            BINARY_DATA_STORAGE_LOCATION_USE,
+        ));
+    }
     let mut children = Vec::new();
     children.extend(children_of(&row, IR_RESOURCES, |record| {
         field("Resource", record, true, &plain_tail, owner, context)
