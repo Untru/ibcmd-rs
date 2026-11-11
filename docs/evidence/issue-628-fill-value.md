@@ -26,6 +26,12 @@ The affected native descriptors are identical between the two platforms:
 | InformationRegisters/CovDefinedResourceTemplate.xml | `d6a3897fdcd9775cb1c8d57c459618593f5c0ecf9a26560979b45961c0010f00` |
 | Catalogs/CovBindingProducts.xml | `26917b250d082a389f31559df2c0d69ba2061ffc8254cc3ccce448a98278b5be` |
 
+The native DefinedType descriptor is also identical in both profiles
+(SHA-256 `12fa9a6d10cf486f44eaea2aa5043db1b41976b866a17bfe42ba9d32d5cc1a89`).
+Independent CF/brace extraction confirms its five-member revision-0 payload:
+type id at 1, value id at 2, revision-3 metadata header at 3, type pattern at 4.
+`DefinedTypeLayout` now gives decoding and indexing those shared coordinates.
+
 For a focused measurement, `cf extract` extracted the exact native object
 records from each hash-checked CF. A small Rust driver called the public
 `export_descriptor` API on those inflated records, with `NameIndex` built
@@ -37,7 +43,7 @@ attributes and text, compared with **4/8** before. All three catalog
 descriptors in each deep-bindings profile now match native XML byte for byte
 (**6/6**, previously 4/6). The two register descriptors retain exactly one
 XML difference: the omitted `BinaryDataStorageLocationUse` property (#629).
-Neither native fixtures nor existing baselines were changed.
+Neither native fixtures nor corpus baselines were changed.
 
 This focused API measurement is not a database import/export run. Raw-row
 name-index declaration extraction and parallel index merging are checked
@@ -68,6 +74,14 @@ The regression now includes synthetic whitespace around string, numeric,
 and nested TypeSet declarations. Removing that trim reproduces an incorrect
 nil for the string alias; restoring it passes the full crate suite.
 Independent source review then approved the correction without findings.
+
+The physical-adapter guard reports 17 new `name-special-case` occurrences
+for this reviewed semantic policy: `export.rs` 2, `index.rs` 6,
+`objects_export.rs` 2, `simple_export.rs` 1, `types_export.rs` 6.
+They select metadata kinds, declaration categories and primitive/type-set
+leaves; none selects a named business object. An independent targeted scan
+confirmed all 17 allowances. The policy baseline appends exactly those
+entries and preserves every existing entry, including stale allowances.
 
 ## Scope
 
