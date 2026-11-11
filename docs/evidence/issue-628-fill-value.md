@@ -56,8 +56,9 @@ cargo test --locked -p ibcmd-rs --test integration coverage_storage_records::cle
 
 ## Regression evidence
 
-`cargo test --locked -p ibcmd-metadata-model`: **72 passed, 0 failed**.
-Strict Clippy for this crate and all its targets also passes.
+`cargo test --locked -p ibcmd-metadata-model`: **74 passed, 0 failed**
+after the review follow-up below. Final Clippy and merge-gate results are
+recorded in PR #712.
 
 The new direct regression feeds an actual stored empty-string value through
 both attribute-body readers. Before the fix, a numeric declaration fails
@@ -82,6 +83,32 @@ They select metadata kinds, declaration categories and primitive/type-set
 leaves; none selects a named business object. An independent targeted scan
 confirmed all 17 allowances. The policy baseline appends exactly those
 entries and preserves every existing entry, including stale allowances.
+
+## Review follow-up
+
+Both attribute readers reuse their existing typed-pattern read. The
+empty-string check destructures the exact typed pair, avoiding additional
+numeric storage offsets.
+
+Completed named-type results are memoized separately from the active-cycle
+set. A synthetic acyclic graph of 27 declarations sharing their preceding
+two aliases first needed **392,835** resolutions; the regression now bounds
+it to at most **27**. Existing cyclic, missing, empty and string-containing
+declarations retain their conservative behaviour.
+
+Known built-in reference sets exclude strings. Their classification uses
+the existing closed vocabulary and canonicalizes its compatibility aliases.
+The added AnyRef snapshot/row case first failed with `None` instead of
+`Some("true")` for the nil attribute: XML retained `cfg:AnyRef`, while the
+compiled row canonicalized the same type id to `cfg:AnyIBRef`. Both index
+routes now agree. CatalogRef/AnyIBRef and mixed-with-string cases are also
+covered.
+
+Independent review checked these corrections and six additional
+`name-special-case` fingerprints in `types_export.rs`. The baseline appends
+only those six records, preserving all 50 earlier records in that file and
+all other files. Together with the original 17, this PR adds 23 reviewed
+semantic routing allowances; no UUID or XML-policy allowance is added.
 
 ## Scope
 
