@@ -134,11 +134,12 @@ pub(crate) fn attribute_properties(
     let typed = list(item(slots, 1)?)?;
     let head = header(item(typed, 1)?)?;
     let [name, synonym, comment] = header_elements(&head)?;
+    let pattern = item(typed, 2)?;
     let mut properties = el("Properties")
         .child(name)
         .child(synonym)
         .child(comment)
-        .child(type_element("Type", item(typed, 2)?, names)?)
+        .child(type_element("Type", pattern, names)?)
         .child(leaf("PasswordMode", bool_text(&slots[2])?))
         .child(localized_element("Format", &slots[3])?)
         .child(localized_element("EditFormat", &slots[18])?)
@@ -152,7 +153,7 @@ pub(crate) fn attribute_properties(
     if with_fill {
         properties = properties
             .child(leaf("FillFromFillingValue", bool_text(&slots[20])?))
-            .child(fill_value_element(&slots[19], item(typed, 2)?, names)?);
+            .child(fill_value_element(&slots[19], pattern, names)?);
     }
     properties = properties
         .child(leaf("FillChecking", code_text(&slots[13], FILL_CHECKING)?))
@@ -278,11 +279,12 @@ pub(crate) fn attribute_elements(
     let typed = list(item(slots, 1)?)?;
     let head = header(item(typed, 1)?)?;
     let [name, synonym, comment] = header_elements(&head)?;
+    let pattern = item(typed, 2)?;
     let elements = vec![
         ("Name", name),
         ("Synonym", synonym),
         ("Comment", comment),
-        ("Type", type_element("Type", item(typed, 2)?, names)?),
+        ("Type", type_element("Type", pattern, names)?),
         ("PasswordMode", leaf("PasswordMode", bool_text(&slots[2])?)),
         ("Format", localized_element("Format", &slots[3])?),
         ("EditFormat", localized_element("EditFormat", &slots[18])?),
@@ -300,10 +302,7 @@ pub(crate) fn attribute_elements(
             "FillFromFillingValue",
             leaf("FillFromFillingValue", bool_text(&slots[20])?),
         ),
-        (
-            "FillValue",
-            fill_value_element(&slots[19], item(typed, 2)?, names)?,
-        ),
+        ("FillValue", fill_value_element(&slots[19], pattern, names)?),
         (
             "FillChecking",
             leaf("FillChecking", code_text(&slots[13], FILL_CHECKING)?),

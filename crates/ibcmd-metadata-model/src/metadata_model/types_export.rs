@@ -5,7 +5,7 @@
 //! `types.rs` (platform types, reference families, standard attribute codes),
 //! so each table has one owner; `export::values` re-exports it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Result, anyhow, bail};
 
@@ -31,10 +31,30 @@ pub(crate) fn fill_value_element(
     pattern: &Brace,
     names: &NameIndex,
 ) -> Result<Element> {
+    let empty_string = matches!(
+        value.as_list(),
+        Some([tag, text]) if tag.as_str() == Some("S") && text.as_str() == Some("")
+    );
+    if empty_string
+        && declared_type_excludes_string(&type_children(pattern, names)?, |name| {
+            names.type_definition(name)
+        }) == Some(true)
+    {
+        Ok(el("FillValue").attr("nil", "true"))
+    } else {
+        value_element("FillValue", value, names)
+    }
+}
+
+fn declared_type_excludes_string(
+    children: &[Element],
+    mut resolve: impl FnMut(&str) -> Option<Vec<Element>>,
+) -> Option<bool> {
     fn excludes_string(
         children: &[Element],
-        names: &NameIndex,
+        resolve: &mut impl FnMut(&str) -> Option<Vec<Element>>,
         visiting: &mut HashSet<String>,
+        resolved: &mut HashMap<String, Option<bool>>,
     ) -> Option<bool> {
         let mut found = false;
         let mut excludes = true;
@@ -45,15 +65,25 @@ pub(crate) fn fill_value_element(
                     found = true;
                     excludes = false;
                 }
+                "Type" | "TypeSet" if is_builtin_reference_set(text) => {
+                    found = true;
+                }
                 "Type" | "TypeSet" if is_type_set(text) => {
                     found = true;
                     let name = text.strip_prefix("cfg:")?;
-                    let definition = names.type_definition(name)?;
-                    if !visiting.insert(name.to_string()) {
-                        return None;
-                    }
-                    let nested = excludes_string(&definition, names, visiting);
-                    visiting.remove(name);
+                    let nested = if let Some(result) = resolved.get(name) {
+                        *result
+                    } else {
+                        if !visiting.insert(name.to_string()) {
+                            return None;
+                        }
+                        let result = resolve(name).and_then(|definition| {
+                            excludes_string(&definition, resolve, visiting, resolved)
+                        });
+                        visiting.remove(name);
+                        resolved.insert(name.to_string(), result);
+                        result
+                    };
                     excludes &= nested?;
                 }
                 "TypeSet" | "TypeId" => return None,
@@ -65,17 +95,23 @@ pub(crate) fn fill_value_element(
         found.then_some(excludes)
     }
 
-    let empty_string = value.as_list().is_some_and(|fields| {
-        fields.len() == 2 && fields[0].as_str() == Some("S") && fields[1].as_str() == Some("")
-    });
-    if empty_string
-        && excludes_string(&type_children(pattern, names)?, names, &mut HashSet::new())
-            == Some(true)
-    {
-        Ok(el("FillValue").attr("nil", "true"))
-    } else {
-        value_element("FillValue", value, names)
-    }
+    excludes_string(
+        children,
+        &mut resolve,
+        &mut HashSet::new(),
+        &mut HashMap::new(),
+    )
+}
+
+/// Snapshot XML can retain compatibility aliases such as cfg:AnyRef;
+/// compiled rows use the vocabulary's canonical name for the same type id.
+fn is_builtin_reference_set(name: &str) -> bool {
+    ibcmd_1c_vocab::builtin_type_id(name)
+        .and_then(builtin_type_qname)
+        .is_some_and(|name| {
+            FAMILY_TYPE_SET_ORDER.contains(&name)
+                && (name == "cfg:AnyIBRef" || name.ends_with("Ref"))
+        })
 }
 
 /// A named type is a type set when it stands for many types: a defined
@@ -539,6 +575,53 @@ mod tests {
     }
 
     #[test]
+    fn fill_value_shared_alias_graph_resolves_each_declaration_once() {
+        let definitions: std::collections::HashMap<_, _> = (0..27)
+            .map(|index| {
+                let children = if index < 2 {
+                    vec![leaf("Type", "xs:decimal")]
+                } else {
+                    [index - 1, index - 2]
+                        .map(|child| leaf("TypeSet", format!("cfg:DefinedType.A{child}")))
+                        .to_vec()
+                };
+                (format!("DefinedType.A{index}"), children)
+            })
+            .collect();
+        let mut calls = 0;
+        let result =
+            declared_type_excludes_string(&[leaf("TypeSet", "cfg:DefinedType.A26")], |name| {
+                calls += 1;
+                definitions.get(name).cloned()
+            });
+        assert_eq!(result, Some(true));
+        assert!(
+            calls <= definitions.len(),
+            "{calls} resolutions for {} declarations",
+            definitions.len()
+        );
+    }
+
+    #[test]
+    fn fill_value_builtin_reference_sets_exclude_strings_unless_mixed() {
+        let names = NameIndex::default();
+        let empty = brace_list![Brace::str("S"), Brace::str("")];
+        for name in ["cfg:CatalogRef", "cfg:AnyIBRef"] {
+            let id = ibcmd_1c_vocab::builtin_type_id(name).unwrap();
+            let mut pattern = reference(id);
+            let fill = fill_value_element(&empty, &pattern, &names).unwrap();
+            assert_eq!(Element::attr(&fill, "nil"), Some("true"), "{name}");
+            pattern.as_list_mut().unwrap().push(brace_list![
+                Brace::str("S"),
+                Brace::atom("10"),
+                Brace::atom("1")
+            ]);
+            let mixed = fill_value_element(&empty, &pattern, &names).unwrap();
+            assert_eq!(Element::attr(&mixed, "type"), Some("xs:string"), "{name}");
+        }
+    }
+
+    #[test]
     fn fill_value_resolves_named_leaves_and_keeps_unknown_or_cyclic_sets() {
         let mut names = NameIndex::default();
         for (id, name, category, pattern) in [
@@ -670,12 +753,35 @@ mod tests {
             "DefinedTypes/CovNumeric.xml",
             Arc::new(numeric.as_bytes().to_vec()),
         ));
+        let any_ref = numeric
+            .replace("CovNumeric", "CovAnyRef")
+            .replace(
+                "6bc7759a-d282-46e6-a1e6-4eb146988f25",
+                "6bc7759a-d282-46e6-a1e6-4eb146988f26",
+            )
+            .replace(
+                "e8d28550-c509-4df0-b340-95bed3e0c564",
+                "e8d28550-c509-4df0-b340-95bed3e0c565",
+            )
+            .replace(
+                "63545e6e-24b1-473f-a6f9-4825af4560a5",
+                "63545e6e-24b1-473f-a6f9-4825af4560a6",
+            )
+            .replace(
+                "<v8:Type> xs:decimal </v8:Type>",
+                "<v8:TypeSet> cfg:AnyRef </v8:TypeSet>",
+            );
+        descriptors.push((
+            "DefinedType",
+            "DefinedTypes/CovAnyRef.xml",
+            Arc::new(any_ref.into_bytes()),
+        ));
         let files = descriptors
             .iter()
             .map(|(_, relative, bytes)| (root.join(relative), bytes.clone()))
             .collect::<Vec<_>>();
         let source = DescriptorContext::with_files(&root, "2.20", &files).unwrap();
-        assert_eq!(source.index.type_definitions.len(), 3);
+        assert_eq!(source.index.type_definitions.len(), 4);
         let from_xml = NameIndex::from_config_index(&source.index);
         let mut from_rows = NameIndex::default();
         for ((kind, _, _), (path, bytes)) in descriptors.iter().zip(&files) {
@@ -690,6 +796,7 @@ mod tests {
             ("DefinedType.CovResourceType", false),
             ("Characteristic.CovTemplate", true),
             ("DefinedType.CovNumeric", true),
+            ("DefinedType.CovAnyRef", true),
         ] {
             let expected = from_xml.type_definition(name).unwrap();
             assert!(!expected.is_empty());
