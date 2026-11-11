@@ -3121,6 +3121,7 @@ fn web_color_code(name: &str) -> Option<u32> {
         "RosyBrown" => 120,
         "RoyalBlue" => 121,
         "SaddleBrown" => 122,
+        "SandyBrown" => 124,
         "Silver" => 128,
         "SlateBlue" => 130,
         "SlateGray" => 131,
@@ -3150,6 +3151,90 @@ fn windows_color_code(name: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sandy_brown_native_xml(platform: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/1c-fixtures/coverage")
+                .join(platform)
+                .join("corpus-spreadsheet-facets/native/CommonTemplates/CovSheetSandyBrown/Ext/Template.xml"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sandy_brown_native_xml_compiles_to_the_measured_web_ordinal() {
+        // The body reader emits the 8.3 namespace profile. The export's 8.5
+        // adapter adds its palette namespace; coverage_corpus checks that CLI.
+        let expected = sandy_brown_native_xml("8.3.27.2214");
+        for platform in ["8.3.27.2214", "8.5.1.1150"] {
+            let native = sandy_brown_native_xml(platform);
+            let body = write_native_moxel_body(&native, None).unwrap();
+            let compact = body.replace(['\r', '\n'], "");
+            assert!(compact.contains("{3,2,{124}}"), "{body}");
+            let actual = ibcmd_moxel::extract_moxel_body_xml(
+                &body,
+                &Default::default(),
+                &Default::default(),
+                |_| None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(actual.as_bytes(), expected, "{platform}");
+        }
+    }
+
+    #[test]
+    fn sandy_brown_unknown_web_ordinal_is_refused_before_xml_publication() {
+        let native = String::from_utf8(sandy_brown_native_xml("8.3.27.2214")).unwrap();
+        let blue = native.replace("d3p1:SandyBrown", "d3p1:Blue");
+        let body = write_native_moxel_body(blue.as_bytes(), None).unwrap();
+        assert_eq!(body.matches("{10}").count(), 1);
+        let unknown = body.replace("{10}", "{4294967295}");
+        let error = ibcmd_moxel::extract_moxel_body_xml(
+            &unknown,
+            &Default::default(),
+            &Default::default(),
+            |_| None,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "mxl.decoder.canonical-ir");
+        let unknown_name = native.replace("d3p1:SandyBrown", "d3p1:UnknownCoverageColor");
+        assert!(
+            write_native_moxel_body(unknown_name.as_bytes(), None)
+                .unwrap_err()
+                .to_string()
+                .contains("web colour UnknownCoverageColor has no stored code")
+        );
+    }
+
+    #[test]
+    fn sandy_brown_palette_overrides_preserve_known_colours_and_refuse_unknown_ordinals() {
+        let native = sandy_brown_native_xml("8.3.27.2214");
+        let blue = String::from_utf8(native.clone())
+            .unwrap()
+            .replace("d3p1:SandyBrown", "d3p1:Blue");
+        let body = write_native_moxel_body(blue.as_bytes(), None).unwrap();
+        let with_override = |ordinal| {
+            let mut changed = body.strip_suffix('}').unwrap().to_owned();
+            changed.push_str(",{1,0,{3,2,{");
+            changed.push_str(ordinal);
+            changed.push_str("}}}}");
+            changed
+        };
+        let extract = |body: &str| {
+            ibcmd_moxel::extract_moxel_body_xml(
+                body,
+                &Default::default(),
+                &Default::default(),
+                |_| None,
+                None,
+            )
+        };
+        assert_eq!(extract(&with_override("124")).unwrap().as_bytes(), native);
+        assert!(extract(&with_override("4294967295")).is_err());
+    }
 
     fn patch_fixture(name: &str) -> Vec<u8> {
         std::fs::read(
