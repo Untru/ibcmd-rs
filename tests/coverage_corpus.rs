@@ -635,6 +635,47 @@ fn empty_or_untyped_failed_exports_are_never_salvaged() {
 }
 
 #[test]
+fn spreadsheet_sandy_brown_matches_native() {
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        for (group, name) in [
+            ("corpus-spreadsheet-facets", "CovSheetSandyBrown"),
+            ("combined", "CommonTemplates/CovSheetSandyBrown"),
+        ] {
+            let set = coverage_paths::root()
+                .join("coverage")
+                .join(platform)
+                .join(group);
+            let manifest: Value =
+                serde_json::from_slice(&fs::read(set.join("manifest.json")).unwrap()).unwrap();
+            let variant = manifest["variants"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|variant| variant["name"] == name)
+                .unwrap();
+            assert_eq!(variant["status"], "platform_proven");
+            let cf = decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap());
+            assert_eq!(
+                sha256_hex(&cf),
+                manifest["configuration_cf"]["decoded_sha256"]
+                    .as_str()
+                    .unwrap()
+            );
+            let temp = TempDirectory::new();
+            let cf_path = temp.0.join("input.cf");
+            fs::write(&cf_path, cf).unwrap();
+            let ours = cf_export(&cf_path, &temp.0.join("export"), version).unwrap();
+            for file in variant["files"].as_array().unwrap() {
+                let path = file["path"].as_str().unwrap();
+                let native = fs::read(set.join("native").join(path)).unwrap();
+                assert_eq!(sha256_hex(&native), file["sha256"].as_str().unwrap());
+                assert_eq!(ours.files.get(path), Some(&native), "{platform}: {path}");
+            }
+        }
+    }
+}
+
+#[test]
 fn coverage_sets_hold_their_baseline() {
     let sets = coverage_sets();
     assert!(
