@@ -37691,6 +37691,82 @@ fn extracts_selected_report_templates_from_broad_reference_index() {
 }
 
 #[test]
+fn report_v20_auxiliary_variant_form_resolves_foreign_common_forms() {
+    let owner = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let nil = ZERO_UUID_FOR_REPORT_TEMPLATE_TEST;
+    let common = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let local = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    let unrelated = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    let [attributes, forms, sections, commands] = report_other_collections_for_test();
+    let raw = exact_report_owner_fixture_for_test(
+        owner,
+        "CovReport",
+        "Coverage",
+        "",
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        "1",
+        nil,
+        nil,
+        nil,
+        "0",
+        "{0}",
+        "{0}",
+        &[
+            format!("{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},0}}"),
+            attributes,
+            forms,
+            sections,
+            commands,
+        ],
+    );
+    let root = split_information_register_braced_fields(&raw).unwrap();
+    let original = split_information_register_braced_fields(root[1]).unwrap();
+    let form_refs = BTreeMap::from([(
+        local.to_owned(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Reports/CovReport/Forms/Variant.xml"),
+            kind: "Form",
+        },
+    )]);
+    // copyinfo contributes the foreign common form to object_refs only.
+    let object_refs = BTreeMap::from([
+        (common.to_owned(), "CommonForm.CovVariant".to_owned()),
+        (unrelated.to_owned(), "Catalog.CovCatalog".to_owned()),
+    ]);
+    for (reference, expected) in [
+        (common, Some("CommonForm.CovVariant")),
+        (local, Some("Report.CovReport.Form.Variant")),
+        (nil, None),
+        (unrelated, None),
+    ] {
+        let mut fields = original.clone();
+        fields[0] = "20";
+        fields.push(reference);
+        let raw = report_raw_with_owner_fields_for_test(&raw, &fields);
+        let properties = parse_report_properties_from_text(
+            &raw,
+            owner,
+            &BTreeMap::new(),
+            &form_refs,
+            &BTreeMap::new(),
+            &object_refs,
+        )
+        .unwrap();
+        assert_eq!(
+            properties.auxiliary_variant_form,
+            Some(expected.map(str::to_owned)),
+            "{reference}"
+        );
+    }
+}
+
+#[test]
 fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
     let report_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let object_type_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
