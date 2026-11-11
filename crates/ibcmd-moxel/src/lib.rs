@@ -11105,6 +11105,10 @@ pub fn parse_moxel_web_color(value: &str) -> Option<String> {
         // Both pinned corpus-spreadsheet-facets profiles pair the sole
         // kind-2 palette ordinal 124 with native SandyBrown XML (#610).
         124 => "SandyBrown",
+        // The public 8.5.1.1529 modern-spreadsheet coverage set pairs its
+        // sole kind-2 slot, ordinal 129, with native SkyBlue backColor.
+        // Keep this existing document readable when unknown ordinals fail.
+        129 => "SkyBlue",
         128 => "Silver",
         130 => "SlateBlue",
         // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
