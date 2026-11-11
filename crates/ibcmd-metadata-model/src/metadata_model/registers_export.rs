@@ -1166,6 +1166,7 @@ pub(crate) fn owned_names(kind: &str, row: &Brace, owner: &str) -> Result<Object
     let head = wrapped_header(parsed.slot(7)?)?;
     let full_name = format!("{owner}.Recalculation.{}", head.name);
     let mut out = ObjectNames {
+        type_definition: None,
         uuid: head.uuid.clone(),
         full_name: full_name.clone(),
         children: Vec::new(),
@@ -1198,6 +1199,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     if kind == "DocumentNumerator" {
         let head = header(item(list(item(list(row)?, 1)?)?, 1)?)?;
         return Ok(ObjectNames {
+            type_definition: None,
             full_name: format!("{kind}.{}", head.name),
             uuid: head.uuid,
             children: Vec::new(),
@@ -1301,6 +1303,7 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     let head = wrapped_header(parsed.slot(header_slot + shift)?)?;
     let full_name = format!("{kind}.{}", head.name);
     let mut out = ObjectNames {
+        type_definition: None,
         uuid: head.uuid.clone(),
         full_name: full_name.clone(),
         children: Vec::new(),

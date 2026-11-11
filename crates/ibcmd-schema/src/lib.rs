@@ -10,6 +10,7 @@ pub mod configuration_mobile;
 pub mod configuration_rights;
 pub mod configuration_root;
 pub mod configuration_v85_projection;
+pub mod defined_type;
 pub mod extension_registry;
 pub mod extension_schema;
 pub mod external_artifact;

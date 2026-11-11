@@ -44,6 +44,13 @@ pub struct NameIndex {
     /// name, item name). A copied object keeps its items' ids, so one id can
     /// name items of several owners.
     predefined: HashMap<String, Vec<(String, String)>>,
+    type_definitions: HashMap<String, TypeDefinition>,
+}
+
+#[derive(Debug, Clone)]
+enum TypeDefinition {
+    Xml(Element),
+    Pattern(Brace),
 }
 
 impl NameIndex {
@@ -96,6 +103,11 @@ impl NameIndex {
             names,
             types,
             predefined,
+            type_definitions: index
+                .type_definitions
+                .iter()
+                .map(|(name, definition)| (name.clone(), TypeDefinition::Xml(definition.clone())))
+                .collect(),
         }
     }
 
@@ -107,6 +119,15 @@ impl NameIndex {
     /// Name of a generated type (`CatalogRef.X`) by its type id.
     pub fn type_name(&self, type_id: &str) -> Option<&str> {
         self.types.get(type_id).map(String::as_str)
+    }
+
+    pub(crate) fn type_definition(&self, name: &str) -> Option<Vec<Element>> {
+        match self.type_definitions.get(name)? {
+            TypeDefinition::Xml(definition) => Some(definition.children.clone()),
+            TypeDefinition::Pattern(pattern) => {
+                super::types::export::type_children(pattern, self).ok()
+            }
+        }
     }
 
     /// Name of a predefined item by its uuid; `None` when the uuid names
@@ -142,6 +163,16 @@ impl NameIndex {
         for generated in &names.types {
             self.types
                 .insert(generated.type_id.clone(), generated.name.clone());
+            if matches!(
+                generated.category.as_str(),
+                "DefinedType" | "Characteristic"
+            ) && let Some(pattern) = &names.type_definition
+            {
+                self.type_definitions.insert(
+                    generated.name.clone(),
+                    TypeDefinition::Pattern(pattern.clone()),
+                );
+            }
         }
     }
 }
@@ -199,6 +230,8 @@ pub struct ObjectNames {
     /// attributes, commands, enum values...): (full name, uuid).
     pub children: Vec<(String, String)>,
     pub types: Vec<GeneratedTypeName>,
+    /// Declared pattern for a DefinedType or Characteristic generated type.
+    pub type_definition: Option<Brace>,
 }
 
 /// Decodes one stored row into the object's model (its XML element).
@@ -330,6 +363,7 @@ pub fn owned_object_names(kind: &str, row: &Brace, owner: &str) -> Result<Object
             let head =
                 names::own_header(row).ok_or_else(|| anyhow!("no header in the {kind} row"))?;
             Ok(ObjectNames {
+                type_definition: None,
                 full_name: format!("{owner}.{kind}.{}", head.1),
                 uuid: head.0,
                 children: Vec::new(),

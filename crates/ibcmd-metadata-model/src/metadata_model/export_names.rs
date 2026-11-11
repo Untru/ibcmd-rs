@@ -151,6 +151,9 @@ impl NameIndex {
 
     /// Merges what several parallel builders collected; `self` wins.
     pub fn absorb(&mut self, other: NameIndex) {
+        for (name, definition) in other.type_definitions {
+            self.type_definitions.entry(name).or_insert(definition);
+        }
         for (uuid, name) in other.names {
             self.names.entry(uuid).or_insert(name);
         }

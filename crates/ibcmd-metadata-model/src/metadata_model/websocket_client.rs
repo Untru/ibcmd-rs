@@ -348,6 +348,7 @@ impl WebSocketClient {
 
     pub fn names(&self) -> ObjectNames {
         ObjectNames {
+            type_definition: None,
             uuid: self.header.uuid.clone(),
             full_name: format!("{}.{}", Layout::KIND, self.header.name),
             children: Vec::new(),

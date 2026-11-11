@@ -45,6 +45,9 @@ pub struct ConfigIndex {
     pub children: HashMap<String, String>,
     /// Generated types by name (`CatalogRef.X`, `DefinedType.Y`, ...).
     pub generated_types: HashMap<String, GeneratedType>,
+    /// Declared leaves of DefinedType/Characteristic type sets, read from
+    /// the same XML snapshot as the names (not reopened during export).
+    pub type_definitions: HashMap<String, Element>,
     /// The tree's `Configuration.xml` uuid.
     pub configuration_uuid: Option<String>,
     /// `<CompatibilityMode>` of `Configuration.xml` (`Version8_3_24`, ...).
@@ -149,6 +152,7 @@ struct Parsed {
     uuid: String,
     children: Vec<(String, String)>,
     generated: Vec<GeneratedType>,
+    type_definition: Option<Element>,
     compatibility_mode: Option<String>,
 }
 
@@ -210,6 +214,15 @@ impl ConfigIndex {
                 index.children.insert(format!("{full_name}.{child}"), uuid);
             }
             for generated in item.generated {
+                if matches!(
+                    generated.category.as_str(),
+                    "DefinedType" | "Characteristic"
+                ) && let Some(definition) = &item.type_definition
+                {
+                    index
+                        .type_definitions
+                        .insert(generated.name.clone(), definition.clone());
+                }
                 index
                     .generated_types
                     .insert(generated.name.clone(), generated);
@@ -303,6 +316,12 @@ fn parse_bytes(root: &Path, path: &Path, bytes: &[u8]) -> Result<Option<Parsed>>
         uuid: uuid.to_ascii_lowercase(),
         children,
         generated,
+        type_definition: matches!(
+            object.name.as_str(),
+            "DefinedType" | "ChartOfCharacteristicTypes"
+        )
+        .then(|| object.path(&["Properties", "Type"]).cloned())
+        .flatten(),
         compatibility_mode,
     }))
 }

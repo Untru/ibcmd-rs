@@ -6,6 +6,7 @@
 //! uses (the same in 2.20 and 2.21).
 
 use anyhow::{Result, anyhow, bail};
+use ibcmd_schema::defined_type::DefinedTypeLayout;
 
 use crate::metadata_model::brace::Brace;
 use crate::metadata_model::export::values::{
@@ -214,14 +215,14 @@ fn constant(payload: &Brace, context: &ExportContext) -> Result<Element> {
 
 /// `{0,<type id>,<value id>,<md base>,<pattern>}`
 fn defined_type(payload: &Brace, context: &ExportContext) -> Result<Element> {
-    let fields = record(payload, "0", "DefinedType")?;
-    let head = header(item(fields, 3)?)?;
+    let fields = record(payload, DefinedTypeLayout::REVISION, "DefinedType")?;
+    let head = header(item(fields, DefinedTypeLayout::HEADER)?)?;
     let [name, synonym, comment] = header_elements(&head)?;
     let internal = el("InternalInfo").child(generated_type(
         format!("DefinedType.{}", head.name),
         "DefinedType",
-        item(fields, 1)?,
-        item(fields, 2)?,
+        item(fields, DefinedTypeLayout::TYPE_ID)?,
+        item(fields, DefinedTypeLayout::VALUE_ID)?,
     )?);
     Ok(object(
         "DefinedType",
@@ -232,7 +233,11 @@ fn defined_type(payload: &Brace, context: &ExportContext) -> Result<Element> {
                 .child(name)
                 .child(synonym)
                 .child(comment)
-                .child(type_element("Type", item(fields, 4)?, &context.names)?),
+                .child(type_element(
+                    "Type",
+                    item(fields, DefinedTypeLayout::PATTERN)?,
+                    &context.names,
+                )?),
         ],
     ))
 }
@@ -664,12 +669,12 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
             (head, types, Vec::new())
         }
         "DefinedType" => {
-            let head = header(item(fields, 3)?)?;
+            let head = header(item(fields, DefinedTypeLayout::HEADER)?)?;
             let types = vec![generated(
                 format!("DefinedType.{}", head.name),
                 "DefinedType",
-                item(fields, 1)?,
-                item(fields, 2)?,
+                item(fields, DefinedTypeLayout::TYPE_ID)?,
+                item(fields, DefinedTypeLayout::VALUE_ID)?,
             )?];
             (head, types, Vec::new())
         }
@@ -718,6 +723,9 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         other => bail!("{other} is not a simple kind"),
     };
     Ok(ObjectNames {
+        type_definition: (kind == "DefinedType")
+            .then(|| item(fields, DefinedTypeLayout::PATTERN).cloned())
+            .transpose()?,
         uuid: head.uuid.clone(),
         full_name: format!("{kind}.{}", head.name),
         children,
