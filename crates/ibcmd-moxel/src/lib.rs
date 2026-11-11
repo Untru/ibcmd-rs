@@ -2038,7 +2038,7 @@ fn decode_moxel_spreadsheet_ir(
         builtin_type_reference,
         trace_sink,
         Some(&mut palette),
-    )
+    )?
     .ok_or_else(|| {
         MxlDiagnostic::decoder(
             "mxl.decoder.canonical-ir",
@@ -2098,6 +2098,19 @@ pub fn parse_moxel_spreadsheet_text(
     object_refs: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
 ) -> Option<MoxelSpreadsheet> {
+    try_parse_moxel_spreadsheet_text(text, object_refs, builtin_type_reference)
+        .ok()
+        .flatten()
+}
+
+/// Keeps an unsupported palette distinct from legacy bodies that do not
+/// decode as a spreadsheet. Embedded documents must retain and reject Err.
+pub fn try_parse_moxel_spreadsheet_text(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    builtin_type_reference: BuiltinTypeReference,
+) -> Result<Option<MoxelSpreadsheet>, MxlDiagnostic> {
+    let _scope = SplitCacheScope::new(text);
     parse_moxel_spreadsheet_text_with_line_trace(
         text,
         object_refs,
@@ -2115,19 +2128,49 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     builtin_type_reference: BuiltinTypeReference,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
     palette: Option<&mut Option<MxlPaletteProvenance>>,
-) -> Option<MoxelSpreadsheet> {
+) -> Result<Option<MoxelSpreadsheet>, MxlDiagnostic> {
     let body = text.trim_start_matches('\u{feff}');
-    let fields = split_braced_bytes(body, 0)?;
+    let Some(fields) = split_braced_bytes(body, 0) else {
+        return Ok(None);
+    };
     let _root_shapes = RootShapesScope::new(&fields);
-    if fields.first()?.trim() != "8" {
-        return None;
+    if fields.first().map(|field| field.trim()) != Some("8") {
+        return Ok(None);
     }
     // A present but undecodable palette must not become a compact-style
     // fallback: palette index zero can name a web colour, not a tooltip.
-    locate_moxel_style_ref_palette_span(&fields, object_refs).ok()?;
+    locate_moxel_style_ref_palette_span(&fields, object_refs).map_err(|()| {
+        MxlDiagnostic::decoder(
+            "mxl.decoder.canonical-ir",
+            "native MOXCEL palette contains an unsupported web colour",
+        )
+    })?;
     if !moxel_palette_overrides_are_supported(&fields, object_refs) {
-        return None;
+        return Err(MxlDiagnostic::decoder(
+            "mxl.decoder.canonical-ir",
+            "native MOXCEL palette override contains an unsupported web colour",
+        ));
     }
+    Ok(parse_moxel_spreadsheet_fields(
+        body,
+        fields,
+        object_refs,
+        generated_types,
+        builtin_type_reference,
+        trace_sink,
+        palette,
+    ))
+}
+
+fn parse_moxel_spreadsheet_fields(
+    body: &str,
+    fields: Vec<&str>,
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+    builtin_type_reference: BuiltinTypeReference,
+    trace_sink: Option<&dyn MoxelLineTraceSink>,
+    palette: Option<&mut Option<MxlPaletteProvenance>>,
+) -> Option<MoxelSpreadsheet> {
     let raw_declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
     let mut rows = parse_moxel_rows(&fields);
     if rows.is_empty() {
