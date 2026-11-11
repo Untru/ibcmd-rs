@@ -22,6 +22,17 @@ the internal decoder. The adapter now preserves the appended member in both
 directions; a synthetic nonempty reference also tests edits and round trips.
 That synthetic test is not a native measurement of a nonempty v5 reference.
 
+The v20 tail uses the same owner-form resolver as the other Report form
+properties. A configuration common form supplied by external `copyinfo`
+is known through the object-reference map rather than the report's own form
+map. Resolving this member through the form-only map lost that known
+reference. The synthetic regression
+`report_v20_auxiliary_variant_form_resolves_foreign_common_forms` first failed
+with `Some(None)` instead of `Some(Some("CommonForm.CovVariant"))`, then passed
+after using the owner-form resolver. It also checks an owned form, nil and
+an unrelated catalog reference. This is reference-resolution evidence,
+not a fresh native measurement of a nonempty v5 common-form slot.
+
 ## Results
 
 The new header test was first run against the unchanged parser in an isolated
