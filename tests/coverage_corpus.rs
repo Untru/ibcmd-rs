@@ -751,22 +751,20 @@ fn stored_spreadsheet_merges_match_the_native_coordinate_order() {
             if merges(actual) != native_merges {
                 differences.push(format!("{platform}/{name}: merge sequence differs"));
             }
-            if name == "CovSpreadsheetFacetTemplate" {
-                let descriptor = format!("CommonTemplates/{name}.xml");
-                let directory = format!("CommonTemplates/{name}/");
-                let owned = ours
-                    .files
-                    .iter()
-                    .filter(|(path, _)| {
-                        path.as_str() == descriptor.as_str() || path.starts_with(&directory)
-                    })
-                    .map(|(path, bytes)| (path.clone(), bytes.clone()))
-                    .collect::<BTreeMap<_, _>>();
-                if owned != expected {
-                    differences.push(format!(
-                        "{platform}/{name}: complete native file map differs"
-                    ));
-                }
+            let descriptor = format!("CommonTemplates/{name}.xml");
+            let directory = format!("CommonTemplates/{name}/");
+            let owned = ours
+                .files
+                .iter()
+                .filter(|(path, _)| {
+                    path.as_str() == descriptor.as_str() || path.starts_with(&directory)
+                })
+                .map(|(path, bytes)| (path.clone(), bytes.clone()))
+                .collect::<BTreeMap<_, _>>();
+            if owned != expected {
+                differences.push(format!(
+                    "{platform}/{name}: complete native file map differs"
+                ));
             }
         }
     }
