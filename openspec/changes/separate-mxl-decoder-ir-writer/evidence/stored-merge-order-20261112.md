@@ -128,12 +128,56 @@ target variants to each profile's converter baseline (**12 additions**).
 The report is a product measurement, not purported Cargo output. These are
 new baseline files; no earlier baseline entry was removed or changed.
 
+## Full local merge gate
+
+`cargo xtask ci` completed **29/29 steps**, with no skipped local step and an
+empty test temporary directory. It ran on tree
+`d71b39b6b084c1a9234230227f502708daf2a861`, initially local commit
+`4fbe7a2c38293154200d2ca2725c757f1b2c5310`, verified identical to published
+`d39d91d94880bd2181344d5b29765e8447b29e0f`:
+
+- Workspace crates: **4,709 passed, 0 failed, 90 ignored**.
+- Root integration suites: **518 passed, 0 failed, 4 ignored**.
+- Root library: **895 passed, 0 failed, 7 ignored**.
+
+The fresh-native evidence below is a subsequent documentation-only update.
+
+## Fresh native 8.5.1.1529 acceptance — 2026-11-12
+
+Installed native Windows x86-64 `ibcmd` version **8.5.1.1529**, executable
+SHA-256
+`4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20`,
+loaded and applied the original, hash-checked 8.5.1.1150 stored-merge CF.
+Its SHA-256 is `9463b9c1117ff40e98cef4f9b6a64df55dbcf9817d6af7e2ca132b75316a6f79`.
+The converter is the preserved iter executable from `5f2aa90e`, with the
+SHA-256 recorded above. All subsequent changes through `d39d91d9` affect only
+the test, baselines and evidence; product source is unchanged.
+
+Both processes use `LANG=ru_RU.UTF-8`; create the disposable file infobase
+with `--locale=ru_RU`. Each invocation has its own scratch data directory:
+
+```text
+<native> infobase create --db-path=<db> --create-database --locale=ru_RU --load=<original.cf> --apply --force --data=<data-1>
+<native> infobase config export --db-path=<db> --data=<data-2> <native-xml>
+<ours> cf export <original.cf> <ours-cf-xml> --source-version 2.21
+<ours> infobase config export --db-path=<db> --platform 8.5.1.1529 --data=<data-3> <ours-db-xml>
+```
+
+All **four commands exited 0**. All six complete native target maps match
+the pinned native files (**12 file comparisons**). The converter CF export
+and export from that native-created, applied file infobase each match all
+six complete fresh-native target maps: **12 product maps / 24 file
+comparisons byte-equal**, with no extra owned files. This file-infobase
+measurement reads the native-applied configuration, in addition to the
+earlier offline CONFIGSAVE measurement. Every temporary infobase, data
+directory and export was removed on exit.
+
 ## Acceptance limits
 
-These results use the immutable public native CF/XML oracle. Fresh native
-platform runs have not been performed on this host. They are not evidence
-of live SQL parity. The complete-file counts cover the six target templates
-in `corpus-stored-merge-rules`, not similarly named templates in the separate
+The complete-file counts cover the six target templates in
+`corpus-stored-merge-rules`, not similarly named templates in the separate
 facets set. The four other template variants still differ in independent
-facets; whole-configuration equality is not claimed. The PR keeps `Refs #637`
-while the issue's fresh native acceptance routes remain open.
+facets; whole-configuration equality is not claimed. Fresh native evidence
+covers 8.5.1.1529. The 8.3.27.2214 and 8.5.1.1150 results above use the
+immutable public native CF/XML oracle. No fresh 8.3 executable or live SQL
+route was run. The PR retains `Refs #637` for those acceptance limits.
