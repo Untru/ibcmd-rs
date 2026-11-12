@@ -1,5 +1,7 @@
 {
   "equal": [
+    "CovSheetAutoFontHeight",
+    "CovSheetOEMFixedFont",
     "CovSheetVerticalPageBreak",
     "CovSpreadsheetFacetTemplate",
     "configuration"
