@@ -4932,6 +4932,8 @@ pub fn parse_moxel_fonts(
 /// bits reproduces all 683 published tables with no counterexample.
 const MOXCEL_FONT_FACE_NAME_BIT: usize = 0;
 const MOXCEL_FONT_HEIGHT_BIT: usize = 1;
+/// Presence mask of the height member in a MOXCEL font descriptor.
+pub const MOXCEL_FONT_HEIGHT_MASK: usize = 1 << MOXCEL_FONT_HEIGHT_BIT;
 const MOXCEL_FONT_WEIGHT_BIT: usize = 2;
 const MOXCEL_FONT_ITALIC_BIT: usize = 3;
 const MOXCEL_FONT_UNDERLINE_BIT: usize = 4;
@@ -4957,6 +4959,76 @@ const MOXCEL_FONT_BOLD_WEIGHT: usize = 700;
 
 fn moxel_font_mask_has(mask: usize, bit: usize) -> bool {
     mask >> bit & 1 == 1
+}
+
+#[cfg(test)]
+mod native_font_tests {
+    use super::*;
+
+    fn xml(record: &str) -> Option<String> {
+        parse_moxel_font(record, &BTreeMap::new()).map(|font| {
+            let mut output = String::new();
+            push_moxel_font_xml(&mut output, &font);
+            output
+        })
+    }
+
+    #[test]
+    fn auto_font_retains_the_measured_height_member() {
+        assert_eq!(
+            xml("{7,3,2,90,1,100}"),
+            Some("\t<font height=\"9\" kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+        assert_eq!(
+            xml("{7,3,0,1,100}"),
+            Some("\t<font kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+        assert_eq!(
+            xml("{7,3,2,95,1,100}"),
+            Some("\t<font height=\"9.5\" kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+    }
+
+    #[test]
+    fn oem_fixed_font_retains_reference_and_explicit_members() {
+        assert_eq!(
+            xml("{7,1,3,{1},120,\"Arial\",1,100}"),
+            Some(
+                concat!(
+                    "\t<font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"",
+                    " ref=\"sys:OEMFixedFont\" faceName=\"Arial\" height=\"12\"",
+                    " kind=\"WindowsFont\"/>\r\n"
+                )
+                .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn font_profiles_reject_unknown_members_and_keep_existing_system_refs() {
+        for record in [
+            "{7,3,0,90,1,100}",
+            "{7,3,2,1,100}",
+            "{7,3,2,90,91,1,100}",
+            "{7,3,4,90,1,100}",
+            "{7,3,514,90,1,100}",
+            "{7,3,2,\"90\",1,100}",
+            "{7,3,2,90,0,100}",
+            "{7,3,2,90,1,101}",
+            "{7,1,0,{999},1,100}",
+            "{7,1,3,{1},120,1,100}",
+        ] {
+            assert_eq!(xml(record), None, "{record}");
+        }
+        for (code, name) in [(0, "DefaultGUIFont"), (2, "ANSIFixedFont")] {
+            assert_eq!(
+                xml(&format!("{{7,1,0,{{{code}}},1,100}}")),
+                Some(format!(
+                    "\t<font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:{name}\" kind=\"WindowsFont\"/>\r\n"
+                ))
+            );
+        }
+    }
 }
 
 /// Style items a font descriptor can name by predefined index. A code no
@@ -5035,6 +5107,7 @@ pub fn with_v85_style_fonts_by_code(
 fn moxel_system_font_ref(index: &str) -> Option<&'static str> {
     match index {
         "0" => Some("sys:DefaultGUIFont"),
+        "1" => Some("sys:OEMFixedFont"),
         "2" => Some("sys:ANSIFixedFont"),
         _ => None,
     }
@@ -5046,21 +5119,30 @@ pub fn parse_moxel_font(text: &str, object_refs: &BTreeMap<String, String>) -> O
         return None;
     }
     match fields.get(1)?.trim() {
-        // `AutoFont`: no ref, no explicit member. Evidence: native UT
-        // 11.5.27.75's `GanttChart` template
-        // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` stores
-        // `ttlFont`/`legFont` as this exact five-field shape and publishes
-        // `<d3p1:ttlFont kind="AutoFont"/>` (no `ref`, no explicit member
-        // attribute) for both.
-        "3" if fields.len() == 5
-            && fields.get(2)?.trim() == "0"
-            && fields.get(3)?.trim() == "1"
-            && fields.get(4)?.trim() == "100" =>
-        {
+        // AutoFont omits the reference field. Preserve the empty profile and
+        // the native height-only member mask; other profiles stay unsupported.
+        "3" => {
+            let height = match &*fields {
+                [_, _, mask, tail, scale]
+                    if mask.trim() == "0" && tail.trim() == "1" && scale.trim() == "100" =>
+                {
+                    None
+                }
+                [_, _, mask, height, tail, scale]
+                    if mask.trim().parse::<usize>().ok() == Some(MOXCEL_FONT_HEIGHT_MASK)
+                        && tail.trim() == "1"
+                        && scale.trim() == "100" =>
+                {
+                    Some(format_moxel_font_height(
+                        height.trim().parse::<usize>().ok()?,
+                    ))
+                }
+                _ => return None,
+            };
             Some(MoxelFont {
                 ref_name: None,
                 face_name: None,
-                height: None,
+                height,
                 bold: None,
                 italic: None,
                 underline: None,
