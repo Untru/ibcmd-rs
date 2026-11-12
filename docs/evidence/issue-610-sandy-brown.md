@@ -105,10 +105,59 @@ Default import verification remains enabled.
 | 8.5.1.1150 / 2.21 | Both commands exit 0; both target files byte-equal | Both commands exit 0; both target files byte-equal |
 
 All disposable databases, source copies and exports were removed after each
-profile. The oracle is the pinned native corpus. Fresh native-platform and
-SQL acceptance were not run; an installed native `ibcmd` was unavailable.
-These counts cover the isolated template, not every object in its original
+profile. These initial measurements use the pinned native corpus. Their
+counts cover the isolated template, not every object in its original
 configuration. Full merge-gate results remain recorded in PR #713.
+
+## Fresh native 8.5.1.1529 acceptance — 2026-11-12
+
+The installed Windows x86-64 native `ibcmd` reports version **8.5.1.1529**;
+its executable SHA-256 is
+`4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20`.
+The converter is the preserved executable from source `3fb85dc3` with the
+SHA-256 recorded above. Subsequent changes through `43b571cb` affect only
+this evidence document.
+
+The input is the same manifest-checked 8.5.1.1150 facets source and CF listed
+above. Retain the isolated SandyBrown template as described for the offline
+routes. Every target descriptor and body byte remains unchanged. Both tools
+run with `LANG=ru_RU.UTF-8`; each native invocation uses a distinct `--data`
+directory, and each created file infobase uses `--locale=ru_RU`.
+
+First create and apply a native reference directly from that XML:
+
+```text
+<native> infobase create --db-path=<reference-db> --create-database --locale=ru_RU --import=<source> --apply --force --data=<data-1>
+<native> infobase config export --db-path=<reference-db> --data=<data-2> <reference-xml>
+```
+
+Then measure four product routes against that fresh native reference:
+
+| Route | Result |
+| --- | --- |
+| Original native CF → converter XML | Complete two-file target map byte-equal |
+| Native-created, applied file infobase → converter XML | Complete two-file target map byte-equal |
+| Converter XML → CF → native create/load/apply → native XML | Complete two-file target map byte-equal |
+| Converter XML → native-created empty file infobase, default import verification → native apply → native XML | Complete two-file target map byte-equal |
+
+The CF writer uses `cf bootstrap --base-free --platform 8.5.1.1529`.
+The XML writer uses `infobase config import --db-path=<db> --platform
+8.5.1.1529`; default verification is enabled. The native consumer of the
+generated CF uses `infobase create --create-database --locale=ru_RU
+--load=<cf> --apply --force`. The other native consumer uses `infobase config
+apply --force` after the converter import. Each native export uses a new
+output directory.
+
+All **11 commands exited 0**. All four complete product maps, **8 file
+comparisons**, match the fresh native output with no extra target files.
+The fresh reference also matches the pinned native target map completely
+(two additional file comparisons). Temporary infobases, backups, source
+copies, data directories and exports were removed on exit.
+
+This proves the isolated SandyBrown read/write routes on native 8.5.1.1529.
+8.3 evidence remains the pinned native corpus and the offline routes above;
+no fresh 8.3 executable or SQL route was run. No whole-configuration parity
+claim is made for the other facets in the original CF.
 
 ## Physical-adapter policy
 
