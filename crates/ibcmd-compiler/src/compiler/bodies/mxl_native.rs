@@ -2481,7 +2481,13 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 ))
             }
             "AutoFont" => {
-                node.only_attributes(&["kind", "height"], "AutoFont")?;
+                for (key, _) in &node.attributes {
+                    if !["kind", "height", "xmlns"].contains(&key.as_str())
+                        && !key.starts_with("xmlns:")
+                    {
+                        bail!("attribute {key} of <AutoFont> has no writer");
+                    }
+                }
                 Ok(match height {
                     Some(height) => format!(
                         "{{7,3,{},{height},1,100}}",
@@ -3291,6 +3297,28 @@ mod tests {
 #[cfg(test)]
 mod native_font_tests {
     use super::*;
+
+    #[test]
+    fn auto_font_rejects_qualified_members_without_losing_them() {
+        let native = String::from_utf8(source("8.3.27.2214", "CovSheetAutoFontHeight")).unwrap();
+        for unsupported in [
+            "xmlns:x=\"urn:other\" x:height=\"9\" kind=\"AutoFont\"",
+            "height=\"9\" kind=\"AutoFont\" xmlns:other=\"urn:other\" other:height=\"10\"",
+            "height=\"9\" kind=\"AutoFont\" xmlnsUnsupported=\"lost\"",
+        ] {
+            let source = native.replace("height=\"9\" kind=\"AutoFont\"", unsupported);
+            assert_ne!(source, native);
+            assert!(
+                write_native_moxel_body(source.as_bytes(), None).is_err(),
+                "{unsupported}"
+            );
+        }
+        let declared = native.replace(
+            "kind=\"AutoFont\"",
+            "kind=\"AutoFont\" xmlns:x=\"urn:unused\"",
+        );
+        assert!(write_native_moxel_body(declared.as_bytes(), None).is_ok());
+    }
 
     fn source(platform: &str, name: &str) -> Vec<u8> {
         std::fs::read(
