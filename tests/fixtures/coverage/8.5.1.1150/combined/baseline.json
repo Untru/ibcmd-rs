@@ -200,6 +200,8 @@
     "CommonTemplates/CovGraphicalSchemaBody",
     "CommonTemplates/CovGraphicalSchemaImage",
     "CommonTemplates/CovGraphicalSchemaPng",
+    "CommonTemplates/CovSheetAutoFontHeight",
+    "CommonTemplates/CovSheetOEMFixedFont",
     "CommonTemplates/CovSheetVerticalPageBreak",
     "CommonTemplates/CovSpreadsheetFacetTemplate",
     "CommonTemplates/CovSpreadsheetMergedCells",

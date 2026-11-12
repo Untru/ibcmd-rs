@@ -4932,6 +4932,8 @@ pub fn parse_moxel_fonts(
 /// bits reproduces all 683 published tables with no counterexample.
 const MOXCEL_FONT_FACE_NAME_BIT: usize = 0;
 const MOXCEL_FONT_HEIGHT_BIT: usize = 1;
+/// Presence mask of the height member in a MOXCEL font descriptor.
+pub const MOXCEL_FONT_HEIGHT_MASK: usize = 1 << MOXCEL_FONT_HEIGHT_BIT;
 const MOXCEL_FONT_WEIGHT_BIT: usize = 2;
 const MOXCEL_FONT_ITALIC_BIT: usize = 3;
 const MOXCEL_FONT_UNDERLINE_BIT: usize = 4;
@@ -4957,6 +4959,108 @@ const MOXCEL_FONT_BOLD_WEIGHT: usize = 700;
 
 fn moxel_font_mask_has(mask: usize, bit: usize) -> bool {
     mask >> bit & 1 == 1
+}
+
+#[cfg(test)]
+mod native_font_tests {
+    use super::*;
+
+    fn xml(record: &str) -> Option<String> {
+        parse_moxel_font(record, &BTreeMap::new()).map(|font| {
+            let mut output = String::new();
+            push_moxel_font_xml(&mut output, &font);
+            output
+        })
+    }
+
+    #[test]
+    fn auto_font_retains_the_measured_height_member() {
+        assert_eq!(
+            xml("{7,3,2,90,1,100}"),
+            Some("\t<font height=\"9\" kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+        assert_eq!(
+            xml("{7,3,0,1,100}"),
+            Some("\t<font kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+        assert_eq!(
+            xml("{7,3,2,95,1,100}"),
+            Some("\t<font height=\"9.5\" kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+    }
+
+    #[test]
+    fn oem_fixed_font_retains_reference_and_explicit_members() {
+        assert_eq!(
+            xml("{7,1,3,{1},120,\"Arial\",1,100}"),
+            Some(
+                concat!(
+                    "\t<font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"",
+                    " ref=\"sys:OEMFixedFont\" faceName=\"Arial\" height=\"12\"",
+                    " kind=\"WindowsFont\"/>\r\n"
+                )
+                .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn chart_system_font_references_declare_their_namespace() {
+        for (code, name) in [
+            (1, "OEMFixedFont"),
+            (0, "DefaultGUIFont"),
+            (2, "ANSIFixedFont"),
+        ] {
+            let font = parse_moxel_font(
+                &format!("{{7,1,3,{{{code}}},120,\"Arial\",1,100}}"),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            for tag in ["ttlFont", "legFont", "chFont"] {
+                let mut output = String::new();
+                push_moxel_chart_font_xml(&mut output, tag, &font);
+                assert_eq!(
+                    output,
+                    format!(
+                        "\t\t\t<d3p1:{tag} xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:{name}\" faceName=\"Arial\" height=\"12\" kind=\"WindowsFont\"/>\r\n"
+                    )
+                );
+            }
+        }
+        let font = parse_moxel_font("{7,3,2,90,1,100}", &BTreeMap::new()).unwrap();
+        let mut output = String::new();
+        push_moxel_chart_font_xml(&mut output, "ttlFont", &font);
+        assert_eq!(
+            output,
+            "\t\t\t<d3p1:ttlFont height=\"9\" kind=\"AutoFont\"/>\r\n"
+        );
+    }
+
+    #[test]
+    fn font_profiles_reject_unknown_members_and_keep_existing_system_refs() {
+        for record in [
+            "{7,3,0,90,1,100}",
+            "{7,3,2,1,100}",
+            "{7,3,2,90,91,1,100}",
+            "{7,3,4,90,1,100}",
+            "{7,3,514,90,1,100}",
+            "{7,3,2,\"90\",1,100}",
+            "{7,3,2,90,0,100}",
+            "{7,3,2,90,1,101}",
+            "{7,1,0,{999},1,100}",
+            "{7,1,3,{1},120,1,100}",
+        ] {
+            assert_eq!(xml(record), None, "{record}");
+        }
+        for (code, name) in [(0, "DefaultGUIFont"), (2, "ANSIFixedFont")] {
+            assert_eq!(
+                xml(&format!("{{7,1,0,{{{code}}},1,100}}")),
+                Some(format!(
+                    "\t<font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:{name}\" kind=\"WindowsFont\"/>\r\n"
+                ))
+            );
+        }
+    }
 }
 
 /// Style items a font descriptor can name by predefined index. A code no
@@ -5035,6 +5139,7 @@ pub fn with_v85_style_fonts_by_code(
 fn moxel_system_font_ref(index: &str) -> Option<&'static str> {
     match index {
         "0" => Some("sys:DefaultGUIFont"),
+        "1" => Some("sys:OEMFixedFont"),
         "2" => Some("sys:ANSIFixedFont"),
         _ => None,
     }
@@ -5046,21 +5151,30 @@ pub fn parse_moxel_font(text: &str, object_refs: &BTreeMap<String, String>) -> O
         return None;
     }
     match fields.get(1)?.trim() {
-        // `AutoFont`: no ref, no explicit member. Evidence: native UT
-        // 11.5.27.75's `GanttChart` template
-        // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` stores
-        // `ttlFont`/`legFont` as this exact five-field shape and publishes
-        // `<d3p1:ttlFont kind="AutoFont"/>` (no `ref`, no explicit member
-        // attribute) for both.
-        "3" if fields.len() == 5
-            && fields.get(2)?.trim() == "0"
-            && fields.get(3)?.trim() == "1"
-            && fields.get(4)?.trim() == "100" =>
-        {
+        // AutoFont omits the reference field. Preserve the empty profile and
+        // the native height-only member mask; other profiles stay unsupported.
+        "3" => {
+            let height = match &*fields {
+                [_, _, mask, tail, scale]
+                    if mask.trim() == "0" && tail.trim() == "1" && scale.trim() == "100" =>
+                {
+                    None
+                }
+                [_, _, mask, height, tail, scale]
+                    if mask.trim().parse::<usize>().ok() == Some(MOXCEL_FONT_HEIGHT_MASK)
+                        && tail.trim() == "1"
+                        && scale.trim() == "100" =>
+                {
+                    Some(format_moxel_font_height(
+                        height.trim().parse::<usize>().ok()?,
+                    ))
+                }
+                _ => return None,
+            };
             Some(MoxelFont {
                 ref_name: None,
                 face_name: None,
-                height: None,
+                height,
                 bold: None,
                 italic: None,
                 underline: None,
@@ -7100,7 +7214,12 @@ fn parse_gantt_points_data(text: &str) -> Option<MoxelGanttSeriesLikeData> {
     if compact_moxel_chart_token(value.get(2)?) != "{4,0,{0},\"\",-1,-1,1,0,\"\"}" {
         return None;
     }
-    parse_moxel_font(value.get(3)?, &BTreeMap::new())?;
+    let font = parse_moxel_font(value.get(3)?, &BTreeMap::new())?;
+    // The points-value emitter represents only a plain AutoFont. Refuse
+    // other fonts until their members can be retained through the model.
+    if font.kind != "AutoFont" || font.height.is_some() {
+        return None;
+    }
     if compact_moxel_chart_token(inner.get(5)?)
         != "{0,1,{0,{0,{3,0,{0}},{3,0,{0}}},{3,4,{0}},{3,4,{0}}}}"
     {
@@ -7269,6 +7388,28 @@ fn parse_gantt_time_scale(text: &str) -> Option<MoxelGanttTimeScale> {
 #[cfg(test)]
 mod gantt_multilevel_tests {
     use super::*;
+
+    #[test]
+    fn native_font_tests_gantt_points_refuse_unrepresented_font_members() {
+        let text = include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object-payload.txt"
+        );
+        let fields = split_1c_braced_fields(text, 0).unwrap();
+        let points = fields[2];
+        assert!(parse_gantt_points_data(points).is_some());
+        let mut accepted = Vec::new();
+        for font in ["{7,3,2,90,1,100}", "{7,1,3,{1},120,\"Arial\",1,100}"] {
+            let changed = points.replacen("{7,3,0,1,100}", font, 1);
+            assert_ne!(changed, points);
+            if parse_gantt_points_data(&changed).is_some() {
+                accepted.push(font);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "unrepresented fonts accepted: {accepted:?}"
+        );
+    }
 
     #[test]
     fn native_four_level_gantt_components_decode() {
@@ -14516,6 +14657,9 @@ fn push_moxel_chart_font_xml_indented(
 ) {
     _ = write!(xml, "{}<d3p1:{tag}", "\t".repeat(indent));
     if let Some(ref_name) = &font.ref_name {
+        if ref_name.starts_with("sys:") {
+            xml.push_str(" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"");
+        }
         _ = write!(xml, " ref=\"{}\"", XmlText(ref_name));
     }
     if let Some(face_name) = &font.face_name {

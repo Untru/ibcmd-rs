@@ -30,7 +30,7 @@ use super::xml_2_21_writer::{
     FIELD_TAGS, GROUPING, TRI_STATE, XmlEdits, child_text, element_name, simple_text,
 };
 use ibcmd_form_body::FormLayout;
-use ibcmd_form_body::layout_8_5_1::Node;
+use ibcmd_form_body::layout_8_5_1::{Node, is_height_only_auto_font_tuple};
 use ibcmd_metadata_source::MetadataSource;
 
 const FORM_ITEM_CLASS_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
@@ -1257,7 +1257,7 @@ fn is_font_8_3(members: &[Node]) -> bool {
         return false;
     }
     match kind {
-        "3" => members.len() == 5 && mask == "0",
+        "3" => (members.len() == 5 && mask == "0") || is_height_only_auto_font_tuple(members),
         "1" | "2" => matches!(members[3], Node::List(_)),
         _ => false,
     }
@@ -2272,6 +2272,57 @@ mod tests {
             out,
             "{4,\r\n{59,0,\r\n{1,1,\r\n{\"ru\",\"a\"}\r\n},\r\n{0}\r\n},\"m\"}"
         );
+    }
+
+    #[test]
+    fn auto_font_height_up_converts_in_place() {
+        for height in ["90", "95"] {
+            let input = format!("{{0,\r\n{{7,3,2,{height},1,100}},\"keep\"}}");
+            let expected = format!("{{0,\r\n{{8,3,2,{height},1,100}},\"keep\"}}");
+            assert_eq!(up_convert_primitives_8_5_1_in_place(&input), expected);
+        }
+    }
+
+    #[test]
+    fn auto_font_height_up_converts_as_a_tree() {
+        let mut node = parse_raw("{0,{7,3,2,90,1,100},\"keep\"}").unwrap();
+        up_convert_primitives(&mut node);
+        assert_eq!(node, parse_raw("{0,{8,3,2,90,1,100},\"keep\"}").unwrap());
+    }
+
+    #[test]
+    fn auto_font_up_conversion_keeps_known_profiles_and_unknown_bytes() {
+        for (input, expected) in [
+            ("{7,3,0,1,100}", "{8,3,0,1,100}"),
+            (
+                "{7,1,3,{1},120,\"Arial\",1,100}",
+                "{8,1,3,{1},120,\"Arial\",1,100}",
+            ),
+        ] {
+            let mut node = parse_raw(input).unwrap();
+            up_convert_primitives(&mut node);
+            assert_eq!(node, parse_raw(expected).unwrap());
+            assert_eq!(
+                parse_raw(&up_convert_primitives_8_5_1_in_place(input)).unwrap(),
+                node
+            );
+        }
+        for input in [
+            "{8,3,2,90,1,100}",
+            "{7,3,0,90,1,100}",
+            "{7,3,4,90,1,100}",
+            "{7,3,514,90,1,100}",
+            "{7,3,2,90,91,1,100}",
+            "{7,3,2,\"90\",1,100}",
+            "{7,3,2,90,0,100}",
+            "{7,3,2,90,1,101}",
+        ] {
+            assert_eq!(up_convert_primitives_8_5_1_in_place(input), input);
+            let mut node = parse_raw(input).unwrap();
+            let expected = node.clone();
+            up_convert_primitives(&mut node);
+            assert_eq!(node, expected, "{input}");
+        }
     }
 
     #[test]
