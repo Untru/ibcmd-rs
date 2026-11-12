@@ -2463,9 +2463,8 @@ fn rejects_opaque_order_before_formatting_list_settings() {
     ));
 }
 
-#[test]
-fn opaque_choice_list_does_not_mask_malformed_dynamic_list_settings() {
-    let opaque_radio = parse_form_child_item(
+fn opaque_radio_for_settings_test() -> FormChildItem {
+    parse_form_child_item(
         r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#,
         None,
         None,
@@ -2474,7 +2473,12 @@ fn opaque_choice_list_does_not_mask_malformed_dynamic_list_settings() {
         &[],
         &BTreeMap::new(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn opaque_choice_list_does_not_mask_malformed_dynamic_list_settings() {
+    let opaque_radio = opaque_radio_for_settings_test();
     assert!(matches!(
         opaque_radio.choice_list,
         CanonicalFormChoiceList::OpaqueSameProfile { .. }
@@ -2988,73 +2992,77 @@ fn unnameable_form_attribute_saved_field_is_written_physically() {
     assert!(xml.contains("<Field>1/0:34c2c3c8-95f8-4cbd-90c6-5516c6b25c70</Field>"));
 }
 
+fn embedded_spreadsheet_attribute_fixture() -> &'static str {
+    concat!(
+        "{9,\r\n",
+        "{6},0,\"ТабличныйДокументФормы\",\r\n",
+        "{1,1,\r\n",
+        "{\"ru\",\"Табличный документ формы\"}\r\n",
+        "},\r\n",
+        "{\"Pattern\",\r\n",
+        "{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f}\r\n",
+        "},\r\n",
+        "{0,\r\n",
+        "{0,\r\n",
+        "{\"B\",1},0}\r\n",
+        "},\r\n",
+        "{0,\r\n",
+        "{0,\r\n",
+        "{\"B\",1},0}\r\n",
+        "},\r\n",
+        "{0,0},\r\n",
+        "{0,0},0,0,0,0,\r\n",
+        "{0,1,\"Moxel\",\r\n",
+        "{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f,\r\n",
+        "{8,1,12,\r\n",
+        "{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},\r\n",
+        "{0},\r\n",
+        "{0},0,\r\n",
+        "{0,0},\r\n",
+        "{0,0},\r\n",
+        "{0,0},\r\n",
+        "{0,0},\r\n",
+        "{0,0},\r\n",
+        "{0,0},1,2,1,0,0,0,\r\n",
+        "{0,0,00000000-0000-0000-0000-000000000000,0},0,0,0,0,0,0,0,0,0,\r\n",
+        "{0},\r\n",
+        "{0},\r\n",
+        "{0},\r\n",
+        "{0},\"\",\r\n",
+        "{\r\n",
+        "{0,6,6,\r\n",
+        "{\"N\",1000},7,\r\n",
+        "{\"N\",1000},8,\r\n",
+        "{\"N\",1000},9,\r\n",
+        "{\"N\",1000},10,\r\n",
+        "{\"N\",1000},11,\r\n",
+        "{\"N\",1000}\r\n",
+        "}\r\n",
+        "},\r\n",
+        "{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,2,\r\n",
+        "{3,3,\r\n",
+        "{-1}\r\n",
+        "},\r\n",
+        "{3,3,\r\n",
+        "{-3}\r\n",
+        "},0,0,0,\"\",0,\r\n",
+        "{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},\r\n",
+        "{0},0,0,0,1,0,0,0}\r\n",
+        "}\r\n",
+        "},\r\n",
+        "{0,0}\r\n",
+        "}"
+    )
+}
+
 #[test]
 fn extracts_form_attribute_spreadsheet_document_type_and_settings() {
     let attribute = parse_form_attribute(
-            concat!(
-                "{9,\r\n",
-                "{6},0,\"ТабличныйДокументФормы\",\r\n",
-                "{1,1,\r\n",
-                "{\"ru\",\"Табличный документ формы\"}\r\n",
-                "},\r\n",
-                "{\"Pattern\",\r\n",
-                "{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f}\r\n",
-                "},\r\n",
-                "{0,\r\n",
-                "{0,\r\n",
-                "{\"B\",1},0}\r\n",
-                "},\r\n",
-                "{0,\r\n",
-                "{0,\r\n",
-                "{\"B\",1},0}\r\n",
-                "},\r\n",
-                "{0,0},\r\n",
-                "{0,0},0,0,0,0,\r\n",
-                "{0,1,\"Moxel\",\r\n",
-                "{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f,\r\n",
-                "{8,1,12,\r\n",
-                "{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},\r\n",
-                "{0},\r\n",
-                "{0},0,\r\n",
-                "{0,0},\r\n",
-                "{0,0},\r\n",
-                "{0,0},\r\n",
-                "{0,0},\r\n",
-                "{0,0},\r\n",
-                "{0,0},1,2,1,0,0,0,\r\n",
-                "{0,0,00000000-0000-0000-0000-000000000000,0},0,0,0,0,0,0,0,0,0,\r\n",
-                "{0},\r\n",
-                "{0},\r\n",
-                "{0},\r\n",
-                "{0},\"\",\r\n",
-                "{\r\n",
-                "{0,6,6,\r\n",
-                "{\"N\",1000},7,\r\n",
-                "{\"N\",1000},8,\r\n",
-                "{\"N\",1000},9,\r\n",
-                "{\"N\",1000},10,\r\n",
-                "{\"N\",1000},11,\r\n",
-                "{\"N\",1000}\r\n",
-                "}\r\n",
-                "},\r\n",
-                "{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,2,\r\n",
-                "{3,3,\r\n",
-                "{-1}\r\n",
-                "},\r\n",
-                "{3,3,\r\n",
-                "{-3}\r\n",
-                "},0,0,0,\"\",0,\r\n",
-                "{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0},\r\n",
-                "{0},0,0,0,1,0,0,0}\r\n",
-                "}\r\n",
-                "},\r\n",
-                "{0,0}\r\n",
-                "}"
-            ),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
-        .unwrap();
+        embedded_spreadsheet_attribute_fixture(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
 
     assert_eq!(
         attribute.value_types,
@@ -3062,10 +3070,13 @@ fn extracts_form_attribute_spreadsheet_document_type_and_settings() {
             reference: "mxl:SpreadsheetDocument".to_string(),
         }]
     );
-    let settings = attribute
+    let FormSpreadsheetDocumentSettings::Xml(settings) = attribute
         .spreadsheet_document_settings
-        .as_deref()
-        .expect("spreadsheet settings");
+        .as_ref()
+        .expect("spreadsheet settings")
+    else {
+        panic!("known spreadsheet settings must decode");
+    };
     assert!(settings.contains("<mxl:languageSettings>"), "{settings}");
     assert!(
         settings.contains("<mxl:templateMode>true</mxl:templateMode>"),
@@ -3091,6 +3102,53 @@ fn extracts_form_attribute_spreadsheet_document_type_and_settings() {
     // `<height>` when that count is zero.
     assert!(xml.contains("<mxl:vgRows>0</mxl:vgRows>"), "{xml}");
     assert!(!xml.contains("<mxl:height>"), "{xml}");
+}
+
+fn embedded_spreadsheet_attribute_with_web_ordinal(ordinal: &str) -> FormAttribute {
+    let raw = embedded_spreadsheet_attribute_fixture().replacen(
+        "{3,3,\r\n{-1}\r\n}",
+        &format!("{{3,2,{{{ordinal}}}}}"),
+        1,
+    );
+    assert_ne!(raw, embedded_spreadsheet_attribute_fixture());
+    parse_form_attribute(&raw, &BTreeMap::new(), &BTreeMap::new())
+        .expect("the spreadsheet attribute must be retained")
+}
+
+#[test]
+fn rejects_unknown_embedded_spreadsheet_web_colours_before_xml_publication() {
+    let known = embedded_spreadsheet_attribute_with_web_ordinal("124");
+    let known_xml =
+        format_form_attributes_section_xml(&[known], &FormAttributesSection::default()).unwrap();
+    assert!(known_xml.contains("<Settings xmlns:mxl="));
+    let unknown = embedded_spreadsheet_attribute_with_web_ordinal("4294967295");
+    assert!(matches!(
+        unknown.spreadsheet_document_settings.as_ref(),
+        Some(FormSpreadsheetDocumentSettings::Unsupported { diagnostic })
+            if diagnostic.code() == "mxl.decoder.canonical-ir"
+    ));
+    assert!(matches!(
+        format_form_attributes_section_xml(&[unknown], &FormAttributesSection::default()),
+        Err(FormSchemaWriteError::UnsupportedSpreadsheetDocumentSettings { attribute, diagnostic })
+            if attribute == "ТабличныйДокументФормы"
+                && diagnostic.code() == "mxl.decoder.canonical-ir"
+    ));
+}
+
+#[test]
+fn opaque_choice_list_does_not_mask_unknown_embedded_spreadsheet_settings() {
+    let unknown = embedded_spreadsheet_attribute_with_web_ordinal("4294967295");
+    let opaque_radio = opaque_radio_for_settings_test();
+    assert!(matches!(
+        opaque_radio.choice_list,
+        CanonicalFormChoiceList::OpaqueSameProfile { .. }
+    ));
+    assert!(matches!(
+        preflight_form_writer_paths(&[opaque_radio], None, &[unknown]),
+        Err(FormSchemaWriteError::UnsupportedSpreadsheetDocumentSettings { attribute, diagnostic })
+            if attribute == "ТабличныйДокументФормы"
+                && diagnostic.code() == "mxl.decoder.canonical-ir"
+    ));
 }
 
 #[test]
