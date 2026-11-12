@@ -62,8 +62,11 @@ maps different for `CovSpreadsheetFacetTemplate`. The six templates are
 The test compares the complete serialized `<merge>` elements, including
 their order and multiplicity, against the pinned native files.
 
-The red-test commit is `2cf88cda`; the production fix is
-`9ba727bc7d21216b0290353eec29943fdaf433ee`.
+The local red-test commit is `2cf88cda`; the local production fix is
+`9ba727bc7d21216b0290353eec29943fdaf433ee`. These local history anchors are
+retained in the contributor checkout. Publication through the fork's web
+interface gives the equivalent source different commit identifiers: the
+production change and unit controls are published in `5cd16659656111180eefb1f1b4c3bad334e4b6e1`.
 
 After the fix, the same commands passed: **2/2 unit tests and 1/1 CF test**.
 All twelve merge sequences and both complete control file maps matched.
@@ -77,11 +80,60 @@ Rust 1.95.0; one Cargo job per target; test threads 1; development debug
 information limited to line tables. No existing test, ignore or baseline was
 removed or weakened.
 
+## Product build and both offline export routes
+
+`cargo xtask check --base upstream/master` passed all **5 steps**, including
+the complete Moxel crate (**40 passed, 0 failed**) and the complete coverage
+suite (1,798 seconds). An earlier check accidentally used the stale fork
+default base and was interrupted while testing unrelated crates; it is not
+counted as a completed gate.
+
+The subsequent product build used `cargo build --locked --profile iter`
+and finished successfully in 38m 57s from a clean checkout:
+
+- Source commit: `5f2aa90ea40a5f0dc291125783ad630970ff6a89`.
+- Source tree: `a0991ccfa6198214291fae5f5c04a586b72e1cdf`.
+- Executable SHA-256:
+  `2cea8045ad0d3d8a5d0383b030b687d3002b229cfc19c6b97c406123e5eea008`.
+- Decompressed public `tests/fixtures/file-infobase/empty.1CD.gz` SHA-256:
+  `c79a7752a6afe4120316cd5fca7941be18ac840b6a836118f7beab4601d1f891`.
+
+For each profile, decode the public `configuration.cf.b64` and verify the
+manifest hash above. The measured commands are:
+
+```text
+ibcmd-rs cf export <input.cf> <cf-output> --source-version <2.20-or-2.21>
+ibcmd-rs infobase config load --db-path=<disposable-db> --data=<scratch/load-data> <input.cf>
+ibcmd-rs infobase config export --db-path=<disposable-db> --data=<scratch/export-data> --platform=<exact-build> <db-output>
+```
+
+The database contains a fresh decompressed copy of the public empty fixture.
+Loading the original CF stages its stored records directly; the route does
+not pre-normalize them through XML import. It measures CONFIGSAVE export,
+without a native platform apply or an active configuration claim. All six
+commands exited **0**, and every scratch database, backup, data directory and
+output tree was removed after measurement.
+
+Both routes matched all six target templates on both profiles: **24 complete
+owned file maps / 48 files byte-equal**, with no extra owned files. Their
+**24 complete serialized merge sequences** also matched byte-for-byte.
+The measurement revealed that the other five target templates are complete
+matches in this stored-merge fixture too, so the regression was strengthened
+to require complete native file maps for all six, rather than the control
+template alone.
+
+The official `tools/coverage/update_baseline.py` consumed a targeted report
+derived from the completed CF measurement and added all six newly equal
+target variants to each profile's converter baseline (**12 additions**).
+The report is a product measurement, not purported Cargo output. These are
+new baseline files; no earlier baseline entry was removed or changed.
+
 ## Acceptance limits
 
 These results use the immutable public native CF/XML oracle. Fresh native
 platform runs have not been performed on this host. They are not evidence
-of live SQL parity. Complete-file equality of the other five target
-templates is a separate assertion from equality of their merge sequences:
-other stored spreadsheet facets have independent issues. The PR keeps
-`Refs #637` while the issue's full acceptance routes remain open.
+of live SQL parity. The complete-file counts cover the six target templates
+in `corpus-stored-merge-rules`, not similarly named templates in the separate
+facets set. The four other template variants still differ in independent
+facets; whole-configuration equality is not claimed. The PR keeps `Refs #637`
+while the issue's fresh native acceptance routes remain open.
