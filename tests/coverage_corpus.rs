@@ -864,3 +864,76 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn spreadsheet_native_fonts_match_complete_native_variants() {
+    let mut differences = Vec::new();
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        for set_name in ["corpus-spreadsheet-facets", "combined"] {
+            let set = coverage_paths::root()
+                .join("coverage")
+                .join(platform)
+                .join(set_name);
+            let manifest: Value =
+                serde_json::from_slice(&fs::read(set.join("manifest.json")).unwrap()).unwrap();
+            let cf = decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap());
+            assert_eq!(
+                sha256_hex(&cf),
+                manifest["configuration_cf"]["decoded_sha256"]
+                    .as_str()
+                    .unwrap()
+            );
+            let temp = TempDirectory::new();
+            let input = temp.0.join("input.cf");
+            fs::write(&input, cf).unwrap();
+            let ours = cf_export(&input, &temp.0.join("export"), version).unwrap();
+            // The combined corpus can refuse other stored entries. Its target
+            // files must still be present and match completely below.
+            if set_name == "corpus-spreadsheet-facets" {
+                assert!(
+                    ours.refusal.is_none(),
+                    "{platform}/{set_name}: {:?}",
+                    ours.refusal
+                );
+            }
+            for name in ["CovSheetAutoFontHeight", "CovSheetOEMFixedFont"] {
+                let identifier = if set_name == "combined" {
+                    format!("CommonTemplates/{name}")
+                } else {
+                    name.to_owned()
+                };
+                let variant = manifest["variants"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|variant| variant["name"] == identifier)
+                    .unwrap();
+                assert_eq!(variant["status"], "platform_proven");
+                let native = variant["files"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|file| {
+                        let path = file["path"].as_str().unwrap();
+                        let bytes = fs::read(set.join("native").join(path)).unwrap();
+                        assert_eq!(sha256_hex(&bytes), file["sha256"].as_str().unwrap());
+                        (compose(path), bytes)
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let label = format!("{platform}/{set_name}/{name}");
+                let verdict = compare(
+                    variant,
+                    &native,
+                    &ours.files,
+                    &[format!("CommonTemplates/{name}")],
+                    &mut BTreeSet::new(),
+                    &label,
+                );
+                if verdict != Verdict::Equal {
+                    differences.push(format!("{label}: {verdict:?}"));
+                }
+            }
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
