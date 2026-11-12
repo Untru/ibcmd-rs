@@ -2481,10 +2481,14 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 ))
             }
             "AutoFont" => {
-                if !node.attributes.iter().all(|(key, _)| key == "kind") {
-                    bail!("an AutoFont <font> spells members");
-                }
-                Ok("{7,3,0,1,100}".to_string())
+                node.only_attributes(&["kind", "height"], "AutoFont")?;
+                Ok(match height {
+                    Some(height) => format!(
+                        "{{7,3,{},{height},1,100}}",
+                        ibcmd_moxel::MOXCEL_FONT_HEIGHT_MASK
+                    ),
+                    None => "{7,3,0,1,100}".to_string(),
+                })
             }
             "StyleItem" | "WindowsFont" => {
                 let reference = node
@@ -2493,6 +2497,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 let (code, reference) = if kind == "WindowsFont" {
                     let index = match reference {
                         "sys:DefaultGUIFont" => "0",
+                        "sys:OEMFixedFont" => "1",
                         "sys:ANSIFixedFont" => "2",
                         other => bail!("system font {other} has no stored code"),
                     };
@@ -3280,5 +3285,86 @@ mod tests {
         assert!(inflate_template_patch(&vec![0; 8 * 1024 * 1024 + 1]).is_err());
         let unknown = ibcmd_module_blob::deflate_raw(b"not a spreadsheet").unwrap();
         assert!(preserve_spreadsheet_language(&unknown, &complete).is_err());
+    }
+}
+
+#[cfg(test)]
+mod native_font_tests {
+    use super::*;
+
+    fn source(platform: &str, name: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/1c-fixtures/coverage")
+                .join(platform)
+                .join("corpus-spreadsheet-facets/native/CommonTemplates")
+                .join(name)
+                .join("Ext/Template.xml"),
+        )
+        .unwrap()
+    }
+
+    fn round_trip(name: &str, record: &str) {
+        let expected = source("8.3.27.2214", name);
+        for platform in ["8.3.27.2214", "8.5.1.1150"] {
+            let body = write_native_moxel_body(&source(platform, name), None).unwrap();
+            assert!(body.replace(['\r', '\n'], "").contains(record), "{body}");
+            let actual = ibcmd_moxel::extract_moxel_body_xml(
+                &body,
+                &Default::default(),
+                &Default::default(),
+                |_| None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(actual.as_bytes(), expected, "{platform}/{name}");
+        }
+    }
+
+    #[test]
+    fn auto_font_height_native_source_round_trips_completely() {
+        round_trip("CovSheetAutoFontHeight", "{7,3,2,90,1,100}");
+    }
+
+    #[test]
+    fn oem_fixed_font_native_source_round_trips_completely() {
+        round_trip("CovSheetOEMFixedFont", "{7,1,3,{1},120,\"Arial\",1,100}");
+    }
+
+    #[test]
+    fn font_writer_keeps_plain_auto_font_and_rejects_unmeasured_members() {
+        let native = String::from_utf8(source("8.3.27.2214", "CovSheetAutoFontHeight")).unwrap();
+        let plain = native.replace("height=\"9\" kind=\"AutoFont\"", "kind=\"AutoFont\"");
+        assert_ne!(plain, native);
+        let body = write_native_moxel_body(plain.as_bytes(), None).unwrap();
+        assert!(body.replace(['\r', '\n'], "").contains("{7,3,0,1,100}"));
+        let actual = ibcmd_moxel::extract_moxel_body_xml(
+            &body,
+            &Default::default(),
+            &Default::default(),
+            |_| None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(actual, plain);
+        for attribute in [
+            "bold=\"true\"",
+            "scale=\"100\"",
+            "ref=\"style:TextFont\"",
+            "faceName=\"Arial\"",
+        ] {
+            let unsupported = plain.replace(
+                "kind=\"AutoFont\"",
+                &format!("kind=\"AutoFont\" {attribute}"),
+            );
+            assert!(
+                write_native_moxel_body(unsupported.as_bytes(), None).is_err(),
+                "{attribute}"
+            );
+        }
+        let oem = String::from_utf8(source("8.3.27.2214", "CovSheetOEMFixedFont")).unwrap();
+        let unknown_namespace = oem.replace(SYSTEM_FONTS_NS, "https://invalid.example/fonts");
+        assert_ne!(unknown_namespace, oem);
+        assert!(write_native_moxel_body(unknown_namespace.as_bytes(), None).is_err());
     }
 }
