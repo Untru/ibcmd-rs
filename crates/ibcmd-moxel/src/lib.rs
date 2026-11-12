@@ -11381,6 +11381,9 @@ pub fn normalize_moxel_merge_order(merges: &mut Vec<MoxelMerge>) {
             .filter(|merge| merge.row >= 0 && merge.column >= 0)
             .cloned(),
     );
+    // Native XML orders finite regions by row and column. The later phases
+    // keep their existing order for unbounded axes.
+    ordered.sort_by_key(|merge| (merge.row, merge.column));
     ordered.extend(
         merges
             .iter()
@@ -11400,6 +11403,17 @@ pub fn normalize_moxel_merge_order(merges: &mut Vec<MoxelMerge>) {
             .cloned(),
     );
     if ordered.len() == merges.len() {
+        // An equal anchor can still name a different extent or column system.
+        let mut seen = BTreeSet::new();
+        ordered.retain(|merge| {
+            seen.insert((
+                merge.row,
+                merge.column,
+                merge.height,
+                merge.width,
+                merge.columns_id.clone(),
+            ))
+        });
         *merges = ordered;
     }
 }
@@ -16501,5 +16515,94 @@ mod moxel_exact_parity_tests {
         assert_eq!(normalize_moxel_picture_payload("YWJj"), "YWJj");
         assert_eq!(normalize_moxel_picture_payload(""), "");
         assert_eq!(normalize_moxel_picture_payload("\r\n"), "");
+    }
+}
+
+#[cfg(test)]
+mod merge_order_tests {
+    use super::*;
+
+    fn values(merges: &[MoxelMerge]) -> Vec<([i32; 4], Option<String>)> {
+        merges
+            .iter()
+            .map(|region| {
+                (
+                    [region.row, region.column, region.height, region.width],
+                    region.columns_id.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stored_merges_follow_native_coordinate_order_and_uniqueness() {
+        // The three stored controls correspond to the native row-order,
+        // column-order and duplicate cases in corpus-stored-merge-rules.
+        for (stored, expected) in [
+            (
+                "{3,{0,2,1,2},{3,0,4,0},{1,1,2,1}}",
+                vec![[0, 3, 0, 1], [1, 1, 0, 1], [2, 0, 0, 1]],
+            ),
+            (
+                "{3,{4,0,4,1},{0,0,0,1},{2,0,2,1}}",
+                vec![[0, 0, 1, 0], [0, 2, 1, 0], [0, 4, 1, 0]],
+            ),
+            (
+                "{4,{3,3,4,3},{0,0,1,0},{0,1,2,1},{0,0,1,0}}",
+                vec![[0, 0, 0, 1], [1, 0, 0, 2], [3, 3, 0, 1]],
+            ),
+        ] {
+            let (merges, horizontal, vertical) = parse_moxel_merge_regions(&[stored]);
+            assert_eq!(
+                values(&merges),
+                expected
+                    .into_iter()
+                    .map(|value| (value, None))
+                    .collect::<Vec<_>>(),
+                "{stored}"
+            );
+            assert!(horizontal.is_empty());
+            assert!(vertical.is_empty());
+        }
+    }
+
+    #[test]
+    fn stored_merges_keep_distinct_extents_columns_and_axis_phases() {
+        let columns_a = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let columns_b = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+        let region = |[row, column, height, width]: [i32; 4], columns: Option<&str>| MoxelMerge {
+            row,
+            column,
+            height,
+            width,
+            columns_id: columns.map(str::to_owned),
+        };
+        let mut merges = vec![
+            region([-1, 8, 0, 1], Some(columns_a)),
+            region([-1, 1, 0, 1], None),
+            region([8, -1, 1, 0], None),
+            region([2, -1, 1, 0], None),
+            region([-1, -1, 0, 0], None),
+            region([0, 0, 0, 2], Some(columns_a)),
+            region([0, 0, 0, 1], Some(columns_a)),
+            region([0, 0, 0, 2], Some(columns_a)),
+            region([0, 0, 0, 2], Some(columns_b)),
+            region([0, 0, 1, 2], Some(columns_a)),
+        ];
+        normalize_moxel_merge_order(&mut merges);
+        assert_eq!(
+            values(&merges),
+            vec![
+                ([0, 0, 0, 2], Some(columns_a.to_owned())),
+                ([0, 0, 0, 1], Some(columns_a.to_owned())),
+                ([0, 0, 0, 2], Some(columns_b.to_owned())),
+                ([0, 0, 1, 2], Some(columns_a.to_owned())),
+                ([-1, 8, 0, 1], Some(columns_a.to_owned())),
+                ([-1, 1, 0, 1], None),
+                ([8, -1, 1, 0], None),
+                ([2, -1, 1, 0], None),
+                ([-1, -1, 0, 0], None),
+            ]
+        );
     }
 }

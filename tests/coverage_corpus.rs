@@ -663,6 +663,115 @@ fn coverage_sets_hold_their_baseline() {
 }
 
 #[test]
+fn stored_spreadsheet_merges_match_the_native_coordinate_order() {
+    fn merges(xml: &[u8]) -> Vec<Vec<u8>> {
+        use quick_xml::events::Event;
+        let mut reader = quick_xml::Reader::from_reader(xml);
+        let mut start = None;
+        let mut result = Vec::new();
+        loop {
+            let position = reader.buffer_position() as usize;
+            match reader.read_event().unwrap() {
+                Event::Start(element) if element.local_name().as_ref() == b"merge" => {
+                    assert!(start.replace(position).is_none());
+                }
+                Event::End(element) if element.local_name().as_ref() == b"merge" => {
+                    result.push(
+                        xml[start.take().unwrap()..reader.buffer_position() as usize].to_vec(),
+                    );
+                }
+                Event::Empty(element) if element.local_name().as_ref() == b"merge" => {
+                    result.push(xml[position..reader.buffer_position() as usize].to_vec());
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+        }
+        assert!(start.is_none());
+        result
+    }
+
+    let mut differences = Vec::new();
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-stored-merge-rules");
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(set.join("manifest.json")).unwrap()).unwrap();
+        let cf = decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap());
+        assert_eq!(
+            sha256_hex(&cf),
+            manifest["configuration_cf"]["decoded_sha256"]
+                .as_str()
+                .unwrap()
+        );
+        let temp = TempDirectory::new();
+        let input = temp.0.join("input.cf");
+        fs::write(&input, cf).unwrap();
+        let ours = cf_export(&input, &temp.0.join("export"), version).unwrap();
+        assert!(ours.refusal.is_none(), "{platform}: {:?}", ours.refusal);
+        for name in [
+            "CovSpreadsheetFacetTemplate",
+            "CovSheetAutoFontHeight",
+            "CovSheetOEMFixedFont",
+            "CovSheetVerticalPageBreak",
+            "CovSheetPageSizeA4",
+            "CovSheetSandyBrown",
+        ] {
+            let variant = manifest["variants"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|variant| variant["name"] == name)
+                .unwrap();
+            assert_eq!(variant["status"], "platform_proven");
+            let expected = variant["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|file| {
+                    let path = file["path"].as_str().unwrap();
+                    let native = fs::read(set.join("native").join(path)).unwrap();
+                    assert_eq!(sha256_hex(&native), file["sha256"].as_str().unwrap());
+                    (path.to_owned(), native)
+                })
+                .collect::<BTreeMap<_, _>>();
+            let body = format!("CommonTemplates/{name}/Ext/Template.xml");
+            let actual = ours
+                .files
+                .get(&body)
+                .unwrap_or_else(|| panic!("{platform}: missing {body}"));
+            let native_merges = merges(&expected[&body]);
+            assert_eq!(
+                native_merges.len(),
+                3,
+                "{platform}/{name}: native control changed"
+            );
+            if merges(actual) != native_merges {
+                differences.push(format!("{platform}/{name}: merge sequence differs"));
+            }
+            let descriptor = format!("CommonTemplates/{name}.xml");
+            let directory = format!("CommonTemplates/{name}/");
+            let owned = ours
+                .files
+                .iter()
+                .filter(|(path, _)| {
+                    path.as_str() == descriptor.as_str() || path.starts_with(&directory)
+                })
+                .map(|(path, bytes)| (path.clone(), bytes.clone()))
+                .collect::<BTreeMap<_, _>>();
+            if owned != expected {
+                differences.push(format!(
+                    "{platform}/{name}: complete native file map differs"
+                ));
+            }
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
+#[test]
 fn variant_files_are_attributed_by_object() {
     // `Catalogs/CovX.xml` and `Catalogs/CovX/…` belong to CovX; everything
     // outside the collection belongs to the configuration itself.
