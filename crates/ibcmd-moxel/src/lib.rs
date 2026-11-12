@@ -7182,7 +7182,12 @@ fn parse_gantt_points_data(text: &str) -> Option<MoxelGanttSeriesLikeData> {
     if compact_moxel_chart_token(value.get(2)?) != "{4,0,{0},\"\",-1,-1,1,0,\"\"}" {
         return None;
     }
-    parse_moxel_font(value.get(3)?, &BTreeMap::new())?;
+    let font = parse_moxel_font(value.get(3)?, &BTreeMap::new())?;
+    // The points-value emitter represents only a plain AutoFont. Refuse
+    // other fonts until their members can be retained through the model.
+    if font.kind != "AutoFont" || font.height.is_some() {
+        return None;
+    }
     if compact_moxel_chart_token(inner.get(5)?)
         != "{0,1,{0,{0,{3,0,{0}},{3,0,{0}}},{3,4,{0}},{3,4,{0}}}}"
     {
@@ -7351,6 +7356,28 @@ fn parse_gantt_time_scale(text: &str) -> Option<MoxelGanttTimeScale> {
 #[cfg(test)]
 mod gantt_multilevel_tests {
     use super::*;
+
+    #[test]
+    fn native_font_tests_gantt_points_refuse_unrepresented_font_members() {
+        let text = include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object-payload.txt"
+        );
+        let fields = split_1c_braced_fields(text, 0).unwrap();
+        let points = fields[2];
+        assert!(parse_gantt_points_data(points).is_some());
+        let mut accepted = Vec::new();
+        for font in ["{7,3,2,90,1,100}", "{7,1,3,{1},120,\"Arial\",1,100}"] {
+            let changed = points.replacen("{7,3,0,1,100}", font, 1);
+            assert_ne!(changed, points);
+            if parse_gantt_points_data(&changed).is_some() {
+                accepted.push(font);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "unrepresented fonts accepted: {accepted:?}"
+        );
+    }
 
     #[test]
     fn native_four_level_gantt_components_decode() {
