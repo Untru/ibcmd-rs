@@ -5005,6 +5005,38 @@ mod native_font_tests {
     }
 
     #[test]
+    fn chart_system_font_references_declare_their_namespace() {
+        for (code, name) in [
+            (1, "OEMFixedFont"),
+            (0, "DefaultGUIFont"),
+            (2, "ANSIFixedFont"),
+        ] {
+            let font = parse_moxel_font(
+                &format!("{{7,1,3,{{{code}}},120,\"Arial\",1,100}}"),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            for tag in ["ttlFont", "legFont", "chFont"] {
+                let mut output = String::new();
+                push_moxel_chart_font_xml(&mut output, tag, &font);
+                assert_eq!(
+                    output,
+                    format!(
+                        "\t\t\t<d3p1:{tag} xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:{name}\" faceName=\"Arial\" height=\"12\" kind=\"WindowsFont\"/>\r\n"
+                    )
+                );
+            }
+        }
+        let font = parse_moxel_font("{7,3,2,90,1,100}", &BTreeMap::new()).unwrap();
+        let mut output = String::new();
+        push_moxel_chart_font_xml(&mut output, "ttlFont", &font);
+        assert_eq!(
+            output,
+            "\t\t\t<d3p1:ttlFont height=\"9\" kind=\"AutoFont\"/>\r\n"
+        );
+    }
+
+    #[test]
     fn font_profiles_reject_unknown_members_and_keep_existing_system_refs() {
         for record in [
             "{7,3,0,90,1,100}",
@@ -14625,6 +14657,9 @@ fn push_moxel_chart_font_xml_indented(
 ) {
     _ = write!(xml, "{}<d3p1:{tag}", "\t".repeat(indent));
     if let Some(ref_name) = &font.ref_name {
+        if ref_name.starts_with("sys:") {
+            xml.push_str(" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"");
+        }
         _ = write!(xml, " ref=\"{}\"", XmlText(ref_name));
     }
     if let Some(face_name) = &font.face_name {
