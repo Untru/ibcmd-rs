@@ -353,6 +353,28 @@ fn is_absolute_font_8_5_1(members: &[Node]) -> bool {
         && members[19].leaf() == Some("0")
 }
 
+/// The paired native height-only AutoFont primitive. Both projection
+/// directions preserve its single member and reject other tuple profiles.
+pub fn is_height_only_auto_font_tuple(members: &[Node]) -> bool {
+    let [
+        Node::Leaf(revision),
+        Node::Leaf(kind),
+        Node::Leaf(mask),
+        Node::Leaf(height),
+        Node::Leaf(tail),
+        Node::Leaf(scale),
+    ] = members
+    else {
+        return false;
+    };
+    (revision == "7" || revision == "8")
+        && kind == "3"
+        && mask.parse::<usize>().ok() == Some(ibcmd_moxel::MOXCEL_FONT_HEIGHT_MASK)
+        && height.parse::<usize>().is_ok()
+        && tail == "1"
+        && scale == "100"
+}
+
 /// `{8,<kind>,<mask>,...,1,<scale>}`: the 8.5 font tuple, the 8.3.27 `{7,...}`
 /// member for member.
 fn is_font_8_5_1(members: &[Node]) -> bool {
@@ -369,7 +391,7 @@ fn is_font_8_5_1(members: &[Node]) -> bool {
         return false;
     }
     match kind {
-        "3" => members.len() == 5 && mask == "0",
+        "3" => (members.len() == 5 && mask == "0") || is_height_only_auto_font_tuple(members),
         "1" | "2" => members[3].list().is_some(),
         _ => false,
     }
@@ -803,6 +825,52 @@ pub fn group_event_name_8_5_1(id: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_font_height_rewrites_without_changing_other_bytes() {
+        assert_eq!(
+            rewrite_primitives_8_5_1_in_place("{0,\r\n{8,3,2,90,1,100},\"keep\"}"),
+            "{0,\r\n{7,3,2,90,1,100},\"keep\"}"
+        );
+    }
+
+    #[test]
+    fn auto_font_height_down_converts_as_a_tree() {
+        assert_eq!(
+            down_convert_primitives_8_5_1_text("{0,{8,3,2,90,1,100},\"keep\"}").unwrap(),
+            "{0,{7,3,2,90,1,100},\"keep\"}"
+        );
+    }
+
+    #[test]
+    fn auto_font_profile_controls_preserve_unknown_tuples() {
+        for (input, expected) in [
+            ("{8,3,0,1,100}", "{7,3,0,1,100}"),
+            (
+                "{8,1,3,{1},120,\"Arial\",1,100}",
+                "{7,1,3,{1},120,\"Arial\",1,100}",
+            ),
+            ("{7,3,2,90,1,100}", "{7,3,2,90,1,100}"),
+            ("{8,3,0,90,1,100}", "{8,3,0,90,1,100}"),
+            ("{8,3,4,90,1,100}", "{8,3,4,90,1,100}"),
+            ("{8,3,514,90,1,100}", "{8,3,514,90,1,100}"),
+            ("{8,3,2,90,91,1,100}", "{8,3,2,90,91,1,100}"),
+            ("{8,3,2,\"90\",1,100}", "{8,3,2,\"90\",1,100}"),
+            ("{8,3,2,90,0,100}", "{8,3,2,90,0,100}"),
+            ("{8,3,2,90,1,101}", "{8,3,2,90,1,101}"),
+        ] {
+            assert_eq!(
+                rewrite_primitives_8_5_1_in_place(input),
+                expected,
+                "{input}"
+            );
+            assert_eq!(
+                down_convert_primitives_8_5_1_text(input).unwrap(),
+                expected,
+                "{input}"
+            );
+        }
+    }
 
     #[test]
     fn round_trips_a_tuple_with_strings_and_base64() {
