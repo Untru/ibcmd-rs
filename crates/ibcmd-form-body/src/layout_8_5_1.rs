@@ -488,7 +488,24 @@ pub fn rewrite_primitives_8_5_1_in_place(text: &str) -> std::borrow::Cow<'_, str
     let bytes = text.as_bytes();
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
     let mut index = 0;
+    let mut in_string = false;
     while index + 3 <= bytes.len() {
+        if in_string {
+            if bytes[index] == b'"' {
+                if bytes.get(index + 1) == Some(&b'"') {
+                    index += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if bytes[index] == b'"' {
+            in_string = true;
+            index += 1;
+            continue;
+        }
         let lead = &bytes[index..index + 3];
         if lead != b"{4," && lead != b"{8," {
             index += 1;
@@ -825,6 +842,16 @@ pub fn group_event_name_8_5_1(id: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_font_height_projection_preserves_quoted_and_escaped_application_text() {
+        let input =
+            r#"{0,"{8,3,2,90,1,100}","before ""{8,3,2,95,1,100}"" after",{8,3,2,90,1,100}}"#;
+        let expected =
+            r#"{0,"{8,3,2,90,1,100}","before ""{8,3,2,95,1,100}"" after",{7,3,2,90,1,100}}"#;
+        assert_eq!(rewrite_primitives_8_5_1_in_place(input), expected);
+        assert_eq!(down_convert_primitives_8_5_1_text(input).unwrap(), expected);
+    }
 
     #[test]
     fn auto_font_height_rewrites_without_changing_other_bytes() {
