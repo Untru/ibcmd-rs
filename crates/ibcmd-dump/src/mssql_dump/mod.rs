@@ -25865,6 +25865,17 @@ fn parse_chart_of_calculation_types_properties(
     if fields.get(35)?.trim() != "1" || fields.get(55)?.trim() != "1" {
         return None;
     }
+    // `<DependenceOnCalculationTypes>` rides field 27: the three charts of
+    // the ordinary corpora write `1` and export `OnActionPeriod`, the chart
+    // of an extension writes `0` and exports `DontUse`. Field 35, against
+    // which this used to be read, is `1` on all four and is kept as a
+    // checked constant above.
+    let stored_dependence = fields.get(27)?.trim();
+    let dependence_on_calculation_types =
+        ibcmd_restructure::descriptor::DEPENDENCE_ON_CALCULATION_TYPES
+            .iter()
+            .find_map(|(name, code)| (code.to_string() == stored_dependence).then_some(*name))?;
+
     Some(ChartOfCalculationTypesProperties {
         generated_types,
         use_standard_commands: information_register_bool(fields.get(24)?)?,
@@ -25957,17 +25968,7 @@ fn parse_chart_of_calculation_types_properties(
             &header.name,
             form_refs,
         )?,
-        // `<DependenceOnCalculationTypes>` rides field 27: the three charts of
-        // the ordinary corpora write `1` and export `OnActionPeriod`, the chart
-        // of an extension writes `0` and exports `DontUse`. Field 35, against
-        // which this used to be read, is `1` on all four and is kept as a
-        // checked constant above.
-        dependence_on_calculation_types: match fields.get(27)?.trim() {
-            "0" => "DontUse",
-            "1" => "OnActionPeriod",
-            "2" => "OnRegistrationPeriod",
-            _ => return None,
-        },
+        dependence_on_calculation_types,
         base_calculation_types: if cct_pair_is(fields.get(28)?, "0", "0") {
             // The exact empty collection is also valid on ordinary charts.
             String::new()
