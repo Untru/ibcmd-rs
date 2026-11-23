@@ -291,6 +291,23 @@ fn the_stored_rows_export_to_the_native_properties() {
     }
 }
 
+#[test]
+fn chart_of_calculation_types_registration_period_round_trips() {
+    let tree = Tree::new();
+    let kind = "ChartOfCalculationTypes";
+    let property = "DependenceOnCalculationTypes";
+    let expected = element(property, "OnRegistrationPeriod");
+    let row = tree.compile(kind, &[(&element(property, "DontUse"), &expected)]);
+    let context = tree.context();
+    let export = ExportContext {
+        names: NameIndex::from_config_index(&context.index),
+        version: "2.21".to_string(),
+        compat: compatibility(&context),
+    };
+    let xml = export_descriptor(kind, &row, &export).unwrap();
+    assert!(xml.contains(&expected), "{xml}");
+}
+
 /// Accounting register, 30 slots (ten registers on record: DataLockControlMode
 /// `0` on nine, `1` on the extension's; FullTextSearch `0` on all ten;
 /// Correspondence `0` on three; PeriodAdjustmentLength `0` on eight, `1` on
@@ -420,7 +437,7 @@ fn chart_of_calculation_types_properties_ride_their_stored_slots() {
             (
                 "DependenceOnCalculationTypes",
                 "DontUse",
-                "OnBasePeriod",
+                "OnRegistrationPeriod",
                 27,
                 "2",
             ),

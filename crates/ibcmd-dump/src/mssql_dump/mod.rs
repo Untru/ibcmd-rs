@@ -25965,7 +25965,7 @@ fn parse_chart_of_calculation_types_properties(
         dependence_on_calculation_types: match fields.get(27)?.trim() {
             "0" => "DontUse",
             "1" => "OnActionPeriod",
-            "2" => "OnBasePeriod",
+            "2" => "OnRegistrationPeriod",
             _ => return None,
         },
         base_calculation_types: if cct_pair_is(fields.get(28)?, "0", "0") {
