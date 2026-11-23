@@ -44468,9 +44468,12 @@ fn format_ws_reference_source_xml(
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal);
     }
-    let insert = format!(
-        "\t\t\t<LocationURL>{}</LocationURL>\r\n",
-        escape_xml_element_text(&properties.location_url)
+    let mut insert = String::new();
+    push_web_service_text_property(
+        &mut insert,
+        "\t\t\t",
+        "LocationURL",
+        &properties.location_url,
     );
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
