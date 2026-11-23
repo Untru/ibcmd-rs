@@ -617,8 +617,7 @@ These are read off a single native sample; the evidence is in the lab folder
 * 8.5: the asset ids (one extension), `Version8_5EnableTaxi` (the one
   combination `3` + `6` on record) and the brand colour of a style (one style
   body) are read off single samples;
-* `OnBasePeriod` for `DependenceOnCalculationTypes` `2` and the values other than
-  `0`/`1` of the accounting register's lock mode and full-text search are the
+* The values other than `0`/`1` of the accounting register's lock mode and full-text search are the
   enumeration order, not observed.
 
 ## Not covered yet
