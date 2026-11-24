@@ -591,6 +591,7 @@ struct Document<'a> {
     row_groups: Vec<&'a Node>,
     column_groups: Vec<&'a Node>,
     merges: Vec<&'a Node>,
+    vertical_page_breaks: Vec<i64>,
     vertical_unmerges: Vec<&'a Node>,
     horizontal_unmerges: Vec<&'a Node>,
     named_items: Vec<&'a Node>,
@@ -634,6 +635,14 @@ impl<'a> Document<'a> {
                 "vgLevels" => document.vg_levels = Some(parse_usize(&child.text, "<vgLevels>")?),
                 "vg" => document.row_groups.push(child),
                 "hg" => document.column_groups.push(child),
+                "verticalPageBreak" => {
+                    child.only_children(&["position"], "verticalPageBreak")?;
+                    document.vertical_page_breaks.push(required_i64(
+                        child,
+                        "position",
+                        "verticalPageBreak",
+                    )?);
+                }
                 "merge" => document.merges.push(child),
                 "verticalUnmerge" => document.vertical_unmerges.push(child),
                 "horizontalUnmerge" => document.horizontal_unmerges.push(child),
@@ -1624,7 +1633,13 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             out.record(record);
             out.raw(",-1");
         }
-        out.raw(",0,0");
+        out.comma();
+        out.raw(&document.vertical_page_breaks.len().to_string());
+        for position in &document.vertical_page_breaks {
+            out.comma();
+            out.raw(&position.to_string());
+        }
+        out.raw(",0"); // Horizontal page breaks.
         Ok(out.text)
     }
 
@@ -1768,6 +1783,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             let what = format!("<printSettings><{}>", member.name);
             let (key, stored) = match member.name.as_str() {
                 "paper" => (0, number(value, &what)?),
+                "pageSize" => (0, format!("{{\"S\",{}}}", quote(value))),
                 "pageOrientation" => (
                     1,
                     match value {

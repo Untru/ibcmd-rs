@@ -1782,6 +1782,7 @@ pub struct MoxelPrintSettings {
     pub black_and_white: Option<bool>,
     pub printer_name: Option<String>,
     pub paper: Option<usize>,
+    pub page_size: Option<String>,
     pub paper_source: Option<usize>,
     /// Page geometry is a decimal, not an integer: key 16 stores `60.5` in
     /// three of the corpus's 56 print-settings records, and reading the whole
@@ -9024,7 +9025,10 @@ pub fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings
             // reader cannot spell refuses the record rather than dropping the
             // member - the strictness the value parser used to get by refusing
             // any `"N"` that was not an integer.
-            0 => settings.paper = Some(value.as_usize()?),
+            0 => match value {
+                MoxelPrintSettingsValue::Text(name) => settings.page_size = Some(name),
+                number => settings.paper = Some(number.as_usize()?),
+            },
             1 => settings.page_orientation = value.as_usize().and_then(moxel_page_orientation),
             2 => settings.scale = Some(value.as_usize()?),
             3 => settings.collate = Some(value.as_bool()?),
@@ -13211,6 +13215,7 @@ pub fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPrintSett
     push_moxel_format_bool(xml, "blackAndWhite", settings.black_and_white);
     push_moxel_format_text(xml, "printerName", settings.printer_name.as_deref());
     push_moxel_format_usize(xml, "paper", settings.paper);
+    push_moxel_format_text(xml, "pageSize", settings.page_size.as_deref());
     push_moxel_format_usize(xml, "paperSource", settings.paper_source);
     push_moxel_format_text(xml, "pageWidth", settings.page_width.as_deref());
     push_moxel_format_text(xml, "pageHeight", settings.page_height.as_deref());
@@ -13241,6 +13246,7 @@ impl MoxelPrintSettings {
             && self.black_and_white.is_none()
             && self.printer_name.is_none()
             && self.paper.is_none()
+            && self.page_size.is_none()
             && self.paper_source.is_none()
             && self.page_width.is_none()
             && self.page_height.is_none()
