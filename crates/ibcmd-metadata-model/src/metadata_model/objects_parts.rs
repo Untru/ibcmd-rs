@@ -807,6 +807,8 @@ impl<'a> Obj<'a> {
             } else {
                 bail!("no stored value for {reference}");
             }
+        } else if reference == "0" {
+            brace_list![num(0)]
         } else if reference.starts_with("CommonPicture.") {
             brace_list![num(0), Brace::uuid(&self.resolve(reference)?)]
         } else {

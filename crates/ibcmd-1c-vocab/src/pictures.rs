@@ -23,6 +23,14 @@ use std::sync::LazyLock;
 
 #[rustfmt::skip]
 pub(crate) const STANDARD_PICTURES: &[(&str, &str)] = &[
+    // corpus-managed-forms on 8.3.27.2214 and 8.5.1.1150 (#598).
+    ("20175a6d-7510-46a8-9077-75a5d0d97802", "StdPicture.AccountingRegister"),
+    ("26abd244-8dd5-417e-aed0-247a573394ca", "StdPicture.AppearanceStarHalfFilled"),
+    ("a636287d-8d6f-4ef3-94bb-a8f986ab52bb", "StdPicture.FormattedString"),
+    ("3b2a508b-f36e-4e0b-9dc0-70b2b56276a9", "StdPicture.GotoURL"),
+    ("9c7f3c8c-a4b4-4a0a-84c8-d60d9feeca16", "StdPicture.NewConversation"),
+    ("6b322d7c-3fa2-437d-b311-fd70c4c7ed46", "StdPicture.QueryWizardTempTableDescription"),
+    ("6ca1af75-2aa5-48a6-820d-efa0ccb8f4f1", "StdPicture.Today"),
     // Matched stored UUIDs against 8.3.27.2214 native exports of src and IR.
     ("3646acb9-a91e-4163-bbe1-2006041cd65d", "StdPicture.SpreadsheetShowGrid"),
     ("8729a534-9f88-47b0-8d6b-ec213689580d", "StdPicture.FilterHistory"),
@@ -402,12 +410,19 @@ mod tests {
             .collect::<Vec<_>>();
         snapshot.sort_unstable();
         snapshot.extend([
+            "20175a6d-7510-46a8-9077-75a5d0d97802 StdPicture.AccountingRegister",
+            "26abd244-8dd5-417e-aed0-247a573394ca StdPicture.AppearanceStarHalfFilled",
+            "a636287d-8d6f-4ef3-94bb-a8f986ab52bb StdPicture.FormattedString",
+            "3b2a508b-f36e-4e0b-9dc0-70b2b56276a9 StdPicture.GotoURL",
+            "9c7f3c8c-a4b4-4a0a-84c8-d60d9feeca16 StdPicture.NewConversation",
+            "6b322d7c-3fa2-437d-b311-fd70c4c7ed46 StdPicture.QueryWizardTempTableDescription",
+            "6ca1af75-2aa5-48a6-820d-efa0ccb8f4f1 StdPicture.Today",
             "3646acb9-a91e-4163-bbe1-2006041cd65d StdPicture.SpreadsheetShowGrid",
             "8729a534-9f88-47b0-8d6b-ec213689580d StdPicture.FilterHistory",
             "3a32aa35-c679-4c5b-91bd-72ae038e5bb4 StdPicture.ExternalDataSource",
         ]);
         snapshot.sort_unstable();
-        assert_eq!(rows.len(), 221);
+        assert_eq!(rows.len(), 228);
         assert_eq!(rows, snapshot);
     }
 
