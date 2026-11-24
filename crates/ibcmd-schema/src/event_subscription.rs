@@ -53,6 +53,19 @@ pub fn native_event_name(event: &str) -> Option<&'static str> {
         .map(|(_, native)| *native)
 }
 
+/// The descriptor writer supports five additional events beyond BOOT-004.
+pub fn descriptor_native_event_name(event: &str) -> Option<&'static str> {
+    match event {
+        "OnCopy" => Some("OnCopy_ПриКопировании"),
+        "OnSetNewCode" => Some("OnSetNewCode_ПриУстановкеНовогоКода"),
+        "UndoPosting" => Some("UndoPosting_ОбработкаУдаленияПроведения"),
+        "ChoiceDataGetProcessing" => Some("ChoiceDataGetProcessing_ОбработкаПолученияДанныхВыбора"),
+        // Документооборот 3.0 `EventSubscriptions/ЗадачаКомплексногоПроцессаПриВыполнении`.
+        "OnExecute" => Some("OnExecute_ПриВыполнении"),
+        _ => native_event_name(event),
+    }
+}
+
 /// Resolve the complete stored spelling, including its Russian suffix.
 pub fn event_from_native(value: &str) -> Option<&'static str> {
     EVENTS

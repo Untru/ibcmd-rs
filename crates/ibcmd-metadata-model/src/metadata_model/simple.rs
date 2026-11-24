@@ -323,20 +323,11 @@ fn functional_options_parameter(
 
 /// The stored spelling of a subscription event: `<name>_<Russian name>`.
 fn event_name(event: &str) -> Result<&'static str> {
-    if let Some(native) = ibcmd_schema::event_subscription::native_event_name(event) {
-        return Ok(native);
+    if event.is_empty() {
+        return Ok("");
     }
-    // The descriptor writer also supports these events outside BOOT-004.
-    match event {
-        "OnCopy" => Ok("OnCopy_ПриКопировании"),
-        "OnSetNewCode" => Ok("OnSetNewCode_ПриУстановкеНовогоКода"),
-        "UndoPosting" => Ok("UndoPosting_ОбработкаУдаленияПроведения"),
-        "ChoiceDataGetProcessing" => Ok("ChoiceDataGetProcessing_ОбработкаПолученияДанныхВыбора"),
-        // Документооборот 3.0 `EventSubscriptions/ЗадачаКомплексногоПроцессаПриВыполнении`.
-        "OnExecute" => Ok("OnExecute_ПриВыполнении"),
-        "" => Ok(""),
-        other => bail!("unknown subscription event {other}"),
-    }
+    ibcmd_schema::event_subscription::descriptor_native_event_name(event)
+        .ok_or_else(|| anyhow!("unknown subscription event {event}"))
 }
 
 /// `{1,{1,<md base>,<source pattern>,"<event>",<handler module>,"<method>"},0}`
