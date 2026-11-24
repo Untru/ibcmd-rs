@@ -128,6 +128,39 @@ fn every_other_native_mode_is_refused_by_name() {
 }
 
 #[test]
+fn postgres_requires_the_effective_name_and_server_before_the_path() {
+    let scratch = TempDir::new("postgres-parameters");
+    let settings = scratch.path().join("defaults.toml");
+    fs::write(&settings, "").unwrap();
+    let config = scratch.path().join("native.yml");
+    for (field, missing) in [
+        ("name: test", "db-server"),
+        ("server: localhost", "db-name"),
+    ] {
+        fs::write(
+            &config,
+            format!("database:\n  dbms: PostgreSQL\n  {field}\n"),
+        )
+        .unwrap();
+        for operation in ["export", "import"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+                .args(["infobase", "config", operation, "--config"])
+                .arg(&config)
+                .env("IBCMD_RS_CONFIG", &settings)
+                .env_remove("IBCMD_RS_DB_SERVER")
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(MALFORMED));
+            assert!(output.stdout.is_empty());
+            assert_eq!(
+                text(&output.stderr).trim_end(),
+                format!("Не указано значение параметра: {missing}")
+            );
+        }
+    }
+}
+
+#[test]
 fn every_native_infobase_command_is_served_or_refused_by_name() {
     for (path, kind) in command_paths() {
         let mut args = vec!["infobase"];

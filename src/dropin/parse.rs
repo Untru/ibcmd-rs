@@ -15,7 +15,7 @@
 //! by name (see `super`).
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::cli::InfobaseConfigSourceVersion;
 use crate::mssql_config_apply::BackupPolicy;
@@ -991,17 +991,20 @@ pub fn parse_infobase(args: &[OsString]) -> Result<Invocation, Refusal> {
         Some(error) => return Err(error.clone()),
         None => None,
     };
-    if postgres_cli && !scan.has(Opt::Settings) && !scan.has(Opt::Config) {
-        if !scan.has(Opt::DbName) && trailing != Some("database-name") {
-            return Err(Refusal::MissingValue("db-name".into()));
-        }
-        if !scan.has(Opt::DbServer)
-            && trailing != Some("database-server")
-            && crate::settings::Settings::load(None)
-                .is_ok_and(|settings| settings.db_server().is_none())
-        {
-            return Err(Refusal::MissingValue("db-server".into()));
-        }
+    // A YAML config or vrunner settings can also select the DBMS. Leave
+    // unreadable settings to normal connection error reporting.
+    if !scan.has(Opt::DbPath)
+        && (postgres_cli || scan.has(Opt::Config) || scan.has(Opt::Settings))
+        && !(scan.has(Opt::DbServer) && scan.has(Opt::DbName))
+        && let Ok(Some(name)) = crate::infobase::missing_postgres_parameter(
+            scan.value(Opt::Dbms),
+            scan.has(Opt::DbServer) || trailing == Some("database-server"),
+            scan.has(Opt::DbName) || trailing == Some("database-name"),
+            scan.value(Opt::Settings).map(Path::new),
+            scan.value(Opt::Config).map(Path::new),
+        )
+    {
+        return Err(Refusal::MissingValue(name.into()));
     }
     for opt in [Opt::Pid, Opt::Remote] {
         if let Some(spelled) = scan.spelled(opt) {
