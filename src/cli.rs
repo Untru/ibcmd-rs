@@ -677,7 +677,7 @@ pub struct CfBootstrapArgs {
     /// Compile the tree with the base-free stage an empty infobase is loaded
     /// from (every row of the tree, no base) instead of the bootstrap
     /// compiler. The only route for an external data processor or report
-    /// (.epf/.erf, 8.3.x XML): it refuses a tree that refers to
+    /// (.epf/.erf, XML 2.20 or the 8.5.1.1150 XML 2.21 profile): it refuses a tree that refers to
     /// configuration objects.
     #[arg(long)]
     pub base_free: bool,

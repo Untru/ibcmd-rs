@@ -6,12 +6,13 @@
 //! root's properties and child objects replace the seed's, the tree's forms,
 //! templates and modules are added, and the seed's own are removed.
 //!
-//! The seeds (`src/load/seeds`) are packages 8.3.27.2214 built: copies of the
+//! The 8.3.27.2214 seeds in `src/load/seeds` are copies of the
 //! fixtures `tests/fixtures/external/variants/no_module/input.epf` and
 //! `tests/fixtures/external/test_report/input.erf`, owned here so a fixture
 //! regenerated for a test cannot change the product. Their identities are
 //! those their own XML dumps; `the_seed_identities_are_the_seeds_own` holds
-//! the constants to the bytes.
+//! the constants to the bytes. XML 2.21 starts from the native
+//! 8.5.1.1150 single-string attribute fixtures from the pinned coverage corpus.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -22,6 +23,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 
 use super::compiled;
+use crate::legacy_version::InfobaseConfigSourceVersion;
 use crate::module_blob::{deflate_raw, inflate_raw};
 
 /// One seed package and the identities its XML dump names.
@@ -47,6 +49,25 @@ const PROCESSOR: Seed = Seed {
     value_id: "0e90fd7d-d3cd-4e67-a2c1-8410e4ea602e",
     name: "ТестОбработка",
     children: &["Форма", "Макет", "Строка", "Строки", "Число"],
+};
+
+const PROCESSOR_85: Seed = Seed {
+    bytes: include_bytes!("seeds/processor-8.5.1.1150.epf"),
+    tag: "ExternalDataProcessor",
+    uuid: "ae84b6f7-f179-523a-92d6-0e3b2f315b3d",
+    object_id: "4ffbdcbe-18ca-56a3-b212-9f9947b0b061",
+    type_id: "12cc2ff6-c665-5fa6-8ace-88e797e9f017",
+    value_id: "04b8c65b-ff55-52ab-91f4-ee808a8c153e",
+    name: "CovAttr_xs_string",
+    children: &["Реквизит1"],
+};
+
+// The corpus generator gives both CovAttr_xs_string objects the same four
+// identities and attribute name. Each package keeps its native descriptor.
+const REPORT_85: Seed = Seed {
+    bytes: include_bytes!("seeds/report-8.5.1.1150.erf"),
+    tag: "ExternalReport",
+    ..PROCESSOR_85
 };
 
 const REPORT: Seed = Seed {
@@ -267,7 +288,10 @@ fn identity(root_xml: &str, tag: &str) -> Result<Identity> {
 
 /// The external root XML of `tree` (a directory, or the root file itself)
 /// with its seed: `None` when the tree is not an external object.
-fn external_root(tree: &Path) -> Result<Option<(PathBuf, String, &'static Seed)>> {
+fn external_root(
+    tree: &Path,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<Option<(PathBuf, String, &'static Seed)>> {
     let candidates = if tree.is_file() {
         vec![tree.to_path_buf()]
     } else {
@@ -279,11 +303,15 @@ fn external_root(tree: &Path) -> Result<Option<(PathBuf, String, &'static Seed)>
         found.sort();
         found
     };
+    let seeds = match source_version {
+        InfobaseConfigSourceVersion::V2_20 => [&PROCESSOR, &REPORT],
+        InfobaseConfigSourceVersion::V2_21 => [&PROCESSOR_85, &REPORT_85],
+    };
     let mut roots = Vec::new();
     for path in candidates {
         let text = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        for seed in [&PROCESSOR, &REPORT] {
+        for seed in seeds {
             if text.contains(&format!("<{} uuid=\"", seed.tag)) {
                 roots.push((path.clone(), text.clone(), seed));
             }
@@ -399,9 +427,9 @@ static BUILD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub fn build_external(
     tree: &Path,
     output: &Path,
-    source_version: crate::legacy_version::InfobaseConfigSourceVersion,
+    source_version: InfobaseConfigSourceVersion,
 ) -> std::result::Result<Option<super::LoadReport>, super::LoadError> {
-    let Some((root_xml, text, seed)) = external_root(tree)? else {
+    let Some((root_xml, text, seed)) = external_root(tree, source_version)? else {
         return Ok(None);
     };
     let target = identity(&text, seed.tag)?;
@@ -799,7 +827,12 @@ mod tests {
             std::env::temp_dir().join(format!("ibcmd-rs-seed-identities-{}", std::process::id()));
         let _scratch = crate::test_scratch::TestScratch::adopt(&scratch);
         fs::create_dir_all(&scratch).unwrap();
-        for (seed, file) in [(&PROCESSOR, "seed.epf"), (&REPORT, "seed.erf")] {
+        for (seed, file) in [
+            (&PROCESSOR, "seed.epf"),
+            (&PROCESSOR_85, "modern.epf"),
+            (&REPORT, "seed.erf"),
+            (&REPORT_85, "modern.erf"),
+        ] {
             let path = scratch.join(file);
             fs::write(&path, seed.bytes).unwrap();
             let (archive, _) = compiled::decode_base(&path).unwrap();
