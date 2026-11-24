@@ -80,6 +80,6 @@ container's records; saving those rows back gives the original configuration
   nothing is staged (here it does not).
 - The platform's lines and behaviour for `config save` (an existing file is
   replaced here; the title is the command's name in `ibcmd help infobase`).
-- `config load` against a server: running the scripts, the `deleted` list for
-  what the target's `Config` holds and the file does not, and the platform's
-  `config apply` of such a stage (#353).
+
+The native CF load and deletion matrix for #353 is recorded in the
+[CF replacement measurements](cf-config-load-removal.md).
