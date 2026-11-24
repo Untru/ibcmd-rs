@@ -363,6 +363,18 @@ pub(super) fn read_active<'a>(
     Ok(Active { rows, inputs })
 }
 
+/// Counts logical staged files without reading Config or the staged payloads.
+pub fn staged_row_count(sql: &SqlExec, database: &str) -> Result<i64> {
+    let table = qualified(database, "ConfigSave");
+    client_of(sql)?
+        .query_scalar(
+            &format!("SELECT COUNT_BIG(DISTINCT FileName) FROM {table}"),
+            &[],
+        )?
+        .and_then(|value| value.as_i64())
+        .context("ConfigSave count did not return an integer")
+}
+
 /// Reads what the check needs and runs it: is the ConfigSave of `database` a
 /// change of the data structure? Read-only.
 pub fn check_staged(sql: &SqlExec, database: &str, xml_version: Option<&str>) -> Result<Verdict> {

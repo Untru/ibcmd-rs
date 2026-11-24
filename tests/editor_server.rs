@@ -148,6 +148,10 @@ impl Server {
             .env("IBCMD_RS_CONFIG", &corpus.settings)
             .env_remove("IBCMD_RS_PLATFORM")
             .env_remove("IBCMD_DB_PSW")
+            .env_remove("IBCMD_EDITOR_TEST_PASSWORD")
+            .env("TMPDIR", &corpus.root)
+            .env("TEMP", &corpus.root)
+            .env("TMP", &corpus.root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -338,14 +342,14 @@ fn serve_speaks_the_protocol_and_its_lifecycle() {
     assert_eq!(server.error("initialize", json!({})), -32602);
     let refused = server.call("initialize", json!({"protocolVersion": "2.0"}));
     assert_eq!(refused["error"]["code"], -32010);
-    assert_eq!(refused["error"]["data"]["serverProtocolVersion"], "1.4");
+    assert_eq!(refused["error"]["data"]["serverProtocolVersion"], "1.5");
     assert_eq!(
-        server.error("initialize", json!({"protocolVersion": "1.5"})),
+        server.error("initialize", json!({"protocolVersion": "1.6"})),
         -32010
     );
 
     let initialized = server.ok("initialize", corpus.initialize_params());
-    assert_eq!(initialized["protocolVersion"], "1.4");
+    assert_eq!(initialized["protocolVersion"], "1.5");
     assert_eq!(initialized["serverInfo"]["name"], "ibcmd-rs");
     assert_eq!(
         initialized["serverInfo"]["version"],
@@ -1154,6 +1158,20 @@ fn editor_apply_requires_consent_and_leaves_file_db_to_client() {
     let pending = server.ok("config/pending", json!({"infobase":"apply-file"}));
     assert_eq!(pending["conclusive"], true);
     assert_eq!(pending["pending"], false);
+    assert_eq!(
+        server.ok(
+            "config/pending",
+            json!({"infobase":"apply-file","presenceOnly":true})
+        ),
+        pending
+    );
+    assert_eq!(
+        server.error(
+            "config/pending",
+            json!({"infobase":"apply-file","presenceOnly":"true"})
+        ),
+        -32602
+    );
     let mut apply = json!({"infobase":"apply-file", "mode":"exclusive", "recoveryDir":corpus.root.join("recovery")});
     assert_eq!(server.error("config/apply", apply.clone()), -32015);
     apply["confirm"] = json!(true);
@@ -1316,4 +1334,116 @@ fn source_read_refuses_only_requested_invalid_descriptor_cold_and_cached() {
         failures.is_empty(),
         "RPC returned guessed descriptor: {failures:?}"
     );
+}
+
+#[test]
+fn sql_import_checks_consent_and_worker_returns_source_errors_on_stdio() {
+    let corpus = Corpus::new("sql-import-guards");
+    let mut init = corpus.initialize_params();
+    init["infobases"].as_array_mut().unwrap().push(json!({
+        "id":"sql", "name":"guard", "server":"127.0.0.1,1", "platform":"8.3.27"
+    }));
+    let mut server = Server::start(&corpus);
+    server.ok("initialize", init);
+    let tree = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file-infobase/tiny-xml");
+    let mut request = json!({"infobase":"sql","sourceDir":tree,"objects":["Configuration"]});
+    assert_eq!(server.error("objects/import", request.clone()), -32015);
+    request["confirm"] = json!(true);
+    for _ in 0..2 {
+        let error = server.call("objects/import", request.clone())["error"].clone();
+        assert_eq!(error["code"], -32014);
+        assert!(
+            error["message"].as_str().unwrap().contains("XML 2.21"),
+            "{error}"
+        );
+    }
+    server.ok("shutdown", Value::Null);
+    assert_eq!(server.finish(true), 0);
+}
+
+/// Seed a fresh ibcmd_rs_376_<suffix> SQL database from the committed tiny.cf.
+/// The caller owns the database and removes it after inspecting ConfigSave.
+#[test]
+#[ignore = "requires a disposable native SQL infobase and a validated server certificate"]
+fn sql_import_and_pending_through_stdio() {
+    let db = std::env::var("IBCMD_EDITOR_TEST_DATABASE").expect("disposable database");
+    assert!(db.strip_prefix("ibcmd_rs_376_").is_some_and(
+        |suffix| !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_alphanumeric())
+    ));
+    let host = std::env::var("IBCMD_EDITOR_TEST_SERVER").expect("SQL Server address");
+    let corpus = Corpus::new("sql-import-pending");
+    let mut server = Server::start(&corpus);
+    let mut init = corpus.initialize_params();
+    init["infobases"].as_array_mut().unwrap().push(json!({
+        "id":"sql", "name":db, "server":host, "platform":"8.5.1"
+    }));
+    server.ok("initialize", init);
+    let mut login = json!({"infobase":"sql","auth":"windows"});
+    if let Ok(user) = std::env::var("IBCMD_EDITOR_TEST_USER") {
+        login["auth"] = json!("sql");
+        login["user"] = json!(user);
+        login["password"] = json!(std::env::var("IBCMD_EDITOR_TEST_PASSWORD").unwrap());
+    }
+    server.ok("infobases/connect", login);
+    let base = json!({"infobase":"sql"});
+    let presence = json!({"infobase":"sql","presenceOnly":true});
+    let empty = server.ok("config/pending", presence.clone());
+    assert_eq!(
+        empty,
+        json!({"pending":false,"stagedRows":0,"conclusive":true,"needsRestructuring":null})
+    );
+    let tree = server.ok("tree/children", base.clone());
+    assert!(!tree["nodes"].as_array().unwrap().is_empty());
+    let object = "CommonModule.ФайловаяБазаПроверка";
+    let module = "CommonModules/ФайловаяБазаПроверка/Ext/Module.bsl";
+    let source = corpus.root.join("source");
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file-infobase/tiny-xml");
+    for (name, bytes) in common::files(&fixture) {
+        let target = source.join(name);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(target, bytes).unwrap();
+    }
+    server.ok(
+        "objects/export",
+        json!({"infobase":"sql","objects":[object],"targetDir":source}),
+    );
+    let original = server.ok("source/read", json!({"infobase":"sql","path":module}));
+    let text = fs::read_to_string(source.join(module)).unwrap();
+    assert_eq!(original["content"], text);
+    assert_eq!(text.as_bytes(), fs::read(fixture.join(module)).unwrap());
+    let mut import = json!({"infobase":"sql","sourceDir":source,"objects":[object],"verify":true});
+    assert_eq!(
+        server.ok("objects/status", import.clone())["objects"][0]["status"],
+        "same"
+    );
+    fs::write(
+        source.join(module),
+        format!("{text}\r\n// SQL editor stage\r\n"),
+    )
+    .unwrap();
+    assert_eq!(
+        server.ok("objects/status", import.clone())["objects"][0]["status"],
+        "modified"
+    );
+    assert_eq!(server.error("objects/import", import.clone()), -32015);
+    assert_eq!(server.ok("config/pending", presence.clone()), empty);
+    import["confirm"] = json!(true);
+    let result = server.ok("objects/import", import);
+    assert!(
+        result["report"]["verification"]["checked_files"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    let pending = server.ok("config/pending", presence);
+    let detailed = server.ok("config/pending", base);
+    assert_eq!(pending["pending"], true);
+    assert!(pending["stagedRows"].as_u64().unwrap() > 0);
+    assert_eq!(pending["stagedRows"], detailed["stagedRows"]);
+    assert!(pending["needsRestructuring"].is_null());
+    assert!(detailed["verdict"].is_object());
+    assert_eq!(detailed["needsRestructuring"], false);
+    server.ok("shutdown", Value::Null);
+    assert_eq!(server.finish(true), 0);
 }

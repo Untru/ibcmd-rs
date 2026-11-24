@@ -213,7 +213,7 @@ export async function activate(context: vscode.ExtensionContext) {
               pending = pendingText(
                 await rpc!.request(
                   "config/pending",
-                  { infobase: b.id },
+                  { infobase: b.id, presenceOnly: true },
                   abort.signal,
                 ),
               );
@@ -396,6 +396,7 @@ export async function activate(context: vscode.ExtensionContext) {
               if (await current()) {
                 const pending = await rpc.request("config/pending", {
                   infobase: base.id,
+                  presenceOnly: true,
                 });
                 if (await current())
                   status.text = `$(database) ${label(f, base)} · ${base.platform} · ${pendingText(pending)}`;

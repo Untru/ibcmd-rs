@@ -61,6 +61,6 @@ pub use check::{Inputs, RowProvider, check};
 pub use dbtree::check_tree_against_db;
 pub use model::{Note, ObjectChange, ObjectOp, Reason, ReasonClass, Stats, Verdict};
 pub use rule_id::RuleId;
-pub use sql::check_staged;
+pub use sql::{check_staged, staged_row_count};
 pub use tree_diff::{ChangeOp, Seg};
 pub use trees::check_trees;

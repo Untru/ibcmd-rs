@@ -76,6 +76,7 @@ fn run() -> Result<()> {
         Commands::Help(args) => std::process::exit(ibcmd_rs::dropin::run_help(&args.args)),
         Commands::Server(_) => std::process::exit(ibcmd_rs::dropin::run_other_mode("server")),
         Commands::Mcp(args) => ibcmd_rs::mcp::run(args)?,
+        Commands::EditorSqlStageWorker => ibcmd_rs::server::run_sql_stage_worker()?,
         Commands::Serve(_) => std::process::exit(ibcmd_rs::server::run_stdio()),
         Commands::Objects(args) => ibcmd_rs::commands::objects::run(args)?,
         Commands::Eventlog(_) => std::process::exit(ibcmd_rs::dropin::run_other_mode("eventlog")),

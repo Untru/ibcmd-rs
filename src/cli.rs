@@ -40,6 +40,9 @@ pub enum Commands {
     /// stdout in Content-Length frames, as a language server; one process per
     /// editor window. Not the platform's `ibcmd server`.
     Serve(ServeArgs),
+    /// Compile one confirmed SQL editor import received on stdin.
+    #[command(hide = true)]
+    EditorSqlStageWorker,
     /// Serve MCP tools over local stdio with a fixed operator-owned settings file.
     Mcp(crate::mcp::McpArgs),
     /// What `serve --stdio` does with the objects of a configuration, from
