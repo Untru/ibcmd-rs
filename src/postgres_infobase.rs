@@ -193,6 +193,7 @@ mod tests {
     use super::*;
 
     fn wire_queries(
+        can_create_temp: bool,
         run: impl FnOnce(&ConnectionConfig) -> Result<InfobaseConfigImportReport>,
     ) -> Vec<String> {
         use std::io::{Read, Write};
@@ -265,7 +266,11 @@ mod tests {
                 }
                 queries.push(String::from_utf8(body[..body.len() - 1].to_vec()).unwrap());
                 if queries.last().unwrap().starts_with("SELECT count(*)") {
-                    send(&mut stream, b'D', b"\0\x02\0\0\0\x010\0\0\0\x01t");
+                    let mut row = *b"\0\x02\0\0\0\x010\0\0\0\x01t";
+                    if !can_create_temp {
+                        *row.last_mut().unwrap() = b'f';
+                    }
+                    send(&mut stream, b'D', &row);
                 }
                 if queries.last().unwrap().starts_with("COPY ") {
                     send(&mut stream, b'G', &[1, 0, 5, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]);
@@ -350,14 +355,14 @@ mod tests {
             source_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/file-infobase/tiny-source"),
         };
-        assert_locked_stage(&wire_queries(|config| import(config, &args)));
+        assert_locked_stage(&wire_queries(true, |config| import(config, &args)));
     }
 
     #[test]
     fn a_cf_load_locks_both_tables_before_reading_its_base() {
         let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/file-infobase/tiny.cf");
-        let queries = wire_queries(|config| {
+        let queries = wire_queries(true, |config| {
             let report = load_cf(config, &input)?;
             assert_eq!(report.operation, "infobase config load");
             assert_eq!(report.format, "cf");
@@ -365,6 +370,24 @@ mod tests {
         });
         assert_locked_stage(&queries);
     }
+    #[test]
+    fn a_role_without_temp_stages_rows_with_inserts() {
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/file-infobase/tiny.cf");
+        let queries = wire_queries(false, |config| load_cf(config, &input));
+        assert!(
+            !queries
+                .iter()
+                .any(|query| query.starts_with("COPY ") || query.starts_with("CREATE TEMP"))
+        );
+        assert!(
+            queries
+                .iter()
+                .any(|query| query.starts_with("INSERT INTO configsave"))
+        );
+        assert_eq!(queries.last().map(String::as_str), Some("COMMIT"));
+    }
+
     #[test]
     fn row_names_quote_backslashes_independently_of_the_server_setting() {
         let row = ConfigRow {

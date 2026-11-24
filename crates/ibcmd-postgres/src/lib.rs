@@ -35,7 +35,7 @@ impl PgTarget {
         password: Option<&str>,
     ) -> Result<Self> {
         let mut parts = server.trim().trim_end_matches(';').split_ascii_whitespace();
-        let address = parts.next().unwrap_or_default();
+        let address = parts.next().unwrap_or_default().trim_end_matches(';');
         let (host, mut port) = match address.rsplit_once(':') {
             Some((host, port)) if !host.contains(':') => (host, Some(port)),
             _ => (address, None),
@@ -113,7 +113,9 @@ impl PgConnection {
                 )
             })?;
         stream.set_nodelay(true).ok();
-        stream.set_read_timeout(Some(Duration::from_secs(600))).ok();
+        let timeout = Some(Duration::from_secs(600));
+        stream.set_read_timeout(timeout)?;
+        stream.set_write_timeout(timeout)?;
         let stream: Box<dyn Transport> = if target.verify_full {
             tls_stream(stream, &target.host)?
         } else {
@@ -296,6 +298,8 @@ impl PgConnection {
 
     /// Send a single binary COPY statement. On a producer error, abort COPY and
     /// consume ReadyForQuery before returning control to the transaction owner.
+    /// This synchronous writer reads server notices at completion. Use it for
+    /// staging tables without triggers that emit messages for each input row.
     pub fn copy_binary(
         &mut self,
         sql: &str,
@@ -592,6 +596,12 @@ mod tests {
             ("srv".into(), 5432)
         );
         assert_eq!(target("srv:5433").port, 5433);
+        let tls = target("srv:5433; sslmode=verify-full");
+        assert_eq!(
+            (tls.host.as_str(), tls.port, tls.verify_full),
+            ("srv", 5433, true)
+        );
+        assert_eq!(target("srv; sslmode=verify-full").host, "srv");
         let spaced = target("srv port=5434;");
         assert!(target("srv port=5434; sslmode=verify-full").verify_full);
         assert!(PgTarget::new("srv sslmode=prefer", "db", None, None).is_err());
