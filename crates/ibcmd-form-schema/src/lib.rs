@@ -10054,6 +10054,9 @@ pub fn form_planner_standard_command_suffix(uuid: &str) -> Option<&'static str> 
     }
 }
 
+/// XML element for a chart or chart component border.
+pub const FORM_CHART_BORDER_ELEMENT: &str = "border";
+
 /// Chart selection mode measured on the 8.5.1.1529 CovChartSelectionMode form.
 pub struct FormChartSelectionMode;
 impl FormChartSelectionMode {

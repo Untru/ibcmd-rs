@@ -6517,6 +6517,7 @@ const MAX_MOXEL_CHART_DECIMAL_EXPONENT: u64 = 4096;
 /// Fixed tail slots shared by spreadsheet drawings and form chart attributes.
 /// Variable-length series, points and scale lists precede the placement slots.
 pub mod chart_layout {
+    pub const DEFAULT_PLACEMENT: &str = "0";
     pub const BORDER: usize = 96;
     pub const BORDER_COLOR: usize = 95;
     pub const TITLE_BORDER_COLOR: usize = 15;
@@ -7040,7 +7041,7 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
             )?
             .trim()
         {
-            "0" => None,
+            chart_layout::DEFAULT_PLACEMENT => None,
             "5" => Some("UseCoordinates"),
             "6" => Some("None"),
             _ => return None,
@@ -7049,7 +7050,7 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
             .get(rectangle_start - (chart_layout::RECTANGLES_START - chart_layout::PLOT_PLACEMENT))?
             .trim()
         {
-            "0" => None,
+            chart_layout::DEFAULT_PLACEMENT => None,
             "1" => Some("UseCoordinates"),
             _ => return None,
         },
@@ -7059,7 +7060,7 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
             )?
             .trim()
         {
-            "0" => None,
+            chart_layout::DEFAULT_PLACEMENT => None,
             "1" => Some("UseCoordinates"),
             "8" => Some("None"),
             _ => return None,

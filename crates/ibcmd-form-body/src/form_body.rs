@@ -41105,9 +41105,10 @@ fn format_form_chart_settings_body_xml(
         child,
     )?);
     color!("borderColor", chart_layout::BORDER_COLOR);
+    let border = t.get(chart_layout::BORDER)?;
     xml.push_str(&form_chart_border_xml(
-        "border",
-        t.get(chart_layout::BORDER)?,
+        ibcmd_form_schema::FORM_CHART_BORDER_ELEMENT,
+        border,
         child,
     )?);
     let description = parse_1c_string(t.get(97)?.trim())?;
@@ -41466,7 +41467,7 @@ fn format_form_chart_settings_body_xml(
     // `"5"` (`UseCoordinates`) come from the corpus above: one
     // `ПротоколРаботыСотрудников` record stores `"3"` and publishes `Top`,
     // four further `do` records store `"5"` and publish `UseCoordinates`.
-    if t.get(tidx(chart_layout::LEGEND_PLACEMENT))?.trim() != "0" {
+    if t.get(tidx(chart_layout::LEGEND_PLACEMENT))?.trim() != chart_layout::DEFAULT_PLACEMENT {
         scalar!(
             "legendPlacement",
             form_chart_code(
@@ -41486,7 +41487,7 @@ fn format_form_chart_settings_body_xml(
     // `<d4p1:plotAreaPlacement>UseCoordinates</d4p1:plotAreaPlacement>`, the
     // twelve `ut`/`uh` records store `"0"` and publish nothing. It was never
     // read before, so the element was lost on every record that has it.
-    if t.get(tidx(chart_layout::PLOT_PLACEMENT))?.trim() != "0" {
+    if t.get(tidx(chart_layout::PLOT_PLACEMENT))?.trim() != chart_layout::DEFAULT_PLACEMENT {
         scalar!(
             "plotAreaPlacement",
             form_chart_code(
@@ -41502,7 +41503,7 @@ fn format_form_chart_settings_body_xml(
     // added): the slot flips from `"0"` to `"8"`. `"1"`
     // (`UseCoordinates`) is the six `do` records that store it and publish
     // it, against the same corpus.
-    if t.get(tidx(chart_layout::TITLE_PLACEMENT))?.trim() != "0" {
+    if t.get(tidx(chart_layout::TITLE_PLACEMENT))?.trim() != chart_layout::DEFAULT_PLACEMENT {
         scalar!(
             "titleAreaPlacement",
             form_chart_code(
