@@ -1,9 +1,14 @@
 {
   "equal": [
+    "CovFacetChartAutoMaxHeight",
+    "CovFacetChartAutoMaxWidth",
+    "CovFacetChartMaxWidth",
+    "CovFacetChartOnActivate",
     "CovFacetCollapseItemsByImportanceVariant",
     "CovFacetConversationsRepresentation",
     "CovFacetPlannerBeforeCreate",
     "CovFacetPlannerBeforeStartQuickEdit",
+    "CovFacetPlannerCommandGenerateProcessing",
     "CovFacetPlannerSelection",
     "CovFacetRootFillCheckProcessingAtServer",
     "CovFacetRootNotificationProcessing",

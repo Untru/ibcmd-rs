@@ -20,11 +20,6 @@
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 8bc8b12f-d55a-5257-b734-f801d74c9330.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
-        "CommonForms/CovFacetChartAutoMaxHeight.xml": "#600: base-free stage has no base Config row f982baa9-1706-56b5-976d-3cf541fcd1be.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 94819a5a-e3d9-5b4f-899c-b820280b307a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row f71679b6-4cc0-52ff-a800-f2b6455f8301.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row 917e8f81-2dfe-509d-ae51-7ce921f0262a.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row 2c1c708f-76e7-518a-b698-28043bafaf91.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row b33dc671-f3f5-580b-bc3d-95e055bdc6bd.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -85,11 +80,6 @@
     },
     "8.3.27.2214/corpus-form-facets": {
       "refused": {
-        "CommonForms/CovFacetChartAutoMaxHeight.xml": "#600: base-free stage has no base Config row a4566629-02d3-5186-a10e-0e2151f68630.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 97fdddd7-3cad-5d44-bd64-94d23a720f34.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row eccf6a8b-dce0-5903-94b5-e3ed668d476a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row a18ac418-4e59-5ff4-9eaa-e153f5926355.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row f786d3c8-58b8-575e-81ca-5bcc0cbfa2c5.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row 9e57eef3-2aea-5173-8595-09d5551c060c.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid"
       }
     },
@@ -253,11 +243,6 @@
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 8bc8b12f-d55a-5257-b734-f801d74c9330.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
-        "CommonForms/CovFacetChartAutoMaxHeight.xml": "#600: base-free stage has no base Config row f982baa9-1706-56b5-976d-3cf541fcd1be.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 94819a5a-e3d9-5b4f-899c-b820280b307a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row f71679b6-4cc0-52ff-a800-f2b6455f8301.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row 917e8f81-2dfe-509d-ae51-7ce921f0262a.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row 2c1c708f-76e7-518a-b698-28043bafaf91.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row b33dc671-f3f5-580b-bc3d-95e055bdc6bd.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovFacetTableExcludesDeselectAll.xml": "#622: base-free stage has no base Config row 07dcfda4-2360-5b5f-8707-870f01bb0809.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -360,11 +345,6 @@
     },
     "8.5.1.1150/corpus-form-facets": {
       "refused": {
-        "CommonForms/CovFacetChartAutoMaxHeight.xml": "#600: base-free stage has no base Config row a4566629-02d3-5186-a10e-0e2151f68630.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 97fdddd7-3cad-5d44-bd64-94d23a720f34.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row eccf6a8b-dce0-5903-94b5-e3ed668d476a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row a18ac418-4e59-5ff4-9eaa-e153f5926355.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row f786d3c8-58b8-575e-81ca-5bcc0cbfa2c5.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row 9e57eef3-2aea-5173-8595-09d5551c060c.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovFacetTableExcludesDeselectAll.xml": "#622: base-free stage has no base Config row d13b8721-a534-5a18-93ca-99d4c3bcf941.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid"
       }
@@ -532,14 +512,11 @@
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
-        "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
-        "Catalogs/CovOwnedScalarModernTemplate/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row f765b72b-e498-595e-9b06-b13df031d51a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovBoundChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row a4446016-0a48-5948-bb31-a65089ab9700.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 703c95e3-eefd-5163-b520-15e913e262f4.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
         "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 0dde8835-c2ac-5eb1-9095-3ccfe3ae2b24.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
         "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row ada7da00-6fe4-5e8d-a519-eb78470c9b91.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
@@ -547,7 +524,6 @@
         "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row 16eae134-5a3a-55d0-a57b-81be5011a8a2.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
         "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
         "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
-        "CommonForms/CovChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row 816b2b50-fe05-53a1-9935-ccf92d00a67e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovChartMissingSeries.xml": "#679: base-free stage has no base Config row 6eb955a2-c7d3-522b-8740-61767f894ab0.0: the native form writer refuses it: <d4p1:chartType> spells StackedLine, which the chart writer has not measured",
         "CommonForms/CovChartSelectionMode.xml": "#679: base-free stage has no base Config row bf5242cb-5457-5b55-8aee-c60e716245a0.0: the native form writer refuses it: <Settings> names <d4p1:selectionMode>, which the chart writer cannot place",
         "CommonForms/CovChartTypeColumn.xml": "#679: base-free stage has no base Config row ef977da5-7048-5978-bbf5-522accccbc05.0: the native form writer refuses it: <d4p1:chartType> spells Column, which the chart writer has not measured",
@@ -557,11 +533,6 @@
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 8bc8b12f-d55a-5257-b734-f801d74c9330.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
         "CommonForms/CovExchangePlanHistory.xml": "#680: failed to compile base-free Form body CommonForms/CovExchangePlanHistory/Ext/Form.xml: no measured uuid for <ExcludedCommand>ChangeHistory</ExcludedCommand> on cfg:ExchangePlanObject",
-        "CommonForms/CovFacetChartAutoMaxHeight.xml": "#600: base-free stage has no base Config row f982baa9-1706-56b5-976d-3cf541fcd1be.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 94819a5a-e3d9-5b4f-899c-b820280b307a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row f71679b6-4cc0-52ff-a800-f2b6455f8301.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row 917e8f81-2dfe-509d-ae51-7ce921f0262a.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row 2c1c708f-76e7-518a-b698-28043bafaf91.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row b33dc671-f3f5-580b-bc3d-95e055bdc6bd.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovFacetTableExcludesDeselectAll.xml": "#622: base-free stage has no base Config row 07dcfda4-2360-5b5f-8707-870f01bb0809.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -704,13 +675,45 @@
       }
     },
     "8.5.1.1529/corpus-form-bound-scalars": {
-      "refused": {
-        "CommonForms/CovBoundChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row 2f0304af-dcaa-5f6a-8e8a-4cf03b15d6de.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured"
+      "gaps": {
+        "CovBoundButtonShowAsCard_true": "#680: CommonForms/CovBoundButtonShowAsCard_true/Ext/Form.xml differs",
+        "CovBoundCheckBoxFieldHorizontalStretch_true": "#680: CommonForms/CovBoundCheckBoxFieldHorizontalStretch_true/Ext/Form.xml differs",
+        "CovBoundCheckBoxFieldTumblerRepresentation_Text": "#680: CommonForms/CovBoundCheckBoxFieldTumblerRepresentation_Text/Ext/Form.xml differs",
+        "CovBoundInputFieldCellMark_IconCircle": "#680: CommonForms/CovBoundInputFieldCellMark_IconCircle/Ext/Form.xml differs",
+        "CovBoundInputFieldCellMark_ShapeUnderTextOval": "#680: CommonForms/CovBoundInputFieldCellMark_ShapeUnderTextOval/Ext/Form.xml differs",
+        "CovBoundInputFieldTimeChoiceMode_Interval60Minutes": "#680: CommonForms/CovBoundInputFieldTimeChoiceMode_Interval60Minutes/Ext/Form.xml differs",
+        "CovBoundLabelFieldCellMark_IconCircle": "#680: CommonForms/CovBoundLabelFieldCellMark_IconCircle/Ext/Form.xml differs",
+        "CovBoundLabelFieldCellMark_ShapeUnderTextOval": "#680: CommonForms/CovBoundLabelFieldCellMark_ShapeUnderTextOval/Ext/Form.xml differs",
+        "CovBoundLabelFieldPasswordMode_true": "#680: CommonForms/CovBoundLabelFieldPasswordMode_true/Ext/Form.xml differs",
+        "CovBoundPictureDecorationBackgroundShowMode_ShowAndIncreaseSize": "#680: CommonForms/CovBoundPictureDecorationBackgroundShowMode_ShowAndIncreaseSize/Ext/Form.xml differs",
+        "CovBoundPictureFieldBackgroundShowMode_DontShow": "#680: CommonForms/CovBoundPictureFieldBackgroundShowMode_DontShow/Ext/Form.xml differs",
+        "CovBoundPictureFieldBackgroundShowMode_ShowAndDontIncreaseSize": "#680: CommonForms/CovBoundPictureFieldBackgroundShowMode_ShowAndDontIncreaseSize/Ext/Form.xml differs",
+        "CovBoundRadioButtonFieldHorizontalAlign_Left": "#680: CommonForms/CovBoundRadioButtonFieldHorizontalAlign_Left/Ext/Form.xml differs",
+        "CovBoundSpreadSheetDocumentFieldCellActionsButtonViewMode_DontShow": "#680: CommonForms/CovBoundSpreadSheetDocumentFieldCellActionsButtonViewMode_DontShow/Ext/Form.xml differs",
+        "CovBoundTableHierarchyPanelLocation_None": "#602: CommonForms/CovBoundTableHierarchyPanelLocation_None/Ext/Form.xml differs",
+        "CovBoundTableMobileDeviceTableType_Cards": "#680: CommonForms/CovBoundTableMobileDeviceTableType_Cards/Ext/Form.xml differs"
       }
     },
     "8.5.1.1529/corpus-form-observed-scalars": {
-      "refused": {
-        "CommonForms/CovChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row fea58380-3b41-53d1-a1a0-80349e16d682.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured"
+      "gaps": {
+        "CovButtonShowAsCard_true": "#680: CommonForms/CovButtonShowAsCard_true/Ext/Form.xml differs",
+        "CovCheckBoxFieldHorizontalStretch_true": "#680: CommonForms/CovCheckBoxFieldHorizontalStretch_true/Ext/Form.xml differs",
+        "CovCheckBoxFieldTumblerRepresentation_Text": "#680: CommonForms/CovCheckBoxFieldTumblerRepresentation_Text/Ext/Form.xml differs",
+        "CovInputFieldCellMark_IconCircle": "#680: CommonForms/CovInputFieldCellMark_IconCircle/Ext/Form.xml differs",
+        "CovInputFieldCellMark_ShapeUnderTextOval": "#680: CommonForms/CovInputFieldCellMark_ShapeUnderTextOval/Ext/Form.xml differs",
+        "CovInputFieldTimeChoiceMode_Interval60Minutes": "#680: CommonForms/CovInputFieldTimeChoiceMode_Interval60Minutes/Ext/Form.xml differs",
+        "CovLabelFieldCellMark_IconCircle": "#680: CommonForms/CovLabelFieldCellMark_IconCircle/Ext/Form.xml differs",
+        "CovLabelFieldCellMark_ShapeUnderTextOval": "#680: CommonForms/CovLabelFieldCellMark_ShapeUnderTextOval/Ext/Form.xml differs",
+        "CovLabelFieldPasswordMode_true": "#680: CommonForms/CovLabelFieldPasswordMode_true/Ext/Form.xml differs",
+        "CovPictureDecorationBackgroundShowMode_ShowAndIncreaseSize": "#680: CommonForms/CovPictureDecorationBackgroundShowMode_ShowAndIncreaseSize/Ext/Form.xml differs",
+        "CovPictureFieldBackgroundShowMode_DontShow": "#680: CommonForms/CovPictureFieldBackgroundShowMode_DontShow/Ext/Form.xml differs",
+        "CovPictureFieldBackgroundShowMode_ShowAndDontIncreaseSize": "#680: CommonForms/CovPictureFieldBackgroundShowMode_ShowAndDontIncreaseSize/Ext/Form.xml differs",
+        "CovRadioButtonFieldHorizontalAlign_Left": "#680: CommonForms/CovRadioButtonFieldHorizontalAlign_Left/Ext/Form.xml differs",
+        "CovSpreadSheetDocumentFieldCellActionsButtonViewMode_DontShow": "#680: CommonForms/CovSpreadSheetDocumentFieldCellActionsButtonViewMode_DontShow/Ext/Form.xml differs",
+        "CovTableAllowRootChoice_true": "#680: CommonForms/CovTableAllowRootChoice_true/Ext/Form.xml differs",
+        "CovTableChoiceFoldersAndItems_Folders": "#680: CommonForms/CovTableChoiceFoldersAndItems_Folders/Ext/Form.xml differs",
+        "CovTableHierarchyPanelLocation_None": "#602: CommonForms/CovTableHierarchyPanelLocation_None/Ext/Form.xml differs",
+        "CovTableMobileDeviceTableType_Cards": "#680: CommonForms/CovTableMobileDeviceTableType_Cards/Ext/Form.xml differs"
       }
     },
     "8.5.1.1529/corpus-hybrid-interface": {
@@ -839,9 +842,9 @@
       }
     },
     "8.5.1.1529/corpus-owned-observed-scalars": {
-      "refused": {
-        "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "Catalogs/CovOwnedScalarModernTemplate/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row f765b72b-e498-595e-9b06-b13df031d51a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured"
+      "gaps": {
+        "CovObservedOwnerModern": "#680: Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarButtonShowAsCard_true/Ext/Form.xml differs",
+        "CovOwnedScalarModernTemplate": "#680: Catalogs/CovOwnedScalarModernTemplate/Forms/CovOwnedScalarButtonShowAsCard_true/Ext/Form.xml differs"
       }
     },
     "8.5.1.1529/corpus-palette-help-and-interface": {
@@ -874,11 +877,6 @@
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 8bc8b12f-d55a-5257-b734-f801d74c9330.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
-        "CommonForms/CovFacetChartAutoMaxHeight.xml": "#600: base-free stage has no base Config row f982baa9-1706-56b5-976d-3cf541fcd1be.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 94819a5a-e3d9-5b4f-899c-b820280b307a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row f71679b6-4cc0-52ff-a800-f2b6455f8301.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row 917e8f81-2dfe-509d-ae51-7ce921f0262a.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row 2c1c708f-76e7-518a-b698-28043bafaf91.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row b33dc671-f3f5-580b-bc3d-95e055bdc6bd.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row dbc25128-2288-5d2e-aa59-3e3483a14562.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -954,11 +952,6 @@
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 8bc8b12f-d55a-5257-b734-f801d74c9330.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
-        "CommonForms/CovFacetChartAutoMaxHeight.xml": "#600: base-free stage has no base Config row f982baa9-1706-56b5-976d-3cf541fcd1be.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 94819a5a-e3d9-5b4f-899c-b820280b307a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row f71679b6-4cc0-52ff-a800-f2b6455f8301.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row 917e8f81-2dfe-509d-ae51-7ce921f0262a.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row 2c1c708f-76e7-518a-b698-28043bafaf91.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row b33dc671-f3f5-580b-bc3d-95e055bdc6bd.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovFacetTableExcludesDeselectAll.xml": "#622: base-free stage has no base Config row 07dcfda4-2360-5b5f-8707-870f01bb0809.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -1000,14 +993,11 @@
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
-        "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
-        "Catalogs/CovOwnedScalarModernTemplate/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row f765b72b-e498-595e-9b06-b13df031d51a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovBoundChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row a4446016-0a48-5948-bb31-a65089ab9700.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 703c95e3-eefd-5163-b520-15e913e262f4.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
         "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 0dde8835-c2ac-5eb1-9095-3ccfe3ae2b24.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
         "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row ada7da00-6fe4-5e8d-a519-eb78470c9b91.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
@@ -1015,7 +1005,6 @@
         "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row 16eae134-5a3a-55d0-a57b-81be5011a8a2.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
         "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
         "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
-        "CommonForms/CovChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row 816b2b50-fe05-53a1-9935-ccf92d00a67e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovChartMissingSeries.xml": "#679: base-free stage has no base Config row 6eb955a2-c7d3-522b-8740-61767f894ab0.0: the native form writer refuses it: <d4p1:chartType> spells StackedLine, which the chart writer has not measured",
         "CommonForms/CovChartSelectionMode.xml": "#679: base-free stage has no base Config row bf5242cb-5457-5b55-8aee-c60e716245a0.0: the native form writer refuses it: <Settings> names <d4p1:selectionMode>, which the chart writer cannot place",
         "CommonForms/CovChartTypeColumn.xml": "#679: base-free stage has no base Config row ef977da5-7048-5978-bbf5-522accccbc05.0: the native form writer refuses it: <d4p1:chartType> spells Column, which the chart writer has not measured",
@@ -1025,11 +1014,6 @@
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 8bc8b12f-d55a-5257-b734-f801d74c9330.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
         "CommonForms/CovExchangePlanHistory.xml": "#680: failed to compile base-free Form body CommonForms/CovExchangePlanHistory/Ext/Form.xml: no measured uuid for <ExcludedCommand>ChangeHistory</ExcludedCommand> on cfg:ExchangePlanObject",
-        "CommonForms/CovFacetChartAutoMaxHeight.xml": "#600: base-free stage has no base Config row f982baa9-1706-56b5-976d-3cf541fcd1be.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 94819a5a-e3d9-5b4f-899c-b820280b307a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row f71679b6-4cc0-52ff-a800-f2b6455f8301.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row 917e8f81-2dfe-509d-ae51-7ce921f0262a.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row 2c1c708f-76e7-518a-b698-28043bafaf91.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
         "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row b33dc671-f3f5-580b-bc3d-95e055bdc6bd.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
         "CommonForms/CovFacetTableExcludesDeselectAll.xml": "#622: base-free stage has no base Config row 07dcfda4-2360-5b5f-8707-870f01bb0809.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row 5c4ce787-b300-57b1-8717-4dcc3b91caaa.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",

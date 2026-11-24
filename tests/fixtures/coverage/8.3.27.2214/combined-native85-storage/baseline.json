@@ -1,0 +1,9 @@
+{
+  "equal": [
+    "CommonForms/CovFacetChartAutoMaxHeight",
+    "CommonForms/CovFacetChartAutoMaxWidth",
+    "CommonForms/CovFacetChartMaxWidth",
+    "CommonForms/CovFacetChartOnActivate",
+    "CommonForms/CovFacetPlannerCommandGenerateProcessing"
+  ]
+}
