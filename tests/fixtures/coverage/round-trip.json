@@ -89,8 +89,7 @@
         "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 97fdddd7-3cad-5d44-bd64-94d23a720f34.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row eccf6a8b-dce0-5903-94b5-e3ed668d476a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row a18ac418-4e59-5ff4-9eaa-e153f5926355.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row f786d3c8-58b8-575e-81ca-5bcc0cbfa2c5.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
-        "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row 9e57eef3-2aea-5173-8595-09d5551c060c.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid"
+        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row f786d3c8-58b8-575e-81ca-5bcc0cbfa2c5.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place"
       }
     },
     "8.3.27.2214/corpus-form-observed-scalars": {
@@ -364,9 +363,7 @@
         "CommonForms/CovFacetChartAutoMaxWidth.xml": "#600: base-free stage has no base Config row 97fdddd7-3cad-5d44-bd64-94d23a720f34.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovFacetChartMaxWidth.xml": "#600: base-free stage has no base Config row eccf6a8b-dce0-5903-94b5-e3ed668d476a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovFacetChartOnActivate.xml": "#600: base-free stage has no base Config row a18ac418-4e59-5ff4-9eaa-e153f5926355.0: the native form writer refuses it: <ChartField> names an event the writer cannot place",
-        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row f786d3c8-58b8-575e-81ca-5bcc0cbfa2c5.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place",
-        "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml": "#622: base-free stage has no base Config row 9e57eef3-2aea-5173-8595-09d5551c060c.0: the native form writer refuses it: <Table> excludes AddAutoSelectedField, which has no measured uuid",
-        "CommonForms/CovFacetTableExcludesDeselectAll.xml": "#622: base-free stage has no base Config row d13b8721-a534-5a18-93ca-99d4c3bcf941.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid"
+        "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml": "#600: base-free stage has no base Config row f786d3c8-58b8-575e-81ca-5bcc0cbfa2c5.0: the native form writer refuses it: <PlannerField> names an event the writer cannot place"
       }
     },
     "8.5.1.1150/corpus-form-observed-scalars": {

@@ -9,6 +9,7 @@
     "CovFacetRootNotificationProcessing",
     "CovFacetRootOnLoadDataFromSettingsAtServer",
     "CovFacetRootURLProcessing",
+    "CovFacetTableExcludesAddAutoSelectedField",
     "CovFacetTableExcludesSelectAll",
     "CovFacetTemplate",
     "configuration"
