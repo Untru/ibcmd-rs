@@ -5699,7 +5699,7 @@ fn extracts_home_page_work_area_with_form_references() {
 #[test]
 fn extracts_client_application_interface_layout() {
     let body = deflate_for_test(
-            b"{1,{0,1,{0,1,aaaaaaaa-aaaa-4aaa-baaa-aaaaaaaaaaaa,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,{0,1,cccccccc-cccc-4ccc-bccc-cccccccccccc,{0,dddddddd-dddd-4ddd-bddd-dddddddddddd,eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,2,0}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},1,{eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,0},0}",
+            b"{1,{0,1,{0,1,aaaaaaaa-aaaa-4aaa-baaa-aaaaaaaaaaaa,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,{0,1,cccccccc-cccc-4ccc-bccc-cccccccccccc,{0,dddddddd-dddd-4ddd-bddd-dddddddddddd,eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,2,1}}}}},{0,2,{0,0}},{0,3,{0,0}},{0,4,{0,0}},1,{eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee,0},0}",
         );
 
     let interface = parse_client_application_interface_blob(&body).unwrap();
@@ -5710,6 +5710,7 @@ fn extracts_client_application_interface_layout() {
     assert!(xml.contains("<panel id=\"dddddddd-dddd-4ddd-bddd-dddddddddddd\">"));
     assert!(xml.contains("<uuid>eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee</uuid>"));
     assert!(xml.contains("<panelDef id=\"eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee\"/>"));
+    assert!(xml.contains("<height>1</height>"));
     assert!(!xml.contains("<left>"));
 }
 

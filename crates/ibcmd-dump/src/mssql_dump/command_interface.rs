@@ -154,7 +154,11 @@ pub(super) struct ClientApplicationInterfaceGroup {
 
 pub(super) enum ClientApplicationInterfaceNode {
     Group(ClientApplicationInterfaceGroup),
-    Panel { id: String, uuid: String },
+    Panel {
+        id: String,
+        uuid: String,
+        height: u32,
+    },
 }
 
 pub(super) fn parse_command_interface_blob(
@@ -804,7 +808,14 @@ fn parse_client_application_interface_children_with_panel_wrapper(
         } else {
             let id = parse_non_zero_uuid(child_fields.get(1)?.trim())?;
             let uuid = parse_non_zero_uuid(child_fields.get(2)?.trim())?;
-            let panel = ClientApplicationInterfaceNode::Panel { id, uuid };
+            let height = match (
+                child_fields.get(3).map(|field| field.trim()),
+                child_fields.get(4),
+            ) {
+                (Some("2"), Some(value)) => value.trim().parse::<u32>().ok()?,
+                _ => 0,
+            };
+            let panel = ClientApplicationInterfaceNode::Panel { id, uuid, height };
             if wrap_panels_in_anonymous_group {
                 children.push(ClientApplicationInterfaceNode::Group(
                     ClientApplicationInterfaceGroup {
@@ -1086,15 +1097,18 @@ fn push_client_application_interface_node_xml(
         ClientApplicationInterfaceNode::Group(group) => {
             push_client_application_interface_group_xml(xml, group, indent);
         }
-        ClientApplicationInterfaceNode::Panel { id, uuid } => {
+        ClientApplicationInterfaceNode::Panel { id, uuid, height } => {
             let tab = "\t".repeat(indent);
             xml.push_str(&format!(
                 "{tab}<panel id=\"{}\">\r\n\
-{tab}\t<uuid>{}</uuid>\r\n\
-{tab}</panel>\r\n",
+{tab}\t<uuid>{}</uuid>\r\n",
                 escape_xml_text(id),
                 escape_xml_text(uuid)
             ));
+            if *height != 0 {
+                xml.push_str(&format!("{tab}\t<height>{height}</height>\r\n"));
+            }
+            xml.push_str(&format!("{tab}</panel>\r\n"));
         }
     }
 }
