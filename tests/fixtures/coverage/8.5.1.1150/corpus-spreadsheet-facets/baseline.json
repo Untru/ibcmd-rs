@@ -1,5 +1,7 @@
 {
   "equal": [
+    "CovSheetDashDotted",
+    "CovSheetGapLine",
     "CovSheetVerticalPageBreak",
     "CovSpreadsheetFacetTemplate",
     "configuration"

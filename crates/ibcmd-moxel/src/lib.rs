@@ -1227,9 +1227,19 @@ pub struct MoxelFont {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MoxelLine {
+    pub gap: bool,
     pub style: &'static str,
     pub line_type: &'static str,
     pub width: usize,
+}
+
+impl MoxelLine {
+    const UNSTYLED: Self = Self {
+        gap: false,
+        style: "",
+        line_type: "",
+        width: 0,
+    };
 }
 
 /// Internal provenance carried until the final `MoxelLine` projection.
@@ -1381,7 +1391,7 @@ impl From<&ResolvedMoxelLine> for MoxelLineTraceEvent {
             final_style: line.style,
             final_type: line.line_type,
             final_width: line.width,
-            final_gap: false,
+            final_gap: line.gap,
             ambiguous: line.ambiguous,
             fail_closed: line.fail_closed,
         }
@@ -2569,7 +2579,21 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs));
     // The document's own line table is authoritative wherever it decodes; the
     // legacy reconstruction below only runs when the slot refuses.
-    let resolved_lines = match parse_moxel_line_table(&fields)
+    let mut stored_lines = parse_moxel_line_table(&fields);
+    // CovObservedSheetDrawingBorder has one drawing line and a cell border
+    // referring to the next slot. Native export publishes that missing slot
+    // as an unstyled line. Importing that XML stores the nil descriptor.
+    if let Some(lines) = &mut stored_lines
+        && let [only] = lines.as_slice()
+        && only.line_type == "v8ui:SpreadsheetDocumentDrawingLineType"
+        && all_formats
+            .iter()
+            .chain(leading_default_format.iter())
+            .any(|format| format.left_border == Some(1))
+    {
+        lines.push(MoxelLine::UNSTYLED);
+    }
+    let resolved_lines = match stored_lines
         .filter(|lines| moxel_line_table_covers_references(lines, &all_formats))
     {
         Some(lines) => {
@@ -5277,7 +5301,7 @@ pub fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
             || descriptor.first()?.trim() != "4"
             || descriptor.get(1)?.trim() != "0"
             || descriptor.get(2)?.trim() != "{0}"
-            || descriptor.get(7)?.trim() != "0"
+            || !matches!(descriptor.get(7)?.trim(), "0" | "1")
         {
             return None;
         }
@@ -5308,21 +5332,19 @@ pub fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
         // its eight-slot table stores `{4,0,{0},0,0,0,00000000-…,0}` at slot 6
         // among seven ordinary cell descriptors, and the platform publishes
         // four lines -- `Solid`, `Double`, `None` and `Dotted`, all width 1 --
-        // which are exactly the four cell descriptors its formats cite. The
-        // placeholder is read as the cell enumeration's own `None` so it can
-        // be dropped with the other uncited entries rather than guessed at.
-        let placeholder =
-            kind == MOXEL_NIL_LINE_KIND && descriptor.get(3)?.trim() == "0" && width == 0;
+        // which are exactly the four cell descriptors its formats cite.
+        if kind == MOXEL_NIL_LINE_KIND
+            && descriptor[3].trim() == "0"
+            && width == 0
+            && descriptor[7].trim() == "0"
+        {
+            lines.push(MoxelLine::UNSTYLED);
+            continue;
+        }
         let line_type = match kind {
             MOXEL_CELL_LINE_KIND => "v8ui:SpreadsheetDocumentCellLineType",
             MOXEL_DRAWING_LINE_KIND => "v8ui:SpreadsheetDocumentDrawingLineType",
-            _ if placeholder => "v8ui:SpreadsheetDocumentCellLineType",
             _ => return None,
-        };
-        let kind = if placeholder {
-            MOXEL_CELL_LINE_KIND
-        } else {
-            kind
         };
         let style = match (kind, descriptor.get(3)?.trim()) {
             (MOXEL_CELL_LINE_KIND, "0") => "None",
@@ -5335,9 +5357,11 @@ pub fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
             (MOXEL_DRAWING_LINE_KIND, "0") => "None",
             (MOXEL_DRAWING_LINE_KIND, "1") => "Solid",
             (MOXEL_DRAWING_LINE_KIND, "3") => "Dotted",
+            (MOXEL_DRAWING_LINE_KIND, "4") => "DashDotted",
             _ => return None,
         };
         lines.push(MoxelLine {
+            gap: descriptor[7].trim() == "1",
             style,
             line_type,
             width,
@@ -5417,6 +5441,7 @@ fn parse_moxel_lines_with_raw_spans(
             vec![resolved_moxel_line_from_parents(
                 std::slice::from_ref(source),
                 MoxelLine {
+                    gap: source.gap,
                     style: source.style,
                     line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                     width: source.width,
@@ -5474,6 +5499,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5485,6 +5511,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 3,
@@ -5496,6 +5523,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5507,6 +5535,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5536,6 +5565,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "ThinDashed",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 1,
@@ -5547,6 +5577,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "None",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 0,
@@ -5558,6 +5589,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "Solid",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 2,
@@ -5569,6 +5601,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "None",
                             line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                             width: 1,
@@ -5586,6 +5619,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5597,6 +5631,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5608,6 +5643,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5619,6 +5655,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                         width: 1,
@@ -5641,6 +5678,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5652,6 +5690,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5663,6 +5702,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                         width: 1,
@@ -5689,6 +5729,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5700,6 +5741,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[2..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5726,6 +5768,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5737,6 +5780,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5748,6 +5792,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 3,
@@ -5774,6 +5819,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5785,6 +5831,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5796,6 +5843,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 0,
@@ -5821,6 +5869,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5832,6 +5881,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Dotted",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5854,6 +5904,7 @@ fn parse_moxel_lines_with_raw_spans(
             vec![resolved_moxel_line_from_parents(
                 &lines[0..1],
                 MoxelLine {
+                    gap: false,
                     style: "Solid",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -5871,6 +5922,7 @@ fn parse_moxel_lines_with_raw_spans(
     finalize_moxel_line_slots(
         vec![ResolvedMoxelLine {
             line: MoxelLine {
+                gap: false,
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
                 width: 1,
@@ -11277,6 +11329,7 @@ pub fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
         _ => return None,
     };
     Some(MoxelLine {
+        gap: false,
         style,
         line_type: "v8ui:SpreadsheetDocumentCellLineType",
         width: 1,
@@ -14907,7 +14960,15 @@ pub fn push_moxel_merge_body_xml(xml: &mut String, merge: &MoxelMerge) {
 }
 
 pub fn push_moxel_line_xml(xml: &mut String, line: &MoxelLine) {
-    _ = write!(xml, "\t<line width=\"{}\" gap=\"false\">\r\n", line.width);
+    if line == &MoxelLine::UNSTYLED {
+        xml.push_str("\t<line width=\"0\" gap=\"false\"/>\r\n");
+        return;
+    }
+    _ = write!(
+        xml,
+        "\t<line width=\"{}\" gap=\"{}\">\r\n",
+        line.width, line.gap
+    );
     _ = write!(
         xml,
         "\t\t<v8ui:style xsi:type=\"{}\">{}</v8ui:style>\r\n",
@@ -16016,6 +16077,7 @@ mod moxel_exact_parity_tests {
         let mut lines = vec![
             ResolvedMoxelLine {
                 line: MoxelLine {
+                    gap: false,
                     style: "Solid",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -16033,6 +16095,7 @@ mod moxel_exact_parity_tests {
             },
             ResolvedMoxelLine {
                 line: MoxelLine {
+                    gap: false,
                     style: "Dotted",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -16344,6 +16407,7 @@ mod moxel_exact_parity_tests {
 
         let line = ResolvedMoxelLine {
             line: MoxelLine {
+                gap: false,
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
                 width: 1,
@@ -16372,6 +16436,7 @@ mod moxel_exact_parity_tests {
                 line,
                 ResolvedMoxelLine {
                     line: MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
