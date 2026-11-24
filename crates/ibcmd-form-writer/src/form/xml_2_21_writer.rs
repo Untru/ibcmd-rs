@@ -551,6 +551,11 @@ pub const GROUPING: &[(&str, Option<&str>)] = &[
 pub const TRI_STATE: &[(&str, Option<&str>)] =
     &[("0", Some("false")), ("1", Some("true")), ("2", None)];
 
+pub(super) const WIDTH_IN_CARD: &[(&str, Option<&str>)] =
+    &[("0", None), ("1", Some("Full")), ("2", Some("Half"))];
+pub(super) const CELL_HYPERLINK_REPRESENTATION: &[(&str, Option<&str>)] =
+    &[("0", None), ("1", Some("Show")), ("2", Some("DontShow"))];
+
 const FACT_RULES: &[FactRule] = &[
     // Form root: appended trailer members. The 8.3.27 root slot of
     // `WindowOpeningMode` cannot tell an explicit `DontBlock` from an unset
@@ -619,7 +624,7 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Item("48", 8),
         element: "WidthInCard",
         replaces: &[],
-        values: &[("0", None), ("2", Some("Half"))],
+        values: WIDTH_IN_CARD,
     },
     FactRule {
         tags: FIELD_TAGS,
@@ -633,15 +638,13 @@ const FACT_RULES: &[FactRule] = &[
             ("3", Some("ByDataAndTitle")),
         ],
     },
-    // Members 13 and 14 read the same code on every BSP item that carries
-    // either element; which element each names follows the elements' own
-    // written order, not a disagreeing record.
+    // In the 8.5.1.1529 DontShow probes only member 13 changes.
     FactRule {
         tags: FIELD_TAGS,
         source: FactSource::Item("48", 13),
         element: "CellHyperlinkRepresentation",
         replaces: &[],
-        values: &[("0", None), ("1", Some("Show"))],
+        values: CELL_HYPERLINK_REPRESENTATION,
     },
     FactRule {
         tags: FIELD_TAGS,
@@ -662,7 +665,7 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("12", 0),
         element: "UseCopy",
         replaces: &[],
-        values: &[("1", Some("true")), ("2", None)],
+        values: TRI_STATE,
     },
     // 8.5 has no `Auto` check box: the kind member reads `0` where 8.3.27
     // needed its set flag, and every BSP check box with a `0` writes nothing.

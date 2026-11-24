@@ -27,7 +27,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use ibcmd_1c_text::{crlf_line_breaks, format_1c_string as quote_1c};
 
 use super::xml_2_21_writer::{
-    FIELD_TAGS, GROUPING, TRI_STATE, XmlEdits, child_text, element_name, simple_text,
+    CELL_HYPERLINK_REPRESENTATION, FIELD_TAGS, GROUPING, TRI_STATE, WIDTH_IN_CARD, XmlEdits,
+    child_text, element_name, simple_text,
 };
 use ibcmd_form_body::FormLayout;
 use ibcmd_form_body::layout_8_5_1::Node;
@@ -716,14 +717,8 @@ fn load_field(
     item.tail
         .insert(7, code_of(TRI_STATE, card.as_deref(), "ShowTitleInCard")?);
     let width = take(edits, element, "WidthInCard")?;
-    item.tail.insert(
-        8,
-        code_of(
-            &[("0", None), ("2", Some("Half"))],
-            width.as_deref(),
-            "WidthInCard",
-        )?,
-    );
+    item.tail
+        .insert(8, code_of(WIDTH_IN_CARD, width.as_deref(), "WidthInCard")?);
     let auto_width = take(edits, element, "AutoWidthInTable")?;
     item.tail.insert(
         12,
@@ -742,7 +737,7 @@ fn load_field(
     item.tail.insert(
         13,
         code_of(
-            &[("0", None), ("1", Some("Show"))],
+            CELL_HYPERLINK_REPRESENTATION,
             representation.as_deref(),
             "CellHyperlinkRepresentation",
         )?,
@@ -782,14 +777,8 @@ fn load_field(
         }
         "LabelField" => {
             let copy = take(edits, element, "UseCopy")?;
-            item.bag_tail.insert(
-                0,
-                code_of(
-                    &[("1", Some("true")), ("2", None)],
-                    copy.as_deref(),
-                    "UseCopy",
-                )?,
-            );
+            item.bag_tail
+                .insert(0, code_of(TRI_STATE, copy.as_deref(), "UseCopy")?);
         }
         "CheckBoxField" => {
             // 8.5 has no `Auto` check box: an unset type is 8.3.27's `Auto`
