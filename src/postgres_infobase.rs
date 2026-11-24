@@ -118,18 +118,49 @@ fn read_rows(connection: &mut PgConnection, table: &str) -> Result<Vec<ConfigRow
 fn write_stage(connection: &mut PgConnection, rows: &[ConfigRow]) -> Result<usize> {
     let written = (|| -> Result<usize> {
         let mut before = 0;
-        connection.query("SELECT count(*) FROM configsave", &mut |row| {
-            before = row
-                .first()
-                .and_then(Option::as_deref)
-                .and_then(|value| std::str::from_utf8(value).ok()?.parse().ok())
-                .unwrap_or(0);
+        let mut can_copy = false;
+        connection.query(
+            "SELECT count(*), has_database_privilege(current_database(), 'TEMP') FROM configsave",
+            &mut |row| {
+                let count = row
+                    .first()
+                    .and_then(Option::as_deref)
+                    .context("missing configsave count")?;
+                before = std::str::from_utf8(count)?.parse()?;
+                can_copy = row.get(1).and_then(Option::as_deref) == Some(b"t");
+                Ok(())
+            },
+        )?;
+        connection.query("DELETE FROM configsave", &mut |_| Ok(()))?;
+        if !can_copy {
+            for row in rows {
+                connection.query(&insert_statement(row), &mut |_| Ok(()))?;
+            }
+            return Ok(before);
+        }
+        // Keep the platform-specific mvarchar cast and the database's local
+        // timestamp on the server. The wire representation uses core PG types.
+        connection.query(
+            "CREATE TEMP TABLE ibcmd_stage (name text, attributes int4, size int8, data bytea, part int4) ON COMMIT DROP",
+            &mut |_| Ok(()),
+        )?;
+        connection.copy_binary("COPY pg_temp.ibcmd_stage FROM STDIN BINARY", |copy| {
+            for row in rows {
+                copy.row(&[
+                    Some(row.file_name.as_bytes()),
+                    Some(&i32::try_from(row.attributes)?.to_be_bytes()),
+                    Some(&i64::try_from(row.data_size)?.to_be_bytes()),
+                    Some(&row.binary),
+                    Some(&i32::try_from(row.part_no)?.to_be_bytes()),
+                ])?;
+            }
             Ok(())
         })?;
-        connection.query("DELETE FROM configsave", &mut |_| Ok(()))?;
-        for row in rows {
-            connection.query(&insert_statement(row), &mut |_| Ok(()))?;
-        }
+        connection.query(
+            "INSERT INTO configsave (filename, creation, modified, attributes, datasize, binarydata, partno) \
+             SELECT name::mvarchar, LOCALTIMESTAMP(0), LOCALTIMESTAMP(0), attributes, size, data, part FROM pg_temp.ibcmd_stage",
+            &mut |_| Ok(()),
+        )?;
         Ok(before)
     })();
     match written {
@@ -187,6 +218,7 @@ mod tests {
             send(&mut stream, b'R', &0u32.to_be_bytes());
             send(&mut stream, b'Z', b"I");
             let mut queries = Vec::new();
+            let mut copy_frames = Vec::new();
             loop {
                 let mut header = [0; 5];
                 stream.read_exact(&mut header).unwrap();
@@ -196,8 +228,49 @@ mod tests {
                 if header[0] == b'X' {
                     break;
                 }
-                assert_eq!(header[0], b'Q');
+                match header[0] {
+                    b'd' => {
+                        copy_frames.push(body);
+                        continue;
+                    }
+                    b'c' => {
+                        assert_eq!(
+                            copy_frames.first().unwrap(),
+                            b"PGCOPY\n\xff\r\n\0\0\0\0\0\0\0\0\0"
+                        );
+                        assert_eq!(copy_frames.pop().unwrap(), (-1i16).to_be_bytes());
+                        assert!(copy_frames.len() > 1);
+                        for row in &copy_frames[1..] {
+                            let mut fields = row.as_slice();
+                            let mut count = [0; 2];
+                            fields.read_exact(&mut count).unwrap();
+                            assert_eq!(i16::from_be_bytes(count), 5);
+                            for expected in [None, Some(4), Some(8), None, Some(4)] {
+                                let mut length = [0; 4];
+                                fields.read_exact(&mut length).unwrap();
+                                let length = usize::try_from(i32::from_be_bytes(length)).unwrap();
+                                if let Some(expected) = expected {
+                                    assert_eq!(length, expected);
+                                }
+                                fields = &fields[length..];
+                            }
+                            assert!(fields.is_empty());
+                        }
+                        send(&mut stream, b'C', b"COPY\0");
+                        send(&mut stream, b'Z', b"T");
+                        continue;
+                    }
+                    b'Q' => {}
+                    tag => panic!("unexpected frontend message {tag}"),
+                }
                 queries.push(String::from_utf8(body[..body.len() - 1].to_vec()).unwrap());
+                if queries.last().unwrap().starts_with("SELECT count(*)") {
+                    send(&mut stream, b'D', b"\0\x02\0\0\0\x010\0\0\0\x01t");
+                }
+                if queries.last().unwrap().starts_with("COPY ") {
+                    send(&mut stream, b'G', &[1, 0, 5, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]);
+                    continue;
+                }
                 send(&mut stream, b'C', b"OK\0");
                 send(&mut stream, b'Z', b"I");
             }
@@ -233,6 +306,11 @@ mod tests {
             Some("LOCK TABLE config, configsave IN SHARE ROW EXCLUSIVE MODE")
         );
         assert!(queries[2].ends_with("FROM config"));
+        assert!(
+            queries
+                .iter()
+                .any(|sql| sql == "COPY pg_temp.ibcmd_stage FROM STDIN BINARY")
+        );
         assert_eq!(queries.last().map(String::as_str), Some("COMMIT"));
     }
 
@@ -287,7 +365,6 @@ mod tests {
         });
         assert_locked_stage(&queries);
     }
-
     #[test]
     fn row_names_quote_backslashes_independently_of_the_server_setting() {
         let row = ConfigRow {

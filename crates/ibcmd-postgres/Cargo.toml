@@ -9,6 +9,8 @@ description = "Portable PostgreSQL transport, authentication and protocol codecs
 [dependencies]
 anyhow = "1.0"
 md5 = "0.6"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rustls-native-certs = "0.8"
 sha2 = "0.10"
 stringprep = "0.1.5"
 uuid = { version = "1.19", features = ["v4"] }
