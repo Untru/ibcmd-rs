@@ -1,0 +1,173 @@
+{
+  "platform": "8.5.1.1529",
+  "xml_version": "2.21",
+  "fixture_sha256": "3490af9c79c00d0a67677378c44b61bdfc3e946f34b6828500eb13a5b4127eac",
+  "exporter_sha256": "86babde097d9e534c7d0295ec1e3a606184fdea271fb3d784276d3c89df4ba5a",
+  "descriptor_audit": {
+    "CommonTemplate": {
+      "total": 10,
+      "identical": 10,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 10,
+      "lossy": 0
+    },
+    "Configuration": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "Language": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    }
+  },
+  "rows": 25,
+  "export_exit": 0,
+  "source_xml": {
+    "equal": 15,
+    "changed": [
+      "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+      "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+      "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+      "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+      "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+      "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+      "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+      "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml"
+    ],
+    "missing": [],
+    "extra": []
+  },
+  "source_asset_rows": 10,
+  "descriptor_counters": {
+    "model_metadata_xml_rows": 12,
+    "model_fallback_rows": 0,
+    "model_shadow_rows": 12,
+    "model_shadow_differing_rows": 0
+  },
+  "xml_field_counts": {
+    "equal": 808,
+    "changed": 5,
+    "missing": 30,
+    "extra": 2
+  },
+  "fallback_messages": [],
+  "platform_steps": {
+    "native": {
+      "import": 0,
+      "apply": 0,
+      "export": 0
+    },
+    "ours": {
+      "import": 0,
+      "apply": 0,
+      "export": 0
+    }
+  },
+  "native_vs_original_config": {
+    "equal": 23,
+    "changed": [
+      "00890155-9fef-4f11-bc0d-03e7023155e9__part0",
+      "versions__part0"
+    ],
+    "missing": [],
+    "extra": []
+  },
+  "native_vs_original_xml": {
+    "equal": 22,
+    "changed": [
+      "ConfigDumpInfo.xml"
+    ],
+    "missing": [],
+    "extra": []
+  },
+  "ours_vs_original_config": {
+    "equal": 15,
+    "changed": [
+      "00890155-9fef-4f11-bc0d-03e7023155e9__part0",
+      "15ecc5cd-8065-5f95-90f2-fc11676411a1.0__part0",
+      "562d76a3-f8fa-5663-bf70-881e747339e6.0__part0",
+      "6010b4c1-5200-5200-b1c9-d988691a9330.0__part0",
+      "6b755b5b-68b3-5c3c-8ca7-161a75f688b3.0__part0",
+      "96fcfe97-a834-526f-9a80-bb479cd819c4.0__part0",
+      "beab300a-c191-5610-b1e1-257f7f07c732.0__part0",
+      "cd4601cb-3137-574c-ad13-fdab74fa57ff.0__part0",
+      "e8d41075-ac0a-56d4-93d5-96c53032c411.0__part0",
+      "versions__part0"
+    ],
+    "missing": [],
+    "extra": []
+  },
+  "ours_vs_original_xml": {
+    "equal": 14,
+    "changed": [
+      "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+      "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+      "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+      "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+      "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+      "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+      "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+      "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+      "ConfigDumpInfo.xml"
+    ],
+    "missing": [],
+    "extra": []
+  },
+  "imported_config": {
+    "equal": 15,
+    "changed": [
+      "00890155-9fef-4f11-bc0d-03e7023155e9__part0",
+      "15ecc5cd-8065-5f95-90f2-fc11676411a1.0__part0",
+      "562d76a3-f8fa-5663-bf70-881e747339e6.0__part0",
+      "6010b4c1-5200-5200-b1c9-d988691a9330.0__part0",
+      "6b755b5b-68b3-5c3c-8ca7-161a75f688b3.0__part0",
+      "96fcfe97-a834-526f-9a80-bb479cd819c4.0__part0",
+      "beab300a-c191-5610-b1e1-257f7f07c732.0__part0",
+      "cd4601cb-3137-574c-ad13-fdab74fa57ff.0__part0",
+      "e8d41075-ac0a-56d4-93d5-96c53032c411.0__part0",
+      "versions__part0"
+    ],
+    "missing": [],
+    "extra": []
+  },
+  "imported_xml": {
+    "equal": 14,
+    "changed": [
+      "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+      "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+      "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+      "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+      "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+      "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+      "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+      "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+      "ConfigDumpInfo.xml"
+    ],
+    "missing": [],
+    "extra": []
+  },
+  "template_bodies": {
+    "CovSheetAppearanceCheckIcon": "cd4601cb-3137-574c-ad13-fdab74fa57ff.0__part0",
+    "CovSheetAutoFontHeight": "beab300a-c191-5610-b1e1-257f7f07c732.0__part0",
+    "CovSheetDashDotted": "562d76a3-f8fa-5663-bf70-881e747339e6.0__part0",
+    "CovSheetGapLine": "96fcfe97-a834-526f-9a80-bb479cd819c4.0__part0",
+    "CovSheetOEMFixedFont": "6b755b5b-68b3-5c3c-8ca7-161a75f688b3.0__part0",
+    "CovSheetPageSizeA4": "e8d41075-ac0a-56d4-93d5-96c53032c411.0__part0",
+    "CovSheetSandyBrown": "15ecc5cd-8065-5f95-90f2-fc11676411a1.0__part0",
+    "CovSheetValueListDetail": "6010b4c1-5200-5200-b1c9-d988691a9330.0__part0",
+    "CovSheetVerticalPageBreak": "17d04453-3bf4-5cc6-95d8-aecd890de0dd.0__part0",
+    "CovSpreadsheetFacetTemplate": "8354ade3-9c21-5454-9d32-b3bf79e84575.0__part0"
+  }
+}
