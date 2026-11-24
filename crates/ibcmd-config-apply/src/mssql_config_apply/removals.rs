@@ -156,7 +156,12 @@ fn retained_catalog_module(input: &RemovalInput<'_>, owner: &str, name: &str) ->
         && active == staged)
 }
 
-const COMMON_MODULE_CLASS: &str = "0fe48980-252d-11d6-a3c7-0050bae0a776";
+fn common_module_class() -> &'static str {
+    crate::metadata_model::export::names::root_class_kinds()
+        .iter()
+        .find_map(|&(class, kind)| (kind == "CommonModule").then_some(class))
+        .expect("CommonModule is a top-level metadata class")
+}
 
 /// Check the entire descriptor against the measured membership edit. Other
 /// references (subscriptions, scheduled jobs, etc.) require their own rules.
@@ -165,7 +170,7 @@ fn module_membership_removed(active: &[u8], stage: &[u8], uuid: &str, root: bool
         return false;
     };
     let (path, tag, member) = if root {
-        (&[3, 1, 5][..], COMMON_MODULE_CLASS, Brace::uuid(uuid))
+        (&[3, 1, 5][..], common_module_class(), Brace::uuid(uuid))
     } else {
         if before
             .as_list()
@@ -180,11 +185,7 @@ fn module_membership_removed(active: &[u8], stage: &[u8], uuid: &str, root: bool
         (
             &[1, 7][..],
             "0",
-            Brace::list(vec![
-                Brace::str("#"),
-                Brace::atom("157fa490-4ce9-11d4-9415-008048da11f9"),
-                Brace::list(vec![Brace::atom(1), Brace::uuid(uuid)]),
-            ]),
+            crate::metadata_model::common::design_time_reference(uuid),
         )
     };
     let mut node = &mut before;
@@ -546,7 +547,7 @@ pub fn analyze(input: &RemovalInput<'_>) -> Result<RemovalAnalysis> {
                         uuid: uuid.clone(),
                         owner: root_owner.clone(),
                         kind: "CommonModule",
-                        class: COMMON_MODULE_CLASS.to_owned(),
+                        class: common_module_class().to_owned(),
                         name: descriptor.name,
                         rows: object.rows.clone(),
                     });
