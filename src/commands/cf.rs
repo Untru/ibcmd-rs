@@ -695,7 +695,7 @@ fn bootstrap(mut args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandErro
             &args,
             "bootstrap_package_not_supported",
             format!(
-                "{:?} source `{}` is built by `cf bootstrap --base-free --platform 8.3.27` (.epf/.erf); refusing ordinary CF publication",
+                "{:?} source `{}` requires `cf bootstrap --base-free --platform <version>` with an .epf/.erf output",
                 package.intent,
                 package.root_xml.display(),
             ),
@@ -1017,8 +1017,9 @@ fn bootstrap_base_free(
     }))
 }
 
-/// The platform whose packages seed an external build (`load::seed`).
+/// The platforms whose packages seed an external build (`load::seed`).
 const EXTERNAL_TARGET_PROFILE: &str = "platform-8.3.27.2214";
+const EXTERNAL_85_TARGET_PROFILE: &str = "platform-8.5.1.1150";
 
 /// `.epf`/`.erf` from the external tree alone (issue #438): the compiled
 /// load onto a seed package given the tree's identities
@@ -1027,15 +1028,23 @@ fn bootstrap_external(
     mut args: CfBootstrapArgs,
     target_unspecified: bool,
 ) -> Result<CfCommandReport, CfCommandError> {
-    // The seeds are 8.3.27.2214 packages and the load keeps their container:
-    // nothing else was measured, so nothing else is offered.
+    use crate::legacy_version::InfobaseConfigSourceVersion;
+    let modern = args.source_version == InfobaseConfigSourceVersion::V2_21;
+    let target = if modern {
+        EXTERNAL_85_TARGET_PROFILE
+    } else {
+        EXTERNAL_TARGET_PROFILE
+    };
     let unmeasured = [
         (
-            args.source_version != crate::legacy_version::InfobaseConfigSourceVersion::V2_20,
-            "8.5 XML (2.21)",
+            modern
+                && args
+                    .platform
+                    .is_some_and(|p| p.is_exact_build() && p.display() != "8.5.1.1150"),
+            "--platform",
         ),
         (
-            !target_unspecified && args.target_profile != EXTERNAL_TARGET_PROFILE,
+            !target_unspecified && args.target_profile != target,
             "--target-profile",
         ),
         (args.profile_dir.is_some(), "--profile-dir"),
@@ -1052,13 +1061,13 @@ fn bootstrap_external(
             &args,
             "bootstrap_option_not_supported",
             format!(
-                "an .epf/.erf is built from XML 2.20 into the container 8.3.27.2214 writes; \
-                 not supported for external objects: {}",
+                "unsupported external bootstrap options for {} on {target}: {}",
+                args.source_version.as_str(),
                 unmeasured.join(", ")
             ),
         ));
     }
-    args.target_profile = EXTERNAL_TARGET_PROFILE.to_owned();
+    args.target_profile = target.to_owned();
     if args.output.exists() {
         return Err(bootstrap_failure(
             &args,

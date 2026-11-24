@@ -201,14 +201,14 @@ fn add_object_field(tree: &Path, name: &str) {
     fs::write(&form, text.replacen("\t<Attributes>", field, 1)).unwrap();
 }
 
-/// The text of the `copyinfo` entry of `file`.
-fn copyinfo(file: &Path, scratch: &Path) -> String {
-    let dir = scratch.join("copyinfo");
+/// The unpacked text of a storage entry.
+fn entry_text(file: &Path, entry: &str, scratch: &Path) -> String {
+    let dir = scratch.join(entry);
     let out = ibcmd(&[
         Path::new("cf"),
         Path::new("extract"),
         file,
-        Path::new("copyinfo"),
+        Path::new(entry),
         &dir,
     ]);
     assert!(
@@ -253,7 +253,7 @@ fn renamed_processor_builds(name: &str, tag: &str) {
         .to_owned();
     let type_id = value_after(&root, "category=\"Object\"", "xr:TypeId");
     assert!(attribute.starts_with("5eed") && type_id.starts_with("5eed"));
-    let copyinfo = copyinfo(&output, &scratch.0);
+    let copyinfo = entry_text(&output, "copyinfo", &scratch.0);
     assert!(
         copyinfo.contains(&format!("{{0,{attribute}}},{type_id},")),
         "{copyinfo}"
@@ -354,4 +354,56 @@ fn an_unmeasured_form_step_is_refused_without_output() {
     assert!(!refused.status.success(), "{report}");
     assert!(report.contains("StartDate"), "{report}");
     assert!(!output.exists());
+}
+
+#[test]
+fn xml_221_processor_uses_the_native_85_container() {
+    let scratch = Scratch::new("processor-85");
+    let tree = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/1c-fixtures/coverage/8.5.1.1150/external/combined-epf/native");
+    let output = scratch.0.join("built.epf");
+    let build = |platform: &str, target: &str| {
+        ibcmd(&[
+            Path::new("cf"),
+            Path::new("bootstrap"),
+            Path::new("--base-free"),
+            Path::new("--platform"),
+            Path::new(platform),
+            Path::new("--target-profile"),
+            Path::new(target),
+            &tree,
+            &output,
+        ])
+    };
+    for (platform, target, option) in [
+        ("8.5.1.1150", "platform-8.3.27.2214", "--target-profile"),
+        ("8.5.1.1529", "platform-8.5.1.1150", "--platform"),
+    ] {
+        let refused = build(platform, target);
+        assert!(!refused.status.success());
+        let report: serde_json::Value = serde_json::from_slice(&refused.stderr).unwrap();
+        assert_eq!(
+            report["errors"][0]["code"],
+            "bootstrap_option_not_supported"
+        );
+        assert!(
+            report["errors"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains(option)
+        );
+        assert!(!output.exists());
+    }
+    let built = build("8.5.1.1150", "platform-8.5.1.1150");
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&built.stdout).unwrap();
+    assert_eq!(report["target_profile"], "platform-8.5.1.1150");
+    assert_eq!(
+        entry_text(&output, "version", &scratch.0),
+        "\u{feff}{\r\n{216,0,\r\n{80501,0}\r\n}\r\n}"
+    );
 }

@@ -501,11 +501,6 @@
         "CovUpdateDataHistoryImmediatelyAfterWrite_true": "#545: ExchangePlans/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml not written"
       }
     },
-    "8.5.1.1150/external/combined-epf": {
-      "gaps": {
-        "CovCombined": "#677: refused: *"
-      }
-    },
     "8.5.1.1150/external/combined-erf": {
       "gaps": {
         "CovCombined": "#677: refused: *"
