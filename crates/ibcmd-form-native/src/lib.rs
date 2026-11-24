@@ -3169,6 +3169,10 @@ pub fn format_document_payload(wrapper: u8, width: &str, height: &str, tail: &st
 /// The uuid a `<Button>` stores for `Form.Item.<item>.StandardCommand.<name>`,
 /// by the target item's tag, whether it is bound to a dynamic list, and the
 /// command's name. Measured over every item button of ERP УХ.
+// Singleton command sets in native corpus-form-facets (8.3.27.2214 and 8.5.1.1150).
+pub const TABLE_ADD_AUTO_SELECTED_FIELD_UUID: &str = "eaab4e19-897e-464c-9674-262fddb1dce9";
+pub const TABLE_DESELECT_ALL_UUID: &str = "03022d03-1986-4dc4-93c2-03d995332357";
+
 const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     (
         "PlannerField",
@@ -4076,6 +4080,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
         "SearchHistory",
         "d96b0c03-b209-4d01-a3fc-17a14f873b64",
     ),
+    ("Table", false, "DeselectAll", TABLE_DESELECT_ALL_UUID),
     (
         "Table",
         false,
@@ -5598,6 +5603,9 @@ pub fn table_item_standard_command_uuid(
         let path = data_path.unwrap_or("").trim();
         let last = path.rsplit('.').next().unwrap_or("");
         match name {
+            "AddAutoSelectedField" if path.ends_with(".Settings.Selection") => {
+                return Some(TABLE_ADD_AUTO_SELECTED_FIELD_UUID);
+            }
             "Ungroup" if path.ends_with(".Settings") => {
                 return Some("23802256-7145-47c7-b379-8d60ca1b1262");
             }
@@ -10113,6 +10121,27 @@ fn resolve_metadata_data_path_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn table_exclusions_use_native_singleton_command_ids() {
+        assert_eq!(
+            table_item_standard_command_uuid(
+                "Table",
+                false,
+                Some("Rows.SettingsComposer.Settings.Selection"),
+                "AddAutoSelectedField"
+            ),
+            Some("eaab4e19-897e-464c-9674-262fddb1dce9")
+        );
+        assert_eq!(
+            table_item_standard_command_uuid("Table", false, Some("Rows"), "DeselectAll"),
+            Some("03022d03-1986-4dc4-93c2-03d995332357")
+        );
+        assert_eq!(
+            table_item_standard_command_uuid("Table", false, Some("Rows"), "AddAutoSelectedField"),
+            None
+        );
+    }
 
     #[test]
     fn extension_activation_colors_match_native_coverage() {

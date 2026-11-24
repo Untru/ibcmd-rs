@@ -30247,6 +30247,9 @@ pub(super) fn form_spreadsheet_document_standard_command_suffix(
 
 pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
+        // Native corpus-form-facets table exclusions (#622).
+        ibcmd_form_native::TABLE_ADD_AUTO_SELECTED_FIELD_UUID => Some("AddAutoSelectedField"),
+        ibcmd_form_native::TABLE_DESELECT_ALL_UUID => Some("DeselectAll"),
         // Platform 8.5: the one identifier every 8.5 BSP table that excludes
         // `ClearTableMarksAppearance` stores, and no other table does.
         "daf40cdf-c477-48c5-9627-57d5450e1f3d" => Some("ClearTableMarksAppearance"),
