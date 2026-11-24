@@ -513,12 +513,21 @@ impl Operation {
     }
 
     fn succeed(&self, report: Option<&Path>, value: &impl Serialize) -> i32 {
+        self.succeed_with_suffix(report, value, "")
+    }
+
+    fn succeed_with_suffix(
+        &self,
+        report: Option<&Path>,
+        value: &impl Serialize,
+        suffix: impl std::fmt::Display,
+    ) -> i32 {
         if let Some(path) = report
             && let Err(error) = write_json(path, value)
         {
             return self.fail_with(&format!("{error:#}"), None);
         }
-        println!("[INFO] {} успешно {}", self.title, self.ended);
+        println!("[INFO] {} успешно {}{suffix}", self.title, self.ended);
         0
     }
 
@@ -587,13 +596,10 @@ const APPLY: Operation = Operation {
     ended: "завершено",
 };
 
-/// The title is the platform's own name of the command (`ibcmd help
-/// infobase`: `save - Выгрузка конфигурации`), as every served command's
-/// title is; the lines `config save` itself prints are not measured.
 const SAVE: Operation = Operation {
     command: "infobase config save",
-    title: "Выгрузка конфигурации",
-    ended: "завершена",
+    title: "Сохранение конфигурации в файл",
+    ended: "завершено",
 };
 
 fn run_export(mut request: ExportRequest) -> i32 {
@@ -816,7 +822,12 @@ fn run_save(mut request: SaveRequest) -> i32 {
     let args = save_args(&request);
     SAVE.start();
     match crate::infobase::save_config(&args) {
-        Ok(value) => SAVE.succeed(report.as_deref(), &value),
+        Ok(value) => {
+            let path = request.path.to_string_lossy();
+            #[cfg(windows)]
+            let path = path.replace('/', std::path::MAIN_SEPARATOR_STR);
+            SAVE.succeed_with_suffix(report.as_deref(), &value, format_args!(": {path}"))
+        }
         Err(error) => SAVE.fail_with(&format!("{error:#}"), report.as_deref()),
     }
 }
