@@ -106,7 +106,7 @@ pub fn run_infobase(args: &[OsString]) -> i32 {
     }
     let code = match parse::parse_infobase(args) {
         Ok(Invocation::Help) => {
-            print!("{}", help::infobase_help(&program_name()));
+            print!("{}", help::overview(&program_name()));
             0
         }
         Ok(Invocation::Version) => {
@@ -190,7 +190,12 @@ pub fn run_help(args: &[OsString]) -> i32 {
     };
     let name = first.to_string_lossy().into_owned();
     if name == "infobase" {
-        print!("{}", help::infobase_help(&program));
+        let page = if args.len() == 1 {
+            help::infobase_help(&program)
+        } else {
+            help::overview(&program)
+        };
+        print!("{page}");
         return finish(0);
     }
     if parse::OTHER_MODES.iter().any(|(mode, _)| *mode == name) {

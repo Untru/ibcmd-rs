@@ -97,7 +97,11 @@ checkpoint does not enable its fold of the newly collected Params SI shape.
 
 ## 1. What each value of `--dynamic` does
 
-### SQL-guard interactive fallback (new source checkpoint; runtime acceptance pending)
+### SQL-guard interactive fallback
+
+The [Windows direct-mode comparison](evidence/dropin-dynamic/direct-2342.md)
+measures all four modes, held SQL connections and terminal choices against
+a five-row CommonModule stage. Standalone acceptance is tracked separately.
 
 The preserved direct-mode native cases `auto1`, `prompt1` and `term1`
 ([design](dropin-dynamic-design.md), section 2) remain the basis for noninteractive

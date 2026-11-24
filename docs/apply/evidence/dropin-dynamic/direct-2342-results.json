@@ -1,0 +1,438 @@
+{
+  "before": {
+    "Config": {
+      "rows": 7212,
+      "payload_map_sha256": "7c09b5d16940c054b70448d345889b35618b340697ff4975e0eecc493739fc2f"
+    },
+    "ConfigSave": {
+      "rows": 5,
+      "payload_map_sha256": "4fb316306a9d6d5d15162c5c09130e5e4fdb68944944a23f5aa0a5ce010787ba"
+    },
+    "Params": {
+      "rows": 23,
+      "payload_map_sha256": "08cdda948e682393051c7eaa62d0ef96179bccf9df675f6fd4cdd49c516b58c3"
+    },
+    "Files": {
+      "rows": 4,
+      "payload_map_sha256": "b6d06f1e6fc41c18fffc7011a8a326150bc80486250757d7f47f9c1b51e115b6"
+    },
+    "ConfigCAS": {
+      "rows": 0,
+      "payload_map_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "ConfigCASSave": {
+      "rows": 0,
+      "payload_map_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    }
+  },
+  "noninteractive": [
+    {
+      "tool": "native",
+      "mode": "auto",
+      "held": false,
+      "exit": 0,
+      "held_session_survived": null,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 4,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "native",
+      "mode": "disable",
+      "held": false,
+      "exit": 0,
+      "held_session_survived": null,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 4,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "native",
+      "mode": "prompt",
+      "held": false,
+      "exit": 0,
+      "held_session_survived": null,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 4,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "native",
+      "mode": "force",
+      "held": false,
+      "exit": 0,
+      "held_session_survived": null,
+      "stage_rows": 0,
+      "config_payloads_sha256": "59120577652fb21a7e6718aee9f486db8ee0569cb24fcb00d93fda0417b4611c",
+      "config_aliases": 3,
+      "config_marker": "6A9A5BC879869057377849143DB703E332D313CBBAD4F429308D296276DCE487",
+      "params_marker": "81D04AC5F02751769C83E627D9A6C57526153C0B7E061493A3DDD12E99782D2C",
+      "changed_rows": {
+        "Config": 4,
+        "ConfigSave": 5,
+        "Params": 5,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "native",
+      "mode": "auto",
+      "held": true,
+      "exit": 0,
+      "held_session_survived": true,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 4,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "native",
+      "mode": "disable",
+      "held": true,
+      "exit": 0,
+      "held_session_survived": true,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 4,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "native",
+      "mode": "prompt",
+      "held": true,
+      "exit": 0,
+      "held_session_survived": true,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 4,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "native",
+      "mode": "force",
+      "held": true,
+      "exit": 0,
+      "held_session_survived": true,
+      "stage_rows": 0,
+      "config_payloads_sha256": "59120577652fb21a7e6718aee9f486db8ee0569cb24fcb00d93fda0417b4611c",
+      "config_aliases": 3,
+      "config_marker": "6A9A5BC879869057377849143DB703E332D313CBBAD4F429308D296276DCE487",
+      "params_marker": "81D04AC5F02751769C83E627D9A6C57526153C0B7E061493A3DDD12E99782D2C",
+      "changed_rows": {
+        "Config": 4,
+        "ConfigSave": 5,
+        "Params": 5,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "own",
+      "mode": "auto",
+      "held": false,
+      "exit": 0,
+      "held_session_survived": null,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 0,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "own",
+      "mode": "disable",
+      "held": false,
+      "exit": 0,
+      "held_session_survived": null,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 0,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "own",
+      "mode": "prompt",
+      "held": false,
+      "exit": 0,
+      "held_session_survived": null,
+      "stage_rows": 0,
+      "config_payloads_sha256": "5763d7129294fa0ecc6fc149becb815d32b4b64ea6a056bb473fd92916963431",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 2,
+        "ConfigSave": 5,
+        "Params": 0,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "own",
+      "mode": "force",
+      "held": false,
+      "exit": 0,
+      "held_session_survived": null,
+      "stage_rows": 0,
+      "config_payloads_sha256": "59120577652fb21a7e6718aee9f486db8ee0569cb24fcb00d93fda0417b4611c",
+      "config_aliases": 3,
+      "config_marker": "6A9A5BC879869057377849143DB703E332D313CBBAD4F429308D296276DCE487",
+      "params_marker": "81D04AC5F02751769C83E627D9A6C57526153C0B7E061493A3DDD12E99782D2C",
+      "changed_rows": {
+        "Config": 4,
+        "ConfigSave": 5,
+        "Params": 1,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "own",
+      "mode": "auto",
+      "held": true,
+      "exit": -1,
+      "held_session_survived": true,
+      "stage_rows": 5,
+      "config_payloads_sha256": "7c09b5d16940c054b70448d345889b35618b340697ff4975e0eecc493739fc2f",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 0,
+        "ConfigSave": 0,
+        "Params": 0,
+        "Files": 0,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "own",
+      "mode": "disable",
+      "held": true,
+      "exit": -1,
+      "held_session_survived": true,
+      "stage_rows": 5,
+      "config_payloads_sha256": "7c09b5d16940c054b70448d345889b35618b340697ff4975e0eecc493739fc2f",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 0,
+        "ConfigSave": 0,
+        "Params": 0,
+        "Files": 0,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "own",
+      "mode": "prompt",
+      "held": true,
+      "exit": -1,
+      "held_session_survived": true,
+      "stage_rows": 5,
+      "config_payloads_sha256": "7c09b5d16940c054b70448d345889b35618b340697ff4975e0eecc493739fc2f",
+      "config_aliases": 0,
+      "config_marker": null,
+      "params_marker": null,
+      "changed_rows": {
+        "Config": 0,
+        "ConfigSave": 0,
+        "Params": 0,
+        "Files": 0,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    },
+    {
+      "tool": "own",
+      "mode": "force",
+      "held": true,
+      "exit": 0,
+      "held_session_survived": true,
+      "stage_rows": 0,
+      "config_payloads_sha256": "59120577652fb21a7e6718aee9f486db8ee0569cb24fcb00d93fda0417b4611c",
+      "config_aliases": 3,
+      "config_marker": "6A9A5BC879869057377849143DB703E332D313CBBAD4F429308D296276DCE487",
+      "params_marker": "81D04AC5F02751769C83E627D9A6C57526153C0B7E061493A3DDD12E99782D2C",
+      "changed_rows": {
+        "Config": 4,
+        "ConfigSave": 5,
+        "Params": 1,
+        "Files": 1,
+        "ConfigCAS": 0,
+        "ConfigCASSave": 0
+      }
+    }
+  ],
+  "terminal": {
+    "interactive-1": {
+      "rc": 0,
+      "sent": true,
+      "survived": true,
+      "staged": 5,
+      "config_marker": false,
+      "params_marker": false,
+      "unchanged": true
+    },
+    "interactive-2": {
+      "rc": 4294967295,
+      "sent": true,
+      "survived": true,
+      "staged": 5,
+      "config_marker": false,
+      "params_marker": false,
+      "unchanged": true
+    },
+    "interactive-2-release": {
+      "rc": 0,
+      "sent": true,
+      "survived": null,
+      "staged": 0,
+      "config_marker": false,
+      "params_marker": false,
+      "unchanged": false
+    },
+    "interactive-3": {
+      "rc": 0,
+      "sent": true,
+      "survived": true,
+      "staged": 0,
+      "config_marker": true,
+      "params_marker": true,
+      "unchanged": false
+    }
+  },
+  "session_terminate": {
+    "term-native-disable-force": {
+      "rc": 0,
+      "survived": true,
+      "unchanged": false,
+      "staged": 0,
+      "config_marker": false,
+      "params_marker": false
+    },
+    "term-native-disable-prompt": {
+      "rc": 0,
+      "survived": true,
+      "unchanged": false,
+      "staged": 0,
+      "config_marker": false,
+      "params_marker": false
+    },
+    "term-native-force-force": {
+      "rc": 0,
+      "survived": true,
+      "unchanged": false,
+      "staged": 0,
+      "config_marker": true,
+      "params_marker": true
+    },
+    "term-own-disable-force": {
+      "rc": 1,
+      "survived": true,
+      "unchanged": true,
+      "staged": 5,
+      "config_marker": false,
+      "params_marker": false
+    },
+    "term-own-disable-prompt": {
+      "rc": 1,
+      "survived": true,
+      "unchanged": true,
+      "staged": 5,
+      "config_marker": false,
+      "params_marker": false
+    },
+    "term-own-force-force": {
+      "rc": 0,
+      "survived": true,
+      "unchanged": false,
+      "staged": 0,
+      "config_marker": true,
+      "params_marker": true
+    }
+  }
+}

@@ -526,36 +526,29 @@ fn the_database_password_can_come_from_stdin() {
 
 #[test]
 fn help_and_version() {
+    let output = run(&["help"]);
+    assert_eq!(output.status.code(), Some(0));
     for args in [
         vec!["infobase", "--help"],
         vec!["infobase", "-?"],
         vec!["infobase", "config", "export", "-h"],
         vec!["infobase", "config", "apply", "--help"],
-        vec!["help", "infobase"],
+        vec!["help", "infobase", "config", "apply"],
     ] {
-        let output = run(&args);
-        assert_eq!(output.status.code(), Some(0), "{args:?}");
-        let help = text(&output.stdout);
-        assert!(
-            help.contains("Режим управления информационной базой"),
-            "{args:?}"
-        );
-        assert!(help.contains("--db-server"), "{args:?}");
-        // served, and no longer named among what is not
-        assert!(help.contains("--extension=<name> | -e <name>"), "{args:?}");
-        assert!(
-            !help.contains("export --base, --file, --extension"),
-            "{args:?}"
-        );
+        let overview = run(&args);
+        assert_eq!(overview.status.code(), Some(0), "{args:?}");
+        assert_eq!(text(&overview.stdout), text(&output.stdout), "{args:?}");
     }
-    let output = run(&["help"]);
-    assert_eq!(output.status.code(), Some(0));
     assert!(text(&output.stdout).contains("Поддерживаемые режимы"));
     assert!(text(&output.stdout).contains("config apply"));
     // the help of the mode describes apply, its words and its refusals
     let output = run(&["help", "infobase"]);
     let help = text(&output.stdout);
+    assert!(!help.contains("export --base, --file, --extension"));
     for word in [
+        "Режим управления информационной базой",
+        "--db-server",
+        "--extension=<name> | -e <name>",
         "--dynamic=<auto|disable|prompt|force>",
         "--session-terminate=<disable|prompt|force>",
         "--recovery-backup=<file>",

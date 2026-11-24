@@ -30,7 +30,7 @@ pub enum Commands {
     /// Drop-in `ibcmd infobase`: `config export`, `config import`,
     /// `config apply` and `config save` in the platform ibcmd's syntax,
     /// against Microsoft SQL Server; other commands are refused.
-    /// `infobase --help` prints its help (in Russian).
+    /// `help infobase` prints its help (in Russian).
     #[command(disable_help_flag = true)]
     Infobase(NativeModeArgs),
     /// The platform ibcmd's other modes, refused with a clear message.
