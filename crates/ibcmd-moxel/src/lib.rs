@@ -4914,9 +4914,11 @@ pub fn parse_moxel_fonts(
     fields
         .iter()
         .enumerate()
-        // A font descriptor leads with `7`.
+        // Legacy absolute descriptors start with 6, current descriptors with 7.
         .filter(|(index, _)| {
-            root_shape_allows(shapes.as_deref(), *index, |shape| shape.leads_with(7))
+            root_shape_allows(shapes.as_deref(), *index, |shape| {
+                shape.leads_with(7) || shape.leads_with(6)
+            })
         })
         .filter_map(|(_, field)| parse_moxel_font(field, object_refs))
         .collect()
@@ -5042,9 +5044,11 @@ fn moxel_system_font_ref(index: &str) -> Option<&'static str> {
 
 pub fn parse_moxel_font(text: &str, object_refs: &BTreeMap<String, String>) -> Option<MoxelFont> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "7" {
-        return None;
-    }
+    let legacy_absolute = match fields.first()?.trim() {
+        "6" if fields.len() == 18 && fields[1].trim() == "0" && fields[17].trim() == "1" => true,
+        "7" => false,
+        _ => return None,
+    };
     match fields.get(1)?.trim() {
         // `AutoFont`: no ref, no explicit member. Evidence: native UT
         // 11.5.27.75's `GanttChart` template
@@ -5079,7 +5083,7 @@ pub fn parse_moxel_font(text: &str, object_refs: &BTreeMap<String, String>) -> O
         // publishes unchanged - the arity (`fields.len() == 19`) already
         // names this shape, so an extra equality on an unused field only
         // rejected valid records.
-        "0" if fields.len() == 19 => {
+        "0" if fields.len() == 19 || legacy_absolute => {
             let height_raw = fields.get(3)?.trim().parse::<usize>().ok()?;
             let weight = fields.get(7)?.trim().parse::<usize>().ok()?;
             Some(MoxelFont {
@@ -5091,7 +5095,11 @@ pub fn parse_moxel_font(text: &str, object_refs: &BTreeMap<String, String>) -> O
                 underline: Some(fields.get(9)?.trim() != "0"),
                 strikeout: Some(fields.get(10)?.trim() != "0"),
                 kind: "Absolute",
-                scale: Some(fields.get(18)?.trim().parse::<usize>().ok()?),
+                scale: Some(if legacy_absolute {
+                    100
+                } else {
+                    fields.get(18)?.trim().parse::<usize>().ok()?
+                }),
             })
         }
         kind @ ("1" | "2") => {
@@ -15350,6 +15358,18 @@ fn push_moxel_note_xml(
 #[cfg(test)]
 mod moxel_exact_parity_tests {
     use super::*;
+
+    #[test]
+    fn legacy_absolute_font_uses_the_native_scale_without_a_scale_slot() {
+        let raw = r#"{6,0,0,83,0,0,0,700,0,0,0,204,0,0,0,34,"Arial",1}"#;
+        let refs = BTreeMap::new();
+        let font = parse_moxel_font(raw, &refs).unwrap();
+        assert_eq!(font.face_name.as_deref(), Some("Arial"));
+        assert_eq!(font.height.as_deref(), Some("8.3"));
+        assert_eq!(font.bold, Some(true));
+        assert_eq!(font.scale, Some(100));
+        assert!(parse_moxel_font(&raw.replace(",1}", ",1,100}"), &refs).is_none());
+    }
 
     /// The built-in type table these tests decode with. None of their bodies
     /// carries a value-type `Pattern`, so the table is never asked.

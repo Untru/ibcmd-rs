@@ -1,0 +1,17 @@
+{
+  "equal": [
+    "CovObservedMergeDescendingColumns",
+    "CovObservedMergeMixedRows",
+    "CovObservedMergeRowColumnDefault",
+    "CovObservedSheetFont0",
+    "CovObservedSheetFont1",
+    "CovObservedSheetFont2",
+    "CovObservedSheetFont3",
+    "CovObservedSheetFont4",
+    "CovObservedSheetFont5",
+    "CovObservedSheetFont6",
+    "CovObservedSheetFont7",
+    "CovObservedSheetFont8",
+    "CovObservedSheetTemplate"
+  ]
+}
