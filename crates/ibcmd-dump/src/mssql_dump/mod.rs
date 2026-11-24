@@ -7748,6 +7748,11 @@ struct FlowchartScheme {
 }
 
 struct FlowchartPrintParameters {
+    paper: Option<String>,
+    orientation: Option<&'static str>,
+    collate: Option<String>,
+    copies: Option<String>,
+    paper_source: Option<String>,
     top_margin: String,
     left_margin: String,
     bottom_margin: String,
@@ -8110,9 +8115,9 @@ fn parse_business_process_flowchart_text_with_types(
 
 /// Header record: `{1, back, grid_enabled, hstep, vstep, draw_grid_mode,
 /// count, key, {"N",value}, ...}` where the keyed tail carries the print
-/// parameters (6..9 margins, 13 black-and-white, 16 fit-page mode). Read off
-/// all seven flowcharts of the evidence base; any other key, mode or value
-/// refuses the scheme.
+/// parameters. The margins, black-and-white flag and fit-page mode are
+/// required. CovPrintedFlowchart also stores paper, orientation, collate,
+/// copies and paper source. Unknown keys or modes refuse the scheme.
 fn parse_flowchart_scheme(
     text: &str,
     object_refs: &BTreeMap<String, String>,
@@ -8152,10 +8157,16 @@ fn parse_flowchart_scheme(
             return None;
         }
     }
-    if values.len() != 6 {
-        return None;
-    }
     let print_parameters = FlowchartPrintParameters {
+        paper: values.remove(&0),
+        orientation: match values.remove(&1).as_deref() {
+            None => None,
+            Some("1") => Some("Portrait"),
+            _ => return None,
+        },
+        collate: values.remove(&3),
+        copies: values.remove(&4),
+        paper_source: values.remove(&15),
         top_margin: values.remove(&6)?,
         left_margin: values.remove(&7)?,
         bottom_margin: values.remove(&8)?,
@@ -8170,6 +8181,9 @@ fn parse_flowchart_scheme(
             _ => return None,
         },
     };
+    if !values.is_empty() {
+        return None;
+    }
     Some(FlowchartScheme {
         back_color,
         grid_enabled,
@@ -8584,6 +8598,8 @@ fn flowchart_picture_extension(data: &[u8]) -> Option<&'static str> {
         Some("jpg")
     } else if data.starts_with(b"BM") {
         Some("bmp")
+    } else if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        Some("gif")
     } else {
         None
     }
@@ -9279,22 +9295,34 @@ fn format_business_process_flowchart_xml(flowchart: &BusinessProcessFlowchart) -
         escape_xml_element_text(&scheme.grid_vertical_step),
     ));
     let print = &scheme.print_parameters;
-    xml.push_str(&format!(
-        "\t<PrintParameters>\r\n\
-\t\t<TopMargin>{}</TopMargin>\r\n\
-\t\t<LeftMargin>{}</LeftMargin>\r\n\
-\t\t<BottomMargin>{}</BottomMargin>\r\n\
-\t\t<RightMargin>{}</RightMargin>\r\n\
-\t\t<BlackAndWhite>{}</BlackAndWhite>\r\n\
-\t\t<FitPageMode>{}</FitPageMode>\r\n\
-\t</PrintParameters>\r\n",
-        escape_xml_element_text(&print.top_margin),
-        escape_xml_element_text(&print.left_margin),
-        escape_xml_element_text(&print.bottom_margin),
-        escape_xml_element_text(&print.right_margin),
-        xml_bool(print.black_and_white),
-        print.fit_page_mode,
-    ));
+    xml.push_str("\t<PrintParameters>\r\n");
+    for (name, value, typed) in [
+        ("Paper", print.paper.as_deref(), true),
+        ("PageOrientation", print.orientation, false),
+        ("Collate", print.collate.as_deref(), true),
+        ("Copies", print.copies.as_deref(), false),
+        ("TopMargin", Some(print.top_margin.as_str()), false),
+        ("LeftMargin", Some(print.left_margin.as_str()), false),
+        ("BottomMargin", Some(print.bottom_margin.as_str()), false),
+        ("RightMargin", Some(print.right_margin.as_str()), false),
+        (
+            "BlackAndWhite",
+            Some(xml_bool(print.black_and_white)),
+            false,
+        ),
+        ("PaperSource", print.paper_source.as_deref(), true),
+        ("FitPageMode", Some(print.fit_page_mode), false),
+    ] {
+        if let Some(value) = value {
+            let attribute = if typed {
+                " xsi:type=\"xs:decimal\""
+            } else {
+                ""
+            };
+            xml.push_str(&format!("\t\t<{name}{attribute}>{value}</{name}>\r\n"));
+        }
+    }
+    xml.push_str("\t</PrintParameters>\r\n");
     // A scheme with no items at all closes `<Items/>` in one element.
     if flowchart.items.is_empty() {
         xml.push_str("\t<Items/>\r\n</GraphicalSchema>");
