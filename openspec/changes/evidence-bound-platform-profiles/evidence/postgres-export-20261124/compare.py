@@ -7,6 +7,8 @@ from pathlib import Path
 
 
 def files(root):
+    if not root.is_dir():
+        raise NotADirectoryError(root)
     found = {}
 
     def raise_error(error):
@@ -16,8 +18,6 @@ def files(root):
         for name in names:
             path = directory / name
             found[path.relative_to(root).as_posix()] = path
-    if "Configuration.xml" not in found or "ConfigDumpInfo.xml" not in found:
-        raise ValueError(f"Incomplete export at {root}")
     return found
 
 
@@ -27,6 +27,8 @@ def record(tree, name, digest):
 
 def compare(native, candidate):
     left, right = files(native), files(candidate)
+    if not {"Configuration.xml", "ConfigDumpInfo.xml"}.issubset(left):
+        raise ValueError(f"Incomplete native export at {native}")
     trees = [hashlib.sha256(), hashlib.sha256()]
     counts = dict(identical=0, different=0, native_only=0, candidate_only=0)
     for name in sorted(left.keys() | right.keys()):
