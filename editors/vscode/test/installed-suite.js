@@ -131,6 +131,18 @@ exports.run = async () => {
     );
     phase("visible-tree");
     assert.equal((await api.visibleObjects()).length, inventory.length);
+    const [root] = await api.configuration.getChildren();
+    assert.equal(root.kind, "Configuration");
+    const treeObjects = [root.kind];
+    async function expandGroups(parent) {
+      for (const node of await api.configuration.getChildren(parent)) {
+        if (node.type === "object") treeObjects.push(node.fullName);
+        if (node.type === "group" && node.kind !== "ConfigurationFiles")
+          await expandGroups(node);
+      }
+    }
+    await expandGroups(root);
+    assert.deepEqual(treeObjects.sort(), inventory.map((r) => r.object).sort());
     phase("configure-executable-override");
     const override = vscode.workspace.getConfiguration("ibcmd-rs");
     phase("write-executable-override");
@@ -155,6 +167,7 @@ exports.run = async () => {
       installed: ext.extensionPath,
       binary,
       objects: api.objects(),
+      treeObjects,
       override: true,
       pickerSelections,
     };

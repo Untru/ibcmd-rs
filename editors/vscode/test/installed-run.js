@@ -38,13 +38,15 @@ const { runTests, downloadAndUnzipVSCode } = require("@vscode/test-electron");
     path.join(run, "extensions"),
   ];
   // Run Electron's JS CLI directly; .cmd wrappers cannot be execFile'd on Windows.
-  const cliScript = path.join(
-    path.dirname(executable),
-    ...(process.platform === "darwin" ? ["..", "Resources"] : ["resources"]),
-    "app",
-    "out",
-    "cli.js",
-  );
+  const cliScript =
+    process.env.IBCMD_TEST_EDITOR_CLI ||
+    path.join(
+      path.dirname(executable),
+      ...(process.platform === "darwin" ? ["..", "Resources"] : ["resources"]),
+      "app",
+      "out",
+      "cli.js",
+    );
   phase("install-vsix", { executable });
   const installed = execFileSync(
     executable,

@@ -412,6 +412,13 @@ export VSCODE_EXECUTABLE_PATH="/Applications/Visual Studio Code.app/Contents/Mac
 npm run test:installed
 ```
 
+For a Windows installation with versioned application resources, set
+`IBCMD_TEST_EDITOR_CLI` to the absolute path of the `cli.js` referenced by the
+selected editor's `bin/code.cmd` or `bin/cursor.cmd`. Use the same VSIX and
+rows directory for both editors. Each invocation creates a fresh profile,
+extensions directory and workspace under `IBCMD_TEST_ROOT`. The resulting
+`acceptance.json` includes the object names from the configuration tree.
+
 CI builds and compares two Windows VSIX files, checks installation/tree in a clean
 Windows VS Code host and uploads VSIX/checksum plus acceptance JSON. The existing
 release workflow packages the Windows release binary into a VSIX and includes it
