@@ -89,3 +89,39 @@ contains the binary hash, command times, generation IDs, alias hashes,
 snapshot hashes and hashes of the exported modules. The file control had
 no active clients. It measures native storage independently of a SQL or
 OWN writer and supplies no client visibility observation.
+
+## Native SQL Server control on 8.5.1.1529
+
+The starting marker configuration used a private file database. Native
+`infobase dump` produced a DT. Native `infobase restore --force` loaded it
+into a precreated disposable SQL Server database. A native XML export from
+SQL confirmed the primary CommonModule contained A346 before publication.
+Restoring the DT required a temporary database-level ALTER grant. After
+restore, a permission check confirmed its revocation. The publications and
+SQL snapshots ran as the private cluster's Windows virtual service account.
+
+On the same database, change only the primary module's returned marker
+to B346 and then C346. For each change use the same partial import, dynamic
+force and XML export commands as the file control, with MSSQLServer
+connection options in place of the file path. All six commands returned 0.
+Both SQL exports contained the expected complete module text.
+
+| SQL observation | Baseline | After B346 | After C346 |
+| --- | ---: | ---: | ---: |
+| Config rows | 12 | 16 | 19 |
+| ConfigSave rows after apply | 0 | 0 | 0 |
+| UUIDs in Config.DynamicallyUpdated | absent | 1 | 2 |
+| UUIDs in Params.DynamicallyUpdated | absent | 2 | 3 |
+
+Each import staged five rows. Each force published three aliases whose
+payload hashes matched the staged descriptor, module and versions rows.
+The second force preserved the three first-generation aliases.
+Config listed the native publication UUIDs in order. Params listed an
+additional leading UUID, identical after both publications. The
+[SQL run record](repeated-sql-1529.json) includes both lists, command times,
+hashes and row counts.
+
+The thin client launched against the registered SQL base exited with code
+1 during license checking, before writing a poll journal. The SQL result
+covers two native storage publications. Same-session visibility and a
+comparison with the OWN writer on its supported build remain open.
