@@ -2572,13 +2572,18 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             let node = self.document.lines[self.lines.order[position]];
             node.only_attributes(&["width", "gap"], "line")?;
             node.only_children(&["style"], "line")?;
-            if node.attribute("gap").is_some_and(|gap| gap != "false") {
-                bail!("a <line> with a gap has no writer");
-            }
+            let gap = u8::from(parse_bool(
+                node.attribute("gap").unwrap_or("false"),
+                "line gap",
+            )?);
             let width = parse_usize(node.attribute("width").unwrap_or("0"), "line width")?;
-            let style = node
-                .child("style")
-                .ok_or_else(|| anyhow!("a <line> has no style"))?;
+            let Some(style) = node.child("style") else {
+                if width != 0 || gap != 0 {
+                    bail!("an unstyled line requires width zero and no gap");
+                }
+                record.push_str(&format!(",1,{{4,0,{{0}},0,0,0,{NIL_UUID},0}},0"));
+                continue;
+            };
             let (kind, code) = match style.xsi_type() {
                 Some("v8ui:SpreadsheetDocumentCellLineType") => (
                     CELL_LINE_KIND,
@@ -2599,12 +2604,13 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                         "None" => 0,
                         "Solid" => 1,
                         "Dotted" => 3,
+                        "DashDotted" => 4,
                         other => bail!("drawing line style {other} has no stored code"),
                     },
                 ),
                 other => bail!("a line style of type {other:?} has no writer"),
             };
-            record.push_str(&format!(",1,{{4,0,{{0}},{code},{width},0,{kind},0}},0"));
+            record.push_str(&format!(",1,{{4,0,{{0}},{code},{width},0,{kind},{gap}}},0"));
         }
         record.push('}');
         let mut out = Out::default();
