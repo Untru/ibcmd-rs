@@ -1,5 +1,8 @@
 # Installed EDT oracle laboratory
 
+See the [Windows BSP probe on EDT 2026.1.3.25](358-windows-bsp.md) for
+the measured ExchangePlan blockers in both conversion directions.
+
 For the current macOS installed-tool baseline and external-only capture workflow,
 see [macos-oracle.md](macos-oracle.md). Historical Windows evidence below retains
 its original exact versions and does not establish current Mac acceptance.

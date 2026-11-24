@@ -1,0 +1,147 @@
+{
+  "issue": 358,
+  "date": "2026-11-24",
+  "scope": "Windows installed-tool compatibility probe on BSP only",
+  "acceptance": "incomplete",
+  "candidate": {
+    "git_commit": "54b796f64da5daed3714acdf7810581fe0e58778",
+    "binary_sha256": "9f7282973019ae24c68e39e1837d27283bc446be0e3f716eeef37ce1db77cd1f",
+    "build": "cargo +1.98.0 build --locked --bin ibcmd-rs",
+    "source_profile": "xml-2.20",
+    "edt_profile": "edt-2025.2.3-xml-2.20",
+    "version": "0.4.1",
+    "binary_bytes": 112598528
+  },
+  "host": {
+    "edt_cli_version": "2026.1.3.25",
+    "edt_cli_sha256": "5170abe5282c1f93cd7bc8113e42020519ab1d8b599affb19f1ae57b5e5e2b47",
+    "edt_jvm": "Axiom 17.0.16, OpenJDK 64-Bit Server VM",
+    "designer_builds": [
+      "8.3.24.1819",
+      "8.3.26.1656",
+      "8.3.27.2214",
+      "8.3.27.2342",
+      "8.5.1.1529"
+    ],
+    "additional_thin_client_builds": [
+      "8.3.28.910",
+      "8.3.28.949"
+    ],
+    "selected_designer": "8.3.27.2214",
+    "designer_sha256": "ca26ada2c7baaf97516c59ba10a2a4d30d7c509da062a8d09ad2b5a9528f8bac",
+    "edt_profile_2025_2_3_executed": false
+  },
+  "input": {
+    "configuration": "BSP",
+    "version": "3.1.9.232",
+    "xml": "2.20",
+    "tree_sha256": "96ea6bda180a5bf7cc00cd2f5cdaa63d49211aa251f712aafca46741269950e6",
+    "file_count": 8568,
+    "total_bytes": 176754012,
+    "ConfigDumpInfo.xml": {
+      "bytes": 2151471,
+      "sha256": "ae90b7268eaa429c2460c2efc67375e8578c3ac26b81d82c442d0f68b1cadb11"
+    },
+    "unchanged_after": true
+  },
+  "generated_project": {
+    "status": "conversion_failed",
+    "exit": 2,
+    "error": "conversion.edt-encode-preflight-failed",
+    "output_published": false,
+    "kind": "ExchangePlan",
+    "uncovered_path": "ExchangePlan/Properties/StandardAttributes",
+    "uncovered_cells": 295,
+    "duration_seconds": 442.159
+  },
+  "installed_export_of_generated": {
+    "status": "blocked_by_generation",
+    "comparison_performed": false
+  },
+  "unchanged_return": {
+    "status": "blocked_by_generation",
+    "comparison_performed": false,
+    "ConfigDumpInfo.xml_compared": false
+  },
+  "auth-project": {
+    "tree_sha256": "dbc36aa59aac276526f86fd3fa3de2a195a65b947d62804c028d53ab2c332daa",
+    "file_count": 6933,
+    "total_bytes": 182836419,
+    "unchanged_after_validation": true
+  },
+  "edt-baseline": {
+    "tree_sha256": "267d3522c3f65fa1db0b9645b48bdc76abd46b9bb9560163decc87457ade1eb8",
+    "file_count": 8566,
+    "total_bytes": 174328237
+  },
+  "native_reference": {
+    "db-create_exit": 0,
+    "db-load_exit": 1,
+    "build": "8.3.27.2214",
+    "load_diagnostic": "missing platform license",
+    "export_performed": false,
+    "load_log_sha256": "a829d6cd16b908bc4357e61e63ceacd9df03a19c215383c060d55384176e4039"
+  },
+  "authentic_edt_to_xml": {
+    "exit": 2,
+    "output_published": false,
+    "errors": [
+      "conversion.edt-encode-preflight-failed"
+    ],
+    "status": "conversion_failed",
+    "kind": "ExchangePlan",
+    "uncovered_field": "standardAttributes",
+    "uncovered_cells": 95,
+    "comparison_performed": false,
+    "duration_seconds": 673.122
+  },
+  "route_CDI": {
+    "edt-xml": null
+  },
+  "installed_edt_commands": {
+    "import": 0,
+    "export": 0,
+    "validate": 0
+  },
+  "workspace_log": {
+    "sha256": "a418659bc8e82eee43fb8f2fa0025ac505dfbda1e08e6b9507916e383f4134eb",
+    "severity_4_or_8_count": 7,
+    "severity_4_count": 3,
+    "severity_8_count": 4,
+    "ambient_control_run": false
+  },
+  "authentic_validation": {
+    "tsv_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw_line_count": 0,
+    "category_counts": {},
+    "severity_counts": {},
+    "configuration_error_count": 0,
+    "malformed_count": 0,
+    "unclassified_count": 0
+  },
+  "validation_differential": {
+    "status": "blocked_by_generation",
+    "comparison_performed": false
+  },
+  "original_native_vs_installed_edt": {
+    "content_different": 333,
+    "native_only": 2,
+    "edt_only": 0
+  },
+  "private_report_sha256": {
+    "generate.report.json": "0af2cc0eae6209b5504a5c156098b4b27bf52048a7eee1af27a998535ca6acc4",
+    "direct.report.json": "460de55599414df2b3a3c70f6a181845d467c968536fd74d6b0285358c160d49",
+    "db-load.log": "a829d6cd16b908bc4357e61e63ceacd9df03a19c215383c060d55384176e4039",
+    "native-vs-edt.diff.json": "9308d9dafd0bc8727e8dec4476a128b861fdb925bf404862f440d612e9b92f1e",
+    "import-timeout-ws/.metadata/.log": "552da1c6d5be635182c1c3c72aa4d0fa0e0b0f11574cbacbba6bb06764d5cf93"
+  },
+  "three_way_reports_produced": 0,
+  "additional_native_reference_attempt": {
+    "tool": "ibcmd",
+    "build": "8.3.27.2342",
+    "create": "timeout",
+    "timeout_seconds": 900,
+    "import_performed": false,
+    "export_performed": false
+  }
+}
