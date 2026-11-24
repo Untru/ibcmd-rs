@@ -1,0 +1,65 @@
+{
+  "commit": "54b796f64da5daed3714acdf7810581fe0e58778",
+  "exe_sha256": "86babde097d9e534c7d0295ec1e3a606184fdea271fb3d784276d3c89df4ba5a",
+  "tree_digest": "SHA-256 of UTF-8 JSON of the path-to-SHA-256 map, sorted keys, unescaped Unicode, no whitespace",
+  "platforms": {
+    "8.3.27.2342": {
+      "old_cf": "0e54e25827d416c2875d38d49b195134e24eb65a58971c068eb8cde340444f4c",
+      "new_cf": "b6054ebb7f167ebe8d70cd921ab86e69ecf516ee95bfc6c04adac3fbead8205f",
+      "reference": {
+        "ConfigDumpInfo.xml": "cef9bb02b40ccac63e5f581b032f552f6c276bab385a886bac19fd30a802b36c",
+        "Configuration.xml": "62d0b58eba7663a0b02f5f3c6961f4b219a79ab7ea1be4f794ba165111883096",
+        "Languages/Русский.xml": "4aec121caa1068f77553259280b723ccbe80c47303f16261aa94dda9222e55bc"
+      },
+      "targets": {
+        "file": {
+          "before": "f7b588d62211e2cafba9f11c8edbcd69c387ca163b469dd6961fcd4e8984090d",
+          "pending": "406e816925c6e8cff171d4f69791f6081094da9f98a8569835165c0993184bd2",
+          "applied": "406e816925c6e8cff171d4f69791f6081094da9f98a8569835165c0993184bd2",
+          "unchanged_applied_elements_before_apply": 7
+        },
+        "pg": {
+          "before": "f7b588d62211e2cafba9f11c8edbcd69c387ca163b469dd6961fcd4e8984090d",
+          "pending": "406e816925c6e8cff171d4f69791f6081094da9f98a8569835165c0993184bd2",
+          "applied": "406e816925c6e8cff171d4f69791f6081094da9f98a8569835165c0993184bd2",
+          "unchanged_applied_elements_before_apply": 7
+        },
+        "mssql": {
+          "before": "f7b588d62211e2cafba9f11c8edbcd69c387ca163b469dd6961fcd4e8984090d",
+          "pending": "406e816925c6e8cff171d4f69791f6081094da9f98a8569835165c0993184bd2",
+          "applied": "406e816925c6e8cff171d4f69791f6081094da9f98a8569835165c0993184bd2",
+          "unchanged_applied_elements_before_apply": 7
+        }
+      }
+    },
+    "8.5.1.1529": {
+      "old_cf": "78da1148826982b6e398fe1f808c8849f7f527c0818a616f0db6e443b2d1d846",
+      "new_cf": "b1b175129ed3b16592e4ab8f9669633d21999161f6bd070cb55fe02afebca43d",
+      "reference": {
+        "ConfigDumpInfo.xml": "5814796f1e996e72900703aa6e0d32d9d97968166e4a3f8c85d147bcef3e361e",
+        "Configuration.xml": "19f606cebf244da58e84182d7bec97b60cd0af4decfe3c0494dd35e930f61644",
+        "Languages/English.xml": "b62bfac9d54f76694c7e91801a2309d98435b36ef8485ca1ea59857f29b7c529"
+      },
+      "targets": {
+        "file": {
+          "before": "5fc9860bfab83a79d1210e73d5b6c975b1961d3184be5111191d13134c1531fd",
+          "pending": "14c4936fd98809f0c28aeabe1ea95ea2b2e8bc341f2efdf7dcc30a894b396d5a",
+          "applied": "14c4936fd98809f0c28aeabe1ea95ea2b2e8bc341f2efdf7dcc30a894b396d5a",
+          "unchanged_applied_elements_before_apply": 7
+        },
+        "pg": {
+          "before": "5fc9860bfab83a79d1210e73d5b6c975b1961d3184be5111191d13134c1531fd",
+          "pending": "14c4936fd98809f0c28aeabe1ea95ea2b2e8bc341f2efdf7dcc30a894b396d5a",
+          "applied": "14c4936fd98809f0c28aeabe1ea95ea2b2e8bc341f2efdf7dcc30a894b396d5a",
+          "unchanged_applied_elements_before_apply": 7
+        },
+        "mssql": {
+          "before": "5fc9860bfab83a79d1210e73d5b6c975b1961d3184be5111191d13134c1531fd",
+          "pending": "14c4936fd98809f0c28aeabe1ea95ea2b2e8bc341f2efdf7dcc30a894b396d5a",
+          "applied": "14c4936fd98809f0c28aeabe1ea95ea2b2e8bc341f2efdf7dcc30a894b396d5a",
+          "unchanged_applied_elements_before_apply": 7
+        }
+      }
+    }
+  }
+}
