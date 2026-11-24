@@ -9779,6 +9779,23 @@ fn module_body_paths_from_texts_with_forms(
         }
     };
     paths.extend(form_module_body_paths(form_refs, &file_names));
+    if metadata_texts
+        .iter()
+        .any(|row| row.kind.as_deref() == Some("CalculationRegister"))
+    {
+        let route = ibcmd_compiler_families::compiler::families::assets::SourceAssetRegistry
+            .route("Recalculation", ibcmd_compiler_families::compiler::families::assets::SourceAssetRole::RecordSetModule)
+            .expect("recalculation module route is registered");
+        for (uuid, reference) in build_calculation_recalculation_reference_index(metadata_texts) {
+            let body_id = format!("{uuid}{}", route.suffix());
+            if file_names.contains(body_id.as_str()) {
+                paths.insert(
+                    body_id,
+                    reference.source_directory().join(route.relative_path()),
+                );
+            }
+        }
+    }
 
     paths
 }
@@ -13696,11 +13713,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         }
         let properties =
             parse_recalculation_properties_from_text(text, uuid, recalculation_ref, object_refs)?;
-        let relative_path = PathBuf::from("CalculationRegisters")
-            .join(sanitize_source_path_segment(&recalculation_ref.owner_name))
-            .join("Recalculations")
-            .join(sanitize_source_path_segment(&header.name))
-            .with_extension("xml");
+        let relative_path = recalculation_ref.source_directory().with_extension("xml");
         let xml = format_recalculation_source_xml(header, &properties, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }

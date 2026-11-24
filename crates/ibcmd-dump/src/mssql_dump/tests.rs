@@ -27079,6 +27079,15 @@ fn routes_and_serializes_calculation_register_recalculation() {
         folder: Some("CalculationRegisters"),
     };
     let rows = vec![owner, child];
+    let module_id = format!("{recalculation_uuid}.0");
+    let module_row = config_row_from_raw_for_generated_type_test(&module_id, "");
+    let paths = module_body_paths_from_texts(&[module_row], &rows);
+    assert_eq!(
+        paths.get(&module_id),
+        Some(&PathBuf::from(
+            "CalculationRegisters/Payroll/Recalculations/BaseData/Ext/RecordSetModule.bsl"
+        ))
+    );
     let recalculation_refs = build_calculation_recalculation_reference_index(&rows);
     assert_eq!(
         recalculation_refs.get(recalculation_uuid),

@@ -905,6 +905,13 @@ pub(super) struct CalculationRecalculationReference {
 }
 
 impl CalculationRecalculationReference {
+    pub(super) fn source_directory(&self) -> PathBuf {
+        PathBuf::from("CalculationRegisters")
+            .join(sanitize_source_path_segment(&self.owner_name))
+            .join("Recalculations")
+            .join(sanitize_source_path_segment(&self.recalculation_name))
+    }
+
     pub(super) fn object_reference(&self) -> String {
         format!(
             "CalculationRegister.{}.Recalculation.{}",
