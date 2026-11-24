@@ -14,6 +14,16 @@ const { runTests, downloadAndUnzipVSCode } = require("@vscode/test-electron");
   const workspace = path.join(run, "workspace"),
     driver = path.join(run, "driver");
   await fs.mkdir(workspace);
+  await fs.mkdir(path.join(workspace, ".vscode"));
+  await fs.writeFile(
+    path.join(workspace, ".vscode", "settings.json"),
+    JSON.stringify({
+      "ibcmd.connections": ["lab/offline"],
+      "ibcmd.connectionMetadata": { "lab/offline": { auth: "windows" } },
+      "ibcmd.sourceDirectory": path.join(workspace, "source"),
+      "ibcmd.statusComparison": "bytes",
+    }),
+  );
   await fs.mkdir(driver);
   await fs.writeFile(
     path.join(driver, "package.json"),
@@ -37,6 +47,19 @@ const { runTests, downloadAndUnzipVSCode } = require("@vscode/test-electron");
     "--extensions-dir",
     path.join(run, "extensions"),
   ];
+  const editorEnv = { ...process.env };
+  if (process.platform === "win32") {
+    // Cursor also stores worktree state relative to the Windows home directory.
+    const home = path.join(run, "home");
+    Object.assign(editorEnv, {
+      HOME: home,
+      USERPROFILE: home,
+      APPDATA: path.join(home, "AppData", "Roaming"),
+      LOCALAPPDATA: path.join(home, "AppData", "Local"),
+    });
+    await fs.mkdir(editorEnv.APPDATA, { recursive: true });
+    await fs.mkdir(editorEnv.LOCALAPPDATA, { recursive: true });
+  }
   // Run Electron's JS CLI directly; .cmd wrappers cannot be execFile'd on Windows.
   const cliScript =
     process.env.IBCMD_TEST_EDITOR_CLI ||
@@ -61,7 +84,7 @@ const { runTests, downloadAndUnzipVSCode } = require("@vscode/test-electron");
       encoding: "utf8",
       timeout: 120_000,
       killSignal: "SIGKILL",
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      env: { ...editorEnv, ELECTRON_RUN_AS_NODE: "1" },
     },
   );
   console.log(installed);
@@ -82,11 +105,13 @@ const { runTests, downloadAndUnzipVSCode } = require("@vscode/test-electron");
       path.join(run, "crashes"),
     ],
     extensionTestsEnv: {
-      ...process.env,
+      ...editorEnv,
       IBCMD_INSTALLED_ROOT: path.join(run, "extensions"),
       IBCMD_ACCEPTANCE_RUN: run,
     },
   });
+  // Some hosts exit successfully even when the test extension stops mid-suite.
+  await fs.access(path.join(run, "acceptance.json"));
   phase("complete");
   console.log(`Retained installed-editor evidence: ${run}`);
 })().catch((e) => {

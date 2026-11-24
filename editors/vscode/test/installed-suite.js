@@ -63,32 +63,6 @@ exports.run = async () => {
       JSON.stringify(rows) +
       "\n",
   );
-  phase("configure-workspace");
-  const cfg = vscode.workspace.getConfiguration("ibcmd", f.uri);
-  phase("configure-connections");
-  await cfg.update(
-    "connections",
-    ["lab/offline"],
-    vscode.ConfigurationTarget.WorkspaceFolder,
-  );
-  phase("configure-connectionMetadata");
-  await cfg.update(
-    "connectionMetadata",
-    { "lab/offline": { auth: "windows" } },
-    vscode.ConfigurationTarget.WorkspaceFolder,
-  );
-  phase("configure-sourceDirectory");
-  await cfg.update(
-    "sourceDirectory",
-    source,
-    vscode.ConfigurationTarget.WorkspaceFolder,
-  );
-  phase("configure-statusComparison");
-  await cfg.update(
-    "statusComparison",
-    "bytes",
-    vscode.ConfigurationTarget.WorkspaceFolder,
-  );
   phase("activate-extension");
   const api = await ext.activate();
   // VS Code caches its API by the requiring extension's identity. The external
