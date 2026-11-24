@@ -195,31 +195,55 @@ pub struct FormFactsV8_5_1 {
     pub unknown_palette_colors: Vec<String>,
 }
 
-pub fn is_form_body_8_5_1(body: &ParsedFormBodyBlob) -> bool {
-    let declares_revision = body
-        .layout
+/// Locate the trailer revision and the optional internal bars following its
+/// presence flags. The scalar trailer slots keep their indices once these
+/// records are removed. Internal bars are absent from the platform XML.
+fn stored_root_panels(layout: &str) -> Option<Vec<usize>> {
+    let head = layout.trim_start().strip_prefix('{')?.trim_start();
+    if !head
+        .strip_prefix(FORM_ROOT_REVISION_8_5_1)?
         .trim_start()
-        .strip_prefix('{')
-        .map(|rest| rest.trim_start())
-        .is_some_and(|rest| {
-            rest.strip_prefix(FORM_ROOT_REVISION_8_5_1)
-                .is_some_and(|after| after.trim_start().starts_with(','))
-        });
-    // The revision alone is a number any hand-made record can carry; an 8.5
-    // root also ends in its trailer, whose own `{59,...}` revision tuple sits
-    // 14 members from the end.
-    declares_revision
-        && ibcmd_1c_text::split_1c_braced_fields(&body.layout, 0).is_some_and(|fields| {
-            fields.len() > ROOT_TRAILER_APPENDED_8_5_1 + 2
-                && fields[fields.len() - ROOT_TRAILER_APPENDED_8_5_1 - 2]
-                    .trim_start()
-                    .strip_prefix('{')
-                    .is_some_and(|rest| {
-                        rest.trim_start()
-                            .strip_prefix(FORM_ROOT_REVISION_8_5_1)
-                            .is_some_and(|after| after.trim_start().starts_with(','))
-                    })
-        })
+        .starts_with(',')
+    {
+        return None;
+    }
+    let fields = ibcmd_1c_text::split_1c_braced_fields(layout, 0)?;
+    for count in 0..=3 {
+        let revision = fields
+            .len()
+            .checked_sub(ROOT_TRAILER_APPENDED_8_5_1 + 2 + count)?;
+        let Some(tuple) = ibcmd_1c_text::split_1c_braced_fields(fields[revision].trim(), 0) else {
+            continue;
+        };
+        if tuple.first()?.trim() != FORM_ROOT_REVISION_8_5_1 {
+            continue;
+        }
+        if count == 0 {
+            return Some(Vec::new());
+        }
+        let mut panels = Vec::with_capacity(count);
+        for (slot, id) in [(2, "-2"), (3, "-3"), (9, "-4")] {
+            let flag = revision + 2 + slot + panels.len();
+            if fields.get(flag)?.trim() == "1" {
+                let panel = ibcmd_1c_text::split_1c_braced_fields(fields.get(flag + 1)?.trim(), 0)?;
+                let identity = ibcmd_1c_text::split_1c_braced_fields(panel.get(1)?.trim(), 0)?;
+                if panel.first()?.trim() != "22"
+                    || panel.get(5)?.trim() != "9"
+                    || identity.first()?.trim() != id
+                    || identity.get(1)?.trim() != FORM_ITEM_CLASS_UUID
+                {
+                    return None;
+                }
+                panels.push(flag + 1);
+            }
+        }
+        return (panels.len() == count).then_some(panels);
+    }
+    None
+}
+
+pub fn is_form_body_8_5_1(body: &ParsedFormBodyBlob) -> bool {
+    stored_root_panels(&body.layout).is_some()
 }
 
 /// Down-converts one 8.5 form body into the 8.3.27 shape the form codec reads.
@@ -228,6 +252,13 @@ pub fn down_convert_form_body_8_5_1(
 ) -> Result<(ParsedFormBodyBlob, FormFactsV8_5_1)> {
     let mut facts = FormFactsV8_5_1::default();
     let mut root = parse_node(&body.layout)?;
+    if let Node::List(members) = &mut root {
+        let panels = stored_root_panels(&body.layout)
+            .ok_or_else(|| anyhow!("8.5 form root has an invalid trailer"))?;
+        for index in panels.into_iter().rev() {
+            members.remove(index);
+        }
+    }
     root = convert_primitives(root, &mut facts);
     root = convert_items(root, &mut facts)?;
     root = convert_values_and_commands(root, &mut facts)?;
