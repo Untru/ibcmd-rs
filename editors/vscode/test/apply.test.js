@@ -253,3 +253,34 @@ test("native apply removes Windows case variants from the child environment", as
     assert.equal(env[key], undefined, key);
   assert.equal(env.TMPDIR, "/external");
 });
+test("native Apply passes canonical Windows drive and UNC targets to ibcmd", async () => {
+  for (const [dbPath, expected] of [
+    ["\\\\?\\C:\\test db", "C:\\test db"],
+    ["\\\\?\\UNC\\server\\share\\test db", "\\\\server\\share\\test db"],
+  ]) {
+    const h = nativeHarness(require("node:path").win32, "win32");
+    const running = h.native(
+      "C:\\ibcmd.exe",
+      { dbPath, platform: "8.5.1" },
+      "C:\\scratch",
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.calls[0][1][3], "--db-path=" + expected);
+    h.child.emit("exit", 0);
+    await running;
+  }
+});
+test("native Apply refuses verbatim-only Windows targets before spawning", async () => {
+  for (const dbPath of [
+    "\\\\?\\Volume{123}\\db",
+    "\\\\?\\C:\\db.",
+    "\\\\?\\C:\\NUL\\db",
+  ]) {
+    const h = nativeHarness(require("node:path").win32, "win32");
+    await assert.rejects(
+      h.native("C:\\ibcmd.exe", { dbPath, platform: "8.5.1" }, "C:\\scratch"),
+      /cannot be represented/,
+    );
+    assert.deepEqual(h.calls, []);
+  }
+});

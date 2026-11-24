@@ -70,6 +70,30 @@ export async function runApply(
   }
 }
 
+// Native ibcmd does not parse the verbatim paths returned by Rust canonicalization.
+function nativeDatabasePath(directory: string): string {
+  if (process.platform !== "win32" || !directory.startsWith("\\\\?\\"))
+    return directory;
+  const rest = directory.slice(4);
+  const drive = /^[A-Za-z]:\\/.test(rest);
+  const unc = /^UNC\\[^\\]+\\[^\\]+(?:\\|$)/i.test(rest);
+  const components = rest.slice(drive ? 3 : 4).split("\\");
+  if (
+    (!drive && !unc) ||
+    components.some(
+      (part) =>
+        /[ .]$|[<>:"/|?*\x00-\x1f]/.test(part) ||
+        /^(?:con|prn|aux|nul|conin\$|conout\$|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)/i.test(
+          part,
+        ),
+    )
+  )
+    throw new ImportValidationError(
+      "The database path cannot be represented for native Apply",
+    );
+  return drive ? rest : "\\\\" + rest.slice(4);
+}
+
 // Native execution belongs to the client. Never use a shell or print native
 // stdout/stderr: it can include paths, credentials or configuration contents.
 export async function nativeApply(
@@ -91,6 +115,7 @@ export async function nativeApply(
     throw new ImportValidationError(
       "Native scratch directory must be absolute",
     );
+  const dbPath = nativeDatabasePath(plan.dbPath);
   await mkdir(scratchRoot, { recursive: true });
   const scratch = await mkdtemp(path.join(scratchRoot, "native-apply-"));
   if (!(await current()))
@@ -106,7 +131,7 @@ export async function nativeApply(
         "infobase",
         "config",
         "apply",
-        `--db-path=${plan.dbPath}`,
+        `--db-path=${dbPath}`,
         "--dynamic=disable",
         `--data=${path.join(scratch, "data")}`,
         `--temp=${path.join(scratch, "temp")}`,

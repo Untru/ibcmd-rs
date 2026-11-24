@@ -59,67 +59,91 @@ const { RpcClient } = require("../out/rpc"),
     `[[database]]\nname = "apply384"\nplatform = "8.5.1"\ndb-path = ${JSON.stringify(db)}\n`,
   );
   process.env.IBCMD_TEST_KEEP_FIXTURES = "1";
-  const rpc = new RpcClient(binary, root),
-    logs = [];
-  const request = rpc.request.bind(rpc);
-  rpc.request = async (method, ...args) => {
-    try {
-      return await request(method, ...args);
-    } catch (error) {
-      console.error(
-        `Acceptance stage failed: ${method} (${error.code ?? "transport"})`,
-      );
-      throw error;
-    }
-  };
-  try {
-    await rpc.request("initialize", {
-      protocolVersion: "1.3",
-      workspaceFolder: root,
+  const logs = [];
+  const host = process.env.IBCMD_TEST_APPLY_HOST === "1";
+  if (host) {
+    const { runTests } = require("@vscode/test-electron");
+    assert.ok(process.env.VSCODE_EXECUTABLE_PATH, "Set VSCODE_EXECUTABLE_PATH");
+    await runTests({
+      vscodeExecutablePath: process.env.VSCODE_EXECUTABLE_PATH,
+      extensionDevelopmentPath: path.resolve(__dirname, ".."),
+      extensionTestsPath: path.join(__dirname, "native-apply-host-suite.js"),
+      launchArgs: [
+        root,
+        "--user-data-dir",
+        path.join(root, "host-profile"),
+        "--extensions-dir",
+        path.join(root, "host-extensions"),
+        "--disable-extensions",
+        "--disable-workspace-trust",
+        "--disable-updates",
+        "--skip-welcome",
+        "--skip-release-notes",
+      ],
+      extensionTestsEnv: { ...env, IBCMD_HOST_MODULE: module },
     });
-    await rpc.request("infobases/connect", { infobase: "apply384" });
-    assert.equal(
-      (await rpc.request("config/pending", { infobase: "apply384" })).pending,
-      false,
-    );
-    await runImport(
-      rpc,
-      { infobase: "apply384", sourceDir: edited, files: [module] },
-      { current: async () => true, confirm: async () => true },
-    );
-    assert.equal(
-      (await rpc.request("config/pending", { infobase: "apply384" })).pending,
-      true,
-    );
-    const before = await fs.readFile(path.join(db, "1Cv8.1CD"));
-    assert.equal(
-      await runApply(rpc, "apply384", path.join(root, "recovery"), {
-        current: async () => true,
-        confirm: async () => false,
-        log: (m) => logs.push(m),
-        native: async () => {
-          throw new Error("declined apply must not execute");
-        },
-      }),
-      false,
-    );
-    assert.deepEqual(await fs.readFile(path.join(db, "1Cv8.1CD")), before);
-    assert.equal(
-      await runApply(rpc, "apply384", path.join(root, "recovery"), {
-        current: async () => true,
-        confirm: async () => true,
-        log: (m) => logs.push(m),
-        native: (plan) =>
-          nativeApply(native, plan, path.join(root, "recovery")),
-      }),
-      true,
-    );
-    assert.equal(
-      (await rpc.request("config/pending", { infobase: "apply384" })).pending,
-      false,
-    );
-  } finally {
-    await rpc.dispose();
+  } else {
+    const rpc = new RpcClient(binary, root);
+    const request = rpc.request.bind(rpc);
+    rpc.request = async (method, ...args) => {
+      try {
+        return await request(method, ...args);
+      } catch (error) {
+        console.error(
+          `Acceptance stage failed: ${method} (${error.code ?? "transport"})`,
+        );
+        throw error;
+      }
+    };
+    try {
+      await rpc.request("initialize", {
+        protocolVersion: "1.3",
+        workspaceFolder: root,
+      });
+      await rpc.request("infobases/connect", { infobase: "apply384" });
+      assert.equal(
+        (await rpc.request("config/pending", { infobase: "apply384" })).pending,
+        false,
+      );
+      await runImport(
+        rpc,
+        { infobase: "apply384", sourceDir: edited, files: [module] },
+        { current: async () => true, confirm: async () => true },
+      );
+      assert.equal(
+        (await rpc.request("config/pending", { infobase: "apply384" })).pending,
+        true,
+      );
+      const before = await fs.readFile(path.join(db, "1Cv8.1CD"));
+      assert.equal(
+        await runApply(rpc, "apply384", path.join(root, "recovery"), {
+          current: async () => true,
+          confirm: async () => false,
+          log: (m) => logs.push(m),
+          native: async () => {
+            throw new Error("declined apply must not execute");
+          },
+        }),
+        false,
+      );
+      assert.deepEqual(await fs.readFile(path.join(db, "1Cv8.1CD")), before);
+      assert.equal(
+        await runApply(rpc, "apply384", path.join(root, "recovery"), {
+          current: async () => true,
+          confirm: async () => true,
+          log: (m) => logs.push(m),
+          native: (plan) =>
+            nativeApply(native, plan, path.join(root, "recovery")),
+        }),
+        true,
+      );
+      assert.equal(
+        (await rpc.request("config/pending", { infobase: "apply384" })).pending,
+        false,
+      );
+    } finally {
+      await rpc.dispose();
+    }
   }
   run(["infobase", "config", "export", `--db-path=${db}`, actual]);
   async function files(dir, prefix = "") {
@@ -156,6 +180,7 @@ const { RpcClient } = require("../out/rpc"),
   const result = {
     root,
     platform: native,
+    extensionHost: host,
     pendingBefore: false,
     pendingAfterImport: true,
     declinedApplyBytesUnchanged: true,

@@ -478,6 +478,13 @@ and compares the complete native export with the edited source. The
 version manifest is checked separately for preserved names/IDs and the
 changed module version. The script forces fixture retention for the server.
 
+To exercise the registered VS Code commands and their status-bar updates,
+also set `IBCMD_TEST_APPLY_HOST=1` and `VSCODE_EXECUTABLE_PATH` to an
+installed Code executable. This runs the same native export comparison in
+an isolated editor profile. On Windows the candidate server must support
+selected file-db staging (tested with PR #537 at
+`c0d1cd7aec6a3a0931e3ca4da77dbec35574aee3`).
+
 Local retained-fixture validation uses the focused `editor_server` integration
 target, not the destructive root-unit test
 `file_import::tests::owned_scratch_is_removed_on_success_error_and_unwind`.
