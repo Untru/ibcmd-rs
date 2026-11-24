@@ -94,3 +94,40 @@ The source rule was unchanged for these experiments. Their measured marker
 agreement does not establish the retention rule for changed runtime bodies,
 repeated generations, other description changes or the 20/21-row boundary.
 Those cases require their own native/OWN twins before #418 can close.
+
+## Field-level comparison and outstanding T20/T21 cells
+
+The two linked science reports record each changed row as a pair of physical
+headers and payload digests in `OWN_vs_native_actual_delta`. Grouping the
+pairs by **every field that differs** gives the following counts. Rows with
+different timestamps still count as different.
+
+| Table | Differing fields | Comment rows | Synonym rows |
+| --- | --- | ---: | ---: |
+| Params | Creation, Modified | 16 | 15 |
+| Params | Modified | 1 | 1 |
+| Params | Modified, SHA-256 | 3 | 3 |
+| Params | Creation, Modified, DataSize, byte length, SHA-256 | 0 | 1 |
+| Files | Creation, Modified, SHA-256 | 1 | 1 |
+
+The three same-length Params payload differences in each twin are the two
+`.ui` rows beginning `789702c6` and `97f2c291`, and `siVersions`.
+The additional Synonym payload difference is the `1a621f0f` service row
+listed above. Marker agreement alone therefore misses three payload
+differences for Comment and four for Synonym.
+
+| Native stage | Invocation | Native whole6 + ten auxiliary tables | OWN from identical staging |
+| --- | --- | --- | --- |
+| T20 | First | Unverified | Unverified |
+| T20 | Repeat | Unverified | Unverified |
+| T21 | First | Unverified | Unverified |
+| T21 | Repeat | Unverified | Unverified |
+
+The [revision21 review disposition](https://github.com/Untru/ibcmd-rs/issues/418#issuecomment-6069822736)
+records one open P2 in LockedRestore. A retained-ledger getter can change a
+previously checked callable or the durable bytes before `require_completed`
+returns. The 47 proposed checks had no recorded execution in that review.
+The 73 passing revision19 checks cover preparation and ledger. Neither those
+checks nor the two five-row twins supply a T20/T21 result. Reverification
+requires the revision21 sources and the staged-input lineage for the boundary
+runs. This field-level comparison uses only the published science reports.
