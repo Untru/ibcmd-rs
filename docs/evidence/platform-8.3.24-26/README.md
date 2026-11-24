@@ -1,5 +1,7 @@
 # #361 native SQL acceptance — 2026-10-23
 
+See the [Windows SQL measurements on BSP 3.1.7.343](windows-sql-bsp-2026-11-24.md) for the subsequent exact-build runs.
+
 **Blocked; no new native export/import measurements.** This records the Mac
 external lab inventory, access check and evidence harness, not platform support.
 The issue stays open. A profile entry does not establish SQL acceptance.
