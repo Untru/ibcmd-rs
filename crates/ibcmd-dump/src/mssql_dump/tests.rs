@@ -36076,11 +36076,10 @@ fn direct_revision_14_forms_decode_only_measured_interface_modes() {
             "<UseInInterfaceCompatibilityMode>{mode}</UseInInterfaceCompatibilityMode>"
         )));
     }
-    for tail in [",3", ""] {
-        let text = row(tail);
-        assert!(!is_direct_code14_form_metadata_text(&text, uuid));
-        assert!(parse_form_metadata_properties_from_text(&text, "Form", uuid).is_none());
-    }
+    let unknown = row(",3");
+    assert!(!is_direct_code14_form_metadata_text(&unknown, uuid));
+    assert!(parse_form_metadata_properties_from_text(&unknown, "Form", uuid).is_none());
+    assert!(!is_direct_code14_form_metadata_text(&row(""), uuid));
 }
 
 #[test]

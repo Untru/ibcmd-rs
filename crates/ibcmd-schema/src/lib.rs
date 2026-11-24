@@ -18850,7 +18850,11 @@ pub mod metadata_child_storage_facts {
             match fields.first()?.trim() {
                 "12" | "13" => Some(FORM_INTERFACE_COMPATIBILITY_DEFAULT),
                 "14" => {
-                    let code = fields.get(5)?.trim();
+                    // Older wrapped records without the trailing mode export as Any.
+                    // Direct records must first satisfy direct_form_header_layout.
+                    let Some(code) = fields.get(5).map(|field| field.trim()) else {
+                        return Some(FORM_INTERFACE_COMPATIBILITY_DEFAULT);
+                    };
                     INTERFACE_COMPATIBILITY_MODES
                         .iter()
                         .find(|(_, value)| value.to_string() == code)

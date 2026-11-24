@@ -238,8 +238,8 @@ fn form_record(node: &Brace, context: &ExportContext) -> Result<(Header, Element
         .child(flag("IncludeHelpInContents", item(fields, 2)?)?)
         .child(purposes);
     if context.is_xml_2_21() {
-        let mode = match version {
-            "14" => code_text(item(fields, 5)?, INTERFACE_COMPATIBILITY_MODES)?,
+        let mode = match (version, fields.get(5)) {
+            ("14", Some(mode)) => code_text(mode, INTERFACE_COMPATIBILITY_MODES)?,
             _ => "Any",
         };
         properties
