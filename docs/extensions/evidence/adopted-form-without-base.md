@@ -27,3 +27,14 @@ cargo test --locked --test integration extension_v85::adopted_form_interceptors_
 ```
 
 The 8.3.27.2214 file export profile also preserved the three event types and the command type. A fresh native Designer export of this particular CFE on 8.3.27.2214 requires a license unavailable on the measurement host. The original seven installed extensions and the ERP УХ reference databases from issue #414 remain outstanding.
+
+## Native 8.3.27.2342, measured on 2026-11-24
+
+The 8.3.27.2342 standalone ibcmd returned exit code 0 for create, load and export with the same CFE and a fresh empty file database. To repeat the measurement, set `$native` to this build and run the three native commands above in a new temporary directory. For this build compare the exported catalog Form.xml to `tests/fixtures/external/adopted_form_no_base_8_3_27_2342/Form.xml`. Its SHA-256 is `63d30cb8ce13005c4aadc691c7ccfb2531406edd97fd26fbb4e22dec9af2036e`. The XML contains the three stored event call types and the Before command action, with no BaseForm element.
+
+| ibcmd-rs command on the same input | Comparison with native 8.3.27.2342 |
+| --- | --- |
+| `cf export $cfe "$work/from-cfe" --platform 8.3.27` | All 8 source paths and bytes matched at the parent of #475 (`f9ebb8dd`), its head (`4f977301`) and the PR base (`54b796f6`). Only the native database dump contains ConfigDumpInfo.xml. |
+| `infobase config export "--db-path=$work/db" --extension=ТестРасширение --platform=8.3.27 "$work/from-db"` | All 9 files matched at `54b796f6`, including ConfigDumpInfo.xml. |
+
+Both ibcmd-rs entry points reject the exact selector `8.3.27.2342` (exit 2). The successful runs used the supported family selector `8.3.27` (XML 2.20). The regression test `form_events::adopted_form_without_base_matches_native_8_3_27_2342` compares the complete form to the native bytes. The 8.3.27.2214 native run and the original seven-extension and ERP УХ lab matrix remain open.
