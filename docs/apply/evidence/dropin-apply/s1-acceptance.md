@@ -99,7 +99,16 @@ two inflated flowcharts. All three compressed representations differed from stor
 other flowchart, the final counter alone differed (37 stored, 23 compiled). Repeating the
 inflated comparison on the four-binding control gave the same result. The four failures in
 that run were forms. Registration of the business-process asset therefore resolves its routing,
-while reconstruction of its stored edit counter remains open.
+while the XML omits the stored edit counter.
+
+For an explicit SQL-backed `--base-free` import, the compiler can now retain the active row
+when the root inflates to exactly the compiled bytes or when a flowchart differs only in that
+last counter and the stored value is at least the compiled one. It rechecks the selected
+rows in the staging transaction. On a disposable c1 copy of BSP 3.1.7.343, all seven columns
+of the staged root and both flowcharts then matched their active rows (3/3). This measurement
+used `--no-verify`. With verification enabled, eight of 10,982 checked files differed and the
+import stopped before writing. The subsequent apply of the diagnostic stage also refused
+descriptor differences. This three-row result covers only root and flowchart preservation.
 
 For fresh export-back runs, collect the return codes of both imports and applies before comparing
 anything. Check 4 can be recorded with `scripts/restructure-lab/compare_config.ps1 -A <native-db>
