@@ -927,7 +927,27 @@ fn base64_lines(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::outline;
+    use super::*;
+
+    #[test]
+    fn graphical_schema_stores_multiline_title_and_layout_specific_colour() {
+        let root = std::env::temp_dir().join(format!("ibcmd-flowchart-{}", uuid::Uuid::new_v4()));
+        let _scratch = crate::test_scratch::TestScratch::adopt(&root);
+        let template = root.join("CommonTemplates/T.xml");
+        let body = template_body_path(&template);
+        fs::create_dir_all(body.parent().unwrap()).unwrap();
+        let xml = include_str!("../../../../tests/fixtures/native-evidence/8.3.27.2214/graphical-scheme-do/native/Catalogs/СхемыПроцессов/Templates/ШаблонЭлементаДекорация/Ext/Template.xml")
+            .replace("style:FieldBackColor", "auto")
+            .replace("<v8:content>Декорация</v8:content>", "<v8:content>first\nsecond</v8:content>");
+        fs::write(&body, xml).unwrap();
+        for (version, expected_colour) in [("2.20", "{3,4,{0}}"), ("2.21", "{4,4,{0},4}")] {
+            let context = DescriptorContext::with_files(&root, version, &[]).unwrap();
+            let row = graphical_schema_row(&template, &context).unwrap().unwrap();
+            let colour = row.at(&[1, 0, 1]).unwrap();
+            assert_eq!(colour, &literal(expected_colour).unwrap());
+            assert!(super::super::brace::serialize(&row).contains("first\r\nsecond"));
+        }
+    }
 
     #[test]
     fn computes_the_outlines_the_platform_stores() {

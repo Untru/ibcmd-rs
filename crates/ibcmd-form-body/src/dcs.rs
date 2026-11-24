@@ -4625,6 +4625,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn form_list_settings_emit_the_native_filter_comparison() {
+        let decode = |text: &str| ibcmd_1c_text::decode_base64_mime(text.trim()).unwrap();
+        let stored = decode(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/form-comparison-storage.xml.b64"
+        ));
+        let DcsChildParseOutcome::Typed(filter) =
+            ibcmd_xml::dcs::parse_dcs_filter_storage_document(&stored).unwrap()
+        else {
+            panic!("expected the fixture's typed comparison");
+        };
+        let xml = emit_canonical_dcs_settings_children(
+            CanonicalDcsSettingsContext::FormListSettings,
+            CanonicalDcsSettingsInput {
+                filter: Some(&filter),
+                ..Default::default()
+            },
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+            "dcsset",
+            "",
+            "mssql:Form/ListSettings",
+        )
+        .unwrap();
+        let native = String::from_utf8(decode(include_str!("../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/form-comparison-embedded.xml.b64"))).unwrap();
+        let lines = |text: &str| {
+            text.trim()
+                .lines()
+                .map(|line| line.trim().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(lines(&xml), lines(&native));
+    }
+
     /// Fail-closed floor for the settings transliteration: only a *cohort*
     /// refusal reaches it. A document that is not a settings document at all
     /// is refused by the analyzer and stays refused -- there is nothing to
