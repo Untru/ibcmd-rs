@@ -1628,6 +1628,24 @@ pub fn apply_form_facts_8_5_1(
                 adoption,
                 &mut assets,
             )?;
+            if edits.elements[element].tag == "HTMLDocumentField"
+                && let Some(Node::List(tuple)) = item.bag_tail.first()
+                && let [_, _, _, code, width, _, _] = tuple.as_slice()
+                && let Some(style) = code
+                    .as_leaf()
+                    .and_then(ibcmd_form_schema::FormControlBorderStyle::from_raw_code)
+                && let Some(width) = width.as_leaf()
+                && width.parse::<u32>().is_ok()
+                && let Some(encoded) =
+                    ibcmd_form_native::format_native_control_border(Some(style.xml_value()), width)
+                && item.bag_tail[0].to_text() == encoded
+                && (style.xml_value() != "WithoutBorder" || width != "1")
+            {
+                edits.insert_child(element, "Border", &format!(
+                    "<Border width=\"{width}\">\r\n\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{}</v8ui:style>\r\n</Border>\r\n",
+                    style.xml_value()
+                ))?;
+            }
             if writes_default_button_importance {
                 default_button_importance(&mut edits, element, item)?;
             }

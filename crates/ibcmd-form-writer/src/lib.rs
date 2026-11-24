@@ -4583,18 +4583,13 @@ fn native_field_payload(
             .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
         }
         Some(14) => {
-            // The exporter reads the kind's own tuple for its extent,
-            // `<Output>`, `<Edit>` and `<AutoMaxWidth>` only
-            // (`FORM_DOCUMENT_FIELD_GEOMETRY`): the other geometry flags and
-            // the border colour have no slot it reads, so a form that spells
-            // one would not come back and is refused. The excluded commands
-            // are the shared member 48, as on every field.
+            // Slot 5 of the graphical schema payload stores its border colour.
+            // The remaining geometry flags below are unmeasured.
             if item.max_width.is_some()
                 || item.max_height.is_some()
                 || item.auto_max_height.is_some()
                 || item.horizontal_stretch.is_some()
                 || item.vertical_stretch.is_some()
-                || item.scalars.contains_key("BorderColor")
             {
                 return Err(anyhow!(
                     "a <GraphicalSchemaField> names a property whose slot is not measured"
@@ -4606,6 +4601,7 @@ fn native_field_payload(
                 item.scalars.get("Output").map(|value| value.trim()),
                 native_scalar_flag(item, "Edit", true),
                 item.auto_max_width.unwrap_or(true),
+                &native_scalar_color(item, "BorderColor", source)?,
                 &events,
             )
             .ok_or_else(|| {

@@ -587,6 +587,45 @@ fn load_item(
         }
         "Table" => load_table(edits, element, item, layout)?,
         "UsualGroup" => load_usual_group(edits, element, item)?,
+        "HTMLDocumentField" => {
+            let borders = edits.direct_children(element, "Border");
+            if let [border] = borders.as_slice() {
+                let el = &edits.elements[*border];
+                let mut reader =
+                    quick_xml::Reader::from_str(&edits.xml[el.open_start..el.line_end]);
+                let quick_xml::events::Event::Start(open) = reader.read_event()? else {
+                    bail!("unsupported HTML document field border");
+                };
+                let props = crate::parse_form_xml_control_border(&open)?;
+                let children = &el.children;
+                let [style] = children.as_slice() else {
+                    bail!("expected one style in HTML document field border");
+                };
+                let style_element = &edits.elements[*style];
+                let mut style_reader = quick_xml::Reader::from_str(
+                    &edits.xml[style_element.open_start..style_element.line_end],
+                );
+                let quick_xml::events::Event::Start(style_open) = style_reader.read_event()? else {
+                    bail!("expected a border style with a value");
+                };
+                if !props.valid
+                    || props.reference
+                    || style_element.tag != "v8ui:style"
+                    || !crate::form_xml_control_border_style_attrs_are_valid(&style_open)?
+                {
+                    bail!("unsupported HTML document field border style or attributes");
+                }
+                let style = simple_text(edits, *style)
+                    .ok_or_else(|| anyhow!("missing HTML document field border style"))?;
+                let encoded =
+                    ibcmd_form_native::format_native_control_border(Some(style), &props.width)
+                        .ok_or_else(|| anyhow!("unsupported HTML document field border {style}"))?;
+                item.bag_tail.insert(0, encoded);
+                edits.remove(*border);
+            } else if !borders.is_empty() {
+                bail!("duplicate HTML document field border");
+            }
+        }
         "Page" => {
             let group = peek(edits, element, "Group")?;
             let group_code = code_of(GROUPING, group.as_deref(), "Group")?;
