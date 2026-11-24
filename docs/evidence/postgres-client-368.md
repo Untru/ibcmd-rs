@@ -40,6 +40,23 @@ $Cli = (Resolve-Path target/debug/ibcmd-rs.exe).Path
 
 При заданном `CARGO_TARGET_DIR` подставьте каталог этой сборки в путь к CLI. Сопоставьте деревья по относительным путям и байтам. Для проверки отказов повторите первый экспорт с новым каталогом вывода без `sslmode=verify-full`, затем с проверкой TLS, удалив из доверенных корень временного центра.
 
+Команды сверки для PowerShell 7 сравнивают относительные пути и SHA-256. При полном совпадении вывод пуст. В первой сверке участвует служебный XML версий.
+
+```powershell
+function Get-TreeDigest($Root, [switch]$SkipVersions) {
+    $base = (Resolve-Path -LiteralPath $Root).Path
+    Get-ChildItem -LiteralPath $base -Recurse -File | ForEach-Object {
+        $name = [IO.Path]::GetRelativePath($base, $_.FullName)
+        if (!$SkipVersions -or $name -cne 'ConfigDumpInfo.xml') {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            "$name $hash"
+        }
+    }
+}
+Compare-Object -CaseSensitive (Get-TreeDigest "$Lab/oracle") (Get-TreeDigest "$Lab/read")
+Compare-Object -CaseSensitive (Get-TreeDigest tests/fixtures/file-infobase/tiny-xml -SkipVersions) (Get-TreeDigest "$Lab/reread" -SkipVersions)
+```
+
 Потоковый unit-тест задерживает завершение запроса на стороне сервера до того, как обработчик клиента получит первую строку. Live-тест отдельно проверяет TLS текущего сеанса в `pg_stat_ssl`, порядок всех 10 000 значений `generate_series`, запись NULL, текста и двоичных байтов. После отмены COPY, нарушения UNIQUE и отказа сервера до начала COPY он сверяет содержимое временной таблицы на том же соединении.
 
 ## Результаты 24.11.2026
