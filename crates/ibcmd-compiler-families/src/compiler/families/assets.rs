@@ -275,6 +275,13 @@ const ROUTES: &[SourceAssetRoute] = &[
         Module
     ),
     route!(
+        "Recalculation",
+        RecordSetModule,
+        ".0",
+        "Ext/RecordSetModule.bsl",
+        Module
+    ),
+    route!(
         "Sequence",
         RecordSetModule,
         ".0",

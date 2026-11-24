@@ -14183,6 +14183,34 @@ mod tests {
     }
 
     #[test]
+    fn packs_recalculation_record_set_module_under_its_own_uuid() {
+        let root =
+            std::env::temp_dir().join(format!("ibcmd-recalculation-{}", uuid::Uuid::new_v4()));
+        let _scratch = crate::test_scratch::TestScratch::adopt(&root);
+        let owner = root.join("CalculationRegisters/Payroll/Recalculations/BaseData");
+        let body = owner.join("Ext/RecordSetModule.bsl");
+        fs::create_dir_all(body.parent().unwrap()).unwrap();
+        let text = b"Function Marker() Export\nReturn 1;\nEndFunction";
+        fs::write(&body, text).unwrap();
+        let uuid = "22222222-2222-4222-8222-222222222222";
+        let rows = super::prepare_object_module_body_rows(
+            &test_sql(),
+            "missing-database",
+            &owner.with_extension("xml"),
+            &test_simple_metadata_properties("Recalculation", uuid, "BaseData"),
+            &test_compile_axes(),
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, format!("{uuid}.0"));
+        assert_eq!(rows[0].path, body);
+        assert_eq!(
+            module_blob_text_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(text)
+        );
+    }
+
+    #[test]
     fn prepares_configuration_application_module_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-configuration-module-no-fetch-{}",
