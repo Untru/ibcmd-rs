@@ -93,6 +93,14 @@ finished with an error. The base-free import on `54b796f6` refused four form row
 of the same paths. A different attribute required by the complete b1 edit is absent in this
 distribution, so this control measures only the four bindings.
 
+A SQL copy loaded from the same distribution held two business-process flowcharts. On an
+unchanged native tree, `audit-empty-stage` produced the same inflated `root` and one of the
+two inflated flowcharts. All three compressed representations differed from storage. For the
+other flowchart, the final counter alone differed (37 stored, 23 compiled). Repeating the
+inflated comparison on the four-binding control gave the same result. The four failures in
+that run were forms. Registration of the business-process asset therefore resolves its routing,
+while reconstruction of its stored edit counter remains open.
+
 For fresh export-back runs, collect the return codes of both imports and applies before comparing
 anything. Check 4 can be recorded with `scripts/restructure-lab/compare_config.ps1 -A <native-db>
 -B <own-db> -ExactSummary`. Run the native apply again on our twin for check 7 and record
