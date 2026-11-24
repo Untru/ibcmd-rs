@@ -9200,6 +9200,7 @@ pub(super) fn parse_form_dynamic_list_key_type(field: &str) -> Option<&'static s
     match parse_form_setting_number(field)?.as_str() {
         "1" => Some("FieldValue"),
         "2" => Some("RowKey"),
+        "3" => Some("RowNumber"),
         _ => None,
     }
 }
@@ -11306,6 +11307,7 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// field, so a multi-segment binding against one of them is answered by the
     /// leaf entry alone rather than by joining the intermediate segments.
     dynamic_list_attribute_ids: BTreeSet<String>,
+    row_number_list_names: BTreeSet<String>,
     table_paths: BTreeMap<FormBoundTableKey, Option<String>>,
     column_names: BTreeMap<FormBoundColumnKey, Option<String>>,
     /// Exactly the columns an attribute *declares*, with no field-map or
@@ -11456,6 +11458,16 @@ fn collect_form_attribute_data_path_columns(
             .insert(attribute.id.clone());
     }
     if is_dynamic_list {
+        if attribute
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.key_type)
+            == Some("RowNumber")
+        {
+            owner_scoped_bindings
+                .row_number_list_names
+                .insert(attribute.name.clone());
+        }
         owner_scoped_bindings
             .dynamic_list_attribute_ids
             .insert(attribute.id.clone());
@@ -16447,7 +16459,59 @@ fn parse_form_child_item_with_metadata_owners(
     if conditional_group_schema.is_some() {
         sanitize_form_conditional_group_descendants(&mut item.child_items);
     }
+    if tag == "Table"
+        && item
+            .data_path
+            .as_ref()
+            .is_some_and(|path| owner_scoped_bindings.row_number_list_names.contains(path))
+    {
+        apply_row_number_list_defaults(&mut item, fields);
+    }
     Some(item)
+}
+
+/// CovDynamicTableFolders omits these entries in the counted bag. The
+/// platform still publishes their defaults for a list keyed by row number.
+fn apply_row_number_list_defaults(item: &mut FormChildItem, fields: &[&str]) {
+    let Some((start, end)) = form_table_counted_property_bag_bounds(fields) else {
+        return;
+    };
+    let bag = &fields[start..end];
+    let mut keys = BTreeSet::new();
+    for pair in bag.chunks_exact(2) {
+        let key = pair[0].trim();
+        if key
+            .parse::<usize>()
+            .ok()
+            .is_none_or(|n| n.to_string() != key)
+            || !keys.insert(key)
+        {
+            return;
+        }
+    }
+    if !keys.contains(TableBagKey::AutoRefresh.key()) {
+        item.auto_refresh.get_or_insert(false);
+    }
+    if !keys.contains(TableBagKey::AutoRefreshPeriod.key()) {
+        item.auto_refresh_period
+            .get_or_insert_with(|| "60".to_owned());
+    }
+    if !keys.contains(TableBagKey::Period.key()) {
+        item.period.get_or_insert_with(|| FormTablePeriod {
+            variant: "Custom",
+            start_date: "0001-01-01T00:00:00".to_owned(),
+            end_date: "0001-01-01T00:00:00".to_owned(),
+        });
+    }
+    if !keys.contains(TableBagKey::TopLevelParent.key()) {
+        item.top_level_parent_nil.get_or_insert(true);
+    }
+    if !keys.contains(TableBagKey::UpdateOnDataChange.key()) {
+        item.update_on_data_change.get_or_insert("Auto");
+    }
+    if !keys.contains(TableBagKey::AllowGettingCurrentRowUrl.key()) {
+        item.allow_getting_current_row_url.get_or_insert(true);
+    }
 }
 
 fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
