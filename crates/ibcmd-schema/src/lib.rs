@@ -18506,7 +18506,7 @@ pub mod metadata_storage_facts {
                 .all(|byte| byte.is_ascii_digit())
     }
 
-    /// Direct Form headers have two measured revisions; revision 12 omits the final flag.
+    /// Direct Form headers have two measured revisions; revision 12 omits the interface mode.
     pub fn direct_form_header_layout(code: Option<&str>, field_count: usize) -> bool {
         matches!((code, field_count), (Some("12"), 5) | (Some("14"), 6))
     }
@@ -18842,6 +18842,24 @@ pub mod metadata_child_storage_facts {
     }
 
     impl FormMetadataRecordLayout {
+        /// Revision 14 appends the 8.5.1 interface mode; earlier records imply Any.
+        pub fn interface_mode(fields: &[&str]) -> Option<&'static str> {
+            use crate::external_named::{
+                FORM_INTERFACE_COMPATIBILITY_DEFAULT, INTERFACE_COMPATIBILITY_MODES,
+            };
+            match fields.first()?.trim() {
+                "12" | "13" => Some(FORM_INTERFACE_COMPATIBILITY_DEFAULT),
+                "14" => {
+                    let code = fields.get(5)?.trim();
+                    INTERFACE_COMPATIBILITY_MODES
+                        .iter()
+                        .find(|(_, value)| value.to_string() == code)
+                        .map(|(name, _)| *name)
+                }
+                _ => None,
+            }
+        }
+
         pub fn from_fields(fields: &[&str]) -> Option<Self> {
             match fields.first()?.trim() {
                 "13" | "14" => Some(Self {

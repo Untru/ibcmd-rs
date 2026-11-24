@@ -53746,7 +53746,7 @@ fn legacy_v12_form_descriptor_is_not_a_common_module() {
         parse_declared_form_type(&text, uuid),
         Some(DeclaredFormType::Managed)
     ));
-    let properties = parse_form_metadata_properties_from_text(&text, "Form", uuid);
+    let properties = parse_form_metadata_properties_from_text(&text, "Form", uuid).unwrap();
     assert_eq!(
         properties.use_purposes,
         vec!["PlatformApplication", "MobilePlatformApplication"]

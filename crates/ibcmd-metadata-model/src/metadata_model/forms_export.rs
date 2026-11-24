@@ -238,8 +238,8 @@ fn form_record(node: &Brace, context: &ExportContext) -> Result<(Header, Element
         .child(flag("IncludeHelpInContents", item(fields, 2)?)?)
         .child(purposes);
     if context.is_xml_2_21() {
-        let mode = match (version, fields.get(5)) {
-            ("14", Some(mode)) => code_text(mode, INTERFACE_COMPATIBILITY_MODES)?,
+        let mode = match version {
+            "14" => code_text(item(fields, 5)?, INTERFACE_COMPATIBILITY_MODES)?,
             _ => "Any",
         };
         properties
@@ -400,11 +400,18 @@ mod tests {
                 "<ExtendedPresentation><v8:item><v8:lang>ru</v8:lang><v8:content>Форма</v8:content></v8:item></ExtendedPresentation>",
             ),
         ] {
-            for version in ["2.20", "2.21"] {
+            for (version, value) in [
+                ("2.20", ""),
+                ("2.21", "Any"),
+                ("2.21", "Taxi"),
+                ("2.21", "Version85"),
+            ] {
                 let mode = if version == "2.20" {
-                    ""
+                    String::new()
                 } else {
-                    "<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>"
+                    format!(
+                        "<UseInInterfaceCompatibilityMode>{value}</UseInInterfaceCompatibilityMode>"
+                    )
                 };
                 let xml = format!(
                     r##"<Form uuid="5f0bd9b1-0000-4000-8000-000000000010"><Properties><Name>ФормаЭлемента</Name><Synonym/><Comment>Комментарий</Comment><FormType>Managed</FormType><IncludeHelpInContents>false</IncludeHelpInContents><UsePurposes><v8:Value xsi:type="app:ApplicationUsePurpose">PlatformApplication</v8:Value><v8:Value xsi:type="app:ApplicationUsePurpose">MobilePlatformApplication</v8:Value></UsePurposes>{mode}{extended}</Properties></Form>"##
