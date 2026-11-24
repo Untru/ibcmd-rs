@@ -15,7 +15,7 @@ results locate the first blocker for each direction of #358.
 The installed EDT baseline differs from the original native input on **335
 paths**: 333 files differ in content and two exist only in the native input.
 One of those is `ConfigDumpInfo.xml` (2,151,471 bytes). The full input manifest
-matched again after the run. These counts describe the two available trees.
+matched again after the run. These counts compare the original native input with its installed EDT export.
 A three-way report requires a candidate output.
 
 The successful import, export and validate commands all returned zero.
@@ -25,9 +25,21 @@ state-update records. There was no generated-project diagnostic differential
 or empty ambient control. The initial failed import has a separate workspace
 and log.
 
-The native control used a new file database created by Designer 8.3.27.2214.
-Its load of the installed EDT export exited 1 with a missing-license message.
-The fresh post-EDT native reference is therefore unavailable on that build. A second, separate file database attempt with native ibcmd 8.3.27.2342 timed out during creation after 900 seconds.
+After the USB HASP key was connected, Designer 8.3.27.2214 and native
+ibcmd 8.3.27.2342 each created a new file database, loaded the same EDT
+baseline and exported XML. All six commands exited 0. Both loads reported
+a possible invalid picture link in form help. Before connecting the key,
+Designer load had exited 1 with a missing-license message and the separate
+ibcmd create had timed out after 900 seconds.
+
+Both fresh native references contain 8,567 files. Cross-build comparison
+matched 8,566 files byte for byte. The sole differing file was
+`ConfigDumpInfo.xml`. Each native reference differs from the installed EDT
+baseline on 332 shared files and contains CDI as one additional file.
+In both fresh CDI files all 10,979 name/ID pairs match the original native
+input, with 4,241 identical full rows and 6,738 changed generation values.
+Strict CDI equality on the converter's unchanged return route is still blocked
+by generation preflight.
 
 The CLI reported `2026.1.3.25`. The candidate used the explicit
 `edt-2025.2.3-xml-2.20` profile for this compatibility probe. The original

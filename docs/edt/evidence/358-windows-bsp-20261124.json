@@ -74,14 +74,6 @@
     "file_count": 8566,
     "total_bytes": 174328237
   },
-  "native_reference": {
-    "db-create_exit": 0,
-    "db-load_exit": 1,
-    "build": "8.3.27.2214",
-    "load_diagnostic": "missing platform license",
-    "export_performed": false,
-    "load_log_sha256": "a829d6cd16b908bc4357e61e63ceacd9df03a19c215383c060d55384176e4039"
-  },
   "authentic_edt_to_xml": {
     "exit": 2,
     "output_published": false,
@@ -136,12 +128,111 @@
     "import-timeout-ws/.metadata/.log": "552da1c6d5be635182c1c3c72aa4d0fa0e0b0f11574cbacbba6bb06764d5cf93"
   },
   "three_way_reports_produced": 0,
-  "additional_native_reference_attempt": {
+  "native_reference_before_hasp": {
+    "db-create_exit": 0,
+    "db-load_exit": 1,
+    "build": "8.3.27.2214",
+    "load_diagnostic": "missing platform license",
+    "export_performed": false,
+    "load_log_sha256": "a829d6cd16b908bc4357e61e63ceacd9df03a19c215383c060d55384176e4039"
+  },
+  "additional_native_reference_attempt_before_hasp": {
     "tool": "ibcmd",
     "build": "8.3.27.2342",
     "create": "timeout",
     "timeout_seconds": 900,
     "import_performed": false,
     "export_performed": false
+  },
+  "native_reference_after_hasp": {
+    "8.3.27.2214": {
+      "create": {
+        "status": "completed",
+        "exit": 0,
+        "seconds": 20.951,
+        "log_sha256": "7654c5d4d3b4e4165ea9345a1bda5ba4a6671c2e7b304fb8fc2232b73e57532b"
+      },
+      "load": {
+        "status": "completed",
+        "exit": 0,
+        "seconds": 499.734,
+        "log_sha256": "feabc8dd096edc161200e3a2a0102e72d4551194509215d158a4c8a8f1cabeda",
+        "diagnostic": "Possible invalid picture link in form help"
+      },
+      "export": {
+        "status": "completed",
+        "exit": 0,
+        "seconds": 2573.405,
+        "log_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+      },
+      "file_count": 8567,
+      "total_bytes": 176615589,
+      "tree_sha256": "17c3ea67c171a400d33fc4223a357ab68e301cf342ca9e4a1e845ad0040ee7dc",
+      "native_reference_vs_installed_edt": {
+        "different_paths": 333,
+        "content_different": 332,
+        "native_reference_only": 1,
+        "edt_only": 0
+      },
+      "ConfigDumpInfo.xml": {
+        "bytes": 2151471,
+        "sha256": "1178183dbf93ec83db73d9e2b12e20f68fe4155e7092b23cb56b56c3b32536a5",
+        "byte_equal_to_original_native": false,
+        "original_metadata_rows": 10979,
+        "reference_metadata_rows": 10979,
+        "exact_metadata_rows_in_common": 4241,
+        "same_name_id_multiset_as_original_native": true,
+        "rows_with_generation": 6738
+      }
+    },
+    "8.3.27.2342": {
+      "create": {
+        "status": "completed",
+        "exit": 0,
+        "seconds": 189.708,
+        "out_sha256": "a5f0a22d4e4524cbb003e8b26e4a5688967084d51df827bb28768ede030ee161",
+        "err_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "load": {
+        "status": "completed",
+        "exit": 0,
+        "seconds": 591.055,
+        "out_sha256": "3ba44e987e5a37fdb6e3fa001dd33118b81fb3ca3a099d288911c58d99594096",
+        "err_sha256": "1d814063ab9364b058fddbe1ca734408626b2e73e26cdbc6293c667d12692739",
+        "diagnostic": "Possible invalid picture link in form help"
+      },
+      "export": {
+        "status": "completed",
+        "exit": 0,
+        "seconds": 398.48,
+        "out_sha256": "2776a981f0670d938da7c8846e4a3b0ff033681900056ac579e9359086c63500",
+        "err_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "file_count": 8567,
+      "total_bytes": 176615589,
+      "tree_sha256": "79a1911fb3408feadd43436e9f69a8145176b618be1c23ec1ae02c7127ba02e2",
+      "native_reference_vs_installed_edt": {
+        "different_paths": 333,
+        "content_different": 332,
+        "native_reference_only": 1,
+        "edt_only": 0
+      },
+      "ConfigDumpInfo.xml": {
+        "bytes": 2151471,
+        "sha256": "f3624fb819d2f35276ae483432e8ee0895bcea99742ae5d657b2b833a83b8350",
+        "byte_equal_to_original_native": false,
+        "original_metadata_rows": 10979,
+        "reference_metadata_rows": 10979,
+        "exact_metadata_rows_in_common": 4241,
+        "same_name_id_multiset_as_original_native": true,
+        "rows_with_generation": 6738
+      }
+    }
+  },
+  "post_hasp_reference_comparison": {
+    "byte_equal_paths": 8566,
+    "different_paths": [
+      "ConfigDumpInfo.xml"
+    ]
   }
 }
