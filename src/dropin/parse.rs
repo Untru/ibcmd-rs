@@ -15,7 +15,7 @@
 //! by name (see `super`).
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::cli::InfobaseConfigSourceVersion;
 use crate::mssql_config_apply::BackupPolicy;
@@ -971,8 +971,40 @@ pub fn parse_infobase(args: &[OsString]) -> Result<Invocation, Refusal> {
     if node.kind == NodeKind::Load {
         return parse_load(&scan);
     }
-    if let Some(error) = scan.error.clone() {
-        return Err(error);
+    let postgres_cli = scan
+        .value(Opt::Dbms)
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("PostgreSQL"))
+        && !scan.has(Opt::DbPath);
+    // With no positional path the platform counts a trailing connection
+    // option as supplied, then diagnoses the first absent required field.
+    let trailing = match &scan.error {
+        Some(Refusal::MissingValue(name))
+            if postgres_cli
+                && scan.arguments.is_empty()
+                && matches!(
+                    name.as_str(),
+                    "database-server" | "database-name" | "database-user" | "database-password"
+                ) =>
+        {
+            Some(name.as_str())
+        }
+        Some(error) => return Err(error.clone()),
+        None => None,
+    };
+    // A YAML config or vrunner settings can also select the DBMS. Leave
+    // unreadable settings to normal connection error reporting.
+    if !scan.has(Opt::DbPath)
+        && (postgres_cli || scan.has(Opt::Config) || scan.has(Opt::Settings))
+        && !(scan.has(Opt::DbServer) && scan.has(Opt::DbName))
+        && let Ok(Some(name)) = crate::infobase::missing_postgres_parameter(
+            scan.value(Opt::Dbms).map(str::trim),
+            scan.has(Opt::DbServer) || trailing == Some("database-server"),
+            scan.has(Opt::DbName) || trailing == Some("database-name"),
+            scan.value(Opt::Settings).map(Path::new),
+            scan.value(Opt::Config).map(Path::new),
+        )
+    {
+        return Err(Refusal::MissingValue(name.into()));
     }
     for opt in [Opt::Pid, Opt::Remote] {
         if let Some(spelled) = scan.spelled(opt) {
@@ -1806,10 +1838,45 @@ mod tests {
     }
 
     #[test]
+    fn postgres_export_and_import_require_a_database_name() {
+        for command in ["export", "import"] {
+            for tail in ["out", "--db-server"] {
+                assert_eq!(
+                    parse(&[
+                        "config",
+                        command,
+                        "--dbms=PostgreSQL",
+                        "--db-server=s",
+                        tail
+                    ]),
+                    Err(Refusal::MissingValue("db-name".into())),
+                );
+            }
+            assert!(
+                parse(&[
+                    "config",
+                    command,
+                    "--dbms=PostgreSQL",
+                    "--config=base.yml",
+                    "out"
+                ])
+                .is_ok()
+            );
+        }
+    }
+
+    #[test]
     fn the_dbms_is_checked_as_natively() {
         let request = export(&["config", "export", "--dbms=mssqlserver", "--db-name=b", "o"]);
         assert_eq!(request.common.dbms.as_deref(), Some("MSSQLServer"));
-        let request = export(&["config", "export", "--dbms=postgresql", "--db-name=b", "o"]);
+        let request = export(&[
+            "config",
+            "export",
+            "--dbms=postgresql",
+            "--db-name=b",
+            "--db-server=s",
+            "o",
+        ]);
         assert_eq!(request.common.dbms.as_deref(), Some("PostgreSQL"));
         for dbms in ["IBMDB2", "OracleDatabase"] {
             assert_eq!(

@@ -14,6 +14,7 @@ fn every_known_build_and_release_declares_its_xml_layout_and_features() {
         [
             "8.3.27.1989",
             "8.3.27.2214",
+            "8.3.27.2342",
             "8.5.1.1150",
             "8.5.1.1529",
             "8.3.27",
@@ -31,6 +32,13 @@ fn every_known_build_and_release_declares_its_xml_layout_and_features() {
         ),
         (
             "8.3.27.2214",
+            XmlFormat::V2_20,
+            FormLayout::V8_3,
+            true,
+            &[][..],
+        ),
+        (
+            "8.3.27.2342",
             XmlFormat::V2_20,
             FormLayout::V8_3,
             true,
@@ -149,7 +157,7 @@ fn only_the_1529_build_writes_the_importance_of_a_default_button() {
 #[test]
 fn unknown_and_unsupported_versions_are_refused_by_name() {
     let message = |text: &str| format!("{:#}", parse(text).unwrap_err());
-    let known = "releases 8.3.27, 8.5.1; builds 8.3.27.1989, 8.3.27.2214, 8.5.1.1150, 8.5.1.1529";
+    let known = "releases 8.3.27, 8.5.1; builds 8.3.27.1989, 8.3.27.2214, 8.3.27.2342, 8.5.1.1150, 8.5.1.1529";
     assert_eq!(
         message("8.3.24.1819"),
         format!(

@@ -282,7 +282,7 @@ SQL Server. Проверено на SQL Server 2025: `.cf` БСП, загруж�
 |---|---|
 | `--db-path=<каталог>`, `--database-path` | Файловая информационная база: каталог с `1Cv8.1CD` (или сам файл). Для `config export`, `config import`, `config save` и `config load`; вместе с `--dbms`, `--db-server`, `--db-name` не указывается. См. [Файловые базы](#файловые-базы). |
 | `--dbms=MSSQLServer` | Тип СУБД: `MSSQLServer`; для `config export`, `config import` и `config load` также `PostgreSQL` (см. [PostgreSQL](#postgresql)). |
-| `--db-server=<сервер>`, `--database-server` | Сервер: `server`, `server\instance`, `server/instance` (как пишет штатный `ibcmd`), `server,port`. По умолчанию — из настроек, иначе `localhost`. |
+| `--db-server=<сервер>`, `--database-server` | Сервер: `server`, `server\instance`, `server/instance` (как пишет штатный `ibcmd`), `server,port`. По умолчанию — из настроек, иначе `localhost`. Для PostgreSQL в режиме подмены `config export` и `config import` сервер и имя базы обязательны. Их можно передать параметрами команды или в настройках подключения. Например, `--db-server="127.0.0.1 port=5432"`. |
 | `--db-name=<база>`, `--database-name` | Имя базы данных. |
 | `--db-user=<логин>`, `--database-user` | Логин SQL Server. Без него — вход Windows. |
 | `--db-pwd=<пароль>`, `--database-password` | Пароль логина SQL Server. |

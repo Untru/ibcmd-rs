@@ -28,6 +28,13 @@ fn every_known_build_and_release_declares_its_xml_layout_and_features() {
             &[][..],
         ),
         (
+            "8.3.27.2342",
+            InfobaseConfigSourceVersion::V2_20,
+            FormLayout::V8_3,
+            true,
+            &[][..],
+        ),
+        (
             "8.5.1",
             InfobaseConfigSourceVersion::V2_21,
             FormLayout::V8_5_1,
@@ -149,7 +156,7 @@ fn unknown_and_unsupported_versions_are_refused_by_name() {
     );
     assert!(build.contains("releases 8.3.27, 8.5.1"), "{build}");
     assert!(
-        build.contains("builds 8.3.27.1989, 8.3.27.2214, 8.5.1.1150, 8.5.1.1529"),
+        build.contains("builds 8.3.27.1989, 8.3.27.2214, 8.3.27.2342, 8.5.1.1150, 8.5.1.1529"),
         "{build}"
     );
 

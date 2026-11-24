@@ -895,6 +895,71 @@ impl<'a> Defaults<'a> {
     }
 }
 
+fn database_type(
+    dbms: Option<&str>,
+    settings: &Option<Value>,
+    defaults: &mut Defaults<'_>,
+) -> Result<String> {
+    Ok(
+        match first_value(dbms, settings_value(settings, "dbms-type")) {
+            Some(dbms) => dbms,
+            None => defaults
+                .get()?
+                .dbms()
+                .map(|dbms| dbms.value)
+                .unwrap_or_else(|| "MSSQLServer".to_string()),
+        },
+    )
+}
+
+fn database_server(
+    cli: Option<&str>,
+    settings: &Option<Value>,
+    defaults: &mut Defaults<'_>,
+) -> Result<Option<String>> {
+    Ok(
+        match first_value(cli, settings_value(settings, "dbms-server")) {
+            Some(value) => Some(value),
+            None => defaults.get()?.db_server().map(|value| value.value),
+        },
+    )
+}
+
+fn database_name(
+    cli: Option<&str>,
+    settings: &Option<Value>,
+    defaults: &mut Defaults<'_>,
+) -> Result<Option<String>> {
+    Ok(
+        match first_value(cli, settings_value(settings, "dbms-base")) {
+            Some(value) => Some(value),
+            None => defaults.get()?.db_name().map(|value| value.value),
+        },
+    )
+}
+
+/// Validate native PG connection parameters before opening an export/import.
+pub(crate) fn missing_postgres_parameter(
+    dbms: Option<&str>,
+    has_server: bool,
+    has_name: bool,
+    settings_path: Option<&Path>,
+    native_config: Option<&Path>,
+) -> Result<Option<&'static str>> {
+    let settings = settings_path.map(read_settings).transpose()?;
+    let mut defaults = Defaults::new(native_config, &Settings::load);
+    if !is_postgres(&database_type(dbms, &settings, &mut defaults)?) {
+        return Ok(None);
+    }
+    if !has_name && database_name(None, &settings, &mut defaults)?.is_none() {
+        return Ok(Some("db-name"));
+    }
+    if !has_server && database_server(None, &settings, &mut defaults)?.is_none() {
+        return Ok(Some("db-server"));
+    }
+    Ok(None)
+}
+
 /// Each value, highest first: the command line, the `--settings` file (the
 /// vRunner JSON), the settings (`crate::settings`: the environment,
 /// `ibcmd-rs.toml`, the `database:` section of native `--config`), then the
@@ -973,35 +1038,15 @@ fn resolve_connection_with_guard(
             &mut defaults,
         );
     }
-    let dbms = match first_value(request.dbms, settings_value(&settings, "dbms-type")) {
-        Some(dbms) => dbms,
-        None => defaults
-            .get()?
-            .dbms()
-            .map(|dbms| dbms.value)
-            .unwrap_or_else(|| "MSSQLServer".to_string()),
-    };
-    let db_server = match first_value(request.db_server, settings_value(&settings, "dbms-server")) {
-        Some(server) => server,
-        None => defaults
-            .get()?
-            .db_server()
-            .map(|server| server.value)
-            .unwrap_or_else(|| "localhost".to_string()),
-    };
-    let db_name = match first_value(request.db_name, settings_value(&settings, "dbms-base")) {
-        Some(name) => name,
-        None => defaults
-            .get()?
-            .db_name()
-            .map(|name| name.value)
-            .ok_or_else(|| {
-                anyhow!(
-                    "не указана информационная база: передайте --db-path для файловой базы \
+    let dbms = database_type(request.dbms, &settings, &mut defaults)?;
+    let db_server = database_server(request.db_server, &settings, &mut defaults)?
+        .unwrap_or_else(|| "localhost".to_string());
+    let db_name = database_name(request.db_name, &settings, &mut defaults)?.ok_or_else(|| {
+        anyhow!(
+            "не указана информационная база: передайте --db-path для файловой базы \
                      или --dbms=MSSQLServer, --db-server и --db-name"
-                )
-            })?,
-    };
+        )
+    })?;
     let db_user = match first_value(request.db_user, settings_value(&settings, "dbms-user")) {
         Some(user) => Some(user),
         None => defaults.get()?.db_user().map(|user| user.value),
