@@ -1099,7 +1099,7 @@ pub fn plan_with_gate(
         {
             analysis.blockers.push(gate::GateBlocker {
                 row: analysis.removals.rows.first().cloned().unwrap_or_default(),
-                reason: "a removed form or template is measured on 8.3.27 only; on 8.5 the platform's own apply removes it".to_owned(),
+                reason: "object and module removals are measured on 8.3.27 only; on 8.5 the platform's own apply removes it".to_owned(),
             });
         }
         if !analysis.removals.is_empty() && analysis.blockers.is_empty() {
@@ -1127,7 +1127,7 @@ pub fn plan_with_gate(
                 }
                 if !analysis.removals.is_empty() {
                     note.push_str(&format!(
-                        "; {} removed form(s) or template(s) ({} rows) are deleted with their search-information records",
+                        "; {} whole object(s) removed, {} Config row(s) deleted",
                         analysis.removals.objects.len(),
                         analysis.removals.rows.len()
                     ));
@@ -1143,7 +1143,7 @@ pub fn plan_with_gate(
             ListAnswer::Refused(reason) => {
                 let removal_blockers = analysis.blockers;
                 let mut message = format!(
-                    "the stage carries a `deleted` row, the list of removals: {description}. This apply consumes an empty list, the rows of a dynamic update and the rows of a removed form or template that it can account for name by name ({}); a list it cannot account for as a whole, and the stage of the platform's own `config import`, need the native `ibcmd infobase config apply`",
+                    "the stage carries a `deleted` row, the list of removals: {description}. This apply consumes an empty list, the rows of a dynamic update and the rows of removed objects or modules that it can account for name by name ({}); a list it cannot account for as a whole, and the stage of the platform's own `config import`, need the native `ibcmd infobase config apply`",
                     reason
                 );
                 for blocker in removal_blockers.iter().take(5) {
@@ -1458,7 +1458,7 @@ pub fn plan_with_gate(
     // The removed forms and templates take their records out of the search information, on top of
     // what the new objects and a restructuring of the same stage rewrite.
     let mut search_info_removal = removals::SearchInfoRemoval::default();
-    if !removals.is_empty() {
+    if !removals.objects.is_empty() {
         let (rewrites, summary) =
             removals::plan_search_info(client, database, &removals, params_rewrites).map_err(
                 |error| {

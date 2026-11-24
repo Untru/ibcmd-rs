@@ -6535,7 +6535,7 @@ fn patch_configuration_source_metadata(
         .as_list_mut()
         .context("configuration properties is not a tuple")?;
     let marker = fields.first().and_then(Brace::as_atom);
-    if !matches!(marker, Some("63" | "68" | "76")) {
+    if !matches!(marker, Some("63" | "67" | "68" | "76")) {
         anyhow::bail!(
             "configuration properties tuple {:?} has no evidenced Version slot",
             marker

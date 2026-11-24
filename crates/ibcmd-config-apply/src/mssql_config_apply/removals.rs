@@ -1,4 +1,4 @@
-//! Removed forms and templates: the stage's `deleted` list executed (#393).
+//! Apply the stage's `deleted` list for forms, templates and modules (#393, #417).
 //!
 //! The native apply never deletes a `Config` row that a stage merely leaves out; a removal travels in the
 //! stage's `deleted` row, the list of the row names to take out (`<count>,"<name>",<flag>,...`, flag 0 for a
@@ -20,11 +20,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::metadata_model::brace::parse_row;
+use crate::metadata_model::brace::{Brace, parse_row};
 use crate::metadata_model::export::names::{owned_groups, remove_owned};
 use crate::restructure::extensions::{
     Adoption, ChangedObject, ExtensionInputs, check as check_adoption,
@@ -76,7 +76,7 @@ pub struct Removals {
 
 impl Removals {
     pub fn is_empty(&self) -> bool {
-        self.objects.is_empty()
+        self.rows.is_empty() && self.objects.is_empty()
     }
 }
 
@@ -108,6 +108,110 @@ fn plain_lower(plain: &[u8]) -> String {
     String::from_utf8_lossy(strip_bom(plain)).to_ascii_lowercase()
 }
 
+/// The 8.3.27 catalog ObjectModule occupies slot zero. Identify the owner
+/// through active configuration membership because other families reuse .0.
+fn retained_catalog_module(input: &RemovalInput<'_>, owner: &str, name: &str) -> Result<bool> {
+    use crate::metadata_model::{export::names::root_kinds, root::export::root_configuration_uuid};
+
+    if !input.overlay_rows.is_empty()
+        || input.staged.iter().any(|row| {
+            !matches!(
+                row.name.as_str(),
+                "deleted" | "root" | "version" | "versions"
+            )
+        })
+    {
+        return Ok(false);
+    }
+    let read = |table, name: &str| super::read_blob(input.client, input.database, table, name);
+    let Some(root) = read("Config", "root")? else {
+        return Ok(false);
+    };
+    let config_id = root_configuration_uuid(&parse_row(&inflate_row(&root)?)?)?;
+    let Some(config) = read("Config", &config_id)? else {
+        return Ok(false);
+    };
+    let kinds = root_kinds(&parse_row(&inflate_row(&config)?)?);
+    if kinds.get(&owner.to_ascii_lowercase()) != Some(&"Catalog") {
+        return Ok(false);
+    }
+    let version_names = |table| -> Result<Option<HashSet<String>>> {
+        let Some(blob) = read(table, "versions")? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            parse_versions(&blob)?
+                .entries
+                .into_iter()
+                .map(|(key, _)| key.to_ascii_lowercase())
+                .collect(),
+        ))
+    };
+    let (Some(mut active), Some(staged)) = (version_names("Config")?, version_names("ConfigSave")?)
+    else {
+        return Ok(false);
+    };
+    Ok(active.contains(&owner.to_ascii_lowercase())
+        && active.remove(&name.to_ascii_lowercase())
+        && active == staged)
+}
+
+const COMMON_MODULE_CLASS: &str = "0fe48980-252d-11d6-a3c7-0050bae0a776";
+
+/// Check the entire descriptor against the measured membership edit. Other
+/// references (subscriptions, scheduled jobs, etc.) require their own rules.
+fn module_membership_removed(active: &[u8], stage: &[u8], uuid: &str, root: bool) -> bool {
+    let (Ok(mut before), Ok(after)) = (parse_row(active), parse_row(stage)) else {
+        return false;
+    };
+    let (path, tag, member) = if root {
+        (&[3, 1, 5][..], COMMON_MODULE_CLASS, Brace::uuid(uuid))
+    } else {
+        if before
+            .as_list()
+            .and_then(|r| r.get(1))
+            .and_then(Brace::as_list)
+            .and_then(|v| v.first())
+            .and_then(Brace::as_atom)
+            != Some("22")
+        {
+            return false;
+        }
+        (
+            &[1, 7][..],
+            "0",
+            Brace::list(vec![
+                Brace::str("#"),
+                Brace::atom("157fa490-4ce9-11d4-9415-008048da11f9"),
+                Brace::list(vec![Brace::atom(1), Brace::uuid(uuid)]),
+            ]),
+        )
+    };
+    let mut node = &mut before;
+    for &index in path {
+        let Some(child) = node.as_list_mut().and_then(|v| v.get_mut(index)) else {
+            return false;
+        };
+        node = child;
+    }
+    let Some(group) = node.as_list_mut() else {
+        return false;
+    };
+    if group.len() < 3
+        || group[0].as_atom() != Some(tag)
+        || group[1].as_atom().and_then(|n| n.parse::<usize>().ok()) != Some(group.len() - 2)
+    {
+        return false;
+    }
+    let count = group.len();
+    group.retain(|item| item != &member);
+    if group.len() + 1 != count {
+        return false;
+    }
+    group[1] = Brace::atom(group.len() - 2);
+    before == after
+}
+
 /// Whether the named things of a list are what this analysis can remove, object by object.
 pub fn analyze(input: &RemovalInput<'_>) -> Result<RemovalAnalysis> {
     let mut analysis = RemovalAnalysis::default();
@@ -132,6 +236,17 @@ pub fn analyze(input: &RemovalInput<'_>) -> Result<RemovalAnalysis> {
             ),
         }
     }
+    if let [name] = input.names
+        && let RowName::Body { owner, suffix: "0" } = classify_name(name)
+        && retained_catalog_module(input, owner, name)?
+    {
+        analysis
+            .removals
+            .accounted
+            .insert(name.to_ascii_lowercase());
+        analysis.removals.rows.push(name.clone());
+        return Ok(analysis);
+    }
     for name in input.names {
         if let RowName::Body { owner, .. } = classify_name(name)
             && !objects.contains(&owner.to_ascii_lowercase())
@@ -139,7 +254,7 @@ pub fn analyze(input: &RemovalInput<'_>) -> Result<RemovalAnalysis> {
             blocker(
                 &mut blockers,
                 name,
-                "a body row of an object that stays (a module, picture or help page of it): the removal of one file of an object is not measured",
+                "a body row of an object that stays: the stage is not an isolated catalog ObjectModule removal",
             );
         }
     }
@@ -385,9 +500,62 @@ pub fn analyze(input: &RemovalInput<'_>) -> Result<RemovalAnalysis> {
     }
     let mut found: Vec<Found> = Vec::new();
     let mut by_owner: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut module_owners = HashSet::new();
     for object in &kept {
         let uuid = &object.uuid;
         let owners = active_mentions.get(uuid).cloned().unwrap_or_default();
+        if kept.len() == 1
+            && input.overlay_rows.is_empty()
+            && input
+                .staged
+                .iter()
+                .any(|row| row.name == "versions" && row.part == 0)
+            && !staged_mentions.contains_key(uuid)
+            && let Some(root_owner) = owners.iter().find(|name| {
+                active_texts
+                    .get(*name)
+                    .zip(staged_texts.get(*name))
+                    .is_some_and(|(a, b)| module_membership_removed(a, b, uuid, true))
+            })
+        {
+            for name in &owners {
+                if name != root_owner
+                    && !active_texts
+                        .get(name)
+                        .zip(staged_texts.get(name))
+                        .is_some_and(|(a, b)| module_membership_removed(a, b, uuid, false))
+                {
+                    blocker(
+                        &mut blockers,
+                        name,
+                        "a reference to the common module is not an isolated subsystem membership removal",
+                    );
+                }
+            }
+            let Some(own) = own_texts.get(uuid) else {
+                blocker(
+                    &mut blockers,
+                    uuid,
+                    "the common module descriptor cannot be read",
+                );
+                continue;
+            };
+            match describe("CommonModule", uuid, own) {
+                Ok(descriptor) => {
+                    found.push(Found {
+                        uuid: uuid.clone(),
+                        owner: root_owner.clone(),
+                        kind: "CommonModule",
+                        class: COMMON_MODULE_CLASS.to_owned(),
+                        name: descriptor.name,
+                        rows: object.rows.clone(),
+                    });
+                    module_owners.extend(owners);
+                }
+                Err(reason) => blocker(&mut blockers, uuid, reason),
+            }
+            continue;
+        }
         let [owner] = owners.as_slice() else {
             blocker(
                 &mut blockers,
@@ -512,7 +680,9 @@ pub fn analyze(input: &RemovalInput<'_>) -> Result<RemovalAnalysis> {
         accepted_owners.insert(owner.clone());
         good_owner.insert(owner.clone());
     }
-    found.retain(|object| good_owner.contains(&object.owner));
+    found.retain(|object| {
+        good_owner.contains(&object.owner) || module_owners.contains(&object.owner)
+    });
 
     // No table, no column: the names of the database do not know the object.
     if !found.is_empty() {
@@ -624,6 +794,9 @@ pub fn analyze(input: &RemovalInput<'_>) -> Result<RemovalAnalysis> {
     let alive_owners: HashSet<String> = found.iter().map(|object| object.owner.clone()).collect();
     accepted_owners.retain(|owner| alive_owners.contains(owner));
 
+    if found.iter().any(|o| o.kind == "CommonModule") {
+        accepted_owners.extend(module_owners);
+    }
     let mut removals = Removals {
         owners: accepted_owners,
         ..Removals::default()
@@ -677,6 +850,13 @@ pub fn extension_blockers(
     };
     if registered == 0 || removals.is_empty() {
         return Ok(Vec::new());
+    }
+    if removals.objects.is_empty() {
+        return Ok(vec![GateBlocker {
+            row: removals.rows[0].clone(),
+            reason: "removing a catalog module with registered extensions requires native apply"
+                .into(),
+        }]);
     }
     let adoptions: Vec<Adoption> = read_adoptions(sql, database)?;
     let inputs = ExtensionInputs {
@@ -927,6 +1107,28 @@ pub fn plan_search_info(
         }
     }
 
+    for module in removals
+        .objects
+        .iter()
+        .filter(|object| object.kind == "CommonModule")
+    {
+        const SUBSYSTEM_CONTENT: &str = "c40aafd6-c889-4229-807a-851d0bc5bc97.si";
+        let (size, sha, plain, set_creation) = base_of(SUBSYSTEM_CONTENT, &rewrites)?;
+        let mut subsystems = removals.owners.clone();
+        subsystems.remove(&module.owner);
+        if let Some(updated) = remove_subsystem_content(&plain, &module.uuid, &subsystems)? {
+            put(
+                &mut rewrites,
+                SUBSYSTEM_CONTENT,
+                size,
+                sha,
+                &updated,
+                set_creation,
+            )?;
+            edited.push(SUBSYSTEM_CONTENT.to_owned());
+        }
+    }
+
     // siVersions: every edited row gets a new version.
     let (size, sha, mut plain, _) = base_of(SI_VERSIONS, &rewrites)?;
     for name in &edited {
@@ -934,6 +1136,69 @@ pub fn plan_search_info(
     }
     put(&mut rewrites, SI_VERSIONS, size, sha, &plain, false)?;
     Ok((rewrites, summary))
+}
+
+/// Each subsystem has a counted list of content UUIDs. Match the SQL cache
+/// against the references proven removed from the metadata descriptors.
+fn remove_subsystem_content(
+    plain: &[u8],
+    uuid: &str,
+    expected: &HashSet<String>,
+) -> Result<Option<Vec<u8>>> {
+    use crate::metadata_model::brace::serialize_row;
+    let mut row = parse_row(plain)?;
+    let root = row
+        .as_list_mut()
+        .context("invalid subsystem content cache")?;
+    ensure!(
+        root.len() == 3 && root[0].as_atom() == Some("1"),
+        "unknown subsystem content cache"
+    );
+    let groups = root[1]
+        .as_list_mut()
+        .context("missing subsystem content groups")?;
+    let number = |field: Option<&Brace>| {
+        field
+            .and_then(Brace::as_atom)
+            .and_then(|v| v.parse::<usize>().ok())
+            .context("invalid subsystem count")
+    };
+    let count = number(groups.first())?;
+    let mut index = 1;
+    let mut removed = HashSet::new();
+    for _ in 0..count {
+        let owner = groups
+            .get(index)
+            .and_then(Brace::as_atom)
+            .context("missing subsystem id")?
+            .to_ascii_lowercase();
+        let n = number(groups.get(index + 1))?;
+        let start = index + 2;
+        let end = start.checked_add(n).context("subsystem size overflow")?;
+        let members = groups
+            .get(start..end)
+            .context("truncated subsystem content")?;
+        if let Some(pos) = members.iter().position(|v| v.as_atom() == Some(uuid)) {
+            ensure!(
+                removed.insert(owner)
+                    && !members[pos + 1..].iter().any(|v| v.as_atom() == Some(uuid)),
+                "duplicate subsystem membership"
+            );
+            groups.remove(start + pos);
+            groups[index + 1] = Brace::atom(n - 1);
+            index = end - 1;
+        } else {
+            index = end;
+        }
+    }
+    ensure!(
+        index == groups.len() && &removed == expected,
+        "subsystem content cache disagrees with metadata"
+    );
+    if removed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(serialize_row(&row)))
 }
 
 #[cfg(test)]
