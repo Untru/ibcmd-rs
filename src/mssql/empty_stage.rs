@@ -13,6 +13,8 @@
 //! `mssql-stage-source-objects --base-free`, which loads it into ConfigSave
 //! with SQL that does not read Config at all.
 
+mod neutral;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1642,6 +1644,19 @@ pub fn empty_stage_summary(report: &EmptyStageAuditReport) -> String {
 pub(super) fn stage_source_objects_base_free(
     args: &MssqlStageSourceObjectsArgs,
 ) -> Result<StageSourceObjectsReport> {
+    stage_base_free(args, false)
+}
+
+pub(crate) fn stage_existing_base_free(
+    args: &MssqlStageSourceObjectsArgs,
+) -> Result<StageSourceObjectsReport> {
+    stage_base_free(args, true)
+}
+
+fn stage_base_free(
+    args: &MssqlStageSourceObjectsArgs,
+    retain_neutral: bool,
+) -> Result<StageSourceObjectsReport> {
     require_non_lab_confirmation(args.allow_non_lab, "source tree staging")?;
     if !args.replace_config_save {
         bail!("staging deletes existing ConfigSave rows; pass --replace-config-save");
@@ -1658,7 +1673,7 @@ pub(super) fn stage_source_objects_base_free(
         super::OFFLINE_STAGE.store(true, Ordering::Relaxed);
     }
     let version = args.source_version.map(|version| version.as_str());
-    let stage = prepare_empty_stage(&args.source_root, version)?;
+    let mut stage = prepare_empty_stage(&args.source_root, version)?;
     let tail_started = std::time::Instant::now();
     let failures = stage.failures().collect::<Vec<_>>();
     // A partial row set is only ever written, never loaded: it lets the
@@ -1698,6 +1713,29 @@ pub(super) fn stage_source_objects_base_free(
         );
     }
 
+    // The SQL handle is built before the first write, so a wrong server name or
+    // a missing password stops the stage before any file is written.
+    let sql = if args.script_only {
+        None
+    } else {
+        let sql_password = resolve_sqlcmd_password(
+            args.sql_user.as_deref(),
+            args.sql_pwd.as_deref(),
+            &args.sql_pwd_env,
+        );
+        Some(stage_sql(
+            args.sqlcmd.as_deref(),
+            args.bcp_executable.as_deref(),
+            &args.server,
+            args.sql_user.as_deref(),
+            sql_password.as_deref(),
+            &args.sql_pwd_env,
+        )?)
+    };
+    let retained = match &sql {
+        Some(sql) if retain_neutral => neutral::retain(&mut stage, sql, &args.database)?,
+        _ => Vec::new(),
+    };
     let rows = stage.rows().collect::<Vec<_>>();
     let mut seen = BTreeSet::new();
     for row in &rows {
@@ -1720,25 +1758,6 @@ pub(super) fn stage_source_objects_base_free(
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     let table = bulk_stage_table_name(&args.database);
-    // The SQL handle is built before the first write, so a wrong server name or
-    // a missing password stops the stage before any file is written.
-    let sql = if args.script_only {
-        None
-    } else {
-        let sql_password = resolve_sqlcmd_password(
-            args.sql_user.as_deref(),
-            args.sql_pwd.as_deref(),
-            &args.sql_pwd_env,
-        );
-        Some(stage_sql(
-            args.sqlcmd.as_deref(),
-            args.bcp_executable.as_deref(),
-            &args.server,
-            args.sql_user.as_deref(),
-            sql_password.as_deref(),
-            &args.sql_pwd_env,
-        )?)
-    };
     // The guard: the state this stage would leave, exported with the model and
     // compared with the tree, before anything is written.
     let verification = if super::stage_guard::wanted(args.verify) {
@@ -1765,10 +1784,11 @@ pub(super) fn stage_source_objects_base_free(
         .with_context(|| format!("failed to write {}", prepare_path.display()))?;
     fs::write(
         &apply_path,
-        build_base_free_bulk_stage_apply_sql(
+        base_free_bulk_stage_sql(
             &args.database,
             &table,
             super::bulk_stage_part_count(&bulk),
+            &retained,
         ),
     )
     .with_context(|| format!("failed to write {}", apply_path.display()))?;
@@ -1875,7 +1895,25 @@ pub(super) fn build_base_free_bulk_stage_apply_sql(
     table: &str,
     staged_rows: usize,
 ) -> String {
+    base_free_bulk_stage_sql(database, table, staged_rows, &[])
+}
+
+fn base_free_bulk_stage_sql(
+    database: &str,
+    table: &str,
+    staged_rows: usize,
+    retained: &[String],
+) -> String {
     let stage = format!("tempdb.dbo.{}", quote_ident(table));
+    let guard = neutral::guard_sql(retained, &stage);
+    let retained_rows = if retained.is_empty() {
+        ""
+    } else {
+        " WHERE NOT EXISTS (SELECT 1 FROM @retained n WHERE n.name COLLATE DATABASE_DEFAULT = s.FileName)
+          UNION ALL
+          SELECT c.FileName COLLATE DATABASE_DEFAULT, c.Creation, c.Modified, c.Attributes, c.DataSize, c.BinaryData, c.PartNo
+          FROM dbo.Config c JOIN @retained n ON n.name COLLATE DATABASE_DEFAULT = c.FileName WHERE c.PartNo = 0"
+    };
     format!(
         "SET NOCOUNT ON;\n\
          SET XACT_ABORT ON;\n\
@@ -1889,10 +1927,10 @@ pub(super) fn build_base_free_bulk_stage_apply_sql(
          IF (SELECT COUNT_BIG(*) FROM {stage} WHERE FileName IN (N'root', N'version', N'versions')) <> 3\n\
              THROW 55005, 'A base-free stage must carry root, version and versions', 1;\n\
          BEGIN TRAN;\n\
-         DELETE FROM dbo.ConfigSave;\n\
+         {guard}DELETE FROM dbo.ConfigSave;\n\
          INSERT INTO dbo.ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
          SELECT s.FileName, DATEADD(year, 2000, SYSUTCDATETIME()), DATEADD(year, 2000, SYSUTCDATETIME()), 0, s.DataSize, s.BinaryData, s.PartNo\n\
-         FROM {stage} s;\n\
+         FROM {stage} s{retained_rows};\n\
          IF (SELECT COUNT_BIG(*) FROM dbo.ConfigSave) <> {staged_rows}\n\
              THROW 56999, 'Unexpected ConfigSave row count after base-free staging', 1;\n\
          COMMIT;\n\

@@ -1,21 +1,30 @@
 """Check 8 of docs/apply/restructuring.md 12.6 for twins staged SEPARATELY: the native export of both, compared file by file.
 
-usage: python check8.py <export of the native twin> <export of the own twin>
+usage: python check8.py [--exact-summary] <export of the native twin> <export of the own twin>
+
+For strict check 8 evidence, --exact-summary includes the raw ConfigDumpInfo.xml,
+prints only counts and exits nonzero on missing roots, unreadable files or any difference.
+Run it only after both native exports have exited successfully into fresh directories.
 
 `ConfigDumpInfo.xml` prints a `configVersion` for every object; the version of a changed object is the generation the
 staging (an import) gave it, random per import. So two twins staged apart can never agree on those attributes; this
 compares every file byte for byte, and `ConfigDumpInfo.xml` with the `configVersion` values taken out, and lists the objects
 whose `configVersion` differs (they should be exactly the changed ones).
 """
+import argparse
 import hashlib
 import os
 import re
 import sys
 
 
+def raise_walk_error(error):
+    raise error
+
+
 def files(root):
     out = {}
-    for base, _, names in os.walk(root):
+    for base, _, names in os.walk(root, onerror=raise_walk_error):
         for name in names:
             path = os.path.join(base, name)
             out[os.path.relpath(path, root)] = path
@@ -24,13 +33,41 @@ def files(root):
 
 def sha(path):
     with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+        return digest.digest()
 
 
-nat, own = files(sys.argv[1]), files(sys.argv[2])
-only_nat, only_own = sorted(set(nat) - set(own)), sorted(set(own) - set(nat))
-different = [rel for rel in sorted(set(nat) & set(own)) if sha(nat[rel]) != sha(own[rel])]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--exact-summary", action="store_true")
+parser.add_argument("native")
+parser.add_argument("own")
+args = parser.parse_args()
+
+try:
+    if args.exact_summary:
+        for root in (args.native, args.own):
+            if not all(os.path.isfile(os.path.join(root, name))
+                       for name in ("Configuration.xml", "ConfigDumpInfo.xml")):
+                sys.exit("8. incomplete export: missing configuration or dump information")
+        if os.path.samefile(args.native, args.own):
+            sys.exit("8. comparison requires separate exports")
+
+    nat, own = files(args.native), files(args.own)
+    only_nat, only_own = sorted(set(nat) - set(own)), sorted(set(own) - set(nat))
+    different = [rel for rel in sorted(set(nat) & set(own)) if sha(nat[rel]) != sha(own[rel])]
+except OSError:
+    if args.exact_summary:
+        sys.exit("8. unable to read both exports completely")
+    raise
 info = "ConfigDumpInfo.xml"
+if args.exact_summary:
+    print(f"8. exact export: native {len(nat)}, own {len(own)}, only native {len(only_nat)}, "
+          f"only own {len(only_own)}, different {len(different)}, "
+          f"ConfigDumpInfo.xml differs {int(info in different)}")
+    sys.exit(int(bool(only_nat or only_own or different)))
+
 version = re.compile(r'(<Metadata name="([^"]*)" id="[^"]*") configVersion="[0-9a-f]*"')
 detail = ""
 if info in different:

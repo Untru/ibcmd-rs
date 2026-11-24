@@ -87,8 +87,7 @@ or a file whose reference names an object the tree has no file of. The stage col
 refusal names them all, in Russian, before anything is written:
 
 - a new object (`справочника нет в базе (в таблице Config нет строки <uuid>)`): use the platform's ibcmd, or
-  `--base-free` where losing what the XML does not carry (business process flowchart counters, the always-used
-  flag of constants) is acceptable;
+  `--base-free` where losing what the XML does not carry (such as the always-used flag of constants) is acceptable;
 - new predefined items: the same, with the items' names read from the tree;
 - a reference to an object the tree has no file of (an exchange plan's content, a role's rights, ...): the tree is
   incomplete - `--base-free` refuses it too - so the message says to restore the file or remove the reference.
@@ -176,3 +175,11 @@ The default follows from this: on БСП the guard is a few seconds and on ERP �
   compared; `docs/import/patch-mode.md` section 4.1 lists it.
 - It refuses; it does not make patch mode carry the change. That is step 2 of the proposal (descriptor override,
   new objects, `deleted`).
+
+On an explicit full-tree SQL import into an existing database, the compiler still builds the
+root and business-process flowcharts from XML. When the inflated root matches the active root,
+the importer can reuse its stored encoding. For a flowchart of that configuration it can also
+keep the stored final item counter when the rest of the inflated body matches byte for byte and
+the stored counter is at least the compiled count. This applies to single-part rows without
+dynamic aliases. Staging rechecks each retained row under the write transaction. A changed
+source flowchart goes through the compiler and the usual verification.

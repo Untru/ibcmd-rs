@@ -792,7 +792,11 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
     // takes the target's own rows; a compiled one can carry a slip of the
     // compiler): the guard checks every stage unless asked not to.
     stage_args.verify = !matches!(args.verify, InfobaseImportVerify::Off);
-    let report = crate::mssql::stage_source_objects(&stage_args)?;
+    let report = if args.stage_mode == InfobaseImportStageMode::BaseFree {
+        crate::mssql::empty_stage::stage_existing_base_free(&stage_args)?
+    } else {
+        crate::mssql::stage_source_objects(&stage_args)?
+    };
 
     Ok(InfobaseConfigImportReport {
         operation: "infobase config import",
