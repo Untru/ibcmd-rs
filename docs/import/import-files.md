@@ -110,7 +110,7 @@ both stages, and native export reproduced both edits.
 - Native `ibcmd.exe` 8.3.27.2342, SHA-256
   `38f37715535cea530e58d5ba2e7e072c184b61b12f3e903ac290b299cf39fd38`.
 - ibcmd-rs 0.4.1, Windows MSVC dev build with Rust 1.98.0 and debug info off,
-  SHA-256 `9339c57f32ca5bf368ada1dcb82fac2b0012adc1e262af590f9ce48916948b7d`.
+  SHA-256 `ae04c5c67d34654a5ec4824c3ed9f602e0f693cd44f4e1122eab58ee56ab4f24`.
 - Fixture `tests/fixtures/external/home_page/two_variable/input.cf` (80,862
   bytes, SHA-256 `f2a236f7babbc194655e903e24f7686d25dc368ec6c4d0dd61af047b8db8b86a`).
 
@@ -139,6 +139,16 @@ both stages, and native export reproduced both edits.
 python scripts/apply-trace/lab/compare_import_files_twins.py baseline native-full native-sparse product-full product-sparse
 ```
 
+The sparse regression can also be run on its own. Start from the restored
+fixture with empty ConfigSave. It creates the sparse input from a native
+export, checks the unsupported property with `--no-check`, verifies that
+ConfigSave is still empty, then stages the supported edits and checks the
+native apply and export.
+
+```text
+python scripts/apply-trace/lab/test_sparse_descriptor.py --product <ibcmd-rs.exe> --native <ibcmd.exe> --database ibcmd_rs_363_<disposable> <new-work-directory>
+```
+
 All four imports, applies and exports exited 0. The checker compares the
 path set and every file against the initial export with exactly the two
 edits above. In `ConfigDumpInfo.xml` only the 40-hex-digit object version
@@ -148,8 +158,8 @@ values can vary. The object names, IDs, order and other bytes matched.
 | --- | ---: | --- |
 | Native full | 11 | `cbd7c2b53d73d519a8d3f79c79761ab8a4b0125f7662639bf81505a081d3eb01` |
 | Native sparse | 11 | `36a56e9d638244455cc7c23baeedb41e7043e5415f25ed5f934da978d2f92451` |
-| ibcmd-rs full | 11 | `59d1d8f1cdf11f8fcc4340a30ddfbbbc031ca68f049c908546812b6b35069e8e` |
-| ibcmd-rs sparse | 11 | `91605b4f2c71b2b505e79fdd1c94e0dc1136ae4f012f9748dac2e41a1c391672` |
+| ibcmd-rs full | 11 | `3506febcfdc83cb3a19c342e659e5771c11073af76d02dd3014afb499f1943ad` |
+| ibcmd-rs sparse | 11 | `a6370fe532d59256b65a80277711fdc9be939054a7fbb1ed008913647ac82140` |
 
 ### Descriptor and flag boundaries
 

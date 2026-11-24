@@ -60,6 +60,8 @@ const SHOWN_VALUE_CHARS: usize = 70;
 pub(crate) enum StageKind {
     /// The target holds the configuration: its rows patched from the tree.
     Patch,
+    /// A sparse descriptor must round-trip before the patch can replace compilation.
+    SparsePatch,
     /// Every row compiled from the tree.
     BaseFree,
 }
@@ -198,6 +200,7 @@ fn state_base<'a>(
 
 /// The guard for a patch stage: its rows over the target's Config.
 pub(super) fn verify_patch_stage(
+    kind: StageKind,
     args: &MssqlStageSourceObjectsArgs,
     sql: &SqlExec,
     manifest: &SourceManifest,
@@ -207,7 +210,7 @@ pub(super) fn verify_patch_stage(
     let base_dir = std::env::var_os("IBCMD_RS_BASE_ROWS_DIR").map(PathBuf::from);
     verify_staged_state(
         &GuardRequest {
-            kind: StageKind::Patch,
+            kind,
             source_root: &args.source_root,
             tree: TreeFiles::Scanned(manifest),
             removed,
@@ -275,10 +278,13 @@ pub(crate) fn verify_staged_state(
 ) -> Result<StageVerification> {
     let started = Instant::now();
     let (outcome, export) = compare_state(request, base, staged).map_err(|error| {
+        let advice = if request.kind == StageKind::SparsePatch {
+            SPARSE_PATCH_ADVICE
+        } else {
+            "Проверку можно отключить ключом --no-verify (тогда расхождения с деревом не обнаруживаются)."
+        };
         anyhow!(
-            "Не удалось проверить результат загрузки: {error:#}\n\
-                 Загрузка не выполнена, в ConfigSave ничего не записано. Проверку можно отключить \
-                 ключом --no-verify (тогда расхождения с деревом не обнаруживаются)."
+            "Не удалось проверить результат загрузки: {error:#}\nЗагрузка не выполнена, в ConfigSave ничего не записано. {advice}"
         )
     })?;
     let total_seconds = started.elapsed().as_secs_f64();
@@ -1054,6 +1060,9 @@ fn compare_text(state: &[u8], tree: &[u8]) -> Option<Vec<String>> {
 
 /// The message of a refused import: a headline, the files (at most
 /// [`LISTED_FILES`]), what the stage can carry and what to do.
+const SPARSE_PATCH_ADVICE: &str =
+    "Для сборки изменённых описаний укажите в --base-dir полное дерево конфигурации и повторите загрузку тех же файлов.";
+
 fn refusal_text(
     kind: StageKind,
     tree: &Path,
@@ -1094,12 +1103,11 @@ fn refusal_text(
             differences.len() - LISTED_FILES
         ));
     }
-    if matches!(kind, StageKind::Patch) && tree.is_dir() && !tree.join("Configuration.xml").exists()
-    {
-        lines.push("Для сборки изменённых описаний укажите в --base-dir полное дерево конфигурации и повторите загрузку тех же файлов.".to_string());
-        return lines.join("\n");
-    }
     match kind {
+        StageKind::SparsePatch => {
+            lines.push(SPARSE_PATCH_ADVICE.to_string());
+            return lines.join("\n");
+        }
         StageKind::Patch => {
             lines.push(
                 "Загрузка в базу, где конфигурация уже есть, собирает из дерева то, что в нём отличается от базы (описания объектов, новые и удалённые объекты, модули, формы, макеты, права ролей, командные интерфейсы), а остальные строки оставляет как в базе; перечисленное выше так не переносится."

@@ -4301,6 +4301,11 @@ fn stage_source_objects_patch(
             );
             let verified = timed_stage_step("verify the staged state", || {
                 stage_guard::verify_patch_stage(
+                    if verify_sparse_patch {
+                        stage_guard::StageKind::SparsePatch
+                    } else {
+                        stage_guard::StageKind::Patch
+                    },
                     args,
                     &sql,
                     &manifest,
