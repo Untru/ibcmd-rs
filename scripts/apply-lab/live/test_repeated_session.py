@@ -23,8 +23,9 @@ class RepeatedSessionTest(unittest.TestCase):
         })
 
     def test_existing_client_can_stay_on_old_generation(self):
-        report = measure(journal().replace("|C|C|", "|A|A|"))
-        self.assertEqual(report["observations"]["after"][0]["server"], "A")
+        report = measure(journal().replace("|B|B|", "|A|A|").replace("|C|C|", "|A|A|"))
+        self.assertTrue(all(rows == [{"client": "A", "server": "A", "samples": 1}]
+                            for rows in report["observations"].values()))
 
     def test_rejects_invalid_evidence(self):
         for rows in (
