@@ -1058,11 +1058,10 @@ fn compare_text(state: &[u8], tree: &[u8]) -> Option<Vec<String>> {
 // ---------------------------------------------------------------------------
 // The refusal.
 
+const SPARSE_PATCH_ADVICE: &str = "Для сборки изменённых описаний укажите в --base-dir полное дерево конфигурации и повторите загрузку тех же файлов.";
+
 /// The message of a refused import: a headline, the files (at most
 /// [`LISTED_FILES`]), what the stage can carry and what to do.
-const SPARSE_PATCH_ADVICE: &str =
-    "Для сборки изменённых описаний укажите в --base-dir полное дерево конфигурации и повторите загрузку тех же файлов.";
-
 fn refusal_text(
     kind: StageKind,
     tree: &Path,
