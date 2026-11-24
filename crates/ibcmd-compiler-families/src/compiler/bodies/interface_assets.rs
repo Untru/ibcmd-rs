@@ -81,8 +81,12 @@ pub enum ClientApplicationNode {
         id: ObjectUuid,
         children: Vec<ClientApplicationNode>,
     },
-    /// `{0,<id>,<panel uuid>,2,0}`.
-    Panel { id: ObjectUuid, uuid: ObjectUuid },
+    /// `{0,<id>,<panel uuid>,2,<height>}`; zero is the default height.
+    Panel {
+        id: ObjectUuid,
+        uuid: ObjectUuid,
+        height: u32,
+    },
 }
 
 /// One `<panelDef>`: `2,{<id>,0}` for one of the platform's standard
@@ -152,14 +156,14 @@ fn client_application_children(nodes: &[ClientApplicationNode]) -> NativeValue {
                     client_application_children(children),
                 ]));
             }
-            ClientApplicationNode::Panel { id, uuid } => {
+            ClientApplicationNode::Panel { id, uuid, height } => {
                 fields.push(token(CLIENT_APPLICATION_PANEL_MARKER));
                 fields.push(platform_list(vec![
                     token("0"),
                     token(id.to_string()),
                     token(uuid.to_string()),
                     token("2"),
-                    token("0"),
+                    token(height.to_string()),
                 ]));
             }
         }
