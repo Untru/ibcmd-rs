@@ -11301,6 +11301,7 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// other owner a zero column id is not evidence of a bound column and stays
     /// unresolved.
     value_list_attribute_ids: BTreeSet<String>,
+    value_table_attribute_ids: BTreeSet<String>,
     /// Attribute ids whose declared type is exactly the built-in dynamic list.
     /// Their field-map entries already spell out the whole relative path of a
     /// field, so a multi-segment binding against one of them is answered by the
@@ -11436,6 +11437,12 @@ fn collect_form_attribute_data_path_columns(
                 insert(item_id, &field.field);
             }
         }
+    }
+    if matches!(attribute.value_types.as_slice(), [ConstantValueType::Reference { reference }] if reference == "v8:ValueTable")
+    {
+        owner_scoped_bindings
+            .value_table_attribute_ids
+            .insert(attribute.id.clone());
     }
     let is_value_list = form_attribute_is_exact_value_list(attribute);
     let platform_columns = if is_dynamic_list {
@@ -13943,14 +13950,18 @@ fn parse_form_child_item_with_metadata_owners(
     // declares as exactly the built-in dynamic list. Two properties turn on it
     // -- the row-set commands of `<CommandSet>` and `<AllowGettingCurrentRowURL>`
     // -- so the binding is resolved once instead of twice.
-    let table_bound_to_dynamic_list = data_path_resolution.as_ref().is_some_and(|resolved| {
-        attribute_names_by_id.iter().any(|(id, name)| {
-            *name == resolved.data_path
-                && owner_scoped_bindings
-                    .dynamic_list_attribute_ids
-                    .contains(id)
-        })
+    let bound_attribute_id = data_path_resolution.as_ref().and_then(|resolved| {
+        attribute_names_by_id
+            .iter()
+            .find_map(|(id, name)| (*name == resolved.data_path).then_some(id))
     });
+    let table_bound_to_dynamic_list = bound_attribute_id.is_some_and(|id| {
+        owner_scoped_bindings
+            .dynamic_list_attribute_ids
+            .contains(id)
+    });
+    let table_bound_to_value_table = bound_attribute_id
+        .is_some_and(|id| owner_scoped_bindings.value_table_attribute_ids.contains(id));
     let mut item = FormChildItem {
         tag,
         id: id.to_string(),
@@ -14320,14 +14331,19 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        // One read for both table layouts: the counted bag walk finds key 13 at
+        // A direct ValueTable binding publishes nil even when key 13 is absent.
+        // For an explicit marker, one read covers both layouts: the counted bag walk finds key 13 at
         // slot 55 on the ordinary tables -- the very slot the layout-specific
         // branch used to read directly -- and finds no key 13 on the dynamic
         // lists, where the unbounded key scan used to land on a different
         // member.  Over all 4 543 native tables the walk reproduces
         // `<RowFilter xsi:nil="true"/>` on exactly the 1 986 that carry it.
         row_filter_nil: if tag == "Table" {
-            form_table_counted_bag_undefined(fields, TableBagKey::RowFilter)
+            form_table_counted_bag_undefined(
+                fields,
+                TableBagKey::RowFilter,
+                table_bound_to_value_table,
+            )
         } else {
             None
         },
@@ -21400,7 +21416,11 @@ pub(super) fn parse_form_table_property_bag_string(
 }
 
 /// One key of a `Table`'s counted property bag, read as the undefined marker.
-pub(super) fn form_table_counted_bag_undefined(fields: &[&str], key: TableBagKey) -> Option<bool> {
+pub(super) fn form_table_counted_bag_undefined(
+    fields: &[&str],
+    key: TableBagKey,
+    implicit_undefined: bool,
+) -> Option<bool> {
     let (start, end) = form_table_counted_property_bag_bounds(fields)?;
     let key = key.key();
     let mut value = None;
@@ -21413,7 +21433,10 @@ pub(super) fn form_table_counted_bag_undefined(fields: &[&str], key: TableBagKey
             value = Some(*fields.get(key_slot + 1)?);
         }
     }
-    parse_form_standalone_undefined_marker(value?)
+    match value {
+        Some(marker) => parse_form_standalone_undefined_marker(marker),
+        None => implicit_undefined.then_some(true),
+    }
 }
 
 pub(super) fn parse_form_table_property_bag_undefined(
@@ -33655,7 +33678,7 @@ pub(super) fn format_form_child_item_xml(
     {
         xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
     }
-    // `RowFilter` is decided by its own bag key alone: over the 4 543 native
+    // An explicit `RowFilter` is identified by its own bag key: over the 4 543 native
     // `Table` items of UT 11.5.27.75 the undefined marker in table bag key 13
     // is present on exactly the 1 986 that carry `<RowFilter xsi:nil="true"/>`
     // and on none of the other 2 557.  Pairing the read with the hierarchical

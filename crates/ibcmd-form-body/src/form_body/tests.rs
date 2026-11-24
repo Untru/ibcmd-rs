@@ -15,6 +15,22 @@ use ibcmd_core::value::CanonicalText;
 
 use super::*;
 
+#[test]
+fn implicit_table_row_filter_respects_present_values_and_bag_bounds() {
+    let mut fields = vec!["0"; 55];
+    let filter = |fields: &[&str], implicit| {
+        form_table_counted_bag_undefined(fields, TableBagKey::RowFilter, implicit)
+    };
+    assert_eq!(filter(&fields, true), Some(true));
+    assert_eq!(filter(&fields, false), None);
+    fields[54] = "1";
+    assert_eq!(filter(&fields, true), None);
+    fields.extend(["13", r#"{"B",0}"#]);
+    assert_eq!(filter(&fields, true), None);
+    fields[56] = r#"{"U"}"#;
+    assert_eq!(filter(&fields, false), Some(true));
+}
+
 trait MetadataFieldDeclarationIndexTestExt {
     fn with_table(self, reference: &str, declared: MetadataTableStandardAttributes) -> Self;
     fn with_constant(self, uuid: &str, declared: MetadataConstantDeclaration) -> Self;
