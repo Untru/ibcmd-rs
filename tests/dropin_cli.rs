@@ -446,7 +446,10 @@ fn save_starts_in_the_platforms_words_and_stops_at_the_connection() {
         file.to_str().unwrap(),
     ]);
     assert_eq!(output.status.code(), Some(FAILED));
-    assert_eq!(text(&output.stdout), "[INFO] Выгрузка конфигурации...\n");
+    assert_eq!(
+        text(&output.stdout),
+        "[INFO] Сохранение конфигурации в файл...\n"
+    );
     let stderr = text(&output.stderr);
     assert!(
         stderr.contains("не указан пароль пользователя сервера СУБД"),
@@ -455,7 +458,7 @@ fn save_starts_in_the_platforms_words_and_stops_at_the_connection() {
     assert!(
         stderr
             .trim_end()
-            .ends_with("[ERROR] Выгрузка конфигурации завершена с ошибкой"),
+            .ends_with("[ERROR] Сохранение конфигурации в файл завершено с ошибкой"),
         "{stderr}"
     );
     assert!(!file.exists());

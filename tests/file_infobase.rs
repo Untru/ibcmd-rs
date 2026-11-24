@@ -462,7 +462,21 @@ fn a_file_infobase_is_saved_as_a_cf_of_its_configuration() {
     for database_configuration in [false, true] {
         let cf = dir.join(format!("saved-{database_configuration}.cf"));
         fs::write(&cf, b"previous saved output").unwrap();
-        ok(&save(&db, &cf, database_configuration));
+        let output = save(&db, &cf, database_configuration);
+        ok(&output);
+        assert_eq!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                "[INFO] Сохранение конфигурации в файл...",
+                &format!(
+                    "[INFO] Сохранение конфигурации в файл успешно завершено: {}",
+                    cf.display()
+                ),
+            ]
+        );
         let out = dir.join(format!("xml-{database_configuration}"));
         ok(&run(&[
             "cf".as_ref(),

@@ -2,7 +2,7 @@
 
 `ibcmd infobase config save [--db] <file.cf>` and the research command
 `ibcmd-rs mssql-save-config` write the configuration a database publishes as a
-`.cf` without XML in between (`src/mssql_dump/config_save.rs`). The offline
+`.cf` without XML in between (`crates/ibcmd-dump/src/mssql_dump/config_save.rs`). The offline
 half of `config load` (`ibcmd-rs mssql-load-config --script-only`,
 `src/mssql/cf_load_stage.rs`) is the inverse: the elements of a `.cf` become
 the rows a load stages in `ConfigSave`, written as the bulk stage's rows file
@@ -70,16 +70,15 @@ as it is. `tests/cf_config_save.rs` reads the rows file back and finds the
 container's records; saving those rows back gives the original configuration
 (`cf export` file for file).
 
-## Open, needs the platform or SQL Server
+## Native SQL Server round trips on 8.3.27.2342 and 8.5.1.1529
 
-- `config load` of a saved file by 8.3.27.2214 / 8.5, and its export equal to
-  the database's (the acceptance of #352); a save of a database with a
-  completed stage, of one with an online generation, and of one with a row in
-  parts against the platform's `config save` of the same database.
-- Whether the platform's `config save` without `--db` writes `deleted` when
-  nothing is staged (here it does not).
-- The platform's lines and behaviour for `config save` (an existing file is
-  replaced here; the title is the command's name in `ibcmd help infobase`).
+See the [November 2026 acceptance matrix](cf-config-save-native-20261124.md)
+for native staging, dynamic generations and multipart storage, the comparison
+procedure, and the separate historical BSP result.
+
+## Other observations still open
+
+- Behaviour of native `config save` when replacing an existing file.
 - `config load` against a server: running the scripts, the `deleted` list for
   what the target's `Config` holds and the file does not, and the platform's
   `config apply` of such a stage (#353).
