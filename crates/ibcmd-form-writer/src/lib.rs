@@ -4638,21 +4638,18 @@ fn native_field_payload(
             // Native ServiceDesk dashboard charts carry independent flags:
             // width32/height5, horizontal1, vertical0. The payload already has
             // separate members, so equality is not a validity condition.
-            if item.max_width.is_some()
-                || item.auto_max_width.is_some()
-                || item.auto_max_height.is_some()
-            {
-                return Err(anyhow!(
-                    "a <ChartField> names a property whose slot is not measured"
-                ));
-            }
-            Ok(native::format_chart_payload(
+            Ok(native::format_chart_payload_with_limits(
                 item.width.as_deref().unwrap_or("50"),
                 item.height.as_deref().unwrap_or("10"),
                 horizontal,
                 vertical,
                 &events,
-                item.max_height.as_deref().unwrap_or("0"),
+                native::ChartLimits {
+                    auto_max_width: item.auto_max_width.unwrap_or(true),
+                    max_width: item.max_width.as_deref().unwrap_or("0"),
+                    auto_max_height: item.auto_max_height.unwrap_or(true),
+                    max_height: item.max_height.as_deref().unwrap_or("0"),
+                },
             ))
         }
         // A Gantt chart's `{3,…}` payload. The exporter publishes the extent

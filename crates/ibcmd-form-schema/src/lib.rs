@@ -4085,6 +4085,10 @@ impl FormChildItemEventCollectionSchema {
                 (FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
             ],
             FormChildItemEventCollectionOwner::PlannerField => &[
+                (
+                    "b34abb58-ee89-4119-945c-6432e9ef04a9",
+                    "CommandGenerateProcessing",
+                ),
                 (FORM_ITEM_DRAG_CHECK_EVENT_UUID, "DragCheck"),
                 (FORM_ITEM_DRAG_START_EVENT_UUID, "DragStart"),
                 (FORM_ITEM_DRAG_END_EVENT_UUID, "DragEnd"),
@@ -4104,6 +4108,7 @@ impl FormChildItemEventCollectionSchema {
                 (FORM_PLANNER_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
             ],
             FormChildItemEventCollectionOwner::ChartField => &[
+                ("97b47b15-7987-4fb4-915f-3ed53d69adfa", "OnActivate"),
                 (FORM_CHART_SELECTION_EVENT_UUID, "Selection"),
                 (FORM_CHART_DETAIL_PROCESSING_EVENT_UUID, "DetailProcessing"),
             ],

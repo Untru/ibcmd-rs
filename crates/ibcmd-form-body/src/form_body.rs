@@ -15525,8 +15525,11 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|properties| properties.auto_max_width())
         } else if tag == "ViewStatusAddition" {
             parse_form_view_status_addition_auto_max_width(fields)
-        } else if let Some((schema, options)) = special_field_layout.as_ref() {
-            schema.auto_max_width(options)
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.auto_max_width(options))
+        {
+            Some(value)
         } else if let Some(value) = table_schema.and_then(|schema| schema.auto_max_width(fields)) {
             Some(value)
         } else if let Some(value) = parse_form_table_off_flag(
@@ -15583,8 +15586,11 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.auto_max_height())
-        } else if let Some((schema, options)) = special_field_layout.as_ref() {
-            schema.auto_max_height(options)
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.auto_max_height(options))
+        {
+            Some(value)
         } else if tag == "Table" {
             parse_form_table_off_flag(
                 tag,
@@ -17718,19 +17724,17 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
         // `ДиаграммаПоказателей` reads `{1,45,10,0,0,…,1,15}` and adds
         // `<MaxHeight>15</MaxHeight>`.
         //
-        // No max-width or auto-max coordinate is claimed: all five items agree
-        // slot for slot across the rest of the tuple and none of them carries
-        // any such element, so nothing in the corpus tells those slots apart.
+        // corpus-form-facets varies the two automatic limits and maximum width independently.
         "ChartField",
         FormDocumentFieldGeometry {
             discriminator: "1",
             len: 11,
             width: Some((1, "50")),
             height: Some((2, "10")),
-            max_width: None,
+            max_width: Some(7),
             max_height: Some(10),
-            auto_max_width: None,
-            auto_max_height: None,
+            auto_max_width: Some(6),
+            auto_max_height: Some(9),
             horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             edit: None,

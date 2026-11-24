@@ -488,6 +488,12 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     (
         "ChartField",
         "",
+        "OnActivate",
+        "97b47b15-7987-4fb4-915f-3ed53d69adfa",
+    ),
+    (
+        "ChartField",
+        "",
         "DetailProcessing",
         "650da4af-3233-4ce0-a1ae-23f87a226eee",
     ),
@@ -822,6 +828,12 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     // The planner's drag events share the item-wide drag identifiers
     // (form_schema.rs `FORM_ITEM_DRAG_*_EVENT_UUID`); Управление задачами
     // `Reports/узПланированиеПроекта/Forms/ФормаУправляемая` names all three.
+    (
+        "PlannerField",
+        "",
+        "CommandGenerateProcessing",
+        "b34abb58-ee89-4119-945c-6432e9ef04a9",
+    ),
     (
         "PlannerField",
         "",
@@ -2317,10 +2329,44 @@ pub fn format_chart_payload(
     events: &str,
     max_height: &str,
 ) -> String {
+    format_chart_payload_with_limits(
+        width,
+        height,
+        horizontal_stretch,
+        vertical_stretch,
+        events,
+        ChartLimits {
+            auto_max_width: true,
+            max_width: "0",
+            auto_max_height: true,
+            max_height,
+        },
+    )
+}
+
+pub struct ChartLimits<'a> {
+    pub auto_max_width: bool,
+    pub max_width: &'a str,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
+}
+
+pub fn format_chart_payload_with_limits(
+    width: &str,
+    height: &str,
+    horizontal_stretch: bool,
+    vertical_stretch: bool,
+    events: &str,
+    limits: ChartLimits<'_>,
+) -> String {
     format!(
-        "{{1,{width},{height},{horizontal},{vertical},{events},1,0,0,1,{max_height}}}",
+        "{{1,{width},{height},{horizontal},{vertical},{events},{auto_width},{max_width},0,{auto_height},{max_height}}}",
         horizontal = u8::from(horizontal_stretch),
         vertical = u8::from(vertical_stretch),
+        auto_width = u8::from(limits.auto_max_width),
+        auto_height = u8::from(limits.auto_max_height),
+        max_width = limits.max_width,
+        max_height = limits.max_height,
     )
 }
 
