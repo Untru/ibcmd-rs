@@ -844,6 +844,7 @@ pub fn child_order(parent: &str) -> Option<&'static [&'static str]> {
             "DefaultItem",
             "TitleTextColor",
             "TitleBackColor",
+            "TitleFont",
             "TitleLocation",
             "WarningOnEditRepresentation",
             "TitleHeight",
