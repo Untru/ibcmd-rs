@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "platform-8.3.27.2342",
+  "status": "experimental",
+  "platform_build": "8.3.27.2342",
+  "constants": {
+    "platform.xml_format": "2.20",
+    "platform.form_layout": "8.3"
+  },
+  "evidence": [
+    "openspec/changes/evidence-bound-platform-profiles/evidence/postgres-dropin-20261124.md"
+  ]
+}
