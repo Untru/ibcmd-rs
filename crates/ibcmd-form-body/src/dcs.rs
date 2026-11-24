@@ -4519,6 +4519,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn filter_operands_outside_the_scalar_cohort_survive_template_normalization() {
+        for (right, expected) in [
+            (
+                r#"<right xsi:type="xs:string"/>"#,
+                r#"<dcsset:right xsi:type="xs:string"/>"#,
+            ),
+            (
+                r#"<right xsi:type="v8:ValueListType"><v8:value xsi:type="xs:string">marker</v8:value></right>"#,
+                r#"<v8:value xsi:type="xs:string">marker</v8:value>"#,
+            ),
+        ] {
+            let settings = format!(
+                r#"<Settings xmlns="http://v8.1c.ru/8.1/data-composition-system/settings"
+                xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core"
+                xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+                <filter><item xsi:type="FilterItemComparison"><left xsi:type="dcscor:Field">SortKey</left>
+                <comparisonType>Equal</comparisonType>{right}</item></filter></Settings>"#
+            );
+            let output = canonicalize_data_composition_settings_document(
+                &settings,
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+            assert!(matches!(
+                output,
+                CanonicalDcsSettingsDocument::Transliterated(_)
+            ));
+            assert!(output.as_str().contains(expected), "{}", output.as_str());
+        }
+    }
+
     /// A settings value whose type QName names the one namespace no root
     /// declaration covers keeps a generated prefix, renumbered from the
     /// storage document's own depth to the depth its element sits at in the

@@ -2564,12 +2564,14 @@ fn parse_dcs_filter_item(
                 ));
             }
             "left" if phase <= 1 && field.is_none() => {
-                let (value, value_type) = parse_typed_filter_child(child, root)?;
-                if value_type != policy.left_field_type_qname() {
+                if filter_operand_type(child, root)? != policy.left_field_type_qname() {
                     return Ok(DcsChildParseOutcome::Unsupported(
                         "filter left type is unsupported",
                     ));
                 }
+                let value = simple_element_text(child).ok_or(DcsSettingsParseError {
+                    reason: "filter left field is empty or complex",
+                })?;
                 field = Some(value);
                 phase = 2;
             }
@@ -2586,12 +2588,19 @@ fn parse_dcs_filter_item(
                 phase = 3;
             }
             "right" if phase == 3 && right.is_none() => {
-                let (value, value_type) = parse_typed_filter_child(child, root)?;
-                if value_type != policy.right_string_type_qname() {
+                if filter_operand_type(child, root)? != policy.right_string_type_qname() {
                     return Ok(DcsChildParseOutcome::Unsupported(
                         "filter right type is unsupported",
                     ));
                 }
+                if child.children().is_empty() {
+                    return Ok(DcsChildParseOutcome::Unsupported(
+                        "empty string filter value is outside the typed cohort",
+                    ));
+                }
+                let value = simple_element_text(child).ok_or(DcsSettingsParseError {
+                    reason: "filter right string has non-text content",
+                })?;
                 let value = CanonicalText::new(&value).map_err(|_| DcsSettingsParseError {
                     reason: "filter string value is invalid",
                 })?;
@@ -2645,17 +2654,13 @@ fn parse_simple_filter_child(element: &XmlElement) -> Result<String, DcsSettings
     })
 }
 
-fn parse_typed_filter_child(
+fn filter_operand_type(
     element: &XmlElement,
     root: &XmlElement,
-) -> Result<(String, String), DcsSettingsParseError> {
-    let value_type = resolved_xsi_type(element, root).ok_or(DcsSettingsParseError {
+) -> Result<String, DcsSettingsParseError> {
+    resolved_xsi_type(element, root).ok_or(DcsSettingsParseError {
         reason: "filter operand lacks one exact xsi:type",
-    })?;
-    let value = simple_element_text(element).ok_or(DcsSettingsParseError {
-        reason: "filter operand is empty or complex",
-    })?;
-    Ok((value, value_type))
+    })
 }
 
 /// Parses the physical BOM/base64 `<Filter>` document stored by Form dynamic
