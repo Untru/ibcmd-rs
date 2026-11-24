@@ -8692,13 +8692,11 @@ fn parse_flowchart_decoration_graphics(
     });
     properties.picture_size = parse_flowchart_picture_size(geometry.get(6)?)?;
     properties.picture = parse_flowchart_picture(geometry.get(7)?)?;
-    properties.shape = Some(match geometry.get(9)?.trim() {
-        "0" => "None",
-        "10" => "Document",
-        "11" => "Block",
-        "12" => "HorizontalBrackets",
-        _ => return None,
-    });
+    properties.shape = Some(
+        ibcmd_metadata_model::metadata_model::bodies_flowchart::decoration_shape_name(
+            geometry.get(9)?.trim(),
+        )?,
+    );
     Some(properties)
 }
 
