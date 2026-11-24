@@ -48,6 +48,7 @@ const DRAWING_LINE_KIND: &str = "b7438842-27cc-42a3-846f-2250cd9c1bc3";
 const REFERENCE_VALUE_TYPE: &str = "3031edd8-c3df-47b2-98ca-47f628d4ec18";
 const STRUCTURE_VALUE_TYPE: &str = "4238019d-7e49-4fc9-91db-b6b951d5cf8e";
 const ARRAY_VALUE_TYPE: &str = "51e7a0d2-530b-11d4-b98a-008048da3034";
+const PALETTE_COLORS_NS: &str = "http://v8.1c.ru/8.1/data/ui/colors/palette";
 const WEB_COLORS_NS: &str = "http://v8.1c.ru/8.1/data/ui/colors/web";
 const WINDOWS_COLORS_NS: &str = "http://v8.1c.ru/8.1/data/ui/colors/windows";
 const CURRENT_CONFIG_NS: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
@@ -247,6 +248,8 @@ struct Node {
     attributes: Vec<(String, String)>,
     children: Vec<Node>,
     text: String,
+    /// In-scope namespace of a QName in the element text.
+    text_namespace: Option<String>,
     /// The element's byte span in the source, start tag to end tag.
     span: (usize, usize),
 }
@@ -350,6 +353,17 @@ fn parse_dom(xml: &[u8]) -> Result<Node> {
                 let mut node = stack
                     .pop()
                     .ok_or_else(|| anyhow!("SpreadsheetDocument XML closes an unopened element"))?;
+                if let Some((prefix, _)) = node.text.trim().split_once(':') {
+                    node.text_namespace = node
+                        .own_namespace(prefix)
+                        .or_else(|| {
+                            stack
+                                .iter()
+                                .rev()
+                                .find_map(|parent| parent.own_namespace(prefix))
+                        })
+                        .map(str::to_owned);
+                }
                 node.span.1 = reader.buffer_position() as usize;
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(node),
@@ -405,6 +419,7 @@ fn start_node(start: &BytesStart<'_>) -> Result<Node> {
         attributes,
         children: Vec::new(),
         text: String::new(),
+        text_namespace: None,
         span: (0, 0),
     })
 }
@@ -2288,10 +2303,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
 
     fn color_slot(&mut self, node: &Node, text: &str) -> Result<usize> {
         let spelled = text.trim();
-        let namespace = spelled
-            .split_once(':')
-            .and_then(|(prefix, _)| node.own_namespace(prefix).map(str::to_string));
-        self.palette_slot_for_spelling(spelled, namespace.as_deref())
+        self.palette_slot_for_spelling(spelled, node.text_namespace.as_deref())
     }
 
     /// A report colour's slot stores the same value an explicit colour of that
@@ -2360,8 +2372,13 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             bail!("colour {spelled} has no writer");
         };
         match namespace {
+            Some(PALETTE_COLORS_NS) => {
+                let record = ibcmd_moxel::moxel_palette_color_record(name)
+                    .ok_or_else(|| anyhow!("palette colour {name} has no stored code"))?;
+                Ok((record.to_owned(), None))
+            }
             Some(WEB_COLORS_NS) => {
-                let code = web_color_code(name)
+                let code = ibcmd_moxel::moxel_web_color_code(name)
                     .ok_or_else(|| anyhow!("web colour {name} has no stored code"))?;
                 Ok((format!("{{3,2,{{{code}}}}}"), None))
             }
@@ -2514,14 +2531,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                         "NormalTextFont" => "{-31}".to_string(),
                         "LargeTextFont" => "{-32}".to_string(),
                         "ExtraLargeTextFont" => "{-33}".to_string(),
-                        _ => {
-                            let source = self.source.ok_or_else(|| {
-                                anyhow!("style font {reference} needs the configuration")
-                            })?;
-                            let uuid =
-                                source.resolve_style_item_uuid(&format!("StyleItem.{name}"))?;
-                            format!("{{0,{}}}", uuid.to_ascii_lowercase())
-                        }
+                        _ => self.named_style_font(name, reference)?,
                     };
                     (2, stored)
                 };
@@ -2564,6 +2574,26 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
         }
     }
 
+    fn named_style_font(&self, name: &str, reference: &str) -> Result<String> {
+        let built_in = ibcmd_moxel::moxel_builtin_style_font_code(name);
+        if let Some(source) = self.source {
+            match source.resolve_style_item_uuid(&format!("StyleItem.{name}")) {
+                Ok(uuid) => return Ok(format!("{{0,{}}}", uuid.to_ascii_lowercase())),
+                Err(error) => {
+                    let missing = error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound);
+                    if !missing || built_in.is_none() {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        built_in
+            .map(|code| format!("{{{code}}}"))
+            .ok_or_else(|| anyhow!("style font {reference} needs the configuration"))
+    }
+
     // -- lines -------------------------------------------------------------
 
     fn line_table(&mut self) -> Result<String> {
@@ -2595,12 +2625,12 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 ),
                 Some("v8ui:SpreadsheetDocumentDrawingLineType") => (
                     DRAWING_LINE_KIND,
-                    match style.text.as_str() {
-                        "None" => 0,
-                        "Solid" => 1,
-                        "Dotted" => 3,
-                        other => bail!("drawing line style {other} has no stored code"),
-                    },
+                    ibcmd_moxel::MOXEL_DRAWING_LINE_STYLES
+                        .iter()
+                        .position(|name| *name == style.text)
+                        .ok_or_else(|| {
+                            anyhow!("drawing line style {} has no stored code", style.text)
+                        })?,
                 ),
                 other => bail!("a line style of type {other:?} has no writer"),
             };
@@ -3067,70 +3097,6 @@ fn report_style_color(name: &str) -> Option<(i32, u32)> {
         "ReportGroup1BackColor" => (-26, 14_217_976),
         "ReportGroup2BackColor" => (-27, 15_530_491),
         "ReportLineColor" => (-28, 8_765_644),
-        _ => return None,
-    })
-}
-
-fn web_color_code(name: &str) -> Option<u32> {
-    Some(match name {
-        "AliceBlue" => 1,
-        "AntiqueWhite" => 2,
-        "Azure" => 5,
-        "Beige" => 6,
-        "Black" => 8,
-        "Blue" => 10,
-        "Cream" => 20,
-        "Crimson" => 21,
-        "DarkBlue" => 23,
-        "DarkGray" => 26,
-        "DarkGreen" => 27,
-        "DarkRed" => 33,
-        "DarkSlateGray" => 37,
-        "DimGray" => 42,
-        "FireBrick" => 44,
-        "FloralWhite" => 45,
-        "ForestGreen" => 46,
-        "Gainsboro" => 48,
-        "GhostWhite" => 49,
-        "Gray" => 52,
-        "Green" => 53,
-        "GreenYellow" => 54,
-        "HoneyDew" => 55,
-        "Ivory" => 59,
-        "Lavender" => 61,
-        "LemonChiffon" => 64,
-        "LightCyan" => 67,
-        "LightGoldenRod" => 68,
-        "LightGoldenRodYellow" => 69,
-        "LightGreen" => 70,
-        "LightGray" => 71,
-        "LightPink" => 72,
-        "LightSalmon" => 73,
-        "LightSkyBlue" => 75,
-        "LightSlateGray" => 77,
-        "LightYellow" => 79,
-        "Maroon" => 84,
-        "MediumBlue" => 86,
-        "MediumGray" => 87,
-        "MediumGreen" => 88,
-        "MediumSpringGreen" => 93,
-        "MintCream" => 97,
-        "MistyRose" => 98,
-        "PaleGoldenrod" => 108,
-        "Red" => 119,
-        "RosyBrown" => 120,
-        "RoyalBlue" => 121,
-        "SaddleBrown" => 122,
-        "Silver" => 128,
-        "SlateBlue" => 130,
-        "SlateGray" => 131,
-        "SteelBlue" => 134,
-        "Tomato" => 138,
-        "Violet" => 140,
-        "VioletRed" => 141,
-        "White" => 143,
-        "WhiteSmoke" => 144,
-        "Yellow" => 145,
         _ => return None,
     })
 }

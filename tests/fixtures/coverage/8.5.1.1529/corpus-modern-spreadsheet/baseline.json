@@ -1,7 +1,12 @@
 {
   "equal": [
     "CovModernSheetBuiltinFont",
+    "CovModernSheetChartColumn",
+    "CovModernSheetChartLine",
+    "CovModernSheetDashed",
     "CovModernSheetEmbeddedTable",
+    "CovModernSheetPalette",
+    "CovModernSheetSkyBlue",
     "CovModernSpreadsheetTemplate",
     "configuration"
   ]

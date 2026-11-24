@@ -40626,6 +40626,7 @@ fn format_form_chart_settings_body_xml(
     // `ibcmd-moxel` records for a template's chart, and the shape the 21 charts
     // of one 8.3.27 corpus stored by 8.5 carry (`DataProcessors/
     // ДиспетчированиеГрафикаПроизводства/Forms/ДиагностикаФормированияГрафика`).
+    use ibcmd_moxel::chart_layout;
     let mut owned = Vec::new();
     let data = if data.first().map(|value| value.trim()) == Some("75") {
         let cut =
@@ -40675,7 +40676,7 @@ fn format_form_chart_settings_body_xml(
     // slot the 74 layout, down to the five-member show-mode tuple at
     // `t[183]`, the literal `60` at `t[187]` and the axis record at
     // `t[189]`. The six members version 74 adds are read by nobody -- the
-    // highest fixed offset any read names is `183` -- so the version only
+    // highest fixed offset any read names is `185` -- so the version only
     // changes the declared length.
     let tail_base = match data.first()?.trim() {
         "73" => FORM_CHART_TAIL_FIELDS_BASE - 6,
@@ -40872,8 +40873,11 @@ fn format_form_chart_settings_body_xml(
                 ("0", "Line"),
                 // Монитор `Catalogs/Запросы/Forms/ФормаАнализа`.
                 ("2", "Area"),
+                ("4", "Column"),
                 ("6", "Column3D"),
                 ("12", "Pie"),
+                ("13", "Pie3D"),
+                ("26", "StackedLine"),
                 ("38", "Gauge"),
                 ("44", "Bubble")
             ]
@@ -40924,16 +40928,22 @@ fn format_form_chart_settings_body_xml(
     scalar!("isShowTitle", form_chart_bool(t.get(12)?)?);
     scalar!("isShowLegend", form_chart_bool(t.get(13)?)?);
     xml.push_str(&form_chart_border_xml("ttlBorder", t.get(14)?, child)?);
-    color!("ttlBorderColor", 15);
+    color!("ttlBorderColor", chart_layout::TITLE_BORDER_COLOR);
     xml.push_str(&form_chart_border_xml("lgBorder", t.get(16)?, child)?);
-    color!("lgBorderColor", 17);
+    color!("lgBorderColor", chart_layout::LEGEND_BORDER_COLOR);
     xml.push_str(&form_chart_border_xml("chBorder", t.get(18)?, child)?);
-    color!("chBorderColor", 19);
+    color!("chBorderColor", chart_layout::CHART_BORDER_COLOR);
     scalar!("transparent", form_chart_bool(t.get(20)?)?);
     color!("bkgColor", 21);
-    scalar!("isTrnspTtl", form_chart_bool(t.get(22)?)?);
+    scalar!(
+        "isTrnspTtl",
+        form_chart_bool(t.get(chart_layout::TRANSPARENT_TITLE)?)?
+    );
     color!("ttlColor", 23);
-    scalar!("isTrnspLeg", form_chart_bool(t.get(24)?)?);
+    scalar!(
+        "isTrnspLeg",
+        form_chart_bool(t.get(chart_layout::TRANSPARENT_LEGEND)?)?
+    );
     color!("legColor", 25);
     scalar!("isTrnspCh", form_chart_bool(t.get(26)?)?);
     color!("chColor", 27);
@@ -41094,8 +41104,13 @@ fn format_form_chart_settings_body_xml(
         t.get(tidx(171)..tidx(175))?,
         child,
     )?);
-    color!("borderColor", 95);
-    xml.push_str(&form_chart_border_xml("border", t.get(96)?, child)?);
+    color!("borderColor", chart_layout::BORDER_COLOR);
+    let border = t.get(chart_layout::BORDER)?;
+    xml.push_str(&form_chart_border_xml(
+        ibcmd_form_schema::FORM_CHART_BORDER_ELEMENT,
+        border,
+        child,
+    )?);
     let description = parse_1c_string(t.get(97)?.trim())?;
     if description.is_empty() {
         empty!("dataSourceDescription");
@@ -41452,11 +41467,11 @@ fn format_form_chart_settings_body_xml(
     // `"5"` (`UseCoordinates`) come from the corpus above: one
     // `ПротоколРаботыСотрудников` record stores `"3"` and publishes `Top`,
     // four further `do` records store `"5"` and publish `UseCoordinates`.
-    if t.get(tidx(161))?.trim() != "0" {
+    if t.get(tidx(chart_layout::LEGEND_PLACEMENT))?.trim() != chart_layout::DEFAULT_PLACEMENT {
         scalar!(
             "legendPlacement",
             form_chart_code(
-                t.get(tidx(161))?,
+                t.get(tidx(chart_layout::LEGEND_PLACEMENT))?,
                 &[
                     ("3", "Top"),
                     ("4", "Bottom"),
@@ -41472,10 +41487,13 @@ fn format_form_chart_settings_body_xml(
     // `<d4p1:plotAreaPlacement>UseCoordinates</d4p1:plotAreaPlacement>`, the
     // twelve `ut`/`uh` records store `"0"` and publish nothing. It was never
     // read before, so the element was lost on every record that has it.
-    if t.get(tidx(160))?.trim() != "0" {
+    if t.get(tidx(chart_layout::PLOT_PLACEMENT))?.trim() != chart_layout::DEFAULT_PLACEMENT {
         scalar!(
             "plotAreaPlacement",
-            form_chart_code(t.get(tidx(160))?, &[("1", "UseCoordinates")])?
+            form_chart_code(
+                t.get(tidx(chart_layout::PLOT_PLACEMENT))?,
+                &[("1", "UseCoordinates")]
+            )?
         );
     }
     // `tidx(162)`, right after legendPlacement's slot, is titleAreaPlacement
@@ -41485,11 +41503,11 @@ fn format_form_chart_settings_body_xml(
     // added): the slot flips from `"0"` to `"8"`. `"1"`
     // (`UseCoordinates`) is the six `do` records that store it and publish
     // it, against the same corpus.
-    if t.get(tidx(162))?.trim() != "0" {
+    if t.get(tidx(chart_layout::TITLE_PLACEMENT))?.trim() != chart_layout::DEFAULT_PLACEMENT {
         scalar!(
             "titleAreaPlacement",
             form_chart_code(
-                t.get(tidx(162))?,
+                t.get(tidx(chart_layout::TITLE_PLACEMENT))?,
                 &[("1", "UseCoordinates"), ("3", "Top"), ("8", "None")]
             )?
         );
@@ -41555,6 +41573,10 @@ fn format_form_chart_settings_body_xml(
 {child_tab}\t<d4p1:colorPalette>{name}</d4p1:colorPalette>\r\n\
 {child_tab}</d4p1:referenceBandsColorPaletteDescription>\r\n"
         ));
+    }
+    use ibcmd_form_schema::FormChartSelectionMode;
+    if let Some(mode) = FormChartSelectionMode::name(t.get(tidx(FormChartSelectionMode::SLOT))?)? {
+        scalar!("selectionMode", mode);
     }
     Some(xml)
 }

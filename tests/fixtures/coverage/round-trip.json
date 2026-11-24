@@ -548,10 +548,6 @@
         "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
         "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row 816b2b50-fe05-53a1-9935-ccf92d00a67e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovChartMissingSeries.xml": "#679: base-free stage has no base Config row 6eb955a2-c7d3-522b-8740-61767f894ab0.0: the native form writer refuses it: <d4p1:chartType> spells StackedLine, which the chart writer has not measured",
-        "CommonForms/CovChartSelectionMode.xml": "#679: base-free stage has no base Config row bf5242cb-5457-5b55-8aee-c60e716245a0.0: the native form writer refuses it: <Settings> names <d4p1:selectionMode>, which the chart writer cannot place",
-        "CommonForms/CovChartTypeColumn.xml": "#679: base-free stage has no base Config row ef977da5-7048-5978-bbf5-522accccbc05.0: the native form writer refuses it: <d4p1:chartType> spells Column, which the chart writer has not measured",
-        "CommonForms/CovChartTypePie3D.xml": "#679: base-free stage has no base Config row 81c147ce-2fd8-5c11-bcf8-36a7ff47aedb.0: the native form writer refuses it: <d4p1:chartType> spells Pie3D, which the chart writer has not measured",
         "CommonForms/CovDeepComposerBinding.xml": "#606: base-free stage has no base Config row 4de97c92-28c5-5c22-b791-9359361ff139.0: the native form writer refuses it: <CheckBoxField> binds to Report.SettingsComposer.Settings.Selection.Use, which the writer cannot place",
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
@@ -666,12 +662,6 @@
         "CommonForms/CovVisualLabelFieldTextColor_c210628e0abb.xml": "#599: base-free stage has no base Config row 43377cf2-e8ef-52f3-83a5-009cf5ef9df7.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
         "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 1707a6fa-41fb-5431-bf0e-d5a6f2a2591f.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row 38943628-21bd-5526-8bcd-a726044c06e7.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonTemplates/CovModernSheetBuiltinFont.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetBuiltinFont/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read StyleItem XML StyleItems/TitleLevel2.xml",
-        "CommonTemplates/CovModernSheetChartColumn.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartColumn/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <d4p1:chartType> spells Column, which the chart writer has not measured",
-        "CommonTemplates/CovModernSheetChartLine.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: the exporter cannot read back the chart the writer built",
-        "CommonTemplates/CovModernSheetDashed.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetDashed/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style Dashed has no stored code",
-        "CommonTemplates/CovModernSheetPalette.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetPalette/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: colour pal:Gray names an unknown namespace",
-        "CommonTemplates/CovModernSheetSkyBlue.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetSkyBlue/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SkyBlue has no stored code",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
         "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",
@@ -693,14 +683,6 @@
         "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\"",
         "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
-      }
-    },
-    "8.5.1.1529/corpus-chart-settings": {
-      "refused": {
-        "CommonForms/CovChartMissingSeries.xml": "#679: base-free stage has no base Config row 083b24b1-aaad-5df4-8035-559deaea0750.0: the native form writer refuses it: <d4p1:chartType> spells StackedLine, which the chart writer has not measured",
-        "CommonForms/CovChartSelectionMode.xml": "#679: base-free stage has no base Config row 8b2fba89-d605-5dbb-9b23-de3d6e58a666.0: the native form writer refuses it: <Settings> names <d4p1:selectionMode>, which the chart writer cannot place",
-        "CommonForms/CovChartTypeColumn.xml": "#679: base-free stage has no base Config row 074b8730-a071-5a49-85f2-dbba7b14f57a.0: the native form writer refuses it: <d4p1:chartType> spells Column, which the chart writer has not measured",
-        "CommonForms/CovChartTypePie3D.xml": "#679: base-free stage has no base Config row c6f01cce-055b-5167-ac70-26364640ecf7.0: the native form writer refuses it: <d4p1:chartType> spells Pie3D, which the chart writer has not measured"
       }
     },
     "8.5.1.1529/corpus-form-bound-scalars": {
@@ -813,16 +795,6 @@
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml": "#622: base-free stage has no base Config row f3219db8-eb25-5d7c-a93a-286ef76838d5.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid"
-      }
-    },
-    "8.5.1.1529/corpus-modern-spreadsheet": {
-      "refused": {
-        "CommonTemplates/CovModernSheetBuiltinFont.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetBuiltinFont/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read StyleItem XML StyleItems/TitleLevel2.xml",
-        "CommonTemplates/CovModernSheetChartColumn.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartColumn/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <d4p1:chartType> spells Column, which the chart writer has not measured",
-        "CommonTemplates/CovModernSheetChartLine.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: the exporter cannot read back the chart the writer built",
-        "CommonTemplates/CovModernSheetDashed.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetDashed/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style Dashed has no stored code",
-        "CommonTemplates/CovModernSheetPalette.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetPalette/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: colour pal:Gray names an unknown namespace",
-        "CommonTemplates/CovModernSheetSkyBlue.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetSkyBlue/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SkyBlue has no stored code"
       }
     },
     "8.5.1.1529/corpus-navigation-commands": {
@@ -1016,10 +988,6 @@
         "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
         "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row 816b2b50-fe05-53a1-9935-ccf92d00a67e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovChartMissingSeries.xml": "#679: base-free stage has no base Config row 6eb955a2-c7d3-522b-8740-61767f894ab0.0: the native form writer refuses it: <d4p1:chartType> spells StackedLine, which the chart writer has not measured",
-        "CommonForms/CovChartSelectionMode.xml": "#679: base-free stage has no base Config row bf5242cb-5457-5b55-8aee-c60e716245a0.0: the native form writer refuses it: <Settings> names <d4p1:selectionMode>, which the chart writer cannot place",
-        "CommonForms/CovChartTypeColumn.xml": "#679: base-free stage has no base Config row ef977da5-7048-5978-bbf5-522accccbc05.0: the native form writer refuses it: <d4p1:chartType> spells Column, which the chart writer has not measured",
-        "CommonForms/CovChartTypePie3D.xml": "#679: base-free stage has no base Config row 81c147ce-2fd8-5c11-bcf8-36a7ff47aedb.0: the native form writer refuses it: <d4p1:chartType> spells Pie3D, which the chart writer has not measured",
         "CommonForms/CovDeepComposerBinding.xml": "#606: base-free stage has no base Config row 4de97c92-28c5-5c22-b791-9359361ff139.0: the native form writer refuses it: <CheckBoxField> binds to Report.SettingsComposer.Settings.Selection.Use, which the writer cannot place",
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
@@ -1134,12 +1102,6 @@
         "CommonForms/CovVisualLabelFieldTextColor_c210628e0abb.xml": "#599: base-free stage has no base Config row 43377cf2-e8ef-52f3-83a5-009cf5ef9df7.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
         "CommonForms/CovVisualUsualGroupBackColor_80b5f7fb6981.xml": "#599: base-free stage has no base Config row 1707a6fa-41fb-5431-bf0e-d5a6f2a2591f.0: the native form writer refuses it: a group names a background colour it cannot place",
         "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row 38943628-21bd-5526-8bcd-a726044c06e7.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonTemplates/CovModernSheetBuiltinFont.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetBuiltinFont/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read StyleItem XML StyleItems/TitleLevel2.xml",
-        "CommonTemplates/CovModernSheetChartColumn.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartColumn/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: <d4p1:chartType> spells Column, which the chart writer has not measured",
-        "CommonTemplates/CovModernSheetChartLine.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetChartLine/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: the exporter cannot read back the chart the writer built",
-        "CommonTemplates/CovModernSheetDashed.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetDashed/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: drawing line style Dashed has no stored code",
-        "CommonTemplates/CovModernSheetPalette.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetPalette/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: colour pal:Gray names an unknown namespace",
-        "CommonTemplates/CovModernSheetSkyBlue.xml": "#679: failed to pack SpreadsheetDocument Template body CommonTemplates/CovModernSheetSkyBlue/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: web colour SkyBlue has no stored code",
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style",
         "CommonTemplates/CovSheetAppearanceCheckIcon.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/AppearanceCheckIcon.xml",
         "CommonTemplates/CovSheetAutoFontHeight.xml": "#608: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: an AutoFont <font> spells members",

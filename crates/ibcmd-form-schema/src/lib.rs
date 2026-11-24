@@ -10054,6 +10054,25 @@ pub fn form_planner_standard_command_suffix(uuid: &str) -> Option<&'static str> 
     }
 }
 
+/// XML element for a chart or chart component border.
+pub const FORM_CHART_BORDER_ELEMENT: &str = "border";
+
+/// Chart selection mode measured on the 8.5.1.1529 CovChartSelectionMode form.
+pub struct FormChartSelectionMode;
+impl FormChartSelectionMode {
+    pub const SLOT: usize = 185;
+    pub const CODES: &[(&str, &str)] = &[("None", "3")];
+
+    pub fn name(code: &str) -> Option<Option<&'static str>> {
+        if code.trim() == "0" {
+            return Some(None);
+        }
+        Self::CODES
+            .iter()
+            .find_map(|&(name, value)| (code.trim() == value).then_some(Some(name)))
+    }
+}
+
 /// Chart revision 75 adds eight color tuples after the revision 74 payload.
 pub struct FormChartColorTailLayout;
 impl FormChartColorTailLayout {

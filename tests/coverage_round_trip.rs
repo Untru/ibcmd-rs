@@ -723,6 +723,27 @@ fn coverage_sets_round_trip_through_ibcmd_rs_writers() {
     );
 }
 
+// Combined configurations may refuse an unrelated object before a file
+// database is written. Keep the two #679 class sets on that route as well.
+#[test]
+fn modern_chart_and_spreadsheet_sets_round_trip_through_file_infobase() {
+    for set in ["corpus-chart-settings", "corpus-modern-spreadsheet"] {
+        let source = coverage_root().join("8.5.1.1529").join(set).join("native");
+        let work = TempDirectory::new();
+        let actual = through_file_infobase(&source, &work.0)
+            .unwrap_or_else(|errors| panic!("{set}: {errors:?}"));
+        let expected = read_tree(&source);
+        assert_eq!(
+            actual.keys().collect::<Vec<_>>(),
+            expected.keys().collect::<Vec<_>>(),
+            "{set}"
+        );
+        for (path, bytes) in expected {
+            assert!(actual[&path] == bytes, "{set}/{path} differs");
+        }
+    }
+}
+
 #[test]
 fn round_trip_expectations_fail_on_regressions_and_report_fixes() {
     let equal = |name: &str| (name.to_owned(), (Verdict::Equal, None));
