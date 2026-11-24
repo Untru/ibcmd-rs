@@ -2783,8 +2783,7 @@ impl FormControlBorderSchema {
             && tuple.first().map(|field| field.trim()) == Some("3")
             && tuple.get(1).map(|field| field.trim()) == Some("1")
             && tuple.get(2).map(|field| field.trim()) == Some("{-18}")
-            && tuple.get(3).map(|field| field.trim()) == Some("1")
-            && tuple.get(4).map(|field| field.trim()) == Some("1")
+            && matches!((tuple[3].trim(), tuple[4].trim()), ("0", "0") | ("1", "1"))
             && tuple.get(5).map(|field| field.trim()) == Some("0"))
         .then_some(FormControlBorder {
             style: FormControlBorderStyle::WithoutBorder,

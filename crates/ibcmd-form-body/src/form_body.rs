@@ -15072,7 +15072,12 @@ fn parse_form_child_item_with_metadata_owners(
                     .get(schema.hidden_state_title_back_color_option_slot()?)
             })
             .and_then(|field| parse_form_control_color(field, object_refs)),
-        border_color: if let Some(schema) = button_color_schema {
+        border_color: if tag == "GraphicalSchemaField" {
+            document_field_options
+                .as_deref()
+                .and_then(|options| options.get(5))
+                .and_then(|color| parse_form_control_color(color, object_refs))
+        } else if let Some(schema) = button_color_schema {
             fields
                 .get(schema.border_color_slot())
                 .and_then(|field| parse_form_control_color(field, object_refs))
@@ -17078,6 +17083,8 @@ fn form_control_window_color_name(code: i32) -> Option<&'static str> {
         // 1C:Документооборот `CommonForms/РедактированиеТабличногоДокумента`
         // `ИмяОбласти` holds `{3,1,{5}}` and writes `win:WindowBackground`.
         5 => Some("win:WindowBackground"),
+        11 => Some("win:InactiveBorder"),
+        24 => Some("win:ToolTip"),
         17 => Some("win:DisabledText"), // 2
         18 => Some("win:ButtonText"),   // 10
         // Read off the platform's own element the same way the other three
@@ -35869,7 +35876,11 @@ pub(super) fn format_form_child_item_xml(
     // `ExtendedTooltip` (6); nothing else shares a check box with it.
     if matches!(
         item.tag,
-        "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField" | "CheckBoxField"
+        "LabelDecoration"
+            | "HTMLDocumentField"
+            | "GraphicalSchemaField"
+            | "SpreadSheetDocumentField"
+            | "CheckBoxField"
     ) {
         if let Some(back_color) = &item.back_color {
             xml.push_str(&format!(

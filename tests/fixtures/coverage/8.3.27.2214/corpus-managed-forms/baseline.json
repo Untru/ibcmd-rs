@@ -3,6 +3,8 @@
     "CovChartField",
     "CovEmbeddedSpreadsheetCells",
     "CovFormEventOnOpen",
+    "CovGraphicalSchemaFieldBorderColorMediumGreen",
+    "CovGraphicalSchemaFieldBorderColorTomato",
     "CovManagedFormTemplate",
     "CovPlannerField",
     "configuration"

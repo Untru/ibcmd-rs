@@ -38,12 +38,15 @@ pub fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> 
         // Platform 8.5 standard style fonts. 8.5.1.1150 BSP: every form item
         // and style item that carries exactly one style font pairs the code
         // with the native `ref` without exception (`fontcodes.py`).
+        -48 => "TitleLevel1",
         -50 => "TitleLevel3",
+        -51 => "TitleLevel4",
         -52 => "TitleLevel5",
         -53 => "TextLevel1",
         -54 => "TextLevel2",
         -55 => "TextLevel3",
         -56 => "SubtitleLevel1",
+        -57 => "SubtitleLevel2",
         -59 => "TitleLevel2",
         _ => return None,
     };
@@ -64,8 +67,8 @@ pub fn standard_style_item_code_for_name(name: &str) -> Option<i32> {
 
 const STANDARD_STYLE_ITEM_CODES: &[i32] = &[
     -1, -11, -3, -15, -7, -13, -21, -10, -14, -23, -24, -16, -17, -22, -25, -26, -27, -28, -18,
-    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38, -44, -42, -43, -47, -50, -52, -53, -54, -55,
-    -56, -59,
+    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38, -44, -42, -43, -47, -48, -50, -51, -52, -53,
+    -54, -55, -56, -57, -59,
 ];
 
 /// Codes 49/61/78/110/115/117/123/127/129/131 (GhostWhite/Lavender/
@@ -87,6 +90,8 @@ pub fn style_web_color_name(code: i32) -> Option<&'static str> {
         6 => Some("web:Beige"),
         8 => Some("web:Black"),
         10 => Some("web:Blue"),
+        12 => Some("web:Brown"),
+        18 => Some("web:CornFlowerBlue"),
         20 => Some("web:Cream"),
         21 => Some("web:Crimson"),
         26 => Some("web:DarkGray"),
@@ -151,6 +156,7 @@ pub fn style_web_color_name(code: i32) -> Option<&'static str> {
         120 => Some("web:RosyBrown"),
         121 => Some("web:RoyalBlue"),
         123 => Some("web:Salmon"),
+        124 => Some("web:SandyBrown"),
         127 => Some("web:Sienna"),
         128 => Some("web:Silver"),
         129 => Some("web:SkyBlue"),

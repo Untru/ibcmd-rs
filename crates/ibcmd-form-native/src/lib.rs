@@ -236,7 +236,9 @@ pub const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("Beige", "6"),
     ("Black", "8"),
     ("Blue", "10"),
+    ("Brown", "12"),
     ("CadetBlue", "14"),
+    ("CornFlowerBlue", "18"),
     ("Cream", "20"),
     ("Crimson", "21"),
     ("DarkBlue", "23"),
@@ -304,6 +306,7 @@ pub const WEB_COLOR_CODES: &[(&str, &str)] = &[
     // `web:Seagreen` (the exporter's `form_control_web_color_name`).
     ("Seagreen", "125"),
     ("Salmon", "123"),
+    ("SandyBrown", "124"),
     ("Sienna", "127"),
     ("Silver", "128"),
     ("SkyBlue", "129"),
@@ -326,8 +329,10 @@ pub const WINDOWS_COLOR_CODES: &[(&str, &str)] = &[
     ("ButtonDarkShadow", "21"),
     ("ButtonText", "18"),
     ("DisabledText", "17"),
+    ("InactiveBorder", "11"),
     ("MenuBar", "4"),
     ("ScrollBar", "0"),
+    ("ToolTip", "24"),
     // 1C:Документооборот `CommonForms/РедактированиеТабличногоДокумента`
     // `ИмяОбласти` holds `{3,1,{5}}` and the platform writes
     // `win:WindowBackground` (the exporter's `form_control_window_color_name`).
@@ -1705,12 +1710,15 @@ pub const PLATFORM_STYLE_FONT_CODES: &[(&str, &str)] = &[
     // Platform 8.5 style fonts: 8.5.1.1150 BSP pairs each code with its name
     // on every item and style item that carries exactly one.
     ("TitleLevel2", "-59"),
+    ("TitleLevel1", "-48"),
     ("TitleLevel3", "-50"),
+    ("TitleLevel4", "-51"),
     ("TitleLevel5", "-52"),
     ("TextLevel1", "-53"),
     ("TextLevel2", "-54"),
     ("TextLevel3", "-55"),
     ("SubtitleLevel1", "-56"),
+    ("SubtitleLevel2", "-57"),
 ];
 
 /// The `{12,…}` record of an item's `<ExtendedTooltip>`, as the platform
@@ -2275,6 +2283,7 @@ pub fn format_graphical_schema_payload(
     output: Option<&str>,
     edit: bool,
     auto_max_width: bool,
+    border_color: &str,
     events: &str,
 ) -> Option<String> {
     let output = match output {
@@ -2283,7 +2292,7 @@ pub fn format_graphical_schema_payload(
         Some(_) => return None,
     };
     Some(format!(
-        "{{3,{width},{height},{output},{edit},{{3,4,{{0}}}},{events},{auto_max_width},0,0,1,0,1,1}}",
+        "{{3,{width},{height},{output},{edit},{border_color},{events},{auto_max_width},0,0,1,0,1,1}}",
         edit = u8::from(edit),
         auto_max_width = u8::from(auto_max_width),
     ))
