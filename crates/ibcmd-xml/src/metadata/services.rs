@@ -1129,7 +1129,7 @@ fn project_event_subscription(
     reject_event_subscription_properties(properties, expected, &uris)?;
 
     let event = required_text(properties, "Event", expected, &uris)?;
-    if !supported_event(&event) {
+    if ibcmd_schema::event_subscription::native_event_name(&event).is_none() {
         return Err(MetadataDecodeError::InvalidEnvelope(
             "EventSubscription Event has no evidenced native mapping",
         ));
@@ -1196,27 +1196,6 @@ fn parse_event_sources(
         ));
     }
     Ok(sources)
-}
-
-fn supported_event(value: &str) -> bool {
-    matches!(
-        value,
-        "BeforeDelete"
-            | "BeforeWrite"
-            | "FillCheckProcessing"
-            | "Filling"
-            | "FormGetProcessing"
-            | "OnReceiveDataFromMaster"
-            | "OnReceiveDataFromSlave"
-            | "OnSendDataToMaster"
-            | "OnSendDataToSlave"
-            | "OnSendNodeDataToSlave"
-            | "OnSetNewNumber"
-            | "OnWrite"
-            | "Posting"
-            | "PresentationFieldsGetProcessing"
-            | "PresentationGetProcessing"
-    )
 }
 
 fn valid_handler(value: &str) -> bool {

@@ -26,6 +26,7 @@ use ibcmd_core::value::{
     MAX_CANONICAL_RETAINED_BYTES, MAX_CANONICAL_TEXT_BYTES,
 };
 use ibcmd_core::version::PlatformBuild;
+use ibcmd_schema::event_subscription::{event_from_native, native_event_name};
 
 use super::super::CompileAxes;
 use super::super::graph::BootstrapGraph;
@@ -3009,54 +3010,6 @@ fn is_xml_ncname_char(character: char) -> bool {
             character,
             '-' | '.' | '0'..='9' | '\u{00b7}' | '\u{0300}'..='\u{036f}' | '\u{203f}'..='\u{2040}'
         )
-}
-
-fn native_event_name(event: &str) -> Option<&'static str> {
-    match event {
-        "BeforeDelete" => Some("BeforeDelete_ПередУдалением"),
-        "BeforeWrite" => Some("BeforeWrite_ПередЗаписью"),
-        "FillCheckProcessing" => Some("FillCheckProcessing_ОбработкаПроверкиЗаполнения"),
-        "Filling" => Some("Filling_ОбработкаЗаполнения"),
-        "FormGetProcessing" => Some("FormGetProcessing_ОбработкаПолученияФормы"),
-        "OnReceiveDataFromMaster" => Some("OnReceiveDataFromMaster_ПриПолученииДанныхОтГлавного"),
-        "OnReceiveDataFromSlave" => Some("OnReceiveDataFromSlave_ПриПолученииДанныхОтПодчиненного"),
-        "OnSendDataToMaster" => Some("OnSendDataToMaster_ПриОтправкеДанныхГлавному"),
-        "OnSendDataToSlave" => Some("OnSendDataToSlave_ПриОтправкеДанныхПодчиненному"),
-        "OnSendNodeDataToSlave" => Some("OnSendNodeDataToSlave_ПриОтправкеДанныхУзлаПодчиненному"),
-        "OnSetNewNumber" => Some("OnSetNewNumber_ПриУстановкеНовогоНомера"),
-        "OnWrite" => Some("OnWrite_ПриЗаписи"),
-        "Posting" => Some("Posting_ОбработкаПроведения"),
-        "PresentationFieldsGetProcessing" => {
-            Some("PresentationFieldsGetProcessing_ОбработкаПолученияПолейПредставления")
-        }
-        "PresentationGetProcessing" => {
-            Some("PresentationGetProcessing_ОбработкаПолученияПредставления")
-        }
-        _ => None,
-    }
-}
-
-fn event_from_native(value: &str) -> Option<&'static str> {
-    const EVENTS: [&str; 15] = [
-        "BeforeDelete",
-        "BeforeWrite",
-        "FillCheckProcessing",
-        "Filling",
-        "FormGetProcessing",
-        "OnReceiveDataFromMaster",
-        "OnReceiveDataFromSlave",
-        "OnSendDataToMaster",
-        "OnSendDataToSlave",
-        "OnSendNodeDataToSlave",
-        "OnSetNewNumber",
-        "OnWrite",
-        "Posting",
-        "PresentationFieldsGetProcessing",
-        "PresentationGetProcessing",
-    ];
-    EVENTS
-        .into_iter()
-        .find(|event| native_event_name(event) == Some(value))
 }
 
 fn serialize_scheduled_job(value: &ScheduledJobNativeIr) -> Vec<u8> {

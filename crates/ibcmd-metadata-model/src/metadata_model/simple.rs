@@ -322,33 +322,21 @@ fn functional_options_parameter(
 }
 
 /// The stored spelling of a subscription event: `<name>_<Russian name>`.
-fn event_name(event: &str) -> Result<String> {
-    let russian = match event {
-        "BeforeWrite" => "ПередЗаписью",
-        "OnWrite" => "ПриЗаписи",
-        "BeforeDelete" => "ПередУдалением",
-        "Filling" => "ОбработкаЗаполнения",
-        "FillCheckProcessing" => "ОбработкаПроверкиЗаполнения",
-        "OnCopy" => "ПриКопировании",
-        "OnSetNewCode" => "ПриУстановкеНовогоКода",
-        "OnSetNewNumber" => "ПриУстановкеНовогоНомера",
-        "Posting" => "ОбработкаПроведения",
-        "UndoPosting" => "ОбработкаУдаленияПроведения",
-        "FormGetProcessing" => "ОбработкаПолученияФормы",
-        "ChoiceDataGetProcessing" => "ОбработкаПолученияДанныхВыбора",
-        "PresentationFieldsGetProcessing" => "ОбработкаПолученияПолейПредставления",
-        "PresentationGetProcessing" => "ОбработкаПолученияПредставления",
-        "OnReceiveDataFromMaster" => "ПриПолученииДанныхОтГлавного",
-        "OnReceiveDataFromSlave" => "ПриПолученииДанныхОтПодчиненного",
-        "OnSendDataToMaster" => "ПриОтправкеДанныхГлавному",
-        "OnSendDataToSlave" => "ПриОтправкеДанныхПодчиненному",
-        "OnSendNodeDataToSlave" => "ПриОтправкеДанныхУзлаПодчиненному",
+fn event_name(event: &str) -> Result<&'static str> {
+    if let Some(native) = ibcmd_schema::event_subscription::native_event_name(event) {
+        return Ok(native);
+    }
+    // The descriptor writer also supports these events outside BOOT-004.
+    match event {
+        "OnCopy" => Ok("OnCopy_ПриКопировании"),
+        "OnSetNewCode" => Ok("OnSetNewCode_ПриУстановкеНовогоКода"),
+        "UndoPosting" => Ok("UndoPosting_ОбработкаУдаленияПроведения"),
+        "ChoiceDataGetProcessing" => Ok("ChoiceDataGetProcessing_ОбработкаПолученияДанныхВыбора"),
         // Документооборот 3.0 `EventSubscriptions/ЗадачаКомплексногоПроцессаПриВыполнении`.
-        "OnExecute" => "ПриВыполнении",
-        "" => return Ok(String::new()),
+        "OnExecute" => Ok("OnExecute_ПриВыполнении"),
+        "" => Ok(""),
         other => bail!("unknown subscription event {other}"),
-    };
-    Ok(format!("{event}_{russian}"))
+    }
 }
 
 /// `{1,{1,<md base>,<source pattern>,"<event>",<handler module>,"<method>"},0}`
@@ -578,6 +566,13 @@ mod tests {
                 r##"{{1,{{2,{{3,{{1,0,{JOB}}},"Загрузка",{{0}},"",0,0,{NIL_UUID},0}},"1","Описание",0,1,{MODULE},"ПриЗагрузке",10,600}},0}}"##
             )
         );
+    }
+
+    #[test]
+    fn descriptor_event_names_extend_the_boot_vocabulary() {
+        assert_eq!(event_name("OnExecute").unwrap(), "OnExecute_ПриВыполнении");
+        assert_eq!(event_name("").unwrap(), "");
+        assert!(event_name("Unknown").is_err());
     }
 
     #[test]
