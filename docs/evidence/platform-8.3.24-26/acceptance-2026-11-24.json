@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "rows": [
+    {
+      "release": "8.3.24",
+      "state": "blocked",
+      "blockers": [
+        "The drop-in candidate rejects exact build 8.3.24.1819 on export and import (exit 2). Without --platform, import refuses XML 2.17; export on this SQL endpoint fails with TLS UnknownIssuer.",
+        "Native import of the same build's BSP demo XML failed on an unresolved predefined element; native reexport of a successfully imported target is unavailable.",
+        "No completed candidate tree pair exists for a full parity diff or for inferring supported binary layouts and production writes."
+      ]
+    },
+    {
+      "release": "8.3.25",
+      "state": "blocked",
+      "blockers": [
+        "The drop-in candidate rejects exact build 8.3.25.1633 on export and import (exit 2). Without --platform, import refuses XML 2.18; export on this SQL endpoint fails with TLS UnknownIssuer.",
+        "Native import of the same build's BSP demo XML failed on an unresolved predefined element; native reexport of a successfully imported target is unavailable.",
+        "No completed candidate tree pair exists for a full parity diff or for inferring supported binary layouts and production writes."
+      ]
+    },
+    {
+      "release": "8.3.26",
+      "state": "blocked",
+      "blockers": [
+        "The drop-in candidate rejects exact build 8.3.26.1656 on export and import (exit 2). Without --platform, import refuses XML 2.19; export on this SQL endpoint fails with TLS UnknownIssuer.",
+        "Native import staged 8360 rows, but both native reexport and activation failed the metadata structure integrity check.",
+        "No completed candidate tree pair exists for a full parity diff or for inferring supported binary layouts and production writes."
+      ]
+    }
+  ]
+}
