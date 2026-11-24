@@ -1384,7 +1384,7 @@ fn sql_import_and_pending_through_stdio() {
         login["user"] = json!(user);
         login["password"] = json!(std::env::var("IBCMD_EDITOR_TEST_PASSWORD").unwrap());
     }
-    server.ok("infobases/connect", login);
+    server.ok("infobases/connect", login.clone());
     let base = json!({"infobase":"sql"});
     let presence = json!({"infobase":"sql","presenceOnly":true});
     let empty = server.ok("config/pending", presence.clone());
@@ -1429,7 +1429,7 @@ fn sql_import_and_pending_through_stdio() {
     assert_eq!(server.error("objects/import", import.clone()), -32015);
     assert_eq!(server.ok("config/pending", presence.clone()), empty);
     import["confirm"] = json!(true);
-    let result = server.ok("objects/import", import);
+    let result = server.ok("objects/import", import.clone());
     assert!(
         result["report"]["verification"]["checked_files"]
             .as_u64()
@@ -1444,6 +1444,80 @@ fn sql_import_and_pending_through_stdio() {
     assert!(pending["needsRestructuring"].is_null());
     assert!(detailed["verdict"].is_object());
     assert_eq!(detailed["needsRestructuring"], false);
+    // Simulate a different writer updating an unrelated active generation between
+    // two requests on this same editor session. Inspect the actual staged row.
+    use ibcmd_sql::{SqlBackend, SqlExec, SqlOptions, SqlParam, SqlValue};
+    let sql = SqlExec::from_options(SqlOptions {
+        sqlcmd: None,
+        bcp: None,
+        server: &host,
+        user: login["user"].as_str(),
+        password: login["password"].as_str(),
+        password_env: "IBCMD_EDITOR_TEST_PASSWORD",
+        trust_server_certificate: false,
+    })
+    .unwrap();
+    let SqlBackend::Client(client) = sql.backend() else {
+        panic!("expected built-in client")
+    };
+    let versions = |table: &str| {
+        let query = format!(
+            "SELECT BinaryData FROM [{db}].dbo.[{table}] WHERE FileName=N'versions' AND PartNo=0"
+        );
+        let Some(SqlValue::Binary(blob)) = client.query_scalar(&query, &[]).unwrap() else {
+            panic!("missing {table} versions row")
+        };
+        blob
+    };
+    let language = "9a236262-c0b7-41e5-a4f6-48c9778f198e";
+    let patch = ibcmd_module_blob::patch_versions_blob_bytes(
+        &versions("Config"),
+        &[language.into()],
+        false,
+    )
+    .unwrap();
+    let generation = &patch
+        .replacements
+        .iter()
+        .find(|r| r.name == language)
+        .unwrap()
+        .new_uuid;
+    let entry = format!("\"{language}\",{generation}");
+    let staged_versions = || {
+        String::from_utf8(ibcmd_module_blob::inflate_raw(&versions("ConfigSave")).unwrap()).unwrap()
+    };
+    assert!(!staged_versions().contains(&entry));
+    let update = format!(
+        "UPDATE [{db}].dbo.Config SET BinaryData=@P1, DataSize=@P2 WHERE FileName=N'versions' AND PartNo=0"
+    );
+    assert_eq!(
+        client
+            .execute(
+                &update,
+                &[
+                    SqlParam::Binary(&patch.blob),
+                    SqlParam::I64(patch.blob.len() as i64)
+                ]
+            )
+            .unwrap(),
+        1
+    );
+    fs::write(
+        source.join(module),
+        format!("{text}\r\n// second SQL editor stage\r\n"),
+    )
+    .unwrap();
+    let second = server.ok("objects/import", import);
+    assert!(
+        second["report"]["verification"]["checked_files"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        staged_versions().contains(&entry),
+        "second import lost the active language generation"
+    );
     server.ok("shutdown", Value::Null);
     assert_eq!(server.finish(true), 0);
 }
