@@ -1,0 +1,72 @@
+{
+  "platform": {
+    "name": "ibcmd.exe",
+    "build": "8.5.1.1529",
+    "sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20"
+  },
+  "backend": "file (.1CD)",
+  "fixture": "tests/fixtures/file-infobase/default-button.1CD.gz",
+  "baseline_1cd_sha256": "c232e3698f62ed1c2063dcff774c6cf6be55e707b21555bdcc8930ef271a1c98",
+  "publications": [
+    {
+      "marker": 43,
+      "commands": {
+        "partial": {
+          "exit": 0,
+          "start_utc": "2026-11-24T17:51:18.5334726Z",
+          "end_utc": "2026-11-24T17:51:27.2726896Z"
+        },
+        "force": {
+          "exit": 0,
+          "start_utc": "2026-11-24T17:51:27.3621644Z",
+          "end_utc": "2026-11-24T17:51:33.5802924Z"
+        },
+        "readback": {
+          "exit": 0,
+          "start_utc": "2026-11-24T17:51:33.6176224Z",
+          "end_utc": "2026-11-24T17:52:00.4568516Z"
+        }
+      },
+      "native_generation": "f0ef7e303130334796e1c34b8debd80500000000",
+      "config_generation_list": "{1,1,307eeff0-3031-4733-96e1-c34b8debd805}",
+      "alias_payload_sha256": {
+        "6d1c2a0e-1cd0-4f00-9a00-000000000001_dynupdate_307eeff0-3031-4733-96e1-c34b8debd805": "022c3b213631241029549bbfa7b9e8b81abca277d3bae0ecde55d02a983d4ae6",
+        "6d1c2a0e-1cd0-4f00-9a00-000000000001_dynupdate_307eeff0-3031-4733-96e1-c34b8debd805.0": "00450c72cf9700948afcb812a22c9f412a497ff84cacc0f12b5d74b7b28fdedc",
+        "versions_dynupdate_307eeff0-3031-4733-96e1-c34b8debd805": "0c07248964b5a1e74e0c43763c5fdfba0970e8b43d1e0cfd64ea08d5f68236e9"
+      },
+      "module_export_sha256": "d404e1c30bfbc71fc87b01c40ddb006064bb5624e64ba700e20e0cace3daf3bb",
+      "stage_1cd_sha256": "8243f4b376860d5b6520c843d73ddf881cb9205bc7c9dc77076415e1ddb2610b",
+      "applied_1cd_sha256": "963d30b6315980d46c9f32ee5ac818070d41adfe700e4e62e913ad2607331c4e"
+    },
+    {
+      "marker": 44,
+      "commands": {
+        "partial": {
+          "exit": 0,
+          "start_utc": "2026-11-24T17:52:00.9257353Z",
+          "end_utc": "2026-11-24T17:52:31.8173483Z"
+        },
+        "force": {
+          "exit": 0,
+          "start_utc": "2026-11-24T17:52:42.3313942Z",
+          "end_utc": "2026-11-24T17:53:23.4273609Z"
+        },
+        "readback": {
+          "exit": 0,
+          "start_utc": "2026-11-24T17:53:33.3803020Z",
+          "end_utc": "2026-11-24T17:54:06.2753426Z"
+        }
+      },
+      "native_generation": "188789a64685e64bb094dd8fb782345a00000000",
+      "config_generation_list": "{1,2,307eeff0-3031-4733-96e1-c34b8debd805,a6898718-8546-4be6-b094-dd8fb782345a}",
+      "alias_payload_sha256": {
+        "6d1c2a0e-1cd0-4f00-9a00-000000000001_dynupdate_a6898718-8546-4be6-b094-dd8fb782345a": "022c3b213631241029549bbfa7b9e8b81abca277d3bae0ecde55d02a983d4ae6",
+        "6d1c2a0e-1cd0-4f00-9a00-000000000001_dynupdate_a6898718-8546-4be6-b094-dd8fb782345a.0": "b315c4bb81fe903a5cc406af8af59ec4f8c782f1b2d30360117933b101004aeb",
+        "versions_dynupdate_a6898718-8546-4be6-b094-dd8fb782345a": "d652a95f3f4bb1f0f26084c8c53f687d5db856035c1276266b500c5adfad0319"
+      },
+      "module_export_sha256": "a2e7e62f3dfbc282f08762e2c0b16c5f1f4c7ef46b71298e5d3497c5c8f38e79",
+      "stage_1cd_sha256": "5c88193b3110bdc5e67fcc4d4af4d27978b9902615406eb87c81456b5dde7081",
+      "applied_1cd_sha256": "c72cf052c24c512690389b5ce477bf5784da7e65526d75a5d2578d938faf48a0"
+    }
+  ]
+}

@@ -37,6 +37,8 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
         run: python3 tests/scripts/platform_acceptance_test.py -v
+      - name: Test repeated publication observer analysis
+        run: python3 -m unittest discover -s scripts/apply-lab/live -p test_repeated_session.py -v
 
   fmt:
     name: Format

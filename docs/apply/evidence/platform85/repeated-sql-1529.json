@@ -1,0 +1,81 @@
+{
+  "platform": {
+    "name": "ibcmd.exe",
+    "build": "8.5.1.1529",
+    "sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20"
+  },
+  "backend": "Microsoft SQL Server",
+  "baseline_marker": "A346",
+  "baseline_config_rows": 12,
+  "baseline_configsave_rows": 0,
+  "baseline_dt_sha256": "2db9535e1c476dd583e8b4130696c82bfb8780bfa358e2470670763daa48ed49",
+  "module": "CommonModules/ОбсужденияСлужебныйКлиентСервер/Ext/Module.bsl",
+  "publications": [
+    {
+      "marker": "B346",
+      "commands": {
+        "stage": {
+          "exit": 0,
+          "start_utc": "2026-11-24T18:47:17.0857657Z",
+          "end_utc": "2026-11-24T18:47:42.3536013Z"
+        },
+        "force": {
+          "exit": 0,
+          "start_utc": "2026-11-24T18:47:47.4497004Z",
+          "end_utc": "2026-11-24T18:48:12.4634036Z"
+        },
+        "read": {
+          "exit": 0,
+          "start_utc": "2026-11-24T18:48:19.9037920Z",
+          "end_utc": "2026-11-24T18:48:42.8820357Z"
+        }
+      },
+      "native_generation": "783bf1bc741c2a46900bf65e4dddbc3b00000000",
+      "config_generation_list": "{1,1,bcf13b78-1c74-462a-900b-f65e4dddbc3b}",
+      "params_generation_list": "{0,2,e591589b-e1c1-427a-85a5-039fe0fcc0c5,bcf13b78-1c74-462a-900b-f65e4dddbc3b}",
+      "stage_config_rows": 12,
+      "stage_configsave_rows": 5,
+      "applied_config_rows": 16,
+      "applied_configsave_rows": 0,
+      "alias_payload_sha256": {
+        "5421f6dc-c8dd-4657-adb8-212893026ea6_dynupdate_bcf13b78-1c74-462a-900b-f65e4dddbc3b": "6b8a14e8bc0d6d7b0b0204832f061daa970a4523ef359195eca62bd6ca97acbc",
+        "5421f6dc-c8dd-4657-adb8-212893026ea6_dynupdate_bcf13b78-1c74-462a-900b-f65e4dddbc3b.0": "ae93f6c20e5c5a3c41662cd5da3a8f8b5408b65682e41019041deac86ea27a7a",
+        "versions_dynupdate_bcf13b78-1c74-462a-900b-f65e4dddbc3b": "402e2f43d2819d9eb3fd30a72f2ca61852d26ab1595a7b06500fcf69d1391864"
+      },
+      "module_export_sha256": "24e9284dc691c0c95d967ce3abde57ed8cb6a98ee5aff7c50f5db02e7a13e179"
+    },
+    {
+      "marker": "C346",
+      "commands": {
+        "stage": {
+          "exit": 0,
+          "start_utc": "2026-11-24T18:49:26.4969321Z",
+          "end_utc": "2026-11-24T18:49:50.0574097Z"
+        },
+        "force": {
+          "exit": 0,
+          "start_utc": "2026-11-24T18:50:01.6563152Z",
+          "end_utc": "2026-11-24T18:50:15.2230365Z"
+        },
+        "read": {
+          "exit": 0,
+          "start_utc": "2026-11-24T18:50:23.6723163Z",
+          "end_utc": "2026-11-24T18:50:43.0988816Z"
+        }
+      },
+      "native_generation": "bf42738b61bda143a4d3551a38fc32c900000000",
+      "config_generation_list": "{1,2,bcf13b78-1c74-462a-900b-f65e4dddbc3b,8b7342bf-bd61-43a1-a4d3-551a38fc32c9}",
+      "params_generation_list": "{0,3,e591589b-e1c1-427a-85a5-039fe0fcc0c5,bcf13b78-1c74-462a-900b-f65e4dddbc3b,8b7342bf-bd61-43a1-a4d3-551a38fc32c9}",
+      "stage_config_rows": 16,
+      "stage_configsave_rows": 5,
+      "applied_config_rows": 19,
+      "applied_configsave_rows": 0,
+      "alias_payload_sha256": {
+        "5421f6dc-c8dd-4657-adb8-212893026ea6_dynupdate_8b7342bf-bd61-43a1-a4d3-551a38fc32c9": "6b8a14e8bc0d6d7b0b0204832f061daa970a4523ef359195eca62bd6ca97acbc",
+        "5421f6dc-c8dd-4657-adb8-212893026ea6_dynupdate_8b7342bf-bd61-43a1-a4d3-551a38fc32c9.0": "cdef1c313ebc9f922a9f4d3728b36e398f16db6d9ceb5349b7f7a65f63b20f9e",
+        "versions_dynupdate_8b7342bf-bd61-43a1-a4d3-551a38fc32c9": "1150eb0d75dfb9a2b541d4e7ea316121c54afd397607fa04bb2ccc4c4135c038"
+      },
+      "module_export_sha256": "2e0413a0b9c939f00cd9a5deedab866a8914990be3cb316515215051649a3ed5"
+    }
+  ]
+}
