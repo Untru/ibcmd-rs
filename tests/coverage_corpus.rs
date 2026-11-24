@@ -663,6 +663,31 @@ fn coverage_sets_hold_their_baseline() {
 }
 
 #[test]
+fn legacy_html_field_37_matches_native() {
+    let path = "CommonForms/CovContextHTMLBound/Ext/Form.xml";
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-legacy-html-layout37");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("legacy.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let export = cf_export(&cf, &temp.0.join("export"), version).unwrap();
+        assert!(export.refusal.is_none(), "{platform}: {:?}", export.refusal);
+        let expected = fs::read(set.join("native").join(path)).unwrap();
+        assert!(
+            export.files.get(path) == Some(&expected),
+            "{platform}: {path}"
+        );
+    }
+}
+
+#[test]
 fn variant_files_are_attributed_by_object() {
     // `Catalogs/CovX.xml` and `Catalogs/CovX/…` belong to CovX; everything
     // outside the collection belongs to the configuration itself.
