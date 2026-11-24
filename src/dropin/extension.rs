@@ -59,12 +59,18 @@ fn target(
             crate::settings::PlatformHint::Import { source_root }
         }),
     )?;
-    let profile = super::apply::profile_of(resolved.value)?;
-    require_profile(profile)?;
+    let profile = extension_write_profile(resolved.value)?;
     Ok((config, profile))
 }
 
-fn require_profile(profile: MssqlNativePlatformProfile) -> Result<()> {
+fn extension_write_profile(
+    spec: crate::platform::PlatformSpec,
+) -> Result<MssqlNativePlatformProfile> {
+    let profile = spec.native_profile().with_context(|| {
+        format!(
+            "extension writes require an exact build with a measured SQL layout; selected {spec}"
+        )
+    })?;
     if !matches!(
         profile,
         MssqlNativePlatformProfile::Platform8_3_27_2214
@@ -74,7 +80,8 @@ fn require_profile(profile: MssqlNativePlatformProfile) -> Result<()> {
             "standard extension import/apply is evidenced only on 8.3.27.2214 and 8.5.1.1150; select --platform explicitly"
         );
     }
-    profile.require_extension_write_supported()
+    profile.require_extension_write_supported()?;
+    Ok(profile)
 }
 
 fn load_args(request: &ImportRequest) -> Result<MssqlLoadExtensionArgs> {
@@ -250,11 +257,25 @@ mod tests {
                 .to_string()
                 .contains("exclusive")
         );
-        assert!(require_profile(MssqlNativePlatformProfile::Platform8_3_27_2214).is_ok());
-        assert!(require_profile(MssqlNativePlatformProfile::Platform8_5_1_1150).is_ok());
-        assert!(require_profile(MssqlNativePlatformProfile::Platform8_3_27_1989).is_err());
         for bad in ["--extension=", "--cluster-id=oops", "--infobase-id=oops"] {
             assert!(parse(&["config", "apply", bad]).is_err());
+        }
+    }
+
+    #[test]
+    fn extension_writes_only_select_measured_exact_builds() {
+        for build in ["8.3.27.2214", "8.5.1.1150"] {
+            let spec = crate::platform::parse(build).unwrap();
+            assert_eq!(
+                Some(extension_write_profile(spec).unwrap()),
+                spec.native_profile()
+            );
+        }
+        for build in ["8.3.27", "8.5.1", "8.3.27.1989", "8.5.1.1529"] {
+            assert!(
+                extension_write_profile(crate::platform::parse(build).unwrap()).is_err(),
+                "{build}"
+            );
         }
     }
 }
