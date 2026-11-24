@@ -75,7 +75,17 @@ impl DirectorySource {
     /// Check the typed EDT source and account for its files before rendering Designer XML.
     pub fn check_edt_source(&self, options: &ConversionOptions) -> Result<(), EdtError> {
         let owner = stage()?;
-        prepare_edt_source(self, options, owner.path())?;
+        let (config, version, _) = prepare_edt_source(self, options, owner.path())?;
+        if let Some(original) = restore(&self.inventory, options, &config)? {
+            let original_config = read_config(Format::Designer, &original, version)?;
+            if provenance::semantic_digest(&original_config)?
+                != provenance::semantic_digest(&config)?
+            {
+                return Err(EdtError::new(
+                    ".ibcmd-provenance/xml: retained original XML disagrees with current typed EDT semantics",
+                ));
+            }
+        }
         self.inventory.verify()
     }
 
@@ -487,30 +497,43 @@ fn retain(
     )
     .map_err(EdtError::source)
 }
+fn differing_path<'a>(
+    actual: &'a std::collections::BTreeMap<String, String>,
+    expected: &'a std::collections::BTreeMap<String, String>,
+) -> Option<&'a String> {
+    actual
+        .keys()
+        .chain(expected.keys())
+        .find(|key| actual.get(*key) != expected.get(*key))
+}
+
 fn restore(
     project: &Inventory,
     options: &ConversionOptions,
     config: &Configuration,
 ) -> Result<Option<Inventory>, EdtError> {
     let Some(index) = project.entry(provenance::MANIFEST) else {
-        if project
+        if let Some(entry) = project
             .entries
             .iter()
-            .any(|entry| entry.path.starts_with(provenance::PREFIX))
+            .find(|entry| entry.path.starts_with(provenance::PREFIX))
         {
-            return Err(EdtError::new("provenance payload exists without manifest"));
+            return Err(EdtError::new(format!(
+                "{}: provenance payload exists without manifest",
+                entry.path
+            )));
         }
         return Ok(None);
     };
-    let manifest: provenance::Manifest =
-        serde_json::from_slice(&project.read_entry(index)?).map_err(EdtError::source)?;
+    let manifest: provenance::Manifest = serde_json::from_slice(&project.read_entry(index)?)
+        .map_err(|error| EdtError::new(format!("{}: {error}", provenance::MANIFEST)))?;
     if manifest.version != 1
         || manifest.edt_version != options.edt_version
         || manifest.xml_dialect != options.xml_dialect
         || manifest.runtime_version != options.runtime_version
     {
         return Err(EdtError::new(
-            "provenance profile differs from requested conversion; remove provenance for typed conversion",
+            ".ibcmd-provenance/manifest.json: provenance profile differs from requested conversion; remove provenance for typed conversion",
         ));
     }
     let generated = project
@@ -519,24 +542,31 @@ fn restore(
         .filter(|entry| !entry.path.starts_with(provenance::PREFIX))
         .map(|entry| (entry.path.clone(), disk::hex(entry.digest)))
         .collect::<std::collections::BTreeMap<_, _>>();
-    if generated != manifest.generated || provenance::semantic_digest(config)? != manifest.semantics
-    {
+    if let Some(path) = differing_path(&generated, &manifest.generated) {
+        return Err(EdtError::new(format!(
+            "{path}: stale provenance: EDT files changed"
+        )));
+    }
+    if provenance::semantic_digest(config)? != manifest.semantics {
         return Err(EdtError::new(
-            "stale provenance: EDT files changed; refusing to restore original XML. Remove .ibcmd-provenance for typed conversion",
+            ".ibcmd-provenance/manifest.json: stale provenance: typed semantics changed",
         ));
     }
+    if let Some(entry) = project.entries.iter().find(|entry| {
+        entry.path.starts_with(provenance::PREFIX)
+            && entry.path != provenance::MANIFEST
+            && !entry.path.starts_with(".ibcmd-provenance/xml/")
+    }) {
+        return Err(EdtError::new(format!(
+            "{}: unknown provenance file",
+            entry.path
+        )));
+    }
     let original = Inventory::scan(&project.root.join(".ibcmd-provenance/xml"))?;
-    if original.hashes() != manifest.original
-        || project
-            .entries
-            .iter()
-            .filter(|entry| entry.path.starts_with(provenance::PREFIX))
-            .count()
-            != original.entries.len() + 1
-    {
-        return Err(EdtError::new(
-            "provenance payload inventory/digest mismatch",
-        ));
+    if let Some(path) = differing_path(&original.hashes(), &manifest.original) {
+        return Err(EdtError::new(format!(
+            ".ibcmd-provenance/xml/{path}: provenance payload inventory/digest mismatch"
+        )));
     }
     Ok(Some(original))
 }

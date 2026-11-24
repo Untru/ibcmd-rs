@@ -387,6 +387,10 @@ fn edt_import_checks_project_before_accessing_configsave() {
     check("missing", &[&db_arg], "missing");
     check("edt-2025.2.3-xml-2.20", &[&db_arg], "DT-INF/PROJECT.PMF");
     check(profile, &[&db_arg], "ConfigSave");
+    let extra = project.join(".ibcmd-provenance/extra");
+    fs::write(&extra, b"?").unwrap();
+    check(profile, &[&db_arg], ".ibcmd-provenance/extra");
+    fs::remove_file(extra).unwrap();
     fs::write(project.join("unmapped.option"), b"?").unwrap();
     for target in [
         vec![db_arg.as_str()],
