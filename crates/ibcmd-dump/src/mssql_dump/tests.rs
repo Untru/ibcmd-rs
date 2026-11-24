@@ -36053,6 +36053,37 @@ fn selected_form_owner_rows_are_resolved_from_metadata_inventory() {
 }
 
 #[test]
+fn direct_revision_14_forms_decode_only_measured_interface_modes() {
+    let uuid = "44444444-4444-4444-8444-444444444441";
+    let row = |tail: &str| {
+        format!(
+            r##"{{1,{{14,{{3,{{1,0,{uuid}}},"ChoiceForm",{{0}},"",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{1,{{"#",1708fdaa-cbce-4289-b373-07a5a74bee91,1}}}}{tail}}},0}}"##
+        )
+    };
+    for (tail, mode) in [(",0", "Any"), (",1", "Taxi"), (",2", "Version85")] {
+        let text = row(tail);
+        assert!(is_direct_code14_form_metadata_text(&text, uuid));
+        let metadata = metadata_text_row_from_text(uuid, text.clone()).unwrap();
+        let properties = parse_form_metadata_properties_from_text(&text, "Form", uuid).unwrap();
+        let xml = format_form_source_xml(
+            "Form",
+            metadata.header.as_ref().unwrap(),
+            &properties,
+            DeclaredFormType::Managed,
+            InfobaseConfigSourceVersion::V2_21,
+        );
+        assert!(xml.contains(&format!(
+            "<UseInInterfaceCompatibilityMode>{mode}</UseInInterfaceCompatibilityMode>"
+        )));
+    }
+    for tail in [",3", ""] {
+        let text = row(tail);
+        assert!(!is_direct_code14_form_metadata_text(&text, uuid));
+        assert!(parse_form_metadata_properties_from_text(&text, "Form", uuid).is_none());
+    }
+}
+
+#[test]
 fn direct_code14_forms_are_indexed_only_with_one_metadata_owner() {
     let owner_uuid = "11111111-1111-4111-8111-111111111111";
     let form_uuid = "44444444-4444-4444-8444-444444444441";
