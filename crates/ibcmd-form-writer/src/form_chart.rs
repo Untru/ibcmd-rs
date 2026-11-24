@@ -52,7 +52,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow, bail, ensure};
 use ibcmd_form_native::{format_native_color, format_native_font};
-use ibcmd_form_schema::FormControlBorderStyle;
+use ibcmd_form_schema::{FormChartSelectionMode, FormControlBorderStyle};
 use quick_xml::Reader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
 use quick_xml::events::{BytesStart, Event};
@@ -267,10 +267,13 @@ const MARKERS: &[(&str, &str)] = &[
 const CHART_TYPES: &[(&str, &str)] = &[
     ("Line", "0"),
     ("Area", "2"),
+    ("Column", "4"),
     ("StackedColumn", "5"),
     ("Column3D", "6"),
     ("StackedBar", "9"),
     ("Pie", "12"),
+    ("Pie3D", "13"),
+    ("StackedLine", "26"),
     ("Gauge", "38"),
     ("Bubble", "44"),
 ];
@@ -536,6 +539,10 @@ fn chart_record(node: &XmlNode, host: ChartHost) -> Result<String> {
     set(117, color(c.required("multiStageLinkColor")?)?);
     set(127, axis(c.required("valuesAxis")?)?);
     set(128, axis(c.required("pointsAxis")?)?);
+    let selection_mode = match c.optional("selectionMode") {
+        Some(mode) => code(mode, FormChartSelectionMode::CODES)?,
+        None => "0",
+    };
     for (slot, name) in [
         (139, "pointsScale"),
         (140, "valuesScale"),
@@ -673,7 +680,7 @@ fn chart_record(node: &XmlNode, host: ChartHost) -> Result<String> {
         (181, "0"),
         (182, "0"),
         (184, "{0,0,0,0}"),
-        (185, "0"),
+        (FormChartSelectionMode::SLOT, selection_mode),
         (186, ""),
         (187, "60"),
         (189, "{0,0,{0,1,0,1,0},0,0}"),
@@ -810,7 +817,7 @@ fn series_record(
 ) -> String {
     const COLUMN_COLORS: [&str; 4] = ["16762956", "7964671", "49407", "7258719"];
     const LINE_COLORS: [&str; 4] = ["16757805", "7105526", "2866687", "5090622"];
-    let line_like = matches!(chart_type, "0" | "44");
+    let line_like = ["0", "26", "44"].contains(&chart_type);
     let cached_color = if series.color != AUTO_COLOR {
         series.color.clone()
     } else {
@@ -2450,6 +2457,11 @@ mod tests {
         );
         assert_ne!(extra, settings);
         assert!(format_form_embedded_chart(&extra).is_err());
+        let unmeasured = extra.replace("unknownMember", "selectionMode");
+        let error = format_form_embedded_chart(&unmeasured)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("<d4p1:selectionMode> spells 1"), "{error}");
         // A chart type the decoder has no code for.
         let area = settings.replace(
             "<d4p1:chartType>Column3D</d4p1:chartType>",

@@ -1557,6 +1557,16 @@ pub struct MoxelChart {
     /// that was actually measured. See `push_moxel_chart_series_text_xml`.
     has_extended_scales: bool,
     is_title_init: bool,
+    border: MoxelChartBorder,
+    border_color: String,
+    ttl_border_color: String,
+    lg_border_color: String,
+    ch_border_color: String,
+    transparent_title: bool,
+    transparent_legend: bool,
+    legend_placement: Option<&'static str>,
+    plot_placement: Option<&'static str>,
+    title_placement: Option<&'static str>,
     ttl_border: MoxelChartBorder,
     lg_border: MoxelChartBorder,
     ch_border: MoxelChartBorder,
@@ -1571,9 +1581,8 @@ pub struct MoxelChart {
     max_series: usize,
     base_val: usize,
     is_outline: bool,
-    /// `post[20]`: `"0"` when the chart's areas carry stored placements,
-    /// `"2"` when they do not. See `parse_moxel_chart`.
-    areas_are_placed: bool,
+    /// Animation mode at `post[20]` (0 = Auto, 2 = DontUse).
+    animation_auto: bool,
     rebuild_time: usize,
     legend_scroll_enable: bool,
     is_randomized_new_values: bool,
@@ -5010,6 +5019,13 @@ const V85_STYLE_FONT_CODES: [(&str, &str); 8] = [
     ("SubtitleLevel1", "-56"),
 ];
 
+/// The codes the 8.5 style-font vocabulary assigns to built-in names.
+pub fn moxel_builtin_style_font_code(name: &str) -> Option<&'static str> {
+    V85_STYLE_FONT_CODES
+        .iter()
+        .find_map(|&(style, code)| (name == style).then_some(code))
+}
+
 /// A spreadsheet's XML with the 8.5 standard style fonts written by code, as
 /// the 2.20 dialect does. A configuration style item of the same name keeps
 /// its name.
@@ -5241,6 +5257,9 @@ const MOXEL_NIL_LINE_KIND: &str = "00000000-0000-0000-0000-000000000000";
 const MAX_MOXEL_LINE_TABLE_ENTRIES: usize = 2048;
 const MAX_MOXEL_LINE_WIDTH: usize = 1024;
 
+/// Drawing-line ordinals are independent of cell-line ordinals.
+pub const MOXEL_DRAWING_LINE_STYLES: &[&str] = &["None", "Solid", "Dashed", "Dotted"];
+
 /// Decodes the document's shared line table from its own root slot.
 ///
 /// Shape: `{count, (1, {4,0,{0},style,width,slot,kind,0}, 0) * count}`.
@@ -5332,9 +5351,10 @@ pub fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
             (MOXEL_CELL_LINE_KIND, "4") => "ThinDashed",
             (MOXEL_CELL_LINE_KIND, "5") => "ThickDashed",
             (MOXEL_CELL_LINE_KIND, "6") => "LargeDashed",
-            (MOXEL_DRAWING_LINE_KIND, "0") => "None",
-            (MOXEL_DRAWING_LINE_KIND, "1") => "Solid",
-            (MOXEL_DRAWING_LINE_KIND, "3") => "Dotted",
+            (MOXEL_DRAWING_LINE_KIND, "0") => MOXEL_DRAWING_LINE_STYLES[0],
+            (MOXEL_DRAWING_LINE_KIND, code) => {
+                *MOXEL_DRAWING_LINE_STYLES.get(parse_moxel_canonical_positive_count(code)?)?
+            }
             _ => return None,
         };
         lines.push(MoxelLine {
@@ -6494,6 +6514,22 @@ const MAX_MOXEL_CHART_LOCALIZED_VALUES: usize = 64;
 const MAX_MOXEL_CHART_DECIMAL_BYTES: usize = 4096;
 const MAX_MOXEL_CHART_DECIMAL_EXPONENT: u64 = 4096;
 
+/// Fixed tail slots shared by spreadsheet drawings and form chart attributes.
+/// Variable-length series, points and scale lists precede the placement slots.
+pub mod chart_layout {
+    pub const BORDER: usize = 96;
+    pub const BORDER_COLOR: usize = 95;
+    pub const TITLE_BORDER_COLOR: usize = 15;
+    pub const LEGEND_BORDER_COLOR: usize = 17;
+    pub const CHART_BORDER_COLOR: usize = 19;
+    pub const TRANSPARENT_TITLE: usize = 22;
+    pub const TRANSPARENT_LEGEND: usize = 24;
+    pub const PLOT_PLACEMENT: usize = 160;
+    pub const LEGEND_PLACEMENT: usize = 161;
+    pub const TITLE_PLACEMENT: usize = 162;
+    pub const RECTANGLES_START: usize = 163;
+}
+
 /// The stored chart-kind code.
 ///
 /// Evidence (native 1С:УТ 11.5.27.75): the 13 stored `Chart` drawings spell
@@ -6512,6 +6548,7 @@ fn moxel_chart_type(code: &str) -> Option<&'static str> {
         // МакетФакторныйАнализВодопад` of ERP УХ 3.2.12.6 is the stand's only
         // record storing `5`, and it publishes
         // `<d3p1:chartType>StackedColumn</d3p1:chartType>`.
+        "4" => Some("Column"),
         "5" => Some("StackedColumn"),
         "9" => Some("StackedBar"),
         "38" => Some("Gauge"),
@@ -6554,18 +6591,29 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
     //
     // Platform 8.5 writes 75: the 74 record plus eight trailing colours
     // (8.5.1.1150 BSP, both `GanttChart` templates: all eight automatic,
-    // and the native tree prints nothing for them). Only that all-automatic
-    // tail is read; any other colour there refuses the chart rather than
-    // dropping a value the platform would print.
+    // and the native tree prints nothing for them). The 8.5.1.1529 light
+    // palette also exports without extra elements. Other tails refuse.
     let post_base_len = match data.first()?.trim() {
         "73" => 91usize,
         "74" => 97usize,
         "75" => {
             let appended = data.get(data.len().checked_sub(8)?..)?;
-            if !appended
+            // Both 8.5.1.1529 CovModernSheetChart fixtures also omit the
+            // eight trailing colours with this light-background palette.
+            let light = [
+                "{3,0,{16777215}}",
+                "{3,4,{0}}",
+                "{3,0,{16777215}}",
+                "{3,0,{16777215}}",
+                "{3,0,{3355443}}",
+                "{3,0,{3355443}}",
+                "{3,0,{3355443}}",
+                "{3,0,{3355443}}",
+            ];
+            let colors = appended
                 .iter()
-                .all(|member| compact_moxel_chart_token(member) == "{3,4,{0}}")
-            {
+                .map(|value| compact_moxel_chart_token(value));
+            if !colors.clone().all(|value| value == "{3,4,{0}}") && !colors.eq(light) {
                 return None;
             }
             105usize
@@ -6747,7 +6795,7 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
     // -- `tail[81]` reads `"1"` in each of the 52 records that publish
     // `true` and `"0"` in each of the six that publish `false`, with no
     // exception. `post[20]` is what carries `animation` instead (see
-    // `areas_are_placed` below): the six `false` records are the five
+    // `animation_auto` below): the six `false` records are the five
     // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` copies plus
     // `ДиагностикаОтчетности_Подсказки`, and only the first five publish
     // `DontUse`.
@@ -6846,7 +6894,7 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
     // proven by the same seed evidence: `63 + 3*series_count + point_count`,
     // reducing to the pre-existing `66 + point_count` at `series_count == 1`.
     let axes_position = 27usize.checked_add(2usize.checked_mul(series_count)?)?;
-    let rectangle_start = 63usize
+    let rectangle_start = (chart_layout::RECTANGLES_START - 100)
         .checked_add(3usize.checked_mul(series_count)?)?
         .checked_add(point_count)?;
     // `post[0]` and `post[1]` used to be read as a single two-state gate,
@@ -6904,20 +6952,7 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
         "0" => false,
         _ => return None,
     };
-    // `post[20]` names the state of the chart's areas. Two published
-    // differences ride it and the corpus does not separate them: `animation`
-    // (`Auto` at `"0"`, `DontUse` at `"2"`) and whether `legendPlacement`
-    // and `titleAreaPlacement` are published at all. Over all 58 chart
-    // records of the stand the two move together exactly -- the five
-    // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` copies store `"2"`,
-    // publish `DontUse` and publish neither placement; the other 53 store
-    // `"0"`, publish `Auto` and publish both (`plotAreaPlacement` between
-    // them is published either way). `tail[65]` (`legendScrollEnable`)
-    // partitions the same 5/53 and is read from its own slot as its own
-    // value; nothing in the corpus tells the three apart, so this reader
-    // does not pretend to, and any other spelling of `post[20]` refuses the
-    // record rather than being interpreted.
-    let areas_are_placed = match post.get(20)?.trim() {
+    let animation_auto = match post.get(20)?.trim() {
         "0" => true,
         "2" => false,
         _ => return None,
@@ -6992,6 +7027,43 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
         parse_moxel_chart_rectangle(post.get(rectangle_start + 8..rectangle_start + 12)?)?;
 
     Some(MoxelChart {
+        border: parse_moxel_chart_border(tail.get(chart_layout::BORDER)?)?,
+        border_color: parse_moxel_chart_color(tail.get(chart_layout::BORDER_COLOR)?)?,
+        ttl_border_color: parse_moxel_chart_color(tail.get(chart_layout::TITLE_BORDER_COLOR)?)?,
+        lg_border_color: parse_moxel_chart_color(tail.get(chart_layout::LEGEND_BORDER_COLOR)?)?,
+        ch_border_color: parse_moxel_chart_color(tail.get(chart_layout::CHART_BORDER_COLOR)?)?,
+        transparent_title: parse_moxel_chart_bool(tail.get(chart_layout::TRANSPARENT_TITLE)?)?,
+        transparent_legend: parse_moxel_chart_bool(tail.get(chart_layout::TRANSPARENT_LEGEND)?)?,
+        legend_placement: match post
+            .get(
+                rectangle_start - (chart_layout::RECTANGLES_START - chart_layout::LEGEND_PLACEMENT),
+            )?
+            .trim()
+        {
+            "0" => None,
+            "5" => Some("UseCoordinates"),
+            "6" => Some("None"),
+            _ => return None,
+        },
+        plot_placement: match post
+            .get(rectangle_start - (chart_layout::RECTANGLES_START - chart_layout::PLOT_PLACEMENT))?
+            .trim()
+        {
+            "0" => None,
+            "1" => Some("UseCoordinates"),
+            _ => return None,
+        },
+        title_placement: match post
+            .get(
+                rectangle_start - (chart_layout::RECTANGLES_START - chart_layout::TITLE_PLACEMENT),
+            )?
+            .trim()
+        {
+            "0" => None,
+            "1" => Some("UseCoordinates"),
+            "8" => Some("None"),
+            _ => return None,
+        },
         front_colors,
         series_cur_id,
         points_cur_id,
@@ -7023,7 +7095,7 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
         max_series,
         base_val,
         is_outline,
-        areas_are_placed,
+        animation_auto,
         rebuild_time,
         legend_scroll_enable,
         is_randomized_new_values,
@@ -8131,11 +8203,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (7, "{1,0}"),
         (9, "0"),
         (10, "0"),
-        (15, "{3,3,{-22}}"),
-        (17, "{3,3,{-22}}"),
-        (19, "{3,3,{-22}}"),
-        (22, "1"),
-        (24, "1"),
         (26, "0"),
         (41, "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}"),
         (45, "0"),
@@ -8168,8 +8235,6 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (85, "0"),
         (91, "0"),
         (94, "0"),
-        (95, "{3,3,{-22}}"),
-        (96, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
         (97, "\"\""),
         (98, "0"),
     ];
@@ -8335,21 +8400,8 @@ fn validate_moxel_chart_v74_post_axes_tail(post: &[&str], axes_position: usize) 
         .then_some(())
 }
 
-/// The five-token window immediately before `elementsChart`
-/// (`rectangle_start - 5 .. rectangle_start`).
-///
-/// More of the design-time cache cluster documented on
-/// `validate_moxel_chart_v74_front`: no observation ties any of these five
-/// slots' content to anything the native XML publishes, so only existence is
-/// required.
-///
-/// The `elementsIsInit == false` branch this used to carry -- a fixed
-/// `1,1,1,0,0` -- was fitted to `ДлительностьОтложенногоОбновления/
-/// ДиаграммаГанта` alone. `ДиагностикаОтчетности_Подсказки` publishes
-/// `elementsIsInit false` too and stores `0,0,1,5,1` here, while
-/// `АнализЖурналаРегистрации/...` publishes `true` and stores
-/// `0,0.944…,1,5,1`; the window tracks how far the layout was ever computed,
-/// not the flag.
+/// Check the window before the rectangles. Its first two entries are layout
+/// cache values. The final three are the plot, legend and title placements.
 fn validate_moxel_chart_v74_rectangle_check(post: &[&str], rectangle_start: usize) -> Option<()> {
     (1..=5usize)
         .all(|back_from| {
@@ -10483,7 +10535,7 @@ fn locate_moxel_style_ref_palette_in(
             continue;
         }
         if !root_shape_allows(shapes, start + 1, |shape| {
-            shape.len == 3 && shape.leads_with(3)
+            (shape.len == 3 && shape.leads_with(3)) || (shape.len == 4 && shape.leads_with(4))
         }) {
             continue;
         }
@@ -10610,11 +10662,25 @@ pub fn parse_moxel_empty_header_footer(text: &str) -> bool {
         }) == Some(true)
 }
 
+/// Measured palette-namespace colours retain their revision-four record.
+pub fn moxel_palette_color_record(name: &str) -> Option<&'static str> {
+    (name == "Gray").then_some("{4,4,{15},5}")
+}
+
 pub fn parse_moxel_style_ref_slot(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<String>> {
     let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() == 4
+        && fields[0].trim() == "4"
+        && fields[1].trim() == "4"
+        && fields[3].trim() == "5"
+    {
+        let payload = split_1c_braced_fields(fields[2], 0)?;
+        return (payload.len() == 1 && payload[0].trim() == "15")
+            .then(|| Some("pal:Gray".to_string()));
+    }
     if fields.len() != 3 || fields.first()?.trim() != "3" {
         return None;
     }
@@ -10898,112 +10964,123 @@ fn parse_moxel_windows_color(value: &str) -> Option<String> {
 ///
 /// A code the corpus does not spell stays a typed refusal: an unresolvable
 /// slot makes the whole palette unusable rather than being guessed at.
+const MOXEL_WEB_COLORS: &[(u32, &str)] = &[
+    // `1` is pinned by a palette with one kind-2 slot and one published
+    // web colour: ERP УХ 3.3.3.3 `DataProcessors/
+    // РасшифровкаРассчитанныхЗначений/Templates/МакетРасшифровкиУсловийОплаты`
+    // carries `-1`, `-3`, a configuration style item and `1`, and its
+    // whole published pool holds one `d3p1:AliceBlue` and thirteen
+    // `style:СерыйФонШапкиОтчета`. Leaving it unnamed refused the whole
+    // palette, so that template published none of its colours or borders.
+    (1, "AliceBlue"),
+    (2, "AntiqueWhite"),
+    (5, "Azure"),
+    (6, "Beige"),
+    (8, "Black"),
+    (10, "Blue"),
+    (20, "Cream"),
+    (21, "Crimson"),
+    (23, "DarkBlue"),
+    (26, "DarkGray"),
+    (27, "DarkGreen"),
+    (31, "DarkGreen"),
+    (33, "DarkRed"),
+    (37, "DarkSlateGray"),
+    (42, "DimGray"),
+    (44, "FireBrick"),
+    (45, "FloralWhite"),
+    (46, "ForestGreen"),
+    (48, "Gainsboro"),
+    (49, "GhostWhite"),
+    (52, "Gray"),
+    (53, "Green"),
+    (54, "GreenYellow"),
+    (55, "HoneyDew"),
+    (59, "Ivory"),
+    (61, "Lavender"),
+    (64, "LemonChiffon"),
+    (67, "LightCyan"),
+    (68, "LightGoldenRod"),
+    (69, "LightGoldenRodYellow"),
+    // `70` and `138` are the two codes ERP УХ 3.2.12.6's `DataProcessors/
+    // ДиспетчированиеГрафикаПроизводства/Templates/ДиагностикаГрафика`
+    // and `Reports/ДиагностикаЭтапаПроизводства/Templates/
+    // ДиагностикаЭтапа` leave unnamed, and their two unaccounted
+    // published names -- `LightGreen` and `Tomato` -- are cited once
+    // each, so counting cannot orient them. Position can: the stored
+    // format records `{3008,0,48,6,0,7}` and `{3968,80,6,0,9,12}` are the
+    // only ones whose member set is "backColor = palette slot 7" and
+    // "textColor = slot 9, backColor = slot 12", and the published pool
+    // holds exactly one format carrying nothing but
+    // `backColor d3p1:LightGreen` and exactly one carrying
+    // `textColor d3p1:White` beside `backColor d3p1:Tomato`. Slot 9 is
+    // code `143` (`White`), already known, which pins the second pairing.
+    // (Note that `70` and `71` do not sit in ASCII order here; the
+    // enumeration's own order is not this table's evidence.)
+    (70, "LightGreen"),
+    (71, "LightGray"),
+    (72, "LightPink"),
+    // `73`/`75` are paired by position, not by count: `Reports/
+    // СхемаМаршрутнойКарты/Templates/Макет` cites its palette slots 2..11
+    // in one format record each, in order, and the published `<format>`
+    // pool spells `HoneyDew`, `AntiqueWhite`, `PaleGoldenrod`,
+    // `LightCyan`, `MediumGreen`, `#EBD0EB`, `Gainsboro`, `LightSkyBlue`,
+    // `LightSalmon`, `LightYellow` in the same order -- so the slot
+    // holding code `75` is `LightSkyBlue` and the one holding `73` is
+    // `LightSalmon`.
+    (73, "LightSalmon"),
+    (75, "LightSkyBlue"),
+    // `77` is pinned the same way, by a palette that leaves it alone:
+    // ERP УХ 3.3.3.3
+    // `Catalogs/ШаблоныНазначенийПлатежей/Templates/МакетТегов` carries
+    // the eight slots `-1, -3, -7, -10, 55, 77, -15, -14`, of which `55`
+    // is the already-known `HoneyDew` and `77` the only other kind-2 one,
+    // and the published pool holds exactly two `d3p1:HoneyDew` and one
+    // `d3p1:LightSlateGray`. Leaving it unnamed refused the whole palette
+    // -- a slot this table cannot name makes the candidate span
+    // unparseable -- so that template published none of its eight colours
+    // at all.
+    (77, "LightSlateGray"),
+    (79, "LightYellow"),
+    (84, "Maroon"),
+    (86, "MediumBlue"),
+    (87, "MediumGray"),
+    (88, "MediumGreen"),
+    (93, "MediumSpringGreen"),
+    (97, "MintCream"),
+    (98, "MistyRose"),
+    (108, "PaleGoldenrod"),
+    (119, "Red"),
+    (120, "RosyBrown"),
+    (121, "RoyalBlue"),
+    (122, "SaddleBrown"),
+    (128, "Silver"),
+    (129, "SkyBlue"),
+    (130, "SlateBlue"),
+    // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
+    // `131` as its only kind-2 slot and publishes `SlateGray` five times
+    // as its only web colour.
+    (131, "SlateGray"),
+    (134, "SteelBlue"),
+    // Paired together with `70` -- see the note there.
+    (138, "Tomato"),
+    (140, "Violet"),
+    (141, "VioletRed"),
+    (143, "White"),
+    (144, "WhiteSmoke"),
+    (145, "Yellow"),
+];
+
+/// When a name has two measured ordinals, write the first one (DarkGreen = 27).
+pub fn moxel_web_color_code(name: &str) -> Option<u32> {
+    MOXEL_WEB_COLORS
+        .iter()
+        .find_map(|&(code, color)| (name == color).then_some(code))
+}
+
 pub fn parse_moxel_web_color(value: &str) -> Option<String> {
-    let name = match value.parse::<u32>().ok()? {
-        // `1` is pinned by a palette with one kind-2 slot and one published
-        // web colour: ERP УХ 3.3.3.3 `DataProcessors/
-        // РасшифровкаРассчитанныхЗначений/Templates/МакетРасшифровкиУсловийОплаты`
-        // carries `-1`, `-3`, a configuration style item and `1`, and its
-        // whole published pool holds one `d3p1:AliceBlue` and thirteen
-        // `style:СерыйФонШапкиОтчета`. Leaving it unnamed refused the whole
-        // palette, so that template published none of its colours or borders.
-        1 => "AliceBlue",
-        2 => "AntiqueWhite",
-        5 => "Azure",
-        6 => "Beige",
-        8 => "Black",
-        10 => "Blue",
-        20 => "Cream",
-        21 => "Crimson",
-        23 => "DarkBlue",
-        26 => "DarkGray",
-        27 | 31 => "DarkGreen",
-        33 => "DarkRed",
-        37 => "DarkSlateGray",
-        42 => "DimGray",
-        44 => "FireBrick",
-        45 => "FloralWhite",
-        46 => "ForestGreen",
-        48 => "Gainsboro",
-        49 => "GhostWhite",
-        52 => "Gray",
-        53 => "Green",
-        54 => "GreenYellow",
-        55 => "HoneyDew",
-        59 => "Ivory",
-        61 => "Lavender",
-        64 => "LemonChiffon",
-        67 => "LightCyan",
-        68 => "LightGoldenRod",
-        69 => "LightGoldenRodYellow",
-        // `70` and `138` are the two codes ERP УХ 3.2.12.6's `DataProcessors/
-        // ДиспетчированиеГрафикаПроизводства/Templates/ДиагностикаГрафика`
-        // and `Reports/ДиагностикаЭтапаПроизводства/Templates/
-        // ДиагностикаЭтапа` leave unnamed, and their two unaccounted
-        // published names -- `LightGreen` and `Tomato` -- are cited once
-        // each, so counting cannot orient them. Position can: the stored
-        // format records `{3008,0,48,6,0,7}` and `{3968,80,6,0,9,12}` are the
-        // only ones whose member set is "backColor = palette slot 7" and
-        // "textColor = slot 9, backColor = slot 12", and the published pool
-        // holds exactly one format carrying nothing but
-        // `backColor d3p1:LightGreen` and exactly one carrying
-        // `textColor d3p1:White` beside `backColor d3p1:Tomato`. Slot 9 is
-        // code `143` (`White`), already known, which pins the second pairing.
-        // (Note that `70` and `71` do not sit in ASCII order here; the
-        // enumeration's own order is not this table's evidence.)
-        70 => "LightGreen",
-        71 => "LightGray",
-        72 => "LightPink",
-        // `73`/`75` are paired by position, not by count: `Reports/
-        // СхемаМаршрутнойКарты/Templates/Макет` cites its palette slots 2..11
-        // in one format record each, in order, and the published `<format>`
-        // pool spells `HoneyDew`, `AntiqueWhite`, `PaleGoldenrod`,
-        // `LightCyan`, `MediumGreen`, `#EBD0EB`, `Gainsboro`, `LightSkyBlue`,
-        // `LightSalmon`, `LightYellow` in the same order -- so the slot
-        // holding code `75` is `LightSkyBlue` and the one holding `73` is
-        // `LightSalmon`.
-        73 => "LightSalmon",
-        75 => "LightSkyBlue",
-        // `77` is pinned the same way, by a palette that leaves it alone:
-        // ERP УХ 3.3.3.3
-        // `Catalogs/ШаблоныНазначенийПлатежей/Templates/МакетТегов` carries
-        // the eight slots `-1, -3, -7, -10, 55, 77, -15, -14`, of which `55`
-        // is the already-known `HoneyDew` and `77` the only other kind-2 one,
-        // and the published pool holds exactly two `d3p1:HoneyDew` and one
-        // `d3p1:LightSlateGray`. Leaving it unnamed refused the whole palette
-        // -- a slot this table cannot name makes the candidate span
-        // unparseable -- so that template published none of its eight colours
-        // at all.
-        77 => "LightSlateGray",
-        79 => "LightYellow",
-        84 => "Maroon",
-        86 => "MediumBlue",
-        87 => "MediumGray",
-        88 => "MediumGreen",
-        93 => "MediumSpringGreen",
-        97 => "MintCream",
-        98 => "MistyRose",
-        108 => "PaleGoldenrod",
-        119 => "Red",
-        120 => "RosyBrown",
-        121 => "RoyalBlue",
-        122 => "SaddleBrown",
-        128 => "Silver",
-        130 => "SlateBlue",
-        // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
-        // `131` as its only kind-2 slot and publishes `SlateGray` five times
-        // as its only web colour.
-        131 => "SlateGray",
-        134 => "SteelBlue",
-        // Paired together with `70` -- see the note there.
-        138 => "Tomato",
-        140 => "Violet",
-        141 => "VioletRed",
-        143 => "White",
-        144 => "WhiteSmoke",
-        145 => "Yellow",
-        _ => return None,
-    };
+    let ordinal = value.parse::<u32>().ok()?;
+    let (_, name) = MOXEL_WEB_COLORS.iter().find(|(code, _)| *code == ordinal)?;
     Some(format!("d3p1:{name}"))
 }
 
@@ -13902,26 +13979,26 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
         chart.ttl_border.width,
         chart.ttl_border.style,
     );
-    push_moxel_chart_literal(xml, "ttlBorderColor", "style:BorderColor");
+    push_moxel_chart_literal(xml, "ttlBorderColor", &chart.ttl_border_color);
     push_moxel_chart_border_xml(
         xml,
         "lgBorder",
         chart.lg_border.width,
         chart.lg_border.style,
     );
-    push_moxel_chart_literal(xml, "lgBorderColor", "style:BorderColor");
+    push_moxel_chart_literal(xml, "lgBorderColor", &chart.lg_border_color);
     push_moxel_chart_border_xml(
         xml,
         "chBorder",
         chart.ch_border.width,
         chart.ch_border.style,
     );
-    push_moxel_chart_literal(xml, "chBorderColor", "style:BorderColor");
+    push_moxel_chart_literal(xml, "chBorderColor", &chart.ch_border_color);
     push_moxel_chart_bool(xml, "transparent", chart.transparent);
     push_moxel_chart_literal(xml, "bkgColor", &chart.front_colors[1]);
-    push_moxel_chart_bool(xml, "isTrnspTtl", true);
+    push_moxel_chart_bool(xml, "isTrnspTtl", chart.transparent_title);
     push_moxel_chart_literal(xml, "ttlColor", &chart.front_colors[2]);
-    push_moxel_chart_bool(xml, "isTrnspLeg", true);
+    push_moxel_chart_bool(xml, "isTrnspLeg", chart.transparent_legend);
     push_moxel_chart_literal(xml, "legColor", &chart.front_colors[3]);
     push_moxel_chart_bool(xml, "isTrnspCh", false);
     push_moxel_chart_literal(xml, "chColor", &chart.front_colors[4]);
@@ -13994,7 +14071,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(
         xml,
         "animation",
-        if chart.areas_are_placed {
+        if chart.animation_auto {
             "Auto"
         } else {
             "DontUse"
@@ -14032,8 +14109,8 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_rectangle_xml(xml, "elementsChart", &chart.elements_chart);
     push_moxel_chart_rectangle_xml(xml, "elementsLegend", &chart.elements_legend);
     push_moxel_chart_rectangle_xml(xml, "elementsTitle", &chart.elements_title);
-    push_moxel_chart_literal(xml, "borderColor", "style:BorderColor");
-    push_moxel_chart_border_xml(xml, "border", 0, "WithoutBorder");
+    push_moxel_chart_literal(xml, "borderColor", &chart.border_color);
+    push_moxel_chart_border_xml(xml, "border", chart.border.width, chart.border.style);
     push_moxel_chart_empty(xml, "dataSourceDescription");
     push_moxel_chart_bool(xml, "isDataSourceMode", false);
     push_moxel_chart_bool(xml, "isRandomizedNewValues", chart.is_randomized_new_values);
@@ -14070,40 +14147,14 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     // tracked one of those members; it could not spell
     // `МакетФакторныйАнализВодопад`'s grid line or label font at all.
     push_moxel_chart_scale_xml(xml, "valuesScale", &chart.values_scale);
-    // `legendPlacement`/`titleAreaPlacement` are gated on `areas_are_placed`
-    // (`post[20]`), not written unconditionally: the five
-    // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` copies publish
-    // neither and every other chart record of the stand publishes both --
-    // `plotAreaPlacement` between them is unaffected either way. Their own
-    // content is tied to `isShowLegend`/`isShowTitle` respectively, with no
-    // exception over the 53 records that publish them.
-    //
-    // `elementsIsInit` used to be this gate, on the same five records; it is
-    // not, because `ДиагностикаОтчетности_Подсказки` publishes
-    // `elementsIsInit false` and both placements. See `areas_are_placed` in
-    // `parse_moxel_chart` for what the corpus does and does not separate.
-    if chart.areas_are_placed {
-        push_moxel_chart_literal(
-            xml,
-            "legendPlacement",
-            if chart.is_show_legend {
-                "UseCoordinates"
-            } else {
-                "None"
-            },
-        );
-    }
-    push_moxel_chart_literal(xml, "plotAreaPlacement", "UseCoordinates");
-    if chart.areas_are_placed {
-        push_moxel_chart_literal(
-            xml,
-            "titleAreaPlacement",
-            if chart.is_show_title {
-                "UseCoordinates"
-            } else {
-                "None"
-            },
-        );
+    for (tag, placement) in [
+        ("legendPlacement", chart.legend_placement),
+        ("plotAreaPlacement", chart.plot_placement),
+        ("titleAreaPlacement", chart.title_placement),
+    ] {
+        if let Some(value) = placement {
+            push_moxel_chart_literal(xml, tag, value);
+        }
     }
     push_moxel_chart_palette_xml(xml, "colorPaletteDescription", &chart.color_palette);
     push_moxel_chart_palette_xml(

@@ -1,6 +1,10 @@
 {
   "equal": [
+    "CovChartMissingSeries",
+    "CovChartSelectionMode",
     "CovChartSettingsTemplate",
+    "CovChartTypeColumn",
+    "CovChartTypePie3D",
     "configuration"
   ]
 }
