@@ -45,7 +45,7 @@ impl PgTarget {
             match option.trim_end_matches(';').split_once('=') {
                 Some(("port", value)) if port.is_none() => port = Some(value),
                 Some(("sslmode", "verify-full")) if !verify_full => verify_full = true,
-                _ => bail!("unsupported or duplicate PostgreSQL server option"),
+                _ => bail!("unrecognised PostgreSQL server `{server}`"),
             }
         }
         let port = match port {
