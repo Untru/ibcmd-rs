@@ -77,3 +77,27 @@ edits, on a fresh clone:
 
 So the chain "our import, then the drop-in apply" of a descriptor edit waits for the import track; the apply is proven on the
 platform's stage, which is the state a stage of the platform's import is in.
+
+## Full-tree import follow-up for #415 (2026-11-24)
+
+The reference b1/c1 protocol above sends only edited descriptors to the platform. A full-tree
+import also sends every form to its writer. The distinction matters when the tree still contains a
+field bound to an attribute that the edit removes.
+
+On platform 8.5.1.1529, two disposable file databases started from copies of the same database
+loaded from the BSP 3.1.7.343 demo distribution. Its native export contained 10,985 files.
+For a focused b1 control, four object descriptors were edited, removing one of the four originally
+reported bound attributes from each owner. All four form XML files were left byte-identical to
+the native export. The native full-tree import diagnosed all four invalid data paths before it
+finished with an error. The base-free import on `54b796f6` refused four form rows, one for each
+of the same paths. A different attribute required by the complete b1 edit is absent in this
+distribution, so this control measures only the four bindings.
+
+For fresh export-back runs, collect the return codes of both imports and applies before comparing
+anything. Check 4 can be recorded with `scripts/restructure-lab/compare_config.ps1 -A <native-db>
+-B <own-db> -ExactSummary`. Run the native apply again on our twin for check 7 and record
+whether it reports that no update is required. After successful native exports to two fresh
+directories, run `python scripts/restructure-lab/s1k/check8.py --exact-summary <native-export>
+<own-export>` for check 8. Both strict comparators report counts and fail on differences.
+Check 4 includes timestamps. Check 8 includes the raw dump information file and reports
+separately whether it differs. The existing version-normalized comparison is available for diagnosis.
