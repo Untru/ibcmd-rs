@@ -3964,7 +3964,7 @@ fn stage_source_objects_patch(
     // objects it lacks, the descriptors that differ, the removals
     // (`override_stage`). Only a bulk stage against a database can.
     let overriding = !args.per_row && !offline;
-    let plan = if overriding {
+    let mut plan = if overriding {
         timed_stage_step("compare the tree with the target", || {
             override_stage::plan(args, &sql)
         })?
@@ -4024,7 +4024,7 @@ fn stage_source_objects_patch(
             .map(PathBuf::as_path)
             .collect::<Vec<_>>();
         match timed_stage_step("compare the tree with the target's export", || {
-            delta_stage::plan(args, &sql, &manifest, &prepared, &plan, &aliases)
+            delta_stage::plan(args, &sql, &manifest, &prepared, &mut plan, &aliases)
         })? {
             delta_stage::Outcome::Active(found) => delta = Some(found),
             delta_stage::Outcome::Off(reason) => all_rows_because = Some(reason),

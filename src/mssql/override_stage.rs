@@ -83,11 +83,16 @@ pub(super) struct Plan {
     pub changed: Vec<(String, String)>,
     /// Ids of objects the target holds and the tree lacks.
     pub removed: Vec<String>,
+    /// Individual module rows of objects that stay in a full import.
+    pub removed_modules: HashSet<String>,
 }
 
 impl Plan {
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
+        self.added.is_empty()
+            && self.changed.is_empty()
+            && self.removed.is_empty()
+            && self.removed_modules.is_empty()
     }
 
     /// Whether the patch loop must leave this tree file to the build: the
@@ -534,7 +539,13 @@ pub(super) struct Removal {
 }
 
 pub(super) fn removal(versions: &[String], plan: &Plan, dynamic: Vec<String>) -> Removal {
-    let object_rows = rows_of_objects(versions, &plan.removed);
+    let mut object_rows = rows_of_objects(versions, &plan.removed);
+    object_rows.extend(
+        versions
+            .iter()
+            .filter(|name| plan.removed_modules.contains(&name.to_ascii_lowercase()))
+            .cloned(),
+    );
     let mut deleted = object_rows.clone();
     for name in dynamic {
         if !deleted.contains(&name) {
@@ -644,11 +655,12 @@ mod tests {
 
     #[test]
     fn removal_lists_the_objects_rows_then_the_pending_updates() {
-        let versions = ["root", "obj", "obj.0", "keep"]
+        let versions = ["root", "obj", "obj.0", "keep", "keep.0", "keep.3"]
             .map(str::to_string)
             .to_vec();
         let plan = Plan {
             removed: vec!["obj".to_string()],
+            removed_modules: HashSet::from(["keep.0".into()]),
             ..Plan::default()
         };
         let removal = removal(
@@ -659,10 +671,16 @@ mod tests {
                 "keep_dynupdate_x".to_string(),
             ],
         );
-        assert_eq!(removal.object_rows, ["obj", "obj.0"]);
+        assert_eq!(removal.object_rows, ["obj", "obj.0", "keep.0"]);
         assert_eq!(
             removal.deleted,
-            ["obj", "obj.0", "DynamicallyUpdated", "keep_dynupdate_x"]
+            [
+                "obj",
+                "obj.0",
+                "keep.0",
+                "DynamicallyUpdated",
+                "keep_dynupdate_x"
+            ]
         );
     }
 
