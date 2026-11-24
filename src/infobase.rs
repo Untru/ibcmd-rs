@@ -1039,11 +1039,8 @@ fn resolve_connection_with_guard(
         );
     }
     let dbms = database_type(request.dbms, &settings, &mut defaults)?;
-    let db_server = match database_server(request.db_server, &settings, &mut defaults)? {
-        Some(server) => server,
-        None if is_postgres(&dbms) => bail!("Не указано значение параметра: db-server"),
-        None => "localhost".to_string(),
-    };
+    let db_server = database_server(request.db_server, &settings, &mut defaults)?
+        .unwrap_or_else(|| "localhost".to_string());
     let db_name = database_name(request.db_name, &settings, &mut defaults)?.ok_or_else(|| {
         anyhow!(
             "не указана информационная база: передайте --db-path для файловой базы \

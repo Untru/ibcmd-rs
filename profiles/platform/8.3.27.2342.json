@@ -8,6 +8,7 @@
     "platform.form_layout": "8.3"
   },
   "evidence": [
+    "tests/fixtures/coverage/8.3.27.2342/commonforms/baseline.json",
     "openspec/changes/evidence-bound-platform-profiles/evidence/postgres-dropin-20261124.md"
   ]
 }

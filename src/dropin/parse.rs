@@ -997,7 +997,7 @@ pub fn parse_infobase(args: &[OsString]) -> Result<Invocation, Refusal> {
         && (postgres_cli || scan.has(Opt::Config) || scan.has(Opt::Settings))
         && !(scan.has(Opt::DbServer) && scan.has(Opt::DbName))
         && let Ok(Some(name)) = crate::infobase::missing_postgres_parameter(
-            scan.value(Opt::Dbms),
+            scan.value(Opt::Dbms).map(str::trim),
             scan.has(Opt::DbServer) || trailing == Some("database-server"),
             scan.has(Opt::DbName) || trailing == Some("database-name"),
             scan.value(Opt::Settings).map(Path::new),
