@@ -436,6 +436,7 @@ pub fn import_args(request: &ImportRequest) -> InfobaseConfigImportArgs {
 /// to the rows of the listed files.
 pub fn import_files_args(request: &ImportFilesRequest) -> InfobaseConfigImportArgs {
     let mut args = import_args(&ImportRequest {
+        edt_profile: None,
         common: request.common.clone(),
         base_free: false,
         verify: request.verify,
@@ -703,6 +704,22 @@ fn full_export_required_message(sync: bool) -> String {
 
 fn run_import(mut request: ImportRequest) -> i32 {
     let report = request.common.report.clone();
+    if let Some(profile) = &request.edt_profile {
+        IMPORT.start();
+        let path = Path::new(&request.path);
+        return match crate::conversion::check_edt_import(path, profile) {
+            Err(error) => {
+                IMPORT.fail_with(&format!("{}: {error:#}", path.display()), report.as_deref())
+            }
+            Ok(()) => IMPORT.refuse_with(
+                &format!(
+                    "{}: прямая запись проекта EDT в ConfigSave пока не поддерживается",
+                    path.display()
+                ),
+                report.as_deref(),
+            ),
+        };
+    }
     if let Err(message) = read_requested_password(&mut request.common) {
         IMPORT.start();
         return IMPORT.fail_with(&message, report.as_deref());
@@ -943,6 +960,7 @@ mod tests {
         assert_eq!(args.output_dir, PathBuf::from("out"));
 
         let import = ImportRequest {
+            edt_profile: None,
             common: Common {
                 data: Some(PathBuf::from(r"F:\run\ibdata")),
                 ..common()

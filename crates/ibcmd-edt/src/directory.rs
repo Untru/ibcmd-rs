@@ -72,6 +72,13 @@ impl DirectorySource {
         }
         Ok(())
     }
+    /// Check the typed EDT source and account for its files before rendering Designer XML.
+    pub fn check_edt_source(&self, options: &ConversionOptions) -> Result<(), EdtError> {
+        let owner = stage()?;
+        prepare_edt_source(self, options, owner.path())?;
+        self.inventory.verify()
+    }
+
     pub fn xml_to_edt(&self, options: &ConversionOptions) -> Result<DirectoryConversion, EdtError> {
         xml_to_edt(self, options)
     }
@@ -332,17 +339,19 @@ fn xml_to_edt(
         extensions: crate::extensions::source_extensions_from_model(&config)?,
     })
 }
-fn edt_to_xml(
+fn prepare_edt_source(
     source: &DirectorySource,
     options: &ConversionOptions,
-) -> Result<DirectoryConversion, EdtError> {
+    work: &Path,
+) -> Result<(Configuration, FormatVersion, Vec<DirectoryFileAccounting>), EdtError> {
     source.require_project()?;
     let version = codec::options(options)?;
     let manifest = source
         .inventory
         .entry("DT-INF/PROJECT.PMF")
         .ok_or_else(|| EdtError::new("PROJECT.PMF missing"))?;
-    codec::project_version_bytes(&source.inventory.read_entry(manifest)?, options, version)?;
+    codec::project_version_bytes(&source.inventory.read_entry(manifest)?, options, version)
+        .map_err(|error| EdtError::new(format!("DT-INF/PROJECT.PMF: {error}")))?;
     if source
         .inventory
         .entry("src/Configuration/Configuration.mdo")
@@ -361,7 +370,8 @@ fn edt_to_xml(
             entry.path.as_str(),
             "DT-INF/PROJECT.PMF" | ".project" | ".settings/org.eclipse.core.resources.prefs"
         ) {
-            codec::validate_control(&entry.path, &source.inventory.read_entry(index)?)?;
+            codec::validate_control(&entry.path, &source.inventory.read_entry(index)?)
+                .map_err(|error| EdtError::new(format!("{}: {error}", entry.path)))?;
         } else if !entry.path.starts_with(provenance::PREFIX) {
             return Err(EdtError::new(format!(
                 "{}: unknown EDT project control file",
@@ -369,10 +379,9 @@ fn edt_to_xml(
             )));
         }
     }
-    let owner = stage()?;
     let typed_source = Inventory::scan(&source.inventory.root.join("src"))?;
     let config = read_config(Format::Edt, &typed_source, version)?;
-    let rebuilt = render(Format::Edt, &config, &owner.path().join("rebuilt"), version)?;
+    let rebuilt = render(Format::Edt, &config, &work.join("rebuilt"), version)?;
     let mut files = accounting(
         &typed_source,
         &rebuilt,
@@ -395,6 +404,15 @@ fn edt_to_xml(
             }),
     );
     cleanup_stage(&rebuilt.root)?;
+    Ok((config, version, files))
+}
+
+fn edt_to_xml(
+    source: &DirectorySource,
+    options: &ConversionOptions,
+) -> Result<DirectoryConversion, EdtError> {
+    let owner = stage()?;
+    let (config, version, files) = prepare_edt_source(source, options, owner.path())?;
     let rendered = render(
         Format::Designer,
         &config,

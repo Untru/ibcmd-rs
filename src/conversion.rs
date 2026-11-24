@@ -5,6 +5,7 @@
 //! or any other subprocess.
 
 mod edt;
+pub(crate) use edt::check_edt_import;
 
 use std::{
     error::Error,
