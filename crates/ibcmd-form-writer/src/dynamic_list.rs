@@ -1185,6 +1185,7 @@ pub(crate) fn dynamic_list_bag(
         None => 0,
         Some("FieldValue") => 1,
         Some("RowKey") => 2,
+        Some("RowNumber") => 3,
         Some(other) => return Err(anyhow!("a dynamic list's <KeyType>{other} is not measured")),
     };
     pairs.push(("KeyType".into(), format!("{{\"N\",{key_type}}}")));

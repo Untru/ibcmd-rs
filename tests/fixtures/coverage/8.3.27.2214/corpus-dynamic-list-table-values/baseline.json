@@ -1,5 +1,6 @@
 {
   "equal": [
+    "CovDynamicTableFolders",
     "CovDynamicTableTemplate",
     "configuration"
   ]
