@@ -511,7 +511,7 @@ fn fact_object_xml(
 /// One property the 2.21 writer reads from an appended member: its element,
 /// the elements of the 2.20 reading it supersedes, and its full value table
 /// (`None` writes no element).
-struct FactRule {
+pub(super) struct FactRule {
     tags: &'static [&'static str],
     source: FactSource,
     element: &'static str,
@@ -551,10 +551,34 @@ pub const GROUPING: &[(&str, Option<&str>)] = &[
 pub const TRI_STATE: &[(&str, Option<&str>)] =
     &[("0", Some("false")), ("1", Some("true")), ("2", None)];
 
-pub(super) const WIDTH_IN_CARD: &[(&str, Option<&str>)] =
-    &[("0", None), ("1", Some("Full")), ("2", Some("Half"))];
-pub(super) const CELL_HYPERLINK_REPRESENTATION: &[(&str, Option<&str>)] =
-    &[("0", None), ("1", Some("Show")), ("2", Some("DontShow"))];
+impl FactRule {
+    pub(super) fn values_for(&self, tag: &str) -> &[(&str, Option<&str>)] {
+        // Only the named classes have measurements for the final code in these tables.
+        match self.element {
+            "WidthInCard" if tag != "InputField" => &self.values[..2],
+            "CellHyperlinkRepresentation" if !matches!(tag, "InputField" | "LabelField") => {
+                &self.values[..2]
+            }
+            _ => self.values,
+        }
+    }
+}
+
+pub(super) const WIDTH_IN_CARD: FactRule = FactRule {
+    tags: FIELD_TAGS,
+    source: FactSource::Item("48", 8),
+    element: "WidthInCard",
+    replaces: &[],
+    values: &[("0", None), ("2", Some("Half")), ("1", Some("Full"))],
+};
+
+pub(super) const CELL_HYPERLINK_REPRESENTATION: FactRule = FactRule {
+    tags: FIELD_TAGS,
+    source: FactSource::Item("48", 13),
+    element: "CellHyperlinkRepresentation",
+    replaces: &[],
+    values: &[("0", None), ("1", Some("Show")), ("2", Some("DontShow"))],
+};
 
 const FACT_RULES: &[FactRule] = &[
     // Form root: appended trailer members. The 8.3.27 root slot of
@@ -619,13 +643,7 @@ const FACT_RULES: &[FactRule] = &[
         replaces: &[],
         values: &[("0", None), ("1", None), ("2", None), ("3", Some("true"))],
     },
-    FactRule {
-        tags: FIELD_TAGS,
-        source: FactSource::Item("48", 8),
-        element: "WidthInCard",
-        replaces: &[],
-        values: WIDTH_IN_CARD,
-    },
+    WIDTH_IN_CARD,
     FactRule {
         tags: FIELD_TAGS,
         source: FactSource::Item("48", 12),
@@ -639,13 +657,7 @@ const FACT_RULES: &[FactRule] = &[
         ],
     },
     // In the 8.5.1.1529 DontShow probes only member 13 changes.
-    FactRule {
-        tags: FIELD_TAGS,
-        source: FactSource::Item("48", 13),
-        element: "CellHyperlinkRepresentation",
-        replaces: &[],
-        values: CELL_HYPERLINK_REPRESENTATION,
-    },
+    CELL_HYPERLINK_REPRESENTATION,
     FactRule {
         tags: FIELD_TAGS,
         source: FactSource::Item("48", 14),
@@ -1259,7 +1271,7 @@ fn apply_rules(
         };
         let code = code.as_str();
         let value = rule
-            .values
+            .values_for(&tag)
             .iter()
             .find(|(known, _)| *known == code)
             .map(|(_, value)| *value)

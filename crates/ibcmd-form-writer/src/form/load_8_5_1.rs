@@ -717,8 +717,14 @@ fn load_field(
     item.tail
         .insert(7, code_of(TRI_STATE, card.as_deref(), "ShowTitleInCard")?);
     let width = take(edits, element, "WidthInCard")?;
-    item.tail
-        .insert(8, code_of(WIDTH_IN_CARD, width.as_deref(), "WidthInCard")?);
+    item.tail.insert(
+        8,
+        code_of(
+            WIDTH_IN_CARD.values_for(tag),
+            width.as_deref(),
+            "WidthInCard",
+        )?,
+    );
     let auto_width = take(edits, element, "AutoWidthInTable")?;
     item.tail.insert(
         12,
@@ -737,7 +743,7 @@ fn load_field(
     item.tail.insert(
         13,
         code_of(
-            CELL_HYPERLINK_REPRESENTATION,
+            CELL_HYPERLINK_REPRESENTATION.values_for(tag),
             representation.as_deref(),
             "CellHyperlinkRepresentation",
         )?,
@@ -2107,6 +2113,20 @@ pub fn compile_xml_2_21_form_body_in_layout_8_3(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn field_values_require_measurements_for_the_field_class() {
+        let width = WIDTH_IN_CARD.values_for("LabelField");
+        assert!(code_of(width, Some("Full"), "WidthInCard").is_err());
+        assert_eq!(code_of(width, Some("Half"), "WidthInCard").unwrap(), "2");
+
+        let hyperlink = CELL_HYPERLINK_REPRESENTATION.values_for("CheckBoxField");
+        assert!(code_of(hyperlink, Some("DontShow"), "CellHyperlinkRepresentation").is_err());
+        assert_eq!(
+            code_of(hyperlink, Some("Show"), "CellHyperlinkRepresentation").unwrap(),
+            "1"
+        );
+    }
 
     #[test]
     fn an_unset_table_line_member_is_a_true_slot_only_in_the_8_3_layout() {
