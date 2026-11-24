@@ -9,7 +9,7 @@
 #[doc(hidden)]
 pub mod export;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 
 use super::attribute::{attribute_body, bool_prop, localized_prop, typed_header};
 use super::brace::{Brace, NIL_UUID};
