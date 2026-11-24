@@ -98,3 +98,19 @@ fn any_ib_ref_is_any_ref_below_compatibility_8_3_23() {
         String::from_utf8_lossy(&actual)
     );
 }
+
+#[test]
+fn adopted_form_without_base_matches_native_8_3_27_2342() {
+    let input = common::fixture("v85_extension_inputs/adopted_form_no_base/input.cfe");
+    let out = common::temp_dir("adopted-form-no-base-2342");
+    let run = common::export(&input, &out);
+    assert!(
+        run.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let actual = out.join("Catalogs/Справочник/Forms/ФормаЭлемента/Ext/Form.xml");
+    let expected = common::fixture("adopted_form_no_base_8_3_27_2342/Form.xml");
+    assert_eq!(fs::read(actual).unwrap(), fs::read(expected).unwrap());
+}

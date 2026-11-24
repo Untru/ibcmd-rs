@@ -154,3 +154,11 @@ fn adopted_document_with_adopted_children() {
         "adopted/document_children/input.cfe",
     );
 }
+
+#[test]
+fn adopted_form_interceptors_without_a_base_form() {
+    assert_case(
+        "adopted_form_no_base",
+        "v85_extension_inputs/adopted_form_no_base/input.cfe",
+    );
+}
