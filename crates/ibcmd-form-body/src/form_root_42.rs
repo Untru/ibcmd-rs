@@ -385,16 +385,25 @@ fn upgrade_table(items: Vec<Node>) -> Vec<Node> {
     else {
         return items;
     };
-    let at = 55 + 2 * count;
-    if upgraded.len() < at + 1 {
+    // The record must contain two members per declared entry and its event list.
+    if count > upgraded.len().saturating_sub(56) / 2 || upgraded.len() < 56 {
         return items;
     }
+    let mut events_slot = 55 + 2 * count;
     upgraded[0] = Node::leaf("55");
-    upgraded[54] = Node::Leaf((count + 1).to_string());
-    upgraded.insert(at, parse_str(r#"{"S",""}"#));
-    upgraded.insert(at, Node::leaf("19"));
+    if !upgraded[55..events_slot]
+        .chunks_exact(2)
+        .any(|entry| entry[0].is("19"))
+    {
+        upgraded[54] = Node::Leaf((count + 1).to_string());
+        upgraded.splice(
+            events_slot..events_slot,
+            [Node::leaf("19"), parse_str(r#"{"S",""}"#)],
+        );
+        events_slot += 2;
+    }
     if let Some(events) = upgraded
-        .get_mut(at + 2)
+        .get_mut(events_slot)
         .filter(|events| is_event_list(events))
     {
         let old = std::mem::replace(events, Node::leaf(""));
@@ -730,6 +739,22 @@ mod tests {
             Node::List(upgraded).rendered(),
             format!("{{{}}}", expected.join(","))
         );
+    }
+
+    #[test]
+    fn revision_49_keeps_existing_property_19_and_checks_the_declared_count() {
+        let mut table = vec![Node::leaf("0"); 55];
+        table[0] = Node::leaf("49");
+        table[54] = Node::leaf("1");
+        let value = parse_str(r#"{"S","saved"}"#);
+        table.extend([Node::leaf("19"), value.clone(), parse_str("{0,0,0}")]);
+        let upgraded = upgrade_table(table.clone());
+        assert!(upgraded[0].is("55"));
+        assert!(upgraded[54].is("1"));
+        assert!(upgraded[55].is("19"));
+        assert_eq!(upgraded[56], value);
+        table[54] = Node::Leaf(usize::MAX.to_string());
+        assert_eq!(upgrade_table(table.clone()), table);
     }
 
     #[test]
