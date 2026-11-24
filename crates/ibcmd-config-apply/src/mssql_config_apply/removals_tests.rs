@@ -727,3 +727,37 @@ fn a_properties_row_without_the_objects_is_left_as_it_is() {
         "an untouched row keeps its version"
     );
 }
+
+#[test]
+fn subsystem_cache_removal_matches_proven_memberships() {
+    let plain = format!("{{1,{{2,{OWNER},2,{FORM_A},{OTHER},{CFG},1,{FORM_A}}},{{0}}}}");
+    let expected = HashSet::from([OWNER.to_owned(), CFG.to_owned()]);
+    let updated = remove_subsystem_content(plain.as_bytes(), FORM_A, &expected)
+        .unwrap()
+        .unwrap();
+    let wanted = format!("{{1,{{2,{OWNER},1,{OTHER},{CFG},0}},{{0}}}}");
+    assert_eq!(
+        parse_row(&updated).unwrap(),
+        parse_row(wanted.as_bytes()).unwrap()
+    );
+    assert!(remove_subsystem_content(plain.as_bytes(), FORM_A, &HashSet::new()).is_err());
+}
+
+#[test]
+fn subsystem_membership_change_preserves_unrelated_fields() {
+    let reference = format!("{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,{{1,{FORM_A}}}}}");
+    let before = format!("{{1,{{22,x,0,0,0,0,0,{{0,1,{reference}}}}}}}");
+    let after = "{1,{22,x,0,0,0,0,0,{0,0}}}";
+    assert!(module_membership_removed(
+        before.as_bytes(),
+        after.as_bytes(),
+        FORM_A,
+        false
+    ));
+    assert!(!module_membership_removed(
+        before.as_bytes(),
+        after.replace(",x,", ",y,").as_bytes(),
+        FORM_A,
+        false
+    ));
+}

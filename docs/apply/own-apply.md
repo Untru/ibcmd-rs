@@ -536,6 +536,16 @@ platform's apply of the same stage, 15 of 16 `.si` texts equal, the platform's e
 Time of the real run: 375 s for the first (debug build, other tracks running; 187 s of them SQL, 124 s the recovery artifact), 232 s
 for the second; the native apply of the same stage 137 s and 227 s.
 
+On SQL Server under 8.3.27.2342, a stage can also remove a retained catalog's
+`ObjectModule` or a whole `CommonModule`. The former deletes the `.0` row
+identified by the active catalog membership and the staged version map.
+The latter removes the descriptor and body, the configuration membership,
+and the references in subsystem content. The main search index loses the
+module record, and the subsystem content index (`c40aafd6-….si`) loses the
+module UUID in each affected list. A changed subscription or scheduled job
+requires its own analysis. The SQL comparisons use separate clones for each
+import and a restored copy of the same stage to isolate the apply step.
+
 **Lists refused whole** (`tools\refusal_cases.ps1`, `--dry-run` on the clone that holds the stage of the first twin; the control, the
 platform's list of 11 names, is planned; each of the others is `needs_native_apply` and names its reason):
 

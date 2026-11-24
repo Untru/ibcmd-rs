@@ -155,6 +155,41 @@ fn object_uuid(path: &Path) -> Option<String> {
     Some(value[..end].to_lowercase())
 }
 
+/// Resolve missing text modules through the surviving descriptor. A binary replacement
+/// still supplies the same row. Descriptors of new objects are excluded by the caller.
+fn removed_object_modules(
+    root: &Path,
+    xmls: &[&Path],
+    differences: &[FileDifference],
+) -> Result<HashSet<String>> {
+    let missing = differences
+        .iter()
+        .filter(|entry| entry.difference == Difference::OnlyInState)
+        .map(|entry| lower(&entry.path))
+        .filter(|path| path.ends_with("/ext/objectmodule.bsl"))
+        .collect::<HashSet<_>>();
+    let mut rows = HashSet::new();
+    if missing.is_empty() {
+        return Ok(rows);
+    }
+    for xml in xmls {
+        let module = xml.with_extension("").join("Ext").join("ObjectModule.bsl");
+        if !missing.contains(&relative(root, &module))
+            || super::source_module_body_path(module).is_some()
+        {
+            continue;
+        }
+        let owner = super::parse_simple_metadata_xml_properties(&fs::read(xml)?)?;
+        if let Some((suffix, _)) = super::object_module_body_suffixes(&owner.kind)
+            .into_iter()
+            .find(|(_, file)| *file == "ObjectModule.bsl")
+        {
+            rows.insert(format!("{}.{suffix}", owner.uuid.to_ascii_lowercase()));
+        }
+    }
+    Ok(rows)
+}
+
 /// Compares the tree with the target's export and decides what the stage leaves out.
 ///
 /// `xmls` are the metadata files the stage would prepare (the patch loop's, after the
@@ -165,13 +200,17 @@ pub(super) fn plan(
     sql: &SqlExec,
     manifest: &SourceManifest,
     xmls: &[&Path],
-    overrides: &Plan,
+    overrides: &mut Plan,
     aliases: &BTreeMap<String, String>,
 ) -> Result<Outcome> {
+    let comparison = compare_tree_with_target(args, sql, manifest)?;
+    if args.path_prefix.is_empty() {
+        overrides.removed_modules =
+            removed_object_modules(&args.source_root, xmls, &comparison.differences)?;
+    }
     if std::env::var(ALL_ROWS_ENV).is_ok_and(|value| value.trim() == "1") {
         return Ok(Outcome::Off(format!("{ALL_ROWS_ENV}=1")));
     }
-    let comparison = compare_tree_with_target(args, sql, manifest)?;
     let root = args.source_root.as_path();
     let mut units = xmls
         .iter()
@@ -588,6 +627,26 @@ mod tests {
 
     fn delta(differing: &[&str], forced: &[&str], aliased: &[&str]) -> Delta {
         Delta::for_test(differing, forced, aliased)
+    }
+
+    #[test]
+    fn missing_object_module_removes_only_the_retained_owners_body() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/eds-matrix");
+        let xml = root.join("Catalogs/Справочник1.xml");
+        let differences = [
+            "Catalogs/Справочник1/Ext/ObjectModule.bsl",
+            "Catalogs/Справочник1/Ext/ManagerModule.bsl",
+            "Catalogs/Other/Ext/ObjectModule.bsl",
+        ]
+        .map(|path| FileDifference {
+            path: path.into(),
+            difference: Difference::OnlyInState,
+        });
+        let rows = removed_object_modules(&root, &[&xml], &differences).unwrap();
+        assert_eq!(
+            rows,
+            HashSet::from(["f9c81679-fe0f-428b-a0d5-5137e68c2913.0".into()])
+        );
     }
 
     #[test]

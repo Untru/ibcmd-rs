@@ -192,7 +192,8 @@ fn literal(text: &str) -> Result<Brace> {
 /// object (subsystem content, web service packages).
 const DESIGN_TIME_REFERENCE: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
 
-fn design_time_reference(uuid: &str) -> Brace {
+/// Stored subsystem content reference to a metadata object.
+pub fn design_time_reference(uuid: &str) -> Brace {
     brace_list![
         Brace::str("#"),
         Brace::atom(DESIGN_TIME_REFERENCE),
