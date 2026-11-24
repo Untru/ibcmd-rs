@@ -1094,6 +1094,11 @@ fn refusal_text(
             differences.len() - LISTED_FILES
         ));
     }
+    if matches!(kind, StageKind::Patch) && tree.is_dir() && !tree.join("Configuration.xml").exists()
+    {
+        lines.push("Для сборки изменённых описаний укажите в --base-dir полное дерево конфигурации и повторите загрузку тех же файлов.".to_string());
+        return lines.join("\n");
+    }
     match kind {
         StageKind::Patch => {
             lines.push(

@@ -96,3 +96,78 @@ file (the platform removes `.0`, `.1`, `.3`; ibcmd-rs names them).
   metadata file the directory lacks (the platform loads such a body; ibcmd-rs
   needs the descriptor to compile it), `--archive` and `--extension` are
   refused.
+## SQL twins, 2026-11-24
+
+The public CLI on master `54b796f6` failed to import a changed common form
+descriptor from a sparse directory. It attempted to compile the descriptor
+using an absent `Configuration.xml` and exited −1. Full import succeeded.
+With the sparse patch fix, both imports succeeded, native apply accepted
+both stages, and native export reproduced both edits.
+
+### Inputs and reproduction
+
+- SQL Server Developer 17.0.1155.3 on Windows, integrated authentication.
+- Native `ibcmd.exe` 8.3.27.2342, SHA-256
+  `38f37715535cea530e58d5ba2e7e072c184b61b12f3e903ac290b299cf39fd38`.
+- ibcmd-rs 0.4.1, Windows MSVC dev build with Rust 1.98.0 and debug info off,
+  SHA-256 `9339c57f32ca5bf368ada1dcb82fac2b0012adc1e262af590f9ce48916948b7d`.
+- Fixture `tests/fixtures/external/home_page/two_variable/input.cf` (80,862
+  bytes, SHA-256 `f2a236f7babbc194655e903e24f7686d25dc368ec6c4d0dd61af047b8db8b86a`).
+
+1. Use native `infobase create --load=<fixture> --apply --locale=ru_RU` on
+   a fresh SQL database. Take a SQL backup with CHECKSUM. Restore it into a
+   second disposable database with its own data and log files. Use
+   `--dbms=MSSQLServer --db-server=localhost --db-name=<twin>` for each
+   command and a separate `--data=<directory>` for each native invocation
+   that can run concurrently. The initial native exports matched in all 11 files.
+2. Copy the native export into a full input directory. In
+   `CommonForms/ФормаСлева/Ext/Form/Module.bsl`, replace `Номер = 1;` with
+   `Номер = 2;`. In `CommonForms/ФормаСправа.xml`, replace `<Comment/>` with
+   `<Comment>Изменено частичной загрузкой</Comment>`. Preserve UTF-8 BOM
+   and line endings. Copy those two files and `CommonForms/ФормаСлева.xml`
+   (module owner) into a separate sparse tree at the same relative paths.
+3. On the first twin run `infobase config import files --base-dir=<sparse>
+   --partial CommonForms/ФормаСлева/Ext/Form/Module.bsl CommonForms/ФормаСправа.xml`.
+   On the other run `infobase config import <full>`. Inspect
+   `SELECT FileName FROM ConfigSave ORDER BY FileName` before apply.
+4. Run native `infobase config apply --force` on each twin, then native
+   `infobase config export <fresh-dir>`. Run the pair first with native
+   import as the oracle, then restore both from the same backup and repeat
+   with ibcmd-rs. Run the checker on the four resulting native exports.
+
+```text
+python scripts/apply-trace/lab/compare_import_files_twins.py baseline native-full native-sparse product-full product-sparse
+```
+
+All four imports, applies and exports exited 0. The checker compares the
+path set and every file against the initial export with exactly the two
+edits above. In `ConfigDumpInfo.xml` only the 40-hex-digit object version
+values can vary. The object names, IDs, order and other bytes matched.
+
+| Import | Files checked | Raw SHA-256 of ConfigDumpInfo.xml |
+| --- | ---: | --- |
+| Native full | 11 | `cbd7c2b53d73d519a8d3f79c79761ab8a4b0125f7662639bf81505a081d3eb01` |
+| Native sparse | 11 | `36a56e9d638244455cc7c23baeedb41e7043e5415f25ed5f934da978d2f92451` |
+| ibcmd-rs full | 11 | `59d1d8f1cdf11f8fcc4340a30ddfbbbc031ca68f049c908546812b6b35069e8e` |
+| ibcmd-rs sparse | 11 | `91605b4f2c71b2b505e79fdd1c94e0dc1136ae4f012f9748dac2e41a1c391672` |
+
+### Descriptor and flag boundaries
+
+- Native sparse staged six rows: the left form descriptor and body, the
+  right form descriptor, `root`, `version` and `versions`. Both product
+  imports staged five, reusing the target's unchanged left descriptor.
+- When the sparse tree held only the module, native `--partial --no-check`
+  staged the owner, body and three service rows. ibcmd-rs refused (exit 1),
+  named the missing owner XML and left ConfigSave empty.
+- Listing just the right descriptor from the same sparse tree without
+  `--partial` made native stage a `deleted` row. ibcmd-rs refused (exit 1)
+  with the missing body's row name and left ConfigSave empty.
+- Changing `UseStandardCommands` from false to true as well as the comment
+  in the sparse right descriptor requires a different descriptor row. With
+  `--partial --no-check` ibcmd-rs reported the mismatched property (exit −1)
+  and left ConfigSave empty. When compiling requires the configuration root,
+  supply the full tree as `--base-dir` and list the desired files.
+
+This records existing common forms on SQL Server with platform 8.3.27.2342.
+Other object families, nested dependency descriptors and merging into a
+previous stage remain outside this measurement.
