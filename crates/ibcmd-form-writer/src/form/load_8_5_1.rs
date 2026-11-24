@@ -2120,6 +2120,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn page_preserves_horizontal_defaults_and_explicit_hidden_title() {
+        let input = r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.21">
+            <ChildItems><Pages name="Tabs" id="1"><ChildItems><Page name="Details" id="2">
+            <ShowTitle>false</ShowTitle></Page></ChildItems></Pages></ChildItems></Form>"#;
+        let (xml, facts) =
+            down_convert_xml_2_21_form_as(input, None, None, FormLayout::V8_5_1).unwrap();
+        let page = &facts.items["2"];
+        assert_eq!(page.bag[&2], "1");
+        assert_eq!(page.bag[&16], "1");
+        assert!(xml.contains("<ShowTitle>false</ShowTitle>"), "{xml}");
+    }
+
+    #[test]
     fn an_unset_table_line_member_is_a_true_slot_only_in_the_8_3_layout() {
         let form = |members: &str| {
             format!(
