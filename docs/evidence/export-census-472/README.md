@@ -1,0 +1,69 @@
+# Проверка покрытия экспорта из Config, 24 ноября 2026
+
+В корпусе табличных макетов все 12 дескрипторов совпали со штатным XML. Восемь из десяти тел макетов потеряли или подменили значения. Штатный импорт принял полученное дерево, а повторная штатная выгрузка из SQL воспроизвела все восемь отличий.
+
+Измерения выполнены с платформой 8.5.1.1529 и Windows-бинарником upstream `54b796f6`. SHA-256 архива VSIX — `50de95909d2950994437255dcc0b271d4bc983737facf9772ea3b5681e50d7cf`, вложенного `extension/bin/ibcmd-rs.exe` — `86babde097d9e534c7d0295ec1e3a606184fdea271fb3d784276d3c89df4ba5a`. [Сборка upstream](https://github.com/Untru/ibcmd-rs/actions/runs/41428030979)
+
+## Что учитывает экспорт
+
+| Участок в исходниках | Что проверяется | Граница проверки |
+| --- | --- | --- |
+| `ModelPlan::models_every_descriptor`, `export_names::has_decoder` | У распознанного вида есть обработчик. Для проверки вызывается декодер на пустой записи | Значения конкретной строки проверяются позже. На матрице план вернул `true`, затем HTTPService потребовал fallback |
+| `ModelExport::export_row`, `metadata_model::export::decode_object` | Выбор декодера по виду, чтение brace-записи, формирование XML | В общем заголовке из девяти полей `export_values::header` проверяет длину и тег в слоте 0, читает UUID из 1.2, имя, синоним и комментарий из 2–4. Этот читатель не классифицирует значения слотов 5–8 |
+| `mssql_dump::dump_table_row` и обработка бинарной строки, `model_export::report_fallback` | При ошибке модели полный экспорт передаёт строку legacy-конвертеру. Счётчик растёт при каждом таком переходе, журнал ограничен первыми 20 | Специализированная ветка EDS, строки без результата модели и тела ресурсов имеют свои маршруты. Shadow сравнивает legacy с успешным результатом модели. Выборочный экспорт имеет отдельную проверку значений |
+| `metadata_model::export::audit` | Сравнивает XML дескриптора с эталоном и отдельно проверяет восстановление исходной строки | Совпадение XML и обратимость строки измеряются раздельно. Тела MXL лежат в отдельных строках `<uuid>.0` |
+
+В этой ревизии `git grep IBCMD_RS_FAIL_ON_MODEL_FALLBACK 54b796f6 -- crates src` не находит обработчика исторической переменной. Переключатель shadow читается в `crates/ibcmd-dump/src/mssql_dump/model_export.rs`. Названные в исходной постановке 1961 строка ServiceDesk, два fallback и 1953 совпадения относятся к `5a0c211`. ServiceDesk 3.10.28 в этом прогоне не измерялся. [Исторический замер](https://github.com/Untru/ibcmd-rs/issues/472)
+
+## Корпус табличных макетов
+
+Исходный CF из `coverage/8.5.1.1150/corpus-spreadsheet-facets` имеет SHA-256 `3490af9c79c00d0a67677378c44b61bdfc3e946f34b6828500eb13a5b4127eac`. Штатная 8.5.1.1529 загрузила его в SQL. В таблице Config 25 строк: Configuration, Language, десять дескрипторов CommonTemplate, десять тел шаблонов, root, version и versions. [Закреплённый пример](https://github.com/Untru/1c-fixtures/tree/8d138b896f462c3053d16076cbabf0ffe5030c1c/coverage/8.5.1.1150/corpus-spreadsheet-facets)
+
+Экспорт завершился успешно. Счётчики модели — 12 записано, 0 fallback, 12 shadow, 0 отличий shadow. Из 23 файлов 15 совпали побайтово и восемь различались, набор путей совпал. При сравнении XML по именам элементов, номеру одноимённого соседа, тексту и атрибутам совпали 808 позиций, изменились 5, отсутствовали 30, добавились 2. Отдельный аудит дескрипторов восстановил 11 из 12 исходных строк. Первое отличие при компиляции Configuration из штатного XML находится в brace-пути `10.0.0`.
+
+| Макет | Штатное значение | Экспорт upstream | Смежный PR |
+| --- | --- | --- | --- |
+| CovSheetAppearanceCheckIcon | Картинка с ref=v8ui:AppearanceCheckIcon и t=false | Пустой picture | [#704](https://github.com/Untru/ibcmd-rs/pull/704) |
+| CovSheetAutoFontHeight | AutoFont высотой 9 | Элемент font пропущен | [#715](https://github.com/Untru/ibcmd-rs/pull/715) |
+| CovSheetOEMFixedFont | sys:OEMFixedFont, Arial, высота 12 | Элемент font пропущен | [#715](https://github.com/Untru/ibcmd-rs/pull/715) |
+| CovSheetDashDotted | Линия рисунка DashDotted | Линия ячейки Solid | [#728](https://github.com/Untru/ibcmd-rs/pull/728) |
+| CovSheetGapLine | gap=true, стиль None | gap=false, стиль Solid | [#728](https://github.com/Untru/ibcmd-rs/pull/728) |
+| CovSheetPageSizeA4 | printSettings с pageSize=A4 и полями | Блок printSettings пропущен | [#726](https://github.com/Untru/ibcmd-rs/pull/726) |
+| CovSheetSandyBrown | Веб-цвет SandyBrown | style:ToolTipBackColor | [#713](https://github.com/Untru/ibcmd-rs/pull/713) |
+| CovSheetValueListDetail | Ячейка с текстом Coverage и детализацией ValueListType | Появились empty=true и indexTo=1, содержимое ячейки пропущено | [#701](https://github.com/Untru/ibcmd-rs/pull/701) |
+
+CovSheetVerticalPageBreak и CovSpreadsheetFacetTemplate совпали. Ветки перечисленных PR в измеряемый бинарник не подмешивались.
+
+### Что сохранилось в SQL
+
+Две одноразовые базы начали с того же CF. В первую импортировали штатный XML, во вторую — XML экспортёра. Стадии import, apply и повторного export завершились кодом 0. На платформе использован один поток для import и export. При параллельном предварительном импорте даже контрольная база потеряла строки тел шаблонов.
+
+Сравнение всех ключей (FileName, PartNo), DataSize, длины и SHA-256 BinaryData дало следующие результаты. В каждой базе осталось 25 строк, наборы ключей совпали.
+
+| Пара | Совпало | Различается |
+| --- | ---: | ---: |
+| Исходный CF → контроль после штатного XML | 23 | 2 (Configuration и versions) |
+| Исходный CF → база после XML экспортёра | 15 | 10 |
+| Контроль → база после XML экспортёра | 15 | 10 (восемь тел макетов, Configuration и versions) |
+
+Штатная повторная выгрузка контроля отличается от первоначального XML только в ConfigDumpInfo.xml. После XML экспортёра отличаются дополнительно те же восемь Template.xml. Поэтому изменение служебных версий не объясняет потери свойств. Измерена таблица Config и повторный экспорт, сравнение остальных таблиц в эти числа не входит.
+
+## Матрица с внешним источником
+
+Второй вход — `tests/fixtures/eds-matrix/configuration.cf`, SHA-256 `e66c3863907df1d059d891024289c4305864c74e7479007879b3d2295b6e11b8`. В SQL 80 строк. Штатное дерево содержит 78 файлов. Из 71 дескриптора независимый аудит получил 68 одинаковых XML, два различных и один отказ. При обратной компиляции 62 строки совпали, восемь различались, оставшаяся не декодировалась.
+
+Полный экспорт отказал при формировании ConfigDumpInfo: для семи детей Cube, DimensionTable, ExternalDataSource и Table отсутствовали канонические роли. До отказа журнал назвал fallback HTTPService `839141d0-9eb6-4c48-a445-9d5a2d58f77e` с причиной `code 1000 is not mapped` и два расхождения shadow (ChartOfAccounts и ChartOfCalculationTypes). Итоговые счётчики команды отсутствуют. В частичном дереве 75 равных файлов, два изменённых XML этих планов и отсутствующий ConfigDumpInfo.xml. Такое дерево исключено из приёмки штатного импорта.
+
+## Воспроизведение
+
+Нужны Windows, Python 3, sqlcmd, локальный SQL Server с Windows-аутентификацией и правом создания базы, штатная 8.5.1.1529 и экспортёр измеряемой ревизии. Каждому запуску передают новый каталог. Программа создаёт базы с уникальным префиксом i472_, оставляет снимки Config, пофайловые и пополевые расхождения, журнал и census.json. На каждой строке проверяет длину и SHA-256 снятых байтов перед передачей через --rows-dir. Базы и рабочие файлы остаются доступны для повторной проверки.
+
+~~~powershell
+git submodule update --init tests/fixtures/1c-fixtures
+$native = 'C:/Program Files/1cv8/8.5.1.1529/bin/ibcmd.exe'
+$exporter = (Resolve-Path 'target/release/ibcmd-rs.exe').Path
+python tools/coverage/native_export_census.py --ibcmd $native --exporter $exporter --out G:/oc/472-facets --cf-base64 tests/fixtures/1c-fixtures/coverage/8.5.1.1150/corpus-spreadsheet-facets/configuration.cf.b64
+python tools/coverage/native_export_census.py --ibcmd $native --exporter $exporter --out G:/oc/472-matrix --cf tests/fixtures/eds-matrix/configuration.cf
+~~~
+
+Для макетов ожидается код 0 при расхождениях в census.json: код показывает, что обе цепочки импорта выполнены. Для матрицы ожидается ненулевой код, а журнал сохраняет отказ экспортёра. Для общей приёмки #472 остаются полная классификация storage-полей, прогон ServiceDesk, устранение отказов и повторное сравнение после исправлений.
