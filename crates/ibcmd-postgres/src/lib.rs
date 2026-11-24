@@ -270,7 +270,8 @@ impl PgConnection {
         self.send(b'Q', &command)?;
         let mut rows = Some(rows);
         let mut failure = None;
-        let mut complete = false;
+        let mut sent = 0usize;
+        let mut completion = None;
         loop {
             let message = self.read_message()?;
             match message.tag {
@@ -279,10 +280,11 @@ impl PgConnection {
                         for chunk in row.chunks(64 * 1024) {
                             self.write_message(b'd', chunk)?;
                         }
+                        sent += 1;
                     }
                     self.send(b'c', &[])?;
                 }
-                b'C' => complete = message.body.starts_with(b"COPY "),
+                b'C' => completion = Some(message.body),
                 b'E' => {
                     failure = Some(anyhow!(
                         "PostgreSQL COPY failed: {}",
@@ -293,8 +295,16 @@ impl PgConnection {
                     if let Some(error) = failure {
                         return Err(error);
                     }
-                    if rows.is_some() || !complete {
+                    if rows.is_some() {
                         bail!("PostgreSQL did not complete COPY FROM STDIN");
+                    }
+                    let count = completion
+                        .as_deref()
+                        .and_then(|body| body.strip_prefix(b"COPY ")?.strip_suffix(b"\0"))
+                        .and_then(|digits| std::str::from_utf8(digits).ok()?.parse::<usize>().ok())
+                        .context("invalid PostgreSQL COPY completion count")?;
+                    if count != sent {
+                        bail!("PostgreSQL COPY acknowledged {count} of {sent} rows");
                     }
                     return Ok(());
                 }

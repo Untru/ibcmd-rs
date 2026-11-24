@@ -175,8 +175,15 @@ fn copy_row(row: &ConfigRow, timestamp: &str) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Copy)]
+    enum CopyReply {
+        Complete,
+        Error,
+        Short,
+    }
+
     fn wire_queries(
-        reject_copy: bool,
+        reply: CopyReply,
         run: impl FnOnce(&ConnectionConfig) -> Result<InfobaseConfigImportReport>,
     ) -> Vec<String> {
         use std::io::{Read, Write};
@@ -202,6 +209,7 @@ mod tests {
             send(&mut stream, b'R', &0u32.to_be_bytes());
             send(&mut stream, b'Z', b"I");
             let mut queries = Vec::new();
+            let mut row_count = 0;
             loop {
                 let mut header = [0; 5];
                 stream.read_exact(&mut header).unwrap();
@@ -212,14 +220,19 @@ mod tests {
                     break;
                 }
                 if header[0] == b'd' {
-                    assert!(body.ends_with(b"\n"));
+                    // The tiny fixtures have no line breaks in their file names.
+                    row_count += body.iter().filter(|&&byte| byte == b'\n').count();
                     continue;
                 }
                 if header[0] == b'c' {
-                    if reject_copy {
-                        send(&mut stream, b'E', b"SERROR\0Msynthetic COPY failure\0\0");
-                    } else {
-                        send(&mut stream, b'C', b"COPY 1\0");
+                    match reply {
+                        CopyReply::Error => {
+                            send(&mut stream, b'E', b"SERROR\0Msynthetic COPY failure\0\0")
+                        }
+                        CopyReply::Short => send(&mut stream, b'C', b"COPY 1\0"),
+                        CopyReply::Complete => {
+                            send(&mut stream, b'C', format!("COPY {row_count}\0").as_bytes())
+                        }
                     }
                 } else {
                     assert_eq!(header[0], b'Q');
@@ -265,10 +278,14 @@ mod tests {
         };
         let result = run(&config);
         let queries = worker.join().unwrap();
-        if reject_copy {
-            assert!(format!("{:#}", result.unwrap_err()).contains("synthetic COPY failure"));
-        } else {
-            assert!(result.is_ok(), "{result:?}");
+        match reply {
+            CopyReply::Complete => assert!(result.is_ok(), "{result:?}"),
+            CopyReply::Error => {
+                assert!(format!("{:#}", result.unwrap_err()).contains("synthetic COPY failure"))
+            }
+            CopyReply::Short => {
+                assert!(format!("{:#}", result.unwrap_err()).contains("COPY acknowledged 1 of"))
+            }
         }
         queries
     }
@@ -331,14 +348,16 @@ mod tests {
             source_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/file-infobase/tiny-source"),
         };
-        assert_locked_stage(&wire_queries(false, |config| import(config, &args)));
+        assert_locked_stage(&wire_queries(CopyReply::Complete, |config| {
+            import(config, &args)
+        }));
     }
 
     #[test]
     fn a_cf_load_locks_both_tables_before_reading_its_base() {
         let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/file-infobase/tiny.cf");
-        let queries = wire_queries(false, |config| {
+        let queries = wire_queries(CopyReply::Complete, |config| {
             let report = load_cf(config, &input)?;
             assert_eq!(report.operation, "infobase config load");
             assert_eq!(report.format, "cf");
@@ -351,10 +370,12 @@ mod tests {
     fn a_rejected_copy_rolls_back_the_stage_replacement() {
         let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/file-infobase/tiny.cf");
-        let queries = wire_queries(true, |config| load_cf(config, &input));
-        assert!(queries.iter().any(|sql| sql == "DELETE FROM configsave"));
-        assert_eq!(queries.last().map(String::as_str), Some("ROLLBACK"));
-        assert!(!queries.iter().any(|sql| sql == "COMMIT"));
+        for reply in [CopyReply::Error, CopyReply::Short] {
+            let queries = wire_queries(reply, |config| load_cf(config, &input));
+            assert!(queries.iter().any(|sql| sql == "DELETE FROM configsave"));
+            assert_eq!(queries.last().map(String::as_str), Some("ROLLBACK"));
+            assert!(!queries.iter().any(|sql| sql == "COMMIT"));
+        }
     }
 
     #[test]
