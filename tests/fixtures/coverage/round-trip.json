@@ -2,20 +2,11 @@
   "xml-cf-xml": {
     "8.3.27.2214/combined": {
       "refused": {
-        "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
-        "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
-        "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 703c95e3-eefd-5163-b520-15e913e262f4.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
-        "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 0dde8835-c2ac-5eb1-9095-3ccfe3ae2b24.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
-        "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row ada7da00-6fe4-5e8d-a519-eb78470c9b91.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
-        "CommonForms/CovButtonPictureGotoURL.xml": "#598: base-free stage has no base Config row 337ad572-d18a-5d4e-8fd3-6c61ebea22f2.0: the native form writer refuses it: no measured value for StdPicture.GotoURL",
-        "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row 16eae134-5a3a-55d0-a57b-81be5011a8a2.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
-        "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
-        "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovDeepComposerBinding.xml": "#606: base-free stage has no base Config row 4de97c92-28c5-5c22-b791-9359361ff139.0: the native form writer refuses it: <CheckBoxField> binds to Report.SettingsComposer.Settings.Selection.Use, which the writer cannot place",
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
@@ -44,7 +35,6 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
     },
@@ -56,11 +46,6 @@
     "8.3.27.2214/corpus-catalog-additional-index": {
       "refused": {
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family"
-      }
-    },
-    "8.3.27.2214/corpus-catalog-pictures": {
-      "refused": {
-        "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL"
       }
     },
     "8.3.27.2214/corpus-client-application-interface": {
@@ -113,13 +98,6 @@
     },
     "8.3.27.2214/corpus-managed-forms": {
       "refused": {
-        "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 81f7119a-0334-518c-805a-676c6a4e2ad5.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
-        "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 60ce38fe-316d-5768-b7d8-4c7ddf74881a.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
-        "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row 9c2e4641-09cd-5b07-814e-d001b7564229.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
-        "CommonForms/CovButtonPictureGotoURL.xml": "#598: base-free stage has no base Config row 8b84bc2f-7e48-5238-a3af-4c9788613168.0: the native form writer refuses it: no measured value for StdPicture.GotoURL",
-        "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row e8ad56e4-4e48-583f-9cb9-81d4ffc012de.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
-        "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 3fc5a204-59c6-5712-b1a5-877f383e3e7f.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
-        "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row d6492747-e412-535e-872e-032ea2e9d83b.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 15832655-0024-59aa-8548-6e6b3576abcb.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row f632ae58-e692-5695-9a81-f23d68e106d3.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row 96b9a6d0-8b49-52ff-a56b-4f97b33890ec.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -136,11 +114,6 @@
         "CommonTemplates/CovObservedSheetDrawingBorder.xml": "#607: failed to pack SpreadsheetDocument Template body CommonTemplates/CovObservedSheetDrawingBorder/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: a <line> has no style"
       }
     },
-    "8.3.27.2214/corpus-orphan-catalog-facets": {
-      "refused": {
-        "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0"
-      }
-    },
     "8.3.27.2214/corpus-orphan-characteristics": {
       "refused": {
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2"
@@ -151,11 +124,6 @@
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place"
-      }
-    },
-    "8.3.27.2214/corpus-reference-network": {
-      "refused": {
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription"
       }
     },
     "8.3.27.2214/corpus-resource-storage": {
@@ -235,20 +203,11 @@
     },
     "8.5.1.1150/combined": {
       "refused": {
-        "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
-        "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
-        "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 703c95e3-eefd-5163-b520-15e913e262f4.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
-        "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 0dde8835-c2ac-5eb1-9095-3ccfe3ae2b24.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
-        "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row ada7da00-6fe4-5e8d-a519-eb78470c9b91.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
-        "CommonForms/CovButtonPictureGotoURL.xml": "#598: base-free stage has no base Config row 337ad572-d18a-5d4e-8fd3-6c61ebea22f2.0: the native form writer refuses it: no measured value for StdPicture.GotoURL",
-        "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row 16eae134-5a3a-55d0-a57b-81be5011a8a2.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
-        "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
-        "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovDeepComposerBinding.xml": "#606: base-free stage has no base Config row 4de97c92-28c5-5c22-b791-9359361ff139.0: the native form writer refuses it: <CheckBoxField> binds to Report.SettingsComposer.Settings.Selection.Use, which the writer cannot place",
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
@@ -290,7 +249,6 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
     },
@@ -319,11 +277,6 @@
     "8.5.1.1150/corpus-catalog-additional-index": {
       "refused": {
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family"
-      }
-    },
-    "8.5.1.1150/corpus-catalog-pictures": {
-      "refused": {
-        "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL"
       }
     },
     "8.5.1.1150/corpus-client-application-interface": {
@@ -390,13 +343,6 @@
     },
     "8.5.1.1150/corpus-managed-forms": {
       "refused": {
-        "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 81f7119a-0334-518c-805a-676c6a4e2ad5.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
-        "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 60ce38fe-316d-5768-b7d8-4c7ddf74881a.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
-        "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row 9c2e4641-09cd-5b07-814e-d001b7564229.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
-        "CommonForms/CovButtonPictureGotoURL.xml": "#598: base-free stage has no base Config row 8b84bc2f-7e48-5238-a3af-4c9788613168.0: the native form writer refuses it: no measured value for StdPicture.GotoURL",
-        "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row e8ad56e4-4e48-583f-9cb9-81d4ffc012de.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
-        "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 3fc5a204-59c6-5712-b1a5-877f383e3e7f.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
-        "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row d6492747-e412-535e-872e-032ea2e9d83b.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovEmbeddedSpreadsheetCells.xml": "#613: base-free stage has no base Config row 15832655-0024-59aa-8548-6e6b3576abcb.0: the native form writer refuses it: an embedded mxl:SpreadsheetDocument with cells has no writer yet",
         "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml": "#600: base-free stage has no base Config row f632ae58-e692-5695-9a81-f23d68e106d3.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
         "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml": "#600: base-free stage has no base Config row 96b9a6d0-8b49-52ff-a56b-4f97b33890ec.0: the native form writer refuses it: a <GraphicalSchemaField> names a property whose slot is not measured",
@@ -434,11 +380,6 @@
         "CommonForms/CovVisualUsualGroupBackColor_ee07b2501001.xml": "#599: base-free stage has no base Config row b9671aa2-c691-5c19-aaab-f0c38a65cb7c.0: the native form writer refuses it: a group names a background colour it cannot place"
       }
     },
-    "8.5.1.1150/corpus-orphan-catalog-facets": {
-      "refused": {
-        "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0"
-      }
-    },
     "8.5.1.1150/corpus-orphan-characteristics": {
       "refused": {
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2"
@@ -455,11 +396,6 @@
       "gaps": {
         "CovObservedOwner": "#594 #595 #602 #632: Catalogs/CovObservedOwner/Forms/CovOwnedScalarTableHierarchyPanelLocation_None/Ext/Form.xml differs",
         "CovOwnedScalarTemplate": "#594 #595 #602 #632: Catalogs/CovOwnedScalarTemplate/Forms/CovOwnedScalarTableHierarchyPanelLocation_None/Ext/Form.xml differs"
-      }
-    },
-    "8.5.1.1150/corpus-reference-network": {
-      "refused": {
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription"
       }
     },
     "8.5.1.1150/corpus-resource-storage": {
@@ -529,24 +465,15 @@
     },
     "8.5.1.1529/combined": {
       "refused": {
-        "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedScalarModernTemplate/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row f765b72b-e498-595e-9b06-b13df031d51a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovBoundChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row a4446016-0a48-5948-bb31-a65089ab9700.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 703c95e3-eefd-5163-b520-15e913e262f4.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
-        "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 0dde8835-c2ac-5eb1-9095-3ccfe3ae2b24.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
-        "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row ada7da00-6fe4-5e8d-a519-eb78470c9b91.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
-        "CommonForms/CovButtonPictureGotoURL.xml": "#598: base-free stage has no base Config row 337ad572-d18a-5d4e-8fd3-6c61ebea22f2.0: the native form writer refuses it: no measured value for StdPicture.GotoURL",
-        "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row 16eae134-5a3a-55d0-a57b-81be5011a8a2.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
-        "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
-        "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row 816b2b50-fe05-53a1-9935-ccf92d00a67e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovChartMissingSeries.xml": "#679: base-free stage has no base Config row 6eb955a2-c7d3-522b-8740-61767f894ab0.0: the native form writer refuses it: <d4p1:chartType> spells StackedLine, which the chart writer has not measured",
         "CommonForms/CovChartSelectionMode.xml": "#679: base-free stage has no base Config row bf5242cb-5457-5b55-8aee-c60e716245a0.0: the native form writer refuses it: <Settings> names <d4p1:selectionMode>, which the chart writer cannot place",
@@ -689,7 +616,6 @@
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml": "#622: base-free stage has no base Config row f3219db8-eb25-5d7c-a93a-286ef76838d5.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "Enums/CovPaletteEnum.xml": "#599: unsupported enum value colour pal:Violet",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\"",
         "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
@@ -856,20 +782,11 @@
   "xml-file-infobase-xml": {
     "8.3.27.2214/combined": {
       "refused": {
-        "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
-        "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
-        "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 703c95e3-eefd-5163-b520-15e913e262f4.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
-        "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 0dde8835-c2ac-5eb1-9095-3ccfe3ae2b24.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
-        "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row ada7da00-6fe4-5e8d-a519-eb78470c9b91.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
-        "CommonForms/CovButtonPictureGotoURL.xml": "#598: base-free stage has no base Config row 337ad572-d18a-5d4e-8fd3-6c61ebea22f2.0: the native form writer refuses it: no measured value for StdPicture.GotoURL",
-        "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row 16eae134-5a3a-55d0-a57b-81be5011a8a2.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
-        "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
-        "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovDeepComposerBinding.xml": "#606: base-free stage has no base Config row 4de97c92-28c5-5c22-b791-9359361ff139.0: the native form writer refuses it: <CheckBoxField> binds to Report.SettingsComposer.Settings.Selection.Use, which the writer cannot place",
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
@@ -898,7 +815,6 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
     },
@@ -936,20 +852,11 @@
     },
     "8.5.1.1150/combined": {
       "refused": {
-        "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
-        "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
-        "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 703c95e3-eefd-5163-b520-15e913e262f4.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
-        "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 0dde8835-c2ac-5eb1-9095-3ccfe3ae2b24.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
-        "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row ada7da00-6fe4-5e8d-a519-eb78470c9b91.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
-        "CommonForms/CovButtonPictureGotoURL.xml": "#598: base-free stage has no base Config row 337ad572-d18a-5d4e-8fd3-6c61ebea22f2.0: the native form writer refuses it: no measured value for StdPicture.GotoURL",
-        "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row 16eae134-5a3a-55d0-a57b-81be5011a8a2.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
-        "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
-        "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovDeepComposerBinding.xml": "#606: base-free stage has no base Config row 4de97c92-28c5-5c22-b791-9359361ff139.0: the native form writer refuses it: <CheckBoxField> binds to Report.SettingsComposer.Settings.Selection.Use, which the writer cannot place",
         "CommonForms/CovDynamicListRowNumber.xml": "#601: base-free stage has no base Config row f9e1a400-e493-5237-a4d1-4a1bb70955ac.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
         "CommonForms/CovDynamicTableFolders.xml": "#601: base-free stage has no base Config row d8126841-4429-5831-9536-3c74f68de40a.0: the native form writer refuses it: a dynamic list's <KeyType>RowNumber is not measured",
@@ -991,30 +898,20 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
     },
     "8.5.1.1529/combined": {
       "refused": {
-        "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
         "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
         "Catalogs/CovOrphanCharacteristics.xml": "#626: unresolved reference -2",
         "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml": "#605: base-free stage has no base Config row d192de5a-c4f5-5b25-9f8f-6842c6241656.0: the native form writer refuses it: a command names the shortcut Space, which is not measured",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml": "#606: base-free stage has no base Config row 56d26752-b930-51ca-9f5d-ed831bbfa8ee.0: the native form writer refuses it: <LabelField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml": "#606: base-free stage has no base Config row d1b3df10-ed28-53da-aea6-ea7e7aa8d7d9.0: the native form writer refuses it: <InputField> binds to Object.Goods.Product.UnitOfMeasure, which the writer cannot place",
         "Catalogs/CovOwnedScalarModernTemplate/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row f765b72b-e498-595e-9b06-b13df031d51a.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovBoundChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row a4446016-0a48-5948-bb31-a65089ab9700.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
-        "CommonForms/CovButtonPictureAccountingRegister.xml": "#598: base-free stage has no base Config row 703c95e3-eefd-5163-b520-15e913e262f4.0: the native form writer refuses it: no measured value for StdPicture.AccountingRegister",
-        "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml": "#598: base-free stage has no base Config row 0dde8835-c2ac-5eb1-9095-3ccfe3ae2b24.0: the native form writer refuses it: no measured value for StdPicture.AppearanceStarHalfFilled",
-        "CommonForms/CovButtonPictureFormattedString.xml": "#598: base-free stage has no base Config row ada7da00-6fe4-5e8d-a519-eb78470c9b91.0: the native form writer refuses it: no measured value for StdPicture.FormattedString",
-        "CommonForms/CovButtonPictureGotoURL.xml": "#598: base-free stage has no base Config row 337ad572-d18a-5d4e-8fd3-6c61ebea22f2.0: the native form writer refuses it: no measured value for StdPicture.GotoURL",
-        "CommonForms/CovButtonPictureNewConversation.xml": "#598: base-free stage has no base Config row 16eae134-5a3a-55d0-a57b-81be5011a8a2.0: the native form writer refuses it: no measured value for StdPicture.NewConversation",
-        "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml": "#598: base-free stage has no base Config row 5a9d5080-90d8-526d-8d7d-c390c8d2608a.0: the native form writer refuses it: no measured value for StdPicture.QueryWizardTempTableDescription",
-        "CommonForms/CovButtonPictureToday.xml": "#598: base-free stage has no base Config row 167338f1-db39-5935-b163-0b4cd464792c.0: the native form writer refuses it: no measured value for StdPicture.Today",
         "CommonForms/CovChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row 816b2b50-fe05-53a1-9935-ccf92d00a67e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "CommonForms/CovChartMissingSeries.xml": "#679: base-free stage has no base Config row 6eb955a2-c7d3-522b-8740-61767f894ab0.0: the native form writer refuses it: <d4p1:chartType> spells StackedLine, which the chart writer has not measured",
         "CommonForms/CovChartSelectionMode.xml": "#679: base-free stage has no base Config row bf5242cb-5457-5b55-8aee-c60e716245a0.0: the native form writer refuses it: <Settings> names <d4p1:selectionMode>, which the chart writer cannot place",
@@ -1157,7 +1054,6 @@
         "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml": "#622: base-free stage has no base Config row f3219db8-eb25-5d7c-a93a-286ef76838d5.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "Enums/CovPaletteEnum.xml": "#599: unsupported enum value colour pal:Violet",
-        "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\"",
         "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
