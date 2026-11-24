@@ -187,10 +187,18 @@ const TEXT_LOCATIONS: &[(&str, i64)] = &[("FirstSegment", 0), ("Middle", 1)];
 const ARROWS: &[(&str, i64)] = &[("None", 0), ("Filled", 1), ("Blank", 2)];
 const SHAPES: &[(&str, i64)] = &[
     ("None", 0),
+    ("VerticalBrackets", 9),
     ("Document", 10),
     ("Block", 11),
     ("HorizontalBrackets", 12),
 ];
+
+/// XML spelling of the shape field in a stored graphical-scheme decoration.
+pub fn decoration_shape_name(stored: &str) -> Option<&'static str> {
+    SHAPES
+        .iter()
+        .find_map(|&(name, code)| (code.to_string() == stored).then_some(name))
+}
 
 impl<'a> Flowchart<'a> {
     fn new(
