@@ -257,26 +257,40 @@ impl<'a> Flowchart<'a> {
                 text(schema, "DrawGridMode"),
                 "DrawGridMode",
             )?),
-            Brace::num(6),
         ];
-        items.extend(parameter(6, number(text(print, "TopMargin"), "TopMargin")?));
-        items.extend(parameter(
-            7,
-            number(text(print, "LeftMargin"), "LeftMargin")?,
-        ));
-        items.extend(parameter(
-            8,
-            number(text(print, "BottomMargin"), "BottomMargin")?,
-        ));
-        items.extend(parameter(
-            9,
-            number(text(print, "RightMargin"), "RightMargin")?,
-        ));
-        items.extend(parameter(13, i64::from(flag(print, "BlackAndWhite"))));
-        items.extend(parameter(
+        let mut parameters = Vec::new();
+        if let Some(paper) = print.child_text("Paper") {
+            parameters.extend(parameter(0, number(paper, "Paper")?));
+        }
+        if let Some(orientation) = print.child_text("PageOrientation") {
+            parameters.extend(parameter(
+                1,
+                code(&[("Portrait", 1)], orientation, "PageOrientation")?,
+            ));
+        }
+        for (key, name) in [(3, "Collate"), (4, "Copies")] {
+            if let Some(value) = print.child_text(name) {
+                parameters.extend(parameter(key, number(value, name)?));
+            }
+        }
+        for (key, name) in [
+            (6, "TopMargin"),
+            (7, "LeftMargin"),
+            (8, "BottomMargin"),
+            (9, "RightMargin"),
+        ] {
+            parameters.extend(parameter(key, number(text(print, name), name)?));
+        }
+        parameters.extend(parameter(13, i64::from(flag(print, "BlackAndWhite"))));
+        if let Some(source) = print.child_text("PaperSource") {
+            parameters.extend(parameter(15, number(source, "PaperSource")?));
+        }
+        parameters.extend(parameter(
             16,
             code(FIT_PAGE_MODES, text(print, "FitPageMode"), "FitPageMode")?,
         ));
+        items.push(Brace::num((parameters.len() / 2) as i64));
+        items.extend(parameters);
         Ok(Brace::List(items))
     }
 
