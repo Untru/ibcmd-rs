@@ -1371,6 +1371,7 @@ pub(super) struct FormBodyProperties {
     pub(super) child_items_width: Option<&'static str>,
     pub(super) collapse_items_by_importance_variant: Option<&'static str>,
     pub(super) command_set_excluded_commands: Vec<&'static str>,
+    pub(super) use_for_folders_and_items_nil: bool,
     pub(super) use_for_folders_and_items: Option<&'static str>,
     pub(super) customizable: Option<bool>,
     pub(super) root_enabled: Option<bool>,
@@ -2723,6 +2724,11 @@ pub(super) fn extract_form_body_properties(
             fields,
             form_owner_reference,
         ),
+        use_for_folders_and_items_nil: form_root_property_bag_value(
+            fields,
+            FORM_USE_FOR_FOLDERS_AND_ITEMS_BAG_KEY,
+        )
+        .is_some_and(|value| value.trim() == r#"{"",00000000-0000-0000-0000-000000000000,0}"#),
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
         root_enabled: extract_form_root_enabled(fields),
@@ -31963,7 +31969,9 @@ fn format_form_body_open_xml_with_dcs_profiles(
     append_form_document_properties_xml(&mut xml, properties);
     // `ShowTitle` precedes `UseForFoldersAndItems` in the native tree (1
     // co-occurrence, no counter-example).
-    if let Some(value) = properties.use_for_folders_and_items {
+    if properties.use_for_folders_and_items_nil {
+        xml.push_str("\t<UseForFoldersAndItems xsi:nil=\"true\"/>\r\n");
+    } else if let Some(value) = properties.use_for_folders_and_items {
         xml.push_str(&format!(
             "\t<UseForFoldersAndItems>{}</UseForFoldersAndItems>\r\n",
             escape_xml_text(value)

@@ -764,7 +764,11 @@ impl FormRootAutoCommandBarSchema {
     /// two routes select the same record wherever the `-1` one selects any.
     pub fn from_raw_layout(wrapper: &str, item_id: &str, fields: &[&str]) -> Option<Self> {
         const AUTO_COMMAND_BAR_DISCRIMINATOR_SLOT: usize = 5;
-        if wrapper != "22" {
+        let legacy_root = wrapper == "19"
+            && item_id == "-1"
+            && fields.len() == 27
+            && fields.get(AUTO_COMMAND_BAR_DISCRIMINATOR_SLOT) == Some(&"9");
+        if wrapper != "22" && !legacy_root {
             return None;
         }
         if item_id != "-1"

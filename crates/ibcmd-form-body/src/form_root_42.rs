@@ -597,6 +597,32 @@ fn upgrade(
     } else {
         items
     };
+    let mut items = items;
+    let field_prefix = usize::from(items.get(4).is_some_and(|flag| flag.is("1")));
+    // Revision 33 stores empty names on a field's own menu and tooltip.
+    // The native re-save expands each using the name of the owning field.
+    if root == "46"
+        && own == "33"
+        && items.first().is_some_and(|tag| tag.is("37"))
+        && let Some(name) = items
+            .get(6 + field_prefix)
+            .and_then(Node::as_leaf)
+            .and_then(|name| name.strip_suffix('"'))
+            .filter(|name| name.starts_with('"') && name.len() > 1)
+    {
+        let name = name.to_owned();
+        for (slot, revision, suffix) in [
+            (42, "21", "КонтекстноеМеню"),
+            (52, "10", "РасширеннаяПодсказка"),
+        ] {
+            if let Some(Node::List(service)) = items.get_mut(slot + field_prefix)
+                && service.first().is_some_and(|tag| tag.is(revision))
+                && service.get(6).is_some_and(|value| value.is(r#""""#))
+            {
+                service[6] = Node::leaf(&format!("{name}{suffix}\""));
+            }
+        }
+    }
     let this = Node::List(items);
     let context = context_tag(&this);
     let kind = context
@@ -616,6 +642,21 @@ fn upgrade(
                 };
                 let len = child.as_list().map_or(0, <[Node]>::len);
                 let empty = child.as_list().is_some_and(|list| list[0].is("0"));
+                // A standard object field uses its stored form attribute id directly.
+                // The historical id substitutions for other chains would change its owner.
+                if root == "46"
+                    && slot_is(&[("37", 11 + field_prefix)])
+                    && let Some([count, attribute, field]) = child.as_list()
+                    && count.is("2")
+                    && attribute.as_list().is_some_and(|parts| parts.len() == 1)
+                    && let Some([id]) = field.as_list()
+                    && id
+                        .as_leaf()
+                        .and_then(|value| value.parse::<i32>().ok())
+                        .is_some_and(|value| value < 0)
+                {
+                    return child;
+                }
                 let child = if is_event_list_shaped(&child, true)
                     && (!empty
                         || (len == 3 && slot_is(EMPTY_EVENT_SLOTS))
