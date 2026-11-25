@@ -23,6 +23,7 @@ def prepare(book, sample, output):
             Результат.ЗаписатьСтроку(Имя + Символы.Таб + "ERROR");
         КонецПопытки;
     КонецЦикла;
+    Результат.ЗаписатьСтроку("END" + Символы.Таб + "{len(names)}");
     Результат.Закрыть();
     ЗавершитьРаботуСистемы(Ложь);
 КонецПроцедуры''')
@@ -33,8 +34,14 @@ def generate(source, allow_missing):
     missing = set()
     uuids = {}
     codes = {}
-    storage = re.compile(rf'\{{4,1,\{{(?:0,({UUID})|(-[1-9][0-9]*))\}},')
-    for line in source.read_text(encoding="utf-8-sig").splitlines():
+    storage = re.compile(
+        rf'\{{"#",{UUID},\{{4,1,\{{(?:0,({UUID})|(-[1-9][0-9]*))\}},'
+        r'"",-1,-1,0,0,""\}\}'
+    )
+    lines = source.read_text(encoding="utf-8-sig").splitlines()
+    if not lines or lines[-1] != f"END\t{len(lines) - 1}":
+        raise ValueError("missing or inconsistent completion marker")
+    for line in lines[:-1]:
         name, value = line.split("\t", 1)
         if not re.fullmatch(NAME, name) or name in seen:
             raise ValueError(f"invalid or duplicate name: {name}")
@@ -42,7 +49,7 @@ def generate(source, allow_missing):
         if value == "ERROR":
             missing.add(name)
             continue
-        match = storage.search(value)
+        match = storage.fullmatch(value)
         if not match:
             raise ValueError(f"unsupported serialized picture: {name}")
         uuid, code = match.groups()
