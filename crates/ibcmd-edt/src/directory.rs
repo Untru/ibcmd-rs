@@ -42,6 +42,55 @@ pub fn read_directory_project(path: impl AsRef<Path>) -> Result<DirectorySource,
     source.require_project()?;
     Ok(source)
 }
+/// Validates a retained Designer source and returns its bytes without publishing a tree.
+pub fn read_retained_xml(
+    path: &Path,
+    options: &ConversionOptions,
+) -> Result<Option<ibcmd_xml::source_tree::SourceTree>, EdtError> {
+    use ibcmd_xml::source_tree::{SourceEntry, SourcePath, SourceTree};
+
+    let inventory = Inventory::scan(path)?;
+    let work = stage()?;
+    let (config, version, _) = prepare_edt_source(&inventory, options, work.path())?;
+    let Some(original) = restore(&inventory, options, &config)? else {
+        inventory.verify()?;
+        return Ok(None);
+    };
+    let limits = ibcmd_xml::source_tree::ReaderLimits::default();
+    if original.entries.len() > limits.files
+        || original.bytes > limits.total_bytes as u64
+        || original
+            .entries
+            .iter()
+            .any(|entry| entry.byte_len > limits.asset_bytes as u64)
+    {
+        return Err(EdtError::new(
+            ".ibcmd-provenance/xml: retained Designer source exceeds the in-memory reader limits",
+        ));
+    }
+    let decoded = read_config(Format::Designer, &original, version)?;
+    if provenance::semantic_digest(&decoded)? != provenance::semantic_digest(&config)? {
+        return Err(EdtError::new(
+            ".ibcmd-provenance/xml: retained original XML disagrees with current typed EDT semantics",
+        ));
+    }
+    let entries = original
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            SourceEntry::from_bytes(
+                SourcePath::new(&entry.path).map_err(EdtError::source)?,
+                original.read_entry(index)?,
+            )
+            .map_err(EdtError::source)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    inventory.verify()?;
+    let tree = SourceTree::new(entries).map_err(EdtError::source)?;
+    Ok(Some(tree))
+}
+
 impl DirectorySource {
     fn require_project(&self) -> Result<(), EdtError> {
         if self.inventory.entry("DT-INF/PROJECT.PMF").is_none() {
@@ -75,7 +124,7 @@ impl DirectorySource {
     /// Check the typed EDT source and account for its files before rendering Designer XML.
     pub fn check_edt_source(&self, options: &ConversionOptions) -> Result<(), EdtError> {
         let owner = stage()?;
-        let (config, version, _) = prepare_edt_source(self, options, owner.path())?;
+        let (config, version, _) = prepare_edt_source(&self.inventory, options, owner.path())?;
         if let Some(original) = restore(&self.inventory, options, &config)? {
             let original_config = read_config(Format::Designer, &original, version)?;
             if provenance::semantic_digest(&original_config)?
@@ -350,27 +399,23 @@ fn xml_to_edt(
     })
 }
 fn prepare_edt_source(
-    source: &DirectorySource,
+    inventory: &Inventory,
     options: &ConversionOptions,
     work: &Path,
 ) -> Result<(Configuration, FormatVersion, Vec<DirectoryFileAccounting>), EdtError> {
-    source.require_project()?;
     let version = codec::options(options)?;
-    let manifest = source
-        .inventory
+    let manifest = inventory
         .entry("DT-INF/PROJECT.PMF")
         .ok_or_else(|| EdtError::new("PROJECT.PMF missing"))?;
-    codec::project_version_bytes(&source.inventory.read_entry(manifest)?, options, version)
+    codec::project_version_bytes(&inventory.read_entry(manifest)?, options, version)
         .map_err(|error| EdtError::new(format!("DT-INF/PROJECT.PMF: {error}")))?;
-    if source
-        .inventory
+    if inventory
         .entry("src/Configuration/Configuration.mdo")
         .is_none()
     {
         return Err(EdtError::new("missing src/Configuration/Configuration.mdo"));
     }
-    for (index, entry) in source
-        .inventory
+    for (index, entry) in inventory
         .entries
         .iter()
         .enumerate()
@@ -380,7 +425,7 @@ fn prepare_edt_source(
             entry.path.as_str(),
             "DT-INF/PROJECT.PMF" | ".project" | ".settings/org.eclipse.core.resources.prefs"
         ) {
-            codec::validate_control(&entry.path, &source.inventory.read_entry(index)?)
+            codec::validate_control(&entry.path, &inventory.read_entry(index)?)
                 .map_err(|error| EdtError::new(format!("{}: {error}", entry.path)))?;
         } else if !entry.path.starts_with(provenance::PREFIX) {
             return Err(EdtError::new(format!(
@@ -389,7 +434,7 @@ fn prepare_edt_source(
             )));
         }
     }
-    let typed_source = Inventory::scan(&source.inventory.root.join("src"))?;
+    let typed_source = Inventory::scan(&inventory.root.join("src"))?;
     let config = read_config(Format::Edt, &typed_source, version)?;
     let rebuilt = render(Format::Edt, &config, &work.join("rebuilt"), version)?;
     let mut files = accounting(
@@ -403,8 +448,7 @@ fn prepare_edt_source(
         file.path = format!("src/{}", file.path);
     }
     files.extend(
-        source
-            .inventory
+        inventory
             .entries
             .iter()
             .filter(|entry| !entry.path.starts_with("src/"))
@@ -422,7 +466,7 @@ fn edt_to_xml(
     options: &ConversionOptions,
 ) -> Result<DirectoryConversion, EdtError> {
     let owner = stage()?;
-    let (config, version, files) = prepare_edt_source(source, options, owner.path())?;
+    let (config, version, files) = prepare_edt_source(&source.inventory, options, owner.path())?;
     let rendered = render(
         Format::Designer,
         &config,

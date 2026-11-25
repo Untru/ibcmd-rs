@@ -230,7 +230,7 @@ impl InfobaseConfigExportArgs {
 }
 
 impl InfobaseConfigImportArgs {
-    fn connection(&self) -> ConnectionRequest<'_> {
+    pub(crate) fn connection(&self) -> ConnectionRequest<'_> {
         ConnectionRequest {
             settings: self.settings.as_deref(),
             native_config: self.native_config.as_deref(),

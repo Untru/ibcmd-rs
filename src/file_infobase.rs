@@ -68,6 +68,83 @@ pub(crate) fn import(
     ))
 }
 
+/// Stage a verified retained Designer tree in an empty file infobase.
+pub(crate) fn import_edt(
+    args: &InfobaseConfigImportArgs,
+    tree: &ibcmd_xml::source_tree::SourceTree,
+    profile: &ibcmd_core::profile::EffectiveProfile,
+) -> Result<InfobaseConfigImportReport> {
+    use crate::mssql::{GuardRequest, StageKind, TreeFiles, verify_staged_state};
+    use crate::mssql_dump::{StagedRow, StateBase};
+
+    let source = absolute_path(&args.source_dir)?;
+    let dialect = &profile
+        .xml_dialect
+        .as_ref()
+        .context("missing EDT XML dialect")?
+        .value;
+    let version =
+        <InfobaseConfigSourceVersion as clap::ValueEnum>::from_str(&dialect.to_string(), false)
+            .map_err(anyhow::Error::msg)?;
+    let config = crate::infobase::resolve_connection(args.connection())?;
+    if config.xml_version_given && config.legacy_source_version()? != version {
+        bail!("the target XML dialect disagrees with the EDT profile");
+    }
+    let data_file = config
+        .file_infobase
+        .as_deref()
+        .context("EDT staging requires a file infobase")?;
+    let entries = crate::conversion::compile_edt_base_free(tree, dialect)?;
+    let staged = entries
+        .iter()
+        .map(|(name, bytes)| StagedRow {
+            file_name: name,
+            bytes,
+        })
+        .collect::<Vec<_>>();
+    let verification = verify_staged_state(
+        &GuardRequest {
+            kind: StageKind::BaseFree,
+            source_root: &source,
+            tree: TreeFiles::Memory(tree),
+            removed: &[],
+            path_prefix: &[],
+            source_version: Some(version),
+        },
+        StateBase::Nothing,
+        &staged,
+    )?;
+    let stage = Stage {
+        rows: stage_rows(&entries, &[])?,
+        base_free: true,
+        reason: "verified retained Designer XML for empty CONFIG".into(),
+        target_rows: 0,
+        verification: Some(verification),
+    };
+    let mut session =
+        ibcmd_filedb::open_for_write(data_file).map_err(|error| anyhow!("{error}"))?;
+    if !session
+        .config_rows("CONFIG")
+        .map_err(|error| anyhow!("{error}"))?
+        .is_empty()
+    {
+        bail!("EDT staging currently requires empty CONFIG");
+    }
+    let written = session
+        .replace("CONFIGSAVE", &stage.rows)
+        .map_err(|error| anyhow!("{error}"))?;
+    let mut report = stage.report(
+        &config,
+        source,
+        Some(version),
+        "file-infobase-configsave-stage",
+        (written.rows_before, written.rows_after),
+        Some(written.backup),
+    );
+    report.format = "edt";
+    Ok(report)
+}
+
 /// The tree an import reads and the XML version it reads it in.
 pub(crate) fn import_source(
     config: &ConnectionConfig,

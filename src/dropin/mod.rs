@@ -707,15 +707,26 @@ fn run_import(mut request: ImportRequest) -> i32 {
     if let Some(profile) = &request.edt_profile {
         IMPORT.start();
         let path = Path::new(&request.path);
-        return match crate::conversion::check_edt_import(path, profile) {
+        let result =
+            crate::conversion::read_edt_import(path, profile).and_then(|(tree, profile)| {
+                let Some(tree) = tree else {
+                    return Ok(None);
+                };
+                if request.common.db_path.is_none()
+                    || request.common.extension.is_some()
+                    || request.no_verify
+                {
+                    return Ok(None);
+                }
+                crate::file_infobase::import_edt(&import_args(&request), &tree, &profile).map(Some)
+            });
+        return match result {
+            Ok(Some(value)) => IMPORT.succeed(report.as_deref(), &value),
             Err(error) => {
                 IMPORT.fail_with(&format!("{}: {error:#}", path.display()), report.as_deref())
             }
-            Ok(()) => IMPORT.refuse_with(
-                &format!(
-                    "{}: прямая запись проекта EDT в ConfigSave пока не поддерживается",
-                    path.display()
-                ),
+            Ok(None) => IMPORT.refuse_with(
+                &format!("{}: запись EDT в ConfigSave требует сохранённого Designer XML, --db-path и включённой проверки", path.display()),
                 report.as_deref(),
             ),
         };

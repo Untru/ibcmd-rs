@@ -16,7 +16,7 @@ mod provenance;
 
 pub use directory::{
     DirectoryConversion, DirectoryFileAccounting, DirectorySource, read_directory_project,
-    read_directory_source,
+    read_directory_source, read_retained_xml,
 };
 
 #[derive(Clone, Debug)]

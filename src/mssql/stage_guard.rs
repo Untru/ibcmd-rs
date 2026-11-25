@@ -135,6 +135,7 @@ impl std::error::Error for StageRefused {}
 
 /// What the stage already knows of the tree's files.
 pub(crate) enum TreeFiles<'a> {
+    Memory(&'a ibcmd_xml::source_tree::SourceTree),
     /// The stage scanned the tree: every file with its sha256, so a file the
     /// export reproduces to the byte is not read again.
     Scanned(&'a SourceManifest),
@@ -359,6 +360,23 @@ fn compare_state(
 ) -> Result<(Compared, crate::mssql_dump::StateExportReport)> {
     let output_root = std::env::temp_dir().join("ibcmd-rs-verified-state");
     let comparer = Arc::new(match &request.tree {
+        TreeFiles::Memory(tree) => {
+            let mut comparer = TreeComparer::new(
+                &output_root,
+                request.source_root,
+                tree.entries()
+                    .iter()
+                    .filter_map(|entry| {
+                        let path = entry.path().as_str();
+                        is_configuration_file(path)
+                            .then(|| (path.to_owned(), Some(sha256_hex(entry.bytes()))))
+                    })
+                    .collect(),
+                request.path_prefix,
+            );
+            comparer.memory = Some((*tree).clone());
+            comparer
+        }
         TreeFiles::Scanned(manifest) => TreeComparer::new(
             &output_root,
             request.source_root,
@@ -466,6 +484,7 @@ struct Outcome {
 struct TreeComparer {
     output_root: PathBuf,
     tree_root: PathBuf,
+    memory: Option<ibcmd_xml::source_tree::SourceTree>,
     scope: Vec<String>,
     /// The tree's files: known at once, or read by a thread that was started
     /// with the export (`pending`) and is waited for by the first file that
@@ -502,6 +521,7 @@ impl TreeComparer {
         Self {
             output_root: output_root.to_path_buf(),
             tree_root: tree_root.to_path_buf(),
+            memory: None,
             scope,
             tree: OnceLock::from(Ok(tree)),
             pending: Mutex::new(None),
@@ -530,6 +550,7 @@ impl TreeComparer {
         Self {
             output_root: output_root.to_path_buf(),
             tree_root: tree_root.to_path_buf(),
+            memory: None,
             scope,
             tree: OnceLock::new(),
             pending: Mutex::new(Some(handle)),
@@ -613,6 +634,14 @@ impl FileSink for TreeComparer {
             Some(TreeFile {
                 sha256: Some(known),
             }) if *known == sha256_hex(bytes) => None,
+            Some(_) if let Some(tree) = &self.memory => {
+                let index = tree
+                    .entries()
+                    .binary_search_by(|entry| entry.path().as_str().cmp(&relative))
+                    .map_err(|_| anyhow!("missing source entry {relative}"))?;
+                compare_content(&relative, bytes, tree.entries()[index].bytes())
+                    .map(|leaves| Difference::Changed { leaves })
+            }
             Some(_) => {
                 let tree_path = relative
                     .split('/')
