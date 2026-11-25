@@ -5,6 +5,7 @@ exports completed from matching restored clones. Import into a distinct
 empty target stopped on three base-free compiler errors. The native
 post-import export remains pending.
 [Windows run and results](evidence/ut11-sql-20261125.md).
+
 ## Inventory on the user's Mac, 2026-10-23
 
 Read-only inspection under `/Volumes/Work/Dev/ibcmd-rs-lab` found:
