@@ -600,7 +600,8 @@ fn picture(element: Option<&Element>, context: &DescriptorContext) -> Result<Bra
         Some(value) => parse_bool(value.trim())?,
         None => false,
     };
-    let value = if reference_text == "0" {
+    const ZERO_PICTURE_REFERENCE: &str = "0";
+    let value = if reference_text == ZERO_PICTURE_REFERENCE {
         // A present picture can carry the platform's zero picture code.
         brace_list![Brace::num(0)]
     } else if let Some(name) = reference_text.strip_prefix("StdPicture.") {
@@ -621,32 +622,8 @@ fn picture(element: Option<&Element>, context: &DescriptorContext) -> Result<Bra
 }
 
 #[cfg(test)]
-mod picture_tests {
-    use super::*;
-
-    #[test]
-    fn zero_code_preserves_a_present_command_picture() {
-        let context = DescriptorContext::with_files(std::path::Path::new("."), "2.20", &[])
-            .expect("empty descriptor index");
-        let xml = crate::metadata_model::xml::parse_element_tree(
-            b"<Picture><Ref>0</Ref><LoadTransparent>false</LoadTransparent></Picture>",
-        )
-        .expect("picture XML");
-        let actual = picture(Some(&xml), &context).expect("recognize native zero picture code");
-        let expected = brace_list![
-            Brace::num(4),
-            Brace::num(1),
-            brace_list![Brace::num(0)],
-            Brace::str(""),
-            Brace::num(-1),
-            Brace::num(-1),
-            Brace::num(0),
-            Brace::num(0),
-            Brace::str(""),
-        ];
-        assert_eq!(actual, expected);
-    }
-}
+#[path = "registers_picture_tests.rs"]
+mod picture_tests;
 
 /// `{0,<virtual-key code>,<modifiers>}` with Shift 4, Ctrl 8 and Alt 16
 /// summed; `{0,0,0}` for none.
