@@ -94,7 +94,12 @@ pub(crate) fn import_edt(
         .file_infobase
         .as_deref()
         .context("EDT staging requires a file infobase")?;
-    let entries = crate::conversion::compile_edt_base_free(tree, dialect)?;
+    // The existing compiler reads the Designer files already inside the project.
+    // Compare its output against the independently validated in-memory snapshot.
+    let entries = crate::mssql::base_free_cf::base_free_entries(
+        &source.join(".ibcmd-provenance/xml"),
+        version,
+    )?;
     let staged = entries
         .iter()
         .map(|(name, bytes)| StagedRow {

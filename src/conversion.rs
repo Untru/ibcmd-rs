@@ -5,7 +5,7 @@
 //! or any other subprocess.
 
 mod edt;
-pub(crate) use edt::{compile_edt_base_free, read_edt_import};
+pub(crate) use edt::read_edt_import;
 
 use std::{
     error::Error,

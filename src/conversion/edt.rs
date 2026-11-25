@@ -34,26 +34,6 @@ pub(crate) fn read_edt_import(
     ))
 }
 
-pub(crate) fn compile_edt_base_free(
-    tree: &SourceTree,
-    dialect: &ibcmd_core::version::XmlDialect,
-) -> Result<std::collections::BTreeMap<String, Vec<u8>>> {
-    let profiles = load_profile_registry(BUNDLED_PROFILES, None, ProfileRegistryLimits::default())?;
-    let id = ProfileId::parse("platform-8.3.27.1989")?;
-    let target = profiles
-        .get(&id)
-        .context("missing bootstrap storage profile")?;
-    let patch = compile_bootstrap_source_tree(tree, dialect.clone(), target)?.into_patch();
-    Ok(patch
-        .into_compiled()?
-        .into_iter()
-        .map(|entry| {
-            let (target, payload) = entry.into_parts();
-            (target.key().as_str().to_owned(), payload.bytes().to_vec())
-        })
-        .collect())
-}
-
 pub(super) fn convert(
     args: &ConvertArgs,
     profiles: &ProfileRegistry,
