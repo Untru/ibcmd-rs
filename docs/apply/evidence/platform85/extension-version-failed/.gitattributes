@@ -1,2 +1,0 @@
-# Preserve the frozen lab evidence exactly, including original line endings.
-* -text whitespace=cr-at-eol

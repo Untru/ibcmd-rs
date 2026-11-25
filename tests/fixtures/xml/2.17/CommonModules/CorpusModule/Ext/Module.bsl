@@ -1,2 +1,0 @@
-Procedure CorpusSmoke() Export
-EndProcedure

@@ -1,2 +1,0 @@
-== only in A (0 rows)
-== only in B (0 rows)

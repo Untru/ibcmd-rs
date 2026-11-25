@@ -1,3 +1,0 @@
-[submodule "1c-fixtures"]
-	path = tests/fixtures/1c-fixtures
-	url = https://github.com/Untru/1c-fixtures.git

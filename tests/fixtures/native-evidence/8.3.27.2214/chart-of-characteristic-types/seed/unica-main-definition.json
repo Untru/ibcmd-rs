@@ -1,9 +1,0 @@
-[
-  {
-    "type": "ChartOfCharacteristicTypes",
-    "name": "CorpusCharacteristics",
-    "valueTypes": [
-      "String(100)"
-    ]
-  }
-]

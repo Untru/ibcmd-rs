@@ -1,2 +1,0 @@
-Procedure Smoke() Export
-EndProcedure

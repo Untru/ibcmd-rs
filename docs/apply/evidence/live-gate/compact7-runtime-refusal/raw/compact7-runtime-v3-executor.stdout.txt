@@ -1,2 +1,0 @@
-PASS exact frozen compact7 closure after queue grant
-PASS exact frozen compact7 closure after queue grant

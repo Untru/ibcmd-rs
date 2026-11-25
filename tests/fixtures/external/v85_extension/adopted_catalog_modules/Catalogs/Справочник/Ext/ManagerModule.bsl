@@ -1,1 +1,0 @@
-﻿// расширение ManagerModule
