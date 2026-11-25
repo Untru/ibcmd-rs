@@ -837,6 +837,11 @@ mod oracle {
     use crate::cli::{InfobaseOracleCli, InfobaseOracleCommands};
 
     pub(super) fn run(args: &[OsString]) -> Option<i32> {
+        if let Some(executable) = std::env::var_os("IBCMD_RS_STANDALONE_ORACLE")
+            && super::parse::is_pid_apply(args)
+        {
+            return Some(run_pid_apply(std::path::Path::new(&executable), args));
+        }
         let [config, command, ..] = args else {
             return None;
         };
@@ -871,6 +876,31 @@ mod oracle {
                 1
             }
         })
+    }
+
+    fn run_pid_apply(executable: &std::path::Path, args: &[OsString]) -> i32 {
+        if !executable.is_absolute() {
+            eprintln!(
+                "IBCMD_RS_STANDALONE_ORACLE должен содержать абсолютный путь к штатному ibcmd"
+            );
+            return super::EXIT_MALFORMED;
+        }
+
+        // Inherit the terminal streams so the server's menus and responses
+        // pass through directly. Removing the opt-in also bounds recursion
+        // if the supplied executable happens to be another oracle build.
+        match std::process::Command::new(executable)
+            .arg("infobase")
+            .args(args)
+            .env_remove("IBCMD_RS_STANDALONE_ORACLE")
+            .status()
+        {
+            Ok(status) => status.code().unwrap_or(super::EXIT_FAILED),
+            Err(error) => {
+                eprintln!("Не удалось запустить штатный ibcmd: {error}");
+                super::EXIT_FAILED
+            }
+        }
     }
 }
 

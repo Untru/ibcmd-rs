@@ -881,3 +881,71 @@ fn import_files_checks_the_files_before_the_connection() {
         );
     }
 }
+
+#[test]
+fn standalone_pid_apply_routes_only_in_an_opted_in_oracle_build() {
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .env("IBCMD_RS_STANDALONE_ORACLE", "relative-ibcmd")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let output = run(&[
+        "infobase",
+        "config",
+        "apply",
+        "--pid=42",
+        "--dynamic=prompt",
+    ]);
+    if cfg!(feature = "platform-oracle") {
+        assert_eq!(output.status.code(), Some(MALFORMED));
+        assert!(text(&output.stderr).contains("IBCMD_RS_STANDALONE_ORACLE"));
+    } else {
+        assert_eq!(output.status.code(), Some(UNSUPPORTED));
+        assert!(text(&output.stderr).contains("--pid"));
+    }
+
+    let output = run(&["infobase", "config", "apply", "--pid=42", "--help"]);
+    assert!(output.status.success());
+    assert!(text(&output.stdout).contains("Поддерживаемые режимы"));
+
+    let output = run(&["infobase", "config", "apply", "--remote=ssh://localhost"]);
+    assert_eq!(output.status.code(), Some(UNSUPPORTED));
+    assert!(text(&output.stderr).contains("--remote"));
+}
+
+#[cfg(feature = "platform-oracle")]
+#[test]
+#[ignore = "requires a private ibsrv with an empty ConfigSave and no clients"]
+fn standalone_pid_apply_matches_native_on_a_private_server() {
+    let native = std::env::var_os("IBCMD_RS_STANDALONE_ORACLE").unwrap();
+    let pid = std::env::var("IBCMD_RS_TEST_STANDALONE_PID")
+        .unwrap()
+        .parse::<u32>()
+        .unwrap();
+    assert_ne!(pid, 0);
+    let pid_arg = format!("--pid={pid}");
+    let args = [
+        "infobase",
+        "config",
+        "apply",
+        &pid_arg,
+        "--dynamic=disable",
+        "--session-terminate=disable",
+    ];
+    let run = |exe: &std::ffi::OsStr| {
+        Command::new(exe)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let expected = run(&native);
+    assert!(expected.status.success());
+    assert!(text(&expected.stdout).contains("не требуется"));
+    let actual = run(std::ffi::OsStr::new(env!("CARGO_BIN_EXE_ibcmd-rs")));
+    assert_eq!(actual.status, expected.status);
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
+}
