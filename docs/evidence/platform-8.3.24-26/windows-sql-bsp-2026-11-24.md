@@ -66,3 +66,15 @@ After the failed native reexport on 8.3.26, the activation probe was `ibcmd info
 ```text
 python scripts/platform-lab/acceptance.py check docs/evidence/platform-8.3.24-26/acceptance-2026-11-24.json --evidence-root <lab-root>
 ```
+
+## Small configuration with a managed form
+
+The follow-up on SQL Server used the repository's `tests/fixtures/external/old_roots/v59_form/input.cf` (11,091 bytes, SHA-256 `b604f9d3efa7c69cc80a5ba65ff9edfec54e1375d58d26faed8faf39ff864da7`). Each build loaded and applied the CF in its own database, then used two separately initialized targets for the XML import probes.
+
+| Build | Native source load / apply / export | Native XML import / immediate reexport | Candidate exact-build export / import |
+| --- | --- | --- | --- |
+| 8.3.24.1819 | 0 / 0 / 0 | 0 / 0 | 2 / 2 |
+| 8.3.25.1633 | 0 / 0 / 0 | 0 / 0 | 2 / 2 |
+| 8.3.26.1656 | 0 / 0 / 0 | 0 / 0 | 2 / 2 |
+
+Every source export contained seven files. Every immediate reexport contained three. The immediate reexport ran before applying the staged XML import. The file counts differ, so the successful command exits establish the native import boundary without establishing a round-trip match. The candidate still refuses the exact build at argument parsing.
