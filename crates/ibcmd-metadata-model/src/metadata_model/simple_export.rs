@@ -5,6 +5,8 @@
 //! XML property orders are the ones every file of the four reference trees
 //! uses (the same in 2.20 and 2.21).
 
+use ibcmd_schema::descriptor_values::{DATA_HISTORY, DATA_LOCK_CONTROL_MODE};
+
 use anyhow::{Result, anyhow, bail};
 
 use crate::metadata_model::brace::Brace;
@@ -120,8 +122,6 @@ fn language(payload: &Brace) -> Result<Element> {
     ))
 }
 
-const DATA_LOCK_CONTROL_MODE: &[(&str, i64)] = &[("Automatic", 0), ("Managed", 1)];
-const DATA_HISTORY: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1)];
 
 /// The properties a constant writes, in order.
 const CONSTANT_PROPERTIES: &[&str] = &[

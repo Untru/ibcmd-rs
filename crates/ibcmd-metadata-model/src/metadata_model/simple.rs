@@ -17,6 +17,7 @@ use super::types::{form_uuid, metadata_ref, object_uuid, type_pattern};
 use super::xml::Element;
 use super::{DescriptorContext, ObjectXml, md_base, native_text, not_yet};
 use ibcmd_restructure::brace_list;
+use ibcmd_schema::descriptor_values::{DATA_HISTORY, DATA_LOCK_CONTROL_MODE};
 
 pub fn compile(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Brace> {
     match object.kind {
@@ -143,7 +144,7 @@ pub fn data_lock_control_mode(value: Option<&str>) -> Result<Brace> {
     enumerated(
         Some(value.unwrap_or("Automatic")),
         "DataLockControlMode",
-        &[("Automatic", 0), ("Managed", 1)],
+        DATA_LOCK_CONTROL_MODE,
     )
 }
 
@@ -152,7 +153,7 @@ pub fn data_history(value: Option<&str>) -> Result<Brace> {
     enumerated(
         Some(value.unwrap_or("DontUse")),
         "DataHistory",
-        &[("DontUse", 0), ("Use", 1)],
+        DATA_HISTORY,
     )
 }
 
