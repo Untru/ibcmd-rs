@@ -2204,7 +2204,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(checked, 28);
+        assert_eq!(checked, 29);
     }
 
     #[test]
