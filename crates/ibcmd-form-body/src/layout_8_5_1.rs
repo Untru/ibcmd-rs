@@ -730,9 +730,10 @@ fn convert_items(node: Node, facts: &mut FormFactsV8_5_1) -> Result<Node> {
                 )
             })?;
         if v8_3 == "37" && kind == "16" {
-            let Node::List(default) =
-                parse_node(ibcmd_form_schema::GEOGRAPHICAL_SCHEMA_DEFAULT_OPTIONS)?
-            else {
+            let Node::List(default) = convert_primitives(
+                parse_node(ibcmd_form_schema::GEOGRAPHICAL_SCHEMA_DEFAULT_OPTIONS)?,
+                &mut FormFactsV8_5_1::default(),
+            ) else {
                 unreachable!("the geographical schema options are a list");
             };
             if *bag != default {
