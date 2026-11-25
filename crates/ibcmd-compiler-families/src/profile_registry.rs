@@ -53,6 +53,14 @@ pub const BUNDLED_PROFILES: &[BundledProfile<'static>] = &[
         json: include_str!("../../../profiles/platform/8.3.24.1819.json"),
     },
     BundledProfile {
+        name: "profiles/platform/8.3.25.1633.json",
+        json: include_str!("../../../profiles/platform/8.3.25.1633.json"),
+    },
+    BundledProfile {
+        name: "profiles/platform/8.3.26.1656.json",
+        json: include_str!("../../../profiles/platform/8.3.26.1656.json"),
+    },
+    BundledProfile {
         name: "profiles/platform/8.3.27.1989.json",
         json: include_str!("../../../profiles/platform/8.3.27.1989.json"),
     },
@@ -262,8 +270,8 @@ mod tests {
     #[test]
     fn bundled_seed_profiles_keep_version_axes_independent() {
         let registry = load_bundled_profile_registry().unwrap();
-        assert_eq!(BUNDLED_PROFILES.len(), 10);
-        assert_eq!(registry.profiles().len(), 10);
+        assert_eq!(BUNDLED_PROFILES.len(), 12);
+        assert_eq!(registry.profiles().len(), 12);
 
         for version in ["2.17", "2.20", "2.21"] {
             let id = ProfileId::parse(&format!("xml-{version}")).unwrap();
@@ -474,7 +482,7 @@ mod tests {
             // The live MSSQL configuration-storage shape is identical on every
             // evidenced build, so 8.3.27 and 8.5.1 declare the same fingerprints.
             if version == "8.3.24.1819" {
-                assert!(profile.fingerprints.is_empty());
+                assert_eq!(profile.fingerprints.len(), 1);
             } else {
                 assert_eq!(profile.fingerprints["mssql.ibversion"].value, "7|80313");
                 assert_eq!(
@@ -598,13 +606,16 @@ mod tests {
             assert_eq!(profile.source_chain.len(), profile.inheritance_chain.len());
         }
 
-        assert!(
-            registry
-                .get(&ProfileId::parse("platform-8.3.24.1819").unwrap())
-                .unwrap()
-                .evidence
-                .is_empty()
-        );
+        for (build, dialect) in [
+            ("8.3.24.1819", "2.17"),
+            ("8.3.25.1633", "2.18"),
+            ("8.3.26.1656", "2.19"),
+        ] {
+            let id = ProfileId::parse(&format!("platform-{build}")).unwrap();
+            let profile = registry.get(&id).unwrap();
+            assert_eq!(profile.fingerprints["xcf.version"].value, dialect);
+            assert!(!profile.constants.contains_key("platform.xml_format"));
+        }
         assert!(
             registry
                 .get(&ProfileId::parse("platform-8.3.27.1989").unwrap())
