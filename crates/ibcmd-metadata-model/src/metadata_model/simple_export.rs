@@ -122,7 +122,6 @@ fn language(payload: &Brace) -> Result<Element> {
     ))
 }
 
-
 /// The properties a constant writes, in order.
 const CONSTANT_PROPERTIES: &[&str] = &[
     "Name",
