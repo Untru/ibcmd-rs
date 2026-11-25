@@ -6093,6 +6093,7 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     };
     const RU: &str = "<currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo>";
     let mut ru = false;
+    let mut empty_languages = false;
     let mut columns = 0u32;
     let mut rows_seen = false;
     let mut template = "0";
@@ -6105,6 +6106,9 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     for (name, attributes, body) in elements {
         match name {
             "languageSettings" if body == RU => ru = true,
+            "languageSettings" if body == "<currentLanguage/><defaultLanguage/>" => {
+                empty_languages = true;
+            }
             "columns" => {
                 columns = number(&child(body, "size").ok_or_else(refuse)?)?;
                 if body != format!("<size>{columns}</size>") {
@@ -6167,7 +6171,9 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     }
     let filled = columns > 0 || height > 0 || !merges.is_empty() || !names.is_empty();
     let language_tail = if filled { 1 } else { 0 };
-    let language = if ru {
+    let language = if empty_languages {
+        "{\"\",\"\",0,0,0}".to_string()
+    } else if ru {
         format!("{{\"ru\",\"ru\",1,1,\"ru\",\"Русский\",\"Русский\",{language_tail}}}")
     } else {
         format!(
@@ -6202,6 +6208,19 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
          1,0,0,0,0,0,2,{{3,3,{{-1}}}},{{3,3,{{-3}}}},0,0,0,\"\",0,\
          {{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0}},{{0}},0,0,0,1,0,0,0}}}}}}"
     ))
+}
+
+#[cfg(test)]
+#[test]
+fn embedded_spreadsheet_preserves_explicit_empty_language_settings() {
+    let xml = r#"<Attribute name="Sheet"><Settings>
+        <mxl:languageSettings><mxl:currentLanguage/><mxl:defaultLanguage/></mxl:languageSettings>
+        <mxl:columns><mxl:size>2</mxl:size></mxl:columns>
+        <mxl:rowsItem><mxl:index>0</mxl:index><mxl:row><mxl:empty>true</mxl:empty></mxl:row></mxl:rowsItem>
+        <mxl:height>1</mxl:height><mxl:vgRows>1</mxl:vgRows>
+    </Settings></Attribute>"#;
+    let compiled = native_embedded_spreadsheet(xml, "Sheet").unwrap();
+    assert!(compiled.contains(r#"{8,1,12,{"","",0,0,0},"#));
 }
 
 /// Whether an attribute is a chart the chart codec writes: `Some(false)` for
