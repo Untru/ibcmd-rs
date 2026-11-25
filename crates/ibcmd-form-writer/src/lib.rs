@@ -6092,6 +6092,7 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
         Some(body[from..to].to_string())
     };
     const RU: &str = "<currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo>";
+    const EMPTY_LANGUAGES: &str = "<currentLanguage/><defaultLanguage/>";
     let mut ru = false;
     let mut empty_languages = false;
     let mut columns = 0u32;
@@ -6106,7 +6107,7 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     for (name, attributes, body) in elements {
         match name {
             "languageSettings" if body == RU => ru = true,
-            "languageSettings" if body == "<currentLanguage/><defaultLanguage/>" => {
+            "languageSettings" if body == EMPTY_LANGUAGES => {
                 empty_languages = true;
             }
             "columns" => {
@@ -6220,7 +6221,8 @@ fn embedded_spreadsheet_preserves_explicit_empty_language_settings() {
         <mxl:height>1</mxl:height><mxl:vgRows>1</mxl:vgRows>
     </Settings></Attribute>"#;
     let compiled = native_embedded_spreadsheet(xml, "Sheet").unwrap();
-    assert!(compiled.contains(r#"{8,1,12,{"","",0,0,0},"#));
+    let language_record = r#"{8,1,12,{"","",0,0,0},"#;
+    assert!(compiled.contains(language_record));
 }
 
 /// Whether an attribute is a chart the chart codec writes: `Some(false)` for
