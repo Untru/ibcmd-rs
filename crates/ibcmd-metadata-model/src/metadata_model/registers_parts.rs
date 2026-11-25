@@ -622,8 +622,38 @@ fn picture(element: Option<&Element>, context: &DescriptorContext) -> Result<Bra
 }
 
 #[cfg(test)]
-#[path = "registers_picture_tests.rs"]
-mod picture_tests;
+mod picture_tests {
+    use super::*;
+
+    #[test]
+    fn zero_code_preserves_a_present_command_picture() {
+        let context = DescriptorContext::with_files(std::path::Path::new("."), "2.20", &[])
+            .expect("empty descriptor index");
+        let leaf = |name: &str, text: &str| Element {
+            name: name.to_string(),
+            text: text.to_string(),
+            ..Element::default()
+        };
+        let xml = Element {
+            name: "Picture".to_string(),
+            children: vec![leaf("Ref", "0"), leaf("LoadTransparent", "false")],
+            ..Element::default()
+        };
+        let actual = picture(Some(&xml), &context).expect("recognize native zero picture code");
+        let expected = brace_list![
+            Brace::num(4),
+            Brace::num(1),
+            brace_list![Brace::num(0)],
+            Brace::str(""),
+            Brace::num(-1),
+            Brace::num(-1),
+            Brace::num(0),
+            Brace::num(0),
+            Brace::str(""),
+        ];
+        assert_eq!(actual, expected);
+    }
+}
 
 /// `{0,<virtual-key code>,<modifiers>}` with Shift 4, Ctrl 8 and Alt 16
 /// summed; `{0,0,0}` for none.
