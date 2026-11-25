@@ -6900,6 +6900,16 @@ pub fn form_calendar_selection_mode_code(value: Option<&str>) -> Option<&'static
     }
 }
 
+/// The measured 8.5.1.1529 options of an unconfigured geographical schema field.
+pub const GEOGRAPHICAL_SCHEMA_DEFAULT_OPTIONS: &str =
+    "{2,50,10,1,1,0,{0,1,0},{4,4,{0},4},1,0,0,1,0}";
+
+/// The two stored exclusions that 8.5.1.1529 writes as FormattedString.
+pub const SPREADSHEET_FORMATTED_STRING_EXCLUSION: [&str; 2] = [
+    "7101b64b-3ee6-4bb8-a6b4-f80ffc54122e",
+    "96a49a89-ccb4-4b16-8e6e-1b0e678f67a1",
+];
+
 /// Track-bar option member 11, shared with `FormSpecialFieldSchema::marking_appearance`.
 /// Управление задачами Reports/узПланированиеПроекта/Forms/ФормаУправляемая
 /// stores 0 for DontShow; the omitted/default spelling stores 2.
@@ -6907,6 +6917,7 @@ pub fn form_track_bar_marking_appearance_code(value: Option<&str>) -> Option<&'s
     match value {
         None => Some("2"),
         Some("TopLeft") => Some("1"),
+        Some("BothSides") => Some("3"),
         Some("DontShow") => Some("0"),
         _ => None,
     }
@@ -7139,6 +7150,7 @@ impl FormSpecialFieldSchema {
         match (self.kind, options.get(11).map(|field| field.trim())) {
             (FormSpecialFieldKind::TrackBar, Some("0")) => Some("DontShow"),
             (FormSpecialFieldKind::TrackBar, Some("1")) => Some("TopLeft"),
+            (FormSpecialFieldKind::TrackBar, Some("3")) => Some("BothSides"),
             _ => None,
         }
     }
@@ -7279,11 +7291,11 @@ impl FormSpecialFieldSchema {
     /// 148 bars with no XML property and `0` on the sole bar whose native XML
     /// says `Broken`. Other codes remain unread.
     pub fn representation(self, options: &[&str]) -> Option<&'static str> {
-        matches!(
-            (self.kind, options.get(8).map(|field| field.trim())),
-            (FormSpecialFieldKind::ProgressBar, Some("0"))
-        )
-        .then_some("Broken")
+        match (self.kind, options.get(8).map(|field| field.trim())) {
+            (FormSpecialFieldKind::ProgressBar, Some("0")) => Some("Broken"),
+            (FormSpecialFieldKind::ProgressBar, Some("2")) => Some("BrokenTilt"),
+            _ => None,
+        }
     }
 }
 

@@ -531,6 +531,7 @@ pub const FIELD_TAGS: &[&str] = &[
     "HTMLDocumentField",
     "CalendarField",
     "GraphicalSchemaField",
+    "GeographicalSchemaField",
     "ProgressBarField",
     "TrackBarField",
     "ChartField",
@@ -670,7 +671,7 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("38", 3),
         element: "TextSize",
         replaces: &[],
-        values: &[("0", Some("Enlarged")), ("1", None)],
+        values: &[("0", Some("Enlarged")), ("1", None), ("2", Some("Reduced"))],
     },
     FactRule {
         tags: &["LabelField"],
@@ -698,7 +699,7 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("11", 2),
         element: "HorizontalStretch",
         replaces: &[],
-        values: &[("1", Some("true")), ("2", None)],
+        values: TRI_STATE,
     },
     // The 8.3.27 reader reads `EditMode` for every field kind but these; the
     // member is the same on every 8.5 BSP field of any kind (0 `Directly`, 1
@@ -852,7 +853,11 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::BagMember("38", 11),
         element: "ControlRepresentation",
         replaces: &[],
-        values: &[("0", None), ("1", Some("Button"))],
+        values: &[
+            ("0", None),
+            ("1", Some("Button")),
+            ("2", Some("ButtonInParentElement")),
+        ],
     },
     FactRule {
         tags: &["UsualGroup"],
@@ -921,7 +926,7 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("5", 2),
         element: "ShowTitleInCard",
         replaces: &[],
-        values: &[("0", Some("false")), ("2", None)],
+        values: TRI_STATE,
     },
     FactRule {
         tags: &["ColumnGroup"],
@@ -935,7 +940,11 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("2", 0),
         element: "AppearanceMode",
         replaces: &[],
-        values: &[("0", None), ("1", Some("CommandBar"))],
+        values: &[
+            ("0", None),
+            ("1", Some("CommandBar")),
+            ("2", Some("UsualGroup")),
+        ],
     },
     FactRule {
         tags: &["Popup"],

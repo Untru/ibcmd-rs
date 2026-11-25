@@ -619,14 +619,8 @@ fn load_item(
         }
         "ColumnGroup" => {
             let card = take(edits, element, "ShowTitleInCard")?;
-            item.bag_tail.insert(
-                2,
-                code_of(
-                    &[("0", Some("false")), ("2", None)],
-                    card.as_deref(),
-                    "ShowTitleInCard",
-                )?,
-            );
+            item.bag_tail
+                .insert(2, code_of(TRI_STATE, card.as_deref(), "ShowTitleInCard")?);
             let title = peek(edits, element, "ShowTitle")?;
             item.bag_tail
                 .insert(3, code_of(TRI_STATE, title.as_deref(), "ShowTitle")?);
@@ -637,7 +631,11 @@ fn load_item(
             item.bag_tail.insert(
                 0,
                 code_of(
-                    &[("0", None), ("1", Some("CommandBar"))],
+                    &[
+                        ("0", None),
+                        ("1", Some("CommandBar")),
+                        ("2", Some("UsualGroup")),
+                    ],
                     mode.as_deref(),
                     "AppearanceMode",
                 )?,
@@ -775,7 +773,7 @@ fn load_field(
             item.bag_tail.insert(
                 3,
                 code_of(
-                    &[("0", Some("Enlarged")), ("1", None)],
+                    &[("0", Some("Enlarged")), ("1", None), ("2", Some("Reduced"))],
                     size.as_deref(),
                     "TextSize",
                 )?,
@@ -808,11 +806,7 @@ fn load_field(
             let stretch = take(edits, element, "HorizontalStretch")?;
             item.bag_tail.insert(
                 2,
-                code_of(
-                    &[("1", Some("true")), ("2", None)],
-                    stretch.as_deref(),
-                    "HorizontalStretch",
-                )?,
+                code_of(TRI_STATE, stretch.as_deref(), "HorizontalStretch")?,
             );
         }
         "PictureField" => {
@@ -1055,6 +1049,10 @@ fn load_usual_group(edits: &mut XmlEdits<'_>, element: usize, item: &mut ItemFac
     match peek(edits, element, "ControlRepresentation")?.as_deref() {
         None => {}
         Some("Button") => put(edits, element, "ControlRepresentation", "Picture")?,
+        Some("ButtonInParentElement") => {
+            take(edits, element, "ControlRepresentation")?;
+            item.bag.insert(11, "2".to_owned());
+        }
         Some(other) => bail!("ControlRepresentation {other} has no 8.3.27 spelling"),
     }
     Ok(())
@@ -1546,6 +1544,7 @@ fn up_bag(
         ("37", "19", "1", 11) => ("1", vec![]),
         // Unmeasured under 8.5 (see `layout_8_5_1::bag_revision`): kept as is.
         ("37", "12", "3", 16) => ("3", vec![]),
+        ("37", "16", "2", 13) => ("2", vec![]),
         ("37", "20", "1", 14) => ("1", vec![]),
         ("12", "0", "5", 9) => ("5", vec![]),
         ("12", "1", "4", 13) => ("6", vec!["0", UNSET_COLOR]),

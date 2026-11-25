@@ -598,6 +598,7 @@ impl FormChoiceListItem {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormChoiceListValue {
+    EmptyCustomStandardPeriod,
     Boolean(bool),
     Decimal(String),
     /// A date, already in the `xs:dateTime` spelling (`YYYY-MM-DDThh:mm:ss`).
@@ -675,6 +676,17 @@ impl FormChoiceListValue {
     /// shape: their distinction is parser provenance, not XML syntax.
     pub fn wire_shape(&self) -> FormChoiceListValueWireShape<'_> {
         match self {
+            Self::EmptyCustomStandardPeriod => FormChoiceListValueWireShape {
+                xml_opening: Cow::Borrowed(concat!(
+                    "<Value xsi:type=\"v8:StandardPeriod\">\r\n",
+                    "\t<v8:variant xsi:type=\"v8:StandardPeriodVariant\">Custom</v8:variant>\r\n",
+                    "\t<v8:startDate>0001-01-01T00:00:00</v8:startDate>\r\n",
+                    "\t<v8:endDate>0001-01-01T00:00:00</v8:endDate>\r\n",
+                    "</Value>",
+                )),
+                xml_closing: "",
+                text: None,
+            },
             Self::Boolean(value) => FormChoiceListValueWireShape {
                 xml_opening: Cow::Borrowed("<Value xsi:type=\"xs:boolean\">"),
                 xml_closing: "</Value>",
@@ -891,6 +903,17 @@ where
                 && parse_empty_form_value_list_payload(payload).is_some() =>
         {
             FormChoiceListValue::EmptyValueList
+        }
+        ("#", [_, class_id, period])
+            if mode.trim() == "1"
+                && class_id.trim() == "2fdc88ec-7c9b-43cd-8ba5-873f043bdd88"
+                && literal_ids_are(type_id, value_id, class_id)
+                && braced_fields_bounded(period, 3)?
+                    .iter()
+                    .map(|s| s.trim())
+                    .eq(["0", "00010101000000", "00010101000000"]) =>
+        {
+            FormChoiceListValue::EmptyCustomStandardPeriod
         }
         // A design-time value of a platform-defined type.  The value member
         // carries the type identifier and the member ordinal; the item's own

@@ -218,6 +218,7 @@ struct FormXmlChoiceListItem {
     /// The `xsi:type` of the inner `<Value>`, and its text.
     literal_type: Option<String>,
     literal: Option<String>,
+    period_members: BTreeMap<String, String>,
     /// Anything inside the item the writer has not measured.
     unwritable: Vec<String>,
     /// The values of a `v8:FixedArray` literal, each read like an item.
@@ -2288,16 +2289,25 @@ fn format_native_child_item(
         let field_command_set = if item.excluded_commands.is_empty() {
             native::NativeFieldItem::default().appearance[6].to_string()
         } else {
-            let mut excluded = item
-                .excluded_commands
-                .iter()
-                .map(|name| {
-                    native::item_standard_command_uuid(&item.tag, false, name).ok_or_else(|| {
-                        anyhow!("<{}> excludes {name}, which has no measured uuid", item.tag)
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
+            let mut excluded = Vec::new();
+            for name in &item.excluded_commands {
+                if item.tag == "SpreadSheetDocumentField" && name == "FormattedString" {
+                    excluded.extend(ibcmd_form_schema::SPREADSHEET_FORMATTED_STRING_EXCLUSION);
+                } else {
+                    excluded.push(
+                        native::item_standard_command_uuid(&item.tag, false, name).ok_or_else(
+                            || {
+                                anyhow!(
+                                    "<{}> excludes {name}, which has no measured uuid",
+                                    item.tag
+                                )
+                            },
+                        )?,
+                    );
+                }
+            }
             excluded.sort_unstable();
+            excluded.dedup();
             format!("{{{},{}}}", excluded.len(), excluded.join(","))
         };
         let header_picture = native_extra_picture(item, "HeaderPicture", source, items_root)?;
@@ -4054,7 +4064,7 @@ fn native_text_input_tail(item: &FormXmlChildItem) -> Result<[&'static str; 8]> 
         )?,
         code("OnScreenKeyboardReturnKeyText", &[("Done", "7")])?,
         // Slot 63 `<AutofillHint>` (FullName 1), behind the slot 62 sub-tuple.
-        code("AutofillHint", &[("FullName", "1")])?,
+        code("AutofillHint", &[("FullName", "1"), ("PhoneNumber", "17")])?,
     ])
 }
 
@@ -4166,6 +4176,25 @@ fn native_choice_list_value(
     let title = format_form_title_value(&choice.title);
     let text = choice.literal.as_deref().unwrap_or("").trim();
     match choice.literal_type.as_deref() {
+        Some("v8:StandardPeriod")
+            if text.is_empty()
+                && choice.period_members.len() == 3
+                && choice.period_members.get("variant").map(String::as_str) == Some("Custom")
+                && ["startDate", "endDate"].into_iter().all(|name| {
+                    choice.period_members.get(name).map(String::as_str)
+                        == Some("0001-01-01T00:00:00")
+                }) =>
+        {
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(
+                    "{\"#\",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{0,00010101000000,00010101000000}}",
+                ),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
         // An empty `<Value/>` with no type at all -- four items of ERP УХ,
         // each storing `{"U"}` with both ids zero.
         None if text.is_empty() => Ok(native::format_native_choice_list_value(
@@ -4691,6 +4720,24 @@ fn native_field_payload(
                 &events,
             ))
         }
+        Some(16) => {
+            if events != "{0,1,0}"
+                || item.width.is_some()
+                || item.height.is_some()
+                || item.max_width.is_some()
+                || item.max_height.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+                || item.horizontal_stretch.is_some()
+                || item.vertical_stretch.is_some()
+                || !item.scalars.is_empty()
+            {
+                return Err(anyhow!(
+                    "a <GeographicalSchemaField> names a property whose slot is not measured"
+                ));
+            }
+            Ok(ibcmd_form_schema::GEOGRAPHICAL_SCHEMA_DEFAULT_OPTIONS.to_owned())
+        }
         Some(20) => {
             if events != "{0,1,0}"
                 || item.max_width.is_some()
@@ -4841,6 +4888,7 @@ fn native_field_payload(
             let representation = match item.scalars.get("Representation").map(String::as_str) {
                 None => "1",
                 Some("Broken") => "0",
+                Some("BrokenTilt") => "2",
                 Some(other) => {
                     return Err(anyhow!(
                         "a progress bar's <Representation>{other} is not measured"
@@ -10290,6 +10338,16 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
                                 FormChoiceListPart::Literal => {
                                     choice.literal = Some(nested_text.to_string());
                                 }
+                                FormChoiceListPart::PeriodMember => {
+                                    if choice
+                                        .period_members
+                                        .insert(local.clone(), nested_text.trim().to_owned())
+                                        .is_some()
+                                    {
+                                        choice.unwritable.push(local.clone());
+                                    }
+                                    nested_text.clear();
+                                }
                                 FormChoiceListPart::TitleLang => {
                                     current_choice_lang = Some(nested_text.trim().to_string());
                                 }
@@ -13585,6 +13643,12 @@ fn path_ends_with_for_choice_list(path: &[String], items: &[FormXmlChildItem]) -
 /// `<FunctionalOptions><Item>`. Neither of the last two carries a
 /// `<Presentation>`, a `<CheckState>` or a `<Value>`.
 fn form_nested_text_element(path: &[String]) -> bool {
+    if ["variant", "startDate", "endDate"]
+        .into_iter()
+        .any(|member| path_ends_with(path, &["ChoiceList", "Item", "Value", "Value", member]))
+    {
+        return true;
+    }
     if form_type_spec_part(path, &["AvailableTypes"], false).is_some() {
         return true;
     }
@@ -13670,6 +13734,7 @@ enum FormChoiceListPart {
     TitleLang,
     TitleContent,
     TitleItem,
+    PeriodMember,
     /// The literal and the title of a value inside a `v8:FixedArray`.
     ArrayLiteral,
     ArrayTitleLang,
@@ -13710,6 +13775,9 @@ fn form_choice_list_part(
             }
             "CheckState" if list && ends(&["CheckState"]) => Some(FormChoiceListPart::CheckState),
             "Value" if ends(&[outer, "Value"]) => Some(FormChoiceListPart::Literal),
+            "variant" | "startDate" | "endDate" if list && ends(&[outer, "Value", local]) => {
+                Some(FormChoiceListPart::PeriodMember)
+            }
             "lang" if ends(&[outer, "Presentation", "item", "lang"]) => {
                 Some(FormChoiceListPart::TitleLang)
             }
@@ -13782,6 +13850,19 @@ fn apply_form_choice_list_part(
         if (opens(&[outer, "Presentation"]) && local == "item")
             || (opens(&[outer, "Presentation", "item"]) && matches!(local, "lang" | "content"))
         {
+            return Ok(());
+        }
+        if outer == "Value"
+            && choice.literal_type.as_deref() == Some("v8:StandardPeriod")
+            && opens(&[outer, "Value"])
+            && matches!(local, "variant" | "startDate" | "endDate")
+        {
+            if local == "variant"
+                && xml_attribute_value(event, "type")?.as_deref()
+                    != Some("v8:StandardPeriodVariant")
+            {
+                choice.unwritable.push(local.to_string());
+            }
             return Ok(());
         }
         // A `v8:FixedArray` literal holds `<v8:Value>`s, each the same

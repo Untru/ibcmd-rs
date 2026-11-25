@@ -655,6 +655,7 @@ pub fn bag_revision(
         ("37", "11", "1", 11) => ("1", 0),
         ("37", "14", "3", 14) => ("3", 0),
         ("37", "15", "4", 14) => ("3", 1),
+        ("37", "16", "2", 13) => ("2", 0),
         ("37", "17", "1", 16) => ("1", 0),
         // A planner field (19): the БСП 8.5 extension ServiceDesk keeps the same
         // form as its 8.3.27 version, and the bag has the same revision and
@@ -728,6 +729,16 @@ fn convert_items(node: Node, facts: &mut FormFactsV8_5_1) -> Result<Node> {
                     bag.len()
                 )
             })?;
+        if v8_3 == "37" && kind == "16" {
+            let Node::List(default) =
+                parse_node(ibcmd_form_schema::GEOGRAPHICAL_SCHEMA_DEFAULT_OPTIONS)?
+            else {
+                unreachable!("the geographical schema options are a list");
+            };
+            if *bag != default {
+                bail!("8.5 geographical schema field {id} has unmeasured options");
+            }
+        }
         item_facts.bag = bag.clone();
         let bag_kept = bag.len() - bag_appended;
         item_facts.bag_tail = bag.split_off(bag_kept);
