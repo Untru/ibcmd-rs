@@ -3974,6 +3974,13 @@ fn stage_source_objects_patch(
     if let Some(selection) = selection {
         selection.refuse_added(&plan.added)?;
     }
+    // A sparse file import can patch a changed descriptor against the target.
+    // Compiling a replacement descriptor needs the whole configuration context.
+    // Prove the patch reproduces the selected files before publishing it.
+    let verify_sparse_patch = selection.is_some()
+        && !plan.changed.is_empty()
+        && !args.source_root.join("Configuration.xml").try_exists()?;
+    let can_build = overriding && !verify_sparse_patch;
     let leave_to_the_build =
         |xml: &PathBuf| plan.is_added(&source_relative_path(&args.source_root, xml));
     let metadata_xmls = metadata_xmls
@@ -4119,12 +4126,12 @@ fn stage_source_objects_patch(
         // does not hold) is not a refusal: the object is built whole instead.
         let (fixable, mut failures): (Vec<_>, Vec<_>) = failures
             .into_iter()
-            .partition(|failure| overriding && override_stage::is_buildable(&failure.error));
+            .partition(|failure| can_build && override_stage::is_buildable(&failure.error));
         let rebuild = fixable
             .into_iter()
             .map(|failure| failure.xml)
             .collect::<Vec<_>>();
-        let built = if overriding && !(plan.is_empty() && rebuild.is_empty()) {
+        let built = if can_build && !(plan.is_empty() && rebuild.is_empty()) {
             let patched = |id: &str| {
                 metadata_objects
                     .iter()
@@ -4284,7 +4291,7 @@ fn stage_source_objects_patch(
 
         // The guard: the state this stage would leave, exported with the model and
         // compared with the tree, before anything is written.
-        let verification = if stage_guard::wanted(args.verify) {
+        let verification = if verify_sparse_patch || stage_guard::wanted(args.verify) {
             let staged = bulk_stage_rows(
                 &metadata_objects,
                 &common_modules,
@@ -4294,6 +4301,11 @@ fn stage_source_objects_patch(
             );
             let verified = timed_stage_step("verify the staged state", || {
                 stage_guard::verify_patch_stage(
+                    if verify_sparse_patch {
+                        stage_guard::StageKind::SparsePatch
+                    } else {
+                        stage_guard::StageKind::Patch
+                    },
                     args,
                     &sql,
                     &manifest,
