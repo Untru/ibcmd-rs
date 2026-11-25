@@ -1361,12 +1361,10 @@ const HTTP_METHODS: &str = "21c96ea8-c8fc-424a-a0b4-e1ffb2fa1a73";
 
 const REUSE_SESSIONS: &[(&str, i64)] = &[("DontUse", 0), ("Use", 1), ("AutoUse", 2)];
 
-/// `HTTPMethod` codes: `DELETE` 2, `GET` 3, `PATCH` 10 (the БСП 8.5 extension
-/// ServiceDesk), `POST` 11 and `PUT` 14 are measured; the rest follow the
-/// platform's alphabetical enumeration.
+/// Codes verified against the native HTTPService row and XML in the EDS matrix.
 const HTTP_METHOD_CODES: &[(&str, i64)] = &[
-    ("Any", 0),
-    ("CONNECT", 1),
+    ("CONNECT", 0),
+    ("COPY", 1),
     ("DELETE", 2),
     ("GET", 3),
     ("HEAD", 4),
@@ -1382,6 +1380,7 @@ const HTTP_METHOD_CODES: &[(&str, i64)] = &[
     ("PUT", 14),
     ("TRACE", 15),
     ("UNLOCK", 16),
+    ("Any", 1000),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
