@@ -1,8 +1,11 @@
 # UT11 SQL acceptance (#359)
 
-Status: **BLOCKED — no SQL acceptance run performed**. This runbook and the
-offline collector do not close #359. CF/filedb parity and the historical
-50,898-file result do not exercise the required SQL export/import paths.
+Status: **SQL roundtrip measured on UT 11.5.27.113**. On 2026-11-25
+both SQL exports completed from matching restored clones. After fixing
+three compile failures, import into a distinct empty target, native apply
+and the control export all completed. The report records both remaining
+byte differences.
+[Windows run and results](evidence/ut11-sql-20261125.md).
 
 ## Inventory on the user's Mac, 2026-10-23
 

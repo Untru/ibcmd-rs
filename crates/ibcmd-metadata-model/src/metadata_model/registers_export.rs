@@ -357,10 +357,15 @@ fn picture(node: &Brace, context: &ExportContext) -> Result<Element> {
     let reference = match value {
         [code] => {
             let code = number(code)?;
-            format!(
-                "StdPicture.{}",
-                std_picture_by_code(code).ok_or_else(|| anyhow!("unknown picture code {code}"))?
-            )
+            if code == 0 {
+                "0".to_string()
+            } else {
+                format!(
+                    "StdPicture.{}",
+                    std_picture_by_code(code)
+                        .ok_or_else(|| anyhow!("unknown picture code {code}"))?
+                )
+            }
         }
         [_, uuid] => {
             let uuid = atom(uuid)?;

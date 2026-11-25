@@ -6091,8 +6091,8 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
         let to = body[from..].find(&close)? + from;
         Some(body[from..to].to_string())
     };
-    const RU: &str = "<currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo>";
     let mut ru = false;
+    let mut empty_languages = false;
     let mut columns = 0u32;
     let mut rows_seen = false;
     let mut template = "0";
@@ -6104,7 +6104,18 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     let mut names = Vec::new();
     for (name, attributes, body) in elements {
         match name {
-            "languageSettings" if body == RU => ru = true,
+            "languageSettings"
+                if ibcmd_form_schema::embedded_spreadsheet_language_settings(body)
+                    == Some(true) =>
+            {
+                ru = true
+            }
+            "languageSettings"
+                if ibcmd_form_schema::embedded_spreadsheet_language_settings(body)
+                    == Some(false) =>
+            {
+                empty_languages = true;
+            }
             "columns" => {
                 columns = number(&child(body, "size").ok_or_else(refuse)?)?;
                 if body != format!("<size>{columns}</size>") {
@@ -6167,7 +6178,9 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     }
     let filled = columns > 0 || height > 0 || !merges.is_empty() || !names.is_empty();
     let language_tail = if filled { 1 } else { 0 };
-    let language = if ru {
+    let language = if empty_languages {
+        "{\"\",\"\",0,0,0}".to_string()
+    } else if ru {
         format!("{{\"ru\",\"ru\",1,1,\"ru\",\"Русский\",\"Русский\",{language_tail}}}")
     } else {
         format!(
@@ -6203,6 +6216,9 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
          {{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0}},{{0}},0,0,0,1,0,0,0}}}}}}"
     ))
 }
+
+#[cfg(test)]
+mod embedded_spreadsheet_tests;
 
 /// Whether an attribute is a chart the chart codec writes: `Some(false)` for
 /// a single `Chart` type, `Some(true)` for a single `GanttChart` type, under

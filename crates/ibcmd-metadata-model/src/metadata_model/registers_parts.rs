@@ -600,7 +600,11 @@ fn picture(element: Option<&Element>, context: &DescriptorContext) -> Result<Bra
         Some(value) => parse_bool(value.trim())?,
         None => false,
     };
-    let value = if let Some(name) = reference_text.strip_prefix("StdPicture.") {
+    const ZERO_PICTURE_REFERENCE: &str = "0";
+    let value = if reference_text == ZERO_PICTURE_REFERENCE {
+        // A present picture can carry the platform's zero picture code.
+        brace_list![Brace::num(0)]
+    } else if let Some(name) = reference_text.strip_prefix("StdPicture.") {
         if let Some((_, code)) = STANDARD_PICTURE_CODES
             .iter()
             .find(|(candidate, _)| *candidate == name)
@@ -683,4 +687,38 @@ pub fn shortcut(text: &str) -> Result<Brace> {
         Brace::num(code),
         Brace::num(mask)
     ])
+}
+
+#[cfg(test)]
+mod picture_tests {
+    use super::*;
+
+    #[test]
+    fn zero_code_preserves_a_present_command_picture() {
+        let context = DescriptorContext::with_files(std::path::Path::new("."), "2.20", &[])
+            .expect("empty descriptor index");
+        let leaf = |name: &str, text: &str| Element {
+            name: name.to_string(),
+            text: text.to_string(),
+            ..Element::default()
+        };
+        let xml = Element {
+            name: "Picture".to_string(),
+            children: vec![leaf("Ref", "0"), leaf("LoadTransparent", "false")],
+            ..Element::default()
+        };
+        let actual = picture(Some(&xml), &context).expect("recognize native zero picture code");
+        let expected = brace_list![
+            Brace::num(4),
+            Brace::num(1),
+            brace_list![Brace::num(0)],
+            Brace::str(""),
+            Brace::num(-1),
+            Brace::num(-1),
+            Brace::num(0),
+            Brace::num(0),
+            Brace::str(""),
+        ];
+        assert_eq!(actual, expected);
+    }
 }

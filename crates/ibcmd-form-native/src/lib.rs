@@ -7773,18 +7773,7 @@ pub fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) -> Opti
         &[("Use", "0"), ("DontUse", "1")],
         "2",
     )?;
-    let children_align = root_code(
-        payload.children_align,
-        &[
-            ("None", "1"),
-            ("ItemsLeftTitlesLeft", "2"),
-            ("ItemsRightTitlesLeft", "3"),
-            ("ItemsLeftTitlesRight", "4"),
-            ("ItemsRightTitlesRight", "5"),
-            ("TitlesLeftDataAuto", "6"),
-        ],
-        "0",
-    )?;
+    let children_align = root_code(payload.children_align, CHILDREN_ALIGNMENT_CODES, "0")?;
     let current_row_use = root_code(
         payload.current_row_use,
         &[("Use", "0"), ("DontUse", "1")],
@@ -8199,18 +8188,7 @@ pub fn format_page_payload(payload: &NativePagePayload<'_>) -> Option<String> {
         &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
         "3",
     )?;
-    let children_align = root_code(
-        payload.children_align,
-        &[
-            ("None", "1"),
-            ("ItemsLeftTitlesLeft", "2"),
-            ("ItemsRightTitlesLeft", "3"),
-            ("ItemsLeftTitlesRight", "4"),
-            ("ItemsRightTitlesRight", "5"),
-            ("TitlesLeftDataAuto", "6"),
-        ],
-        "0",
-    )?;
+    let children_align = root_code(payload.children_align, CHILDREN_ALIGNMENT_CODES, "0")?;
     Some(format!(
         "{{18,{picture},{named},{child_items_width},{title_data_path},{format},{show_title},{{\"Pattern\"}},\"\",{back_color},{horizontal_spacing},{vertical_spacing},{horizontal_align},{vertical_align},{children_align},{scroll_on_compress},{horizontal},{horizontal_tail},{border_color},{font}}}",
         picture = payload.picture,
@@ -8560,7 +8538,7 @@ pub struct NativeRootTail<'a> {
     pub horizontal_align: Option<&'a str>,
     /// `<VerticalAlign>`: `Top`, `Center` or `Bottom`.
     pub vertical_align: Option<&'a str>,
-    /// `<ChildrenAlign>`, of which only `None` is ever stored.
+    /// `<ChildrenAlign>`, encoded like the equivalent group property.
     pub children_align: Option<&'a str>,
     /// `<Group>`, read twice and again not the same way: `AlwaysHorizontal`
     /// writes 1 in the first place and 3 in the second.
@@ -8653,6 +8631,15 @@ fn root_code(value: Option<&str>, table: &[(&str, &str)], absent: &'static str) 
     }
 }
 
+const CHILDREN_ALIGNMENT_CODES: &[(&str, &str)] = &[
+    ("None", "1"),
+    ("ItemsLeftTitlesLeft", "2"),
+    ("ItemsRightTitlesLeft", "3"),
+    ("ItemsLeftTitlesRight", "4"),
+    ("ItemsRightTitlesRight", "5"),
+    ("TitlesLeftDataAuto", "6"),
+];
+
 const ROOT_SPACING: &[(&str, &str)] = &[
     ("None", "1"),
     ("Half", "2"),
@@ -8711,7 +8698,7 @@ pub fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
             &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
             "3",
         )?,
-        root_code(tail.children_align, &[("None", "1")], "0")?,
+        root_code(tail.children_align, CHILDREN_ALIGNMENT_CODES, "0")?,
         group,
         scroll_again,
         // `<Scale>`, 100 when unwritten (the exporter's `extract_form_scale`).
@@ -12017,6 +12004,13 @@ mod tests {
         .expect("a grouped tail");
         assert!(group.contains(",3,3,0,1,0,100,"));
         assert!(group.ends_with(",0,0,3,{50,0},1"));
+
+        let children = format_root_tail(&NativeRootTail {
+            children_align: Some("ItemsLeftTitlesLeft"),
+            ..NativeRootTail::default()
+        })
+        .expect("a tail with child alignment");
+        assert!(children.contains(",3,3,2,0,0,100,"));
 
         // Every switch the tail carries, off.
         let off = format_root_tail(&NativeRootTail {
