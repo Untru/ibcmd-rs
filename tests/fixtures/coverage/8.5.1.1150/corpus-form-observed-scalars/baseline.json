@@ -1,0 +1,17 @@
+{
+  "equal": [
+    "CovPageChildrenAlign_None",
+    "CovPageEnableContentChange_true",
+    "CovPageGroup_AlwaysHorizontal",
+    "CovPageGroup_Horizontal",
+    "CovPageHorizontalSpacing_Half",
+    "CovPageHorizontalStretch_false",
+    "CovPageHorizontalStretch_true",
+    "CovPageReadOnly_true",
+    "CovPageScrollOnCompress_true",
+    "CovPageShowTitle_false",
+    "CovPageVerticalAlign_Center",
+    "CovPageVerticalStretch_false",
+    "CovPageVerticalStretch_true"
+  ]
+}
