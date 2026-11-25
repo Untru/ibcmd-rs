@@ -1638,6 +1638,7 @@ pub fn plan_with_gate(
     };
     let nodes = node_literals(node_source);
     report.not_written = vec![
+        "Params ibparams.inf and locale.inf: preserved; native direct apply can refresh both".to_owned(),
         "Params .ui rows (the platform's configuration-licensing records, track ui #340): never written; the native apply re-encrypts two of them on every apply".to_owned(),
     ];
     if structure.is_some() && options.backup == BackupPolicy::None {

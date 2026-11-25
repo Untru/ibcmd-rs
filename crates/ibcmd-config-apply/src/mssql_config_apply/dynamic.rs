@@ -1806,6 +1806,7 @@ pub fn plan_dynamic(sql: &SqlExec, options: &ConfigApplyOptions) -> Result<Dynam
         );
     }
     report.not_written = vec![
+        "Params ibparams.inf and locale.inf: preserved; native direct apply can refresh both".to_owned(),
         "Params .ui rows (the platform's configuration-licensing records, track ui #340): never written".to_owned(),
         "the help/search index in Files (userDocs_ru*, userPostings_ru*, userVocabulary_ru*): not rebuilt; native-derived payloads can differ and help-search equivalence is not claimed".to_owned(),
         "the ordinary rows the aliases stand beside: they keep the previous text until an exclusive apply folds the generation".to_owned(),

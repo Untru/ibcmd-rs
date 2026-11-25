@@ -15,6 +15,12 @@ The following CLI commands and their implementation modules are gated by
 - `infobase config roundtrip` and `infobase config sweep` and
   `src/infobase_oracle.rs`, which use the installed platform's own `config
   check` and `config apply` as an oracle.
+- `infobase config apply --pid=<pid>` when
+  `IBCMD_RS_STANDALONE_ORACLE` contains the absolute path to the platform's
+  native executable. The child inherits stdin, stdout and stderr so the
+  server controls its interaction. Use this route on a private standalone
+  server to compare apply and session state. The independent standalone
+  transport for the release build remains open in #347.
 
 Since release 0.3 the `infobase` mode itself is released (`src/dropin/`,
 `src/infobase.rs`): `config export` and `config import` read and write SQL

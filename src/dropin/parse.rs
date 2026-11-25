@@ -923,6 +923,20 @@ fn parse_export_query(scan: &Scan) -> Result<Invocation, Refusal> {
     }))
 }
 
+/// The research route accepts only a local, explicitly named apply target.
+#[cfg(feature = "platform-oracle")]
+pub(super) fn is_pid_apply(args: &[OsString]) -> bool {
+    let scan = scan(args);
+    scan.node().kind == NodeKind::Apply
+        && scan.error.is_none()
+        && !scan.has(Opt::Help)
+        && !scan.has(Opt::Version)
+        && !scan.has(Opt::Remote)
+        && scan
+            .value(Opt::Pid)
+            .is_some_and(|value| value.parse::<u32>().is_ok_and(|pid| pid != 0))
+}
+
 /// Parses the arguments that follow `infobase`.
 pub fn parse_infobase(args: &[OsString]) -> Result<Invocation, Refusal> {
     let scan = scan(args);

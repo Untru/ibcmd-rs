@@ -3,7 +3,7 @@
 
 use super::parse::{INFOBASE, NodeKind, OTHER_MODES, command_paths};
 
-/// `ibcmd infobase --help` (and `ibcmd help infobase`).
+/// `ibcmd help infobase`.
 pub fn infobase_help(program: &str) -> String {
     let version = env!("CARGO_PKG_VERSION");
     let unsupported = command_paths()
@@ -258,8 +258,9 @@ pub fn infobase_help(program: &str) -> String {
 
                 --session-terminate=<disable|prompt|force>
                     Завершение активных сеансов. disable (по умолчанию);
-                    prompt и force принимаются, пока к базе никто не подключен,
-                    ibcmd-rs сеансы не завершает
+                    при монопольном применении с подключёнными сеансами
+                    prompt и force возвращают код 1. При --dynamic=force
+                    сеансы сохраняются при любом значении этого параметра
 
                 --session-terminate-message=<message>
                     Принимается и не используется
