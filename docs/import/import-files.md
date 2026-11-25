@@ -181,3 +181,56 @@ values can vary. The object names, IDs, order and other bytes matched.
 This records existing common forms on SQL Server with platform 8.3.27.2342.
 Other object families, nested dependency descriptors and merging into a
 previous stage remain outside this measurement.
+
+## Nested subsystem descriptors on SQL Server, 2026-11-25
+
+The second fixture is
+`tests/fixtures/external/nested_subsystems/input.cf` (SHA-256
+`d31fa5104dbb979cd478f94b732763eabdf998f833ba6ba26332f266c9cc3a25`).
+It requires platform 8.5.1. Use native ibcmd 8.5.1.1529 (SHA-256
+`4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20`)
+and SQL Server Developer 17.0.1155.3. Create and apply the fixture, then
+restore a copy-only checksum backup into a second disposable SQL database
+as above. The two initial native exports were byte-identical.
+
+In the full native tree change the empty comment of
+`Subsystems/Верх/Subsystems/Низ.xml` to `<Comment>SQL twin 363</Comment>`.
+The parent lists the child in `ChildObjects`. The child references
+`CommonModule.ФайловаяБазаПроверка` in `Content`. Leave both relationships
+unchanged. Keep the native encoding and line endings.
+
+| Native import | XML directory and file list | Rows in ConfigSave before apply |
+| --- | --- | --- |
+| Full | Whole edited tree | Full import |
+| Partial, `--no-check` | The parent and child descriptors, with only `Subsystems/Верх.xml` on the command line | Parent, child, `root`, `version`, `versions` |
+| Partial | Only the edited child descriptor, listed by its relative path | Child, `root`, `version`, `versions` |
+
+Both partial cases ran on separate restores of the same backup. Native
+`config apply --force` and `config export` succeeded in each case. The
+seven exported paths and their contents matched the edited input with
+only `ConfigDumpInfo.xml` version values normalized. The child-only case
+required neither the parent descriptor nor the referenced common module
+descriptor in the source directory. The parent-selected case imported
+the unlisted child that was present beneath its directory.
+
+```text
+python scripts/apply-trace/lab/compare_import_files_twins.py --edited edited native-full native-parent native-child
+```
+
+Restore both databases from the original backup and repeat the three
+imports using ibcmd-rs, restoring the sparse twin between partial runs.
+Use native apply and export throughout. Measured on `dc177253`, Windows
+MSVC dev build with Rust 1.95.0, SHA-256
+`cf9216dbb0cf06ff0c8e5262dc4eb23e7d2ff4fdd41a9783d540c4b43741430e`.
+
+| ibcmd-rs import | Rows in ConfigSave before apply | Raw ConfigDumpInfo.xml SHA-256 after apply |
+| --- | --- | --- |
+| Full tree | Child, `root`, `version`, `versions` | `47ed2dec8f8451264e8d97da95f300eaf0da50394984330b75261a444b98d1cb` |
+| Only parent listed, parent and child supplied, `--partial --no-check` | Parent, child, `root`, `version`, `versions` | `026dd0e159aef6e9e613c42832289d6ca3cc218f504324e5c72358d980511b15` |
+| Only child listed and supplied, `--partial` | Child, `root`, `version`, `versions` | `167d1f5ce419b26ea4db54b8cce3d5ecc6064aee02a05901d6978cb81ede4c38` |
+
+All imports, applies and exports returned 0. All six exports matched all
+seven files in the edited input after normalizing only `configVersion`
+values. The existing parent-child relationship and common-module reference
+survived all three product imports. Unserved operations are documented in
+“What ibcmd-rs does with it” above, along with their refusal behavior.

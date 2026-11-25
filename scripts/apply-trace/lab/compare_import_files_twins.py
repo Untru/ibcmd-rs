@@ -1,4 +1,4 @@
-"""Check native XML exports of the two_variable fixture after the #363 edits."""
+"""Check native XML exports of SQL twins after the #363 edits."""
 
 import argparse
 import hashlib
@@ -28,14 +28,18 @@ def replace_once(data, old, new):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--edited", action="store_true", help="compare against an already edited input tree"
+    )
     parser.add_argument("baseline", type=Path)
     parser.add_argument("exports", type=Path, nargs="+")
     args = parser.parse_args()
     expected = files(args.baseline)
-    expected[MODULE] = replace_once(expected[MODULE], "Номер = 1;", "Номер = 2;")
-    expected[DESCRIPTOR] = replace_once(
-        expected[DESCRIPTOR], "<Comment/>", "<Comment>Изменено частичной загрузкой</Comment>"
-    )
+    if not args.edited:
+        expected[MODULE] = replace_once(expected[MODULE], "Номер = 1;", "Номер = 2;")
+        expected[DESCRIPTOR] = replace_once(
+            expected[DESCRIPTOR], "<Comment/>", "<Comment>Изменено частичной загрузкой</Comment>"
+        )
     # Keep object names, IDs, ordering and every byte outside version values.
     version = re.compile(rb'configVersion="[0-9a-fA-F]{40}"')
     if not version.search(expected[VERSIONS]):
