@@ -65,3 +65,37 @@ with just the one `app:permissionMessage` element removed, both candidate
 writers reached the panel height in `Ext/ClientApplicationInterface.xml`.
 PR #722 covers this separate record. The remaining #678 cases concern help
 links and standard commands.
+
+## Help links and standard commands on 8.5.1.1529
+
+The pinned native CFs for `corpus-navigation-commands` and
+`corpus-palette-help-and-interface` contain these references:
+
+| CF entry | XML command | Stored code |
+| --- | --- | --- |
+| Common-form body | AccountingRegister.StandardCommand.OpenList | 0 |
+| Common-form body | ChartOfAccounts.StandardCommand.OpenList | 0 |
+| Subsystem command interface | ExchangePlan.StandardCommand.Create | 1 |
+
+The target owner UUIDs were resolved from the native descriptors. The help
+fixture also exports a literal `about:../id…` link beside an ordinary
+`Catalog.…/Help` link. Both hrefs survive the writer and reader.
+
+For the navigation probe, keep the two corresponding common forms, their
+accounting register and chart of accounts, the documents, accumulation
+registers and languages from the native tree. For the help and command
+interface probe, keep the catalogs, exchange plans, subsystems and languages
+from the native tree. Update each configuration's child list accordingly.
+Use the native export of each probe as input to the same CF and file database
+commands above. Use `--no-verify` for navigation because the file database
+export already differs on the empty `StandardTabularSections` element in the
+chart of accounts (#627).
+
+- Navigation returned 12/12 application files through CF and through each
+  native re-export after apply. The file database's own export returned
+  11/12 byte-identical files, including both target forms and their bodies.
+- Help and command interface returned 11/11 application files in each of
+  the four exports, including the HTML and subsystem command interface.
+- The pinned coverage round-trip suite passed on both routes. The only
+  remaining #678 refusal entries concern panel height, implemented in the
+  separate open PR #722.

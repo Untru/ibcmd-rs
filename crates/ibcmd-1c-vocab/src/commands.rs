@@ -335,7 +335,12 @@ pub fn command_interface_standard_command_for_code(kind: &str, code: &str) -> Op
         // and both were written as the raw `1:<uuid>` sentinel instead.
         (
             "1",
-            "BusinessProcess" | "Catalog" | "ChartOfAccounts" | "Document" | "InformationRegister",
+            "BusinessProcess"
+            | "Catalog"
+            | "ChartOfAccounts"
+            | "Document"
+            | "ExchangePlan"
+            | "InformationRegister",
         ) => Some("Create"),
         ("1", "ChartOfCharacteristicTypes") => Some("CreateFolder"),
         ("2", "Catalog") => Some("CreateFolder"),

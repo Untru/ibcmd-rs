@@ -3802,10 +3802,9 @@ pub fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>) -> Ve
             offset = uuid_start;
             continue;
         };
-        let Some(reference) = refs
-            .get(uuid)
-            .filter(|_| help_link_marker_is_anchor(&text, start))
-        else {
+        let Some(reference) = refs.get(uuid).filter(|_| {
+            !text[..start].ends_with("about:") && help_link_marker_is_anchor(&text, start)
+        }) else {
             output.push_str(&text[offset..uuid_end]);
             offset = uuid_end;
             continue;

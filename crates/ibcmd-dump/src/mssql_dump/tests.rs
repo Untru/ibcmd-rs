@@ -14101,7 +14101,7 @@ fn rewrites_internal_help_links_to_metadata_references() {
     let unknown_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let refs = BTreeMap::from([(uuid.to_string(), "Catalog.Products".to_string())]);
     let html = format!(
-        r#"<a href="../id{uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Products</a><a href="../id{unknown_uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Unknown</a><a href="https://example.com">External</a>"#
+        r#"<a href="../id{uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Products</a><a href="../id{unknown_uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Unknown</a><a href="https://example.com">External</a><a href="about:../id{uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Keep</a>"#
     );
 
     let rewritten = String::from_utf8(rewrite_help_links(html.as_bytes(), &refs)).unwrap();
@@ -14109,6 +14109,7 @@ fn rewrites_internal_help_links_to_metadata_references() {
     assert!(rewritten.contains(r#"href="Catalog.Products/Help""#));
     assert!(rewritten.contains(&format!(r#"href="../id{unknown_uuid}/"#)));
     assert!(rewritten.contains(r#"href="https://example.com""#));
+    assert!(rewritten.contains(&format!(r#"href="about:../id{uuid}/"#)));
 }
 
 #[test]
