@@ -1,9 +1,10 @@
 # UT11 SQL acceptance (#359)
 
-Status: **Partial SQL run on UT 11.5.27.113**. On 2026-11-25 both SQL
-exports completed from matching restored clones. Import into a distinct
-empty target stopped on three base-free compiler errors. The native
-post-import export remains pending.
+Status: **SQL roundtrip measured on UT 11.5.27.113**. On 2026-11-25
+both SQL exports completed from matching restored clones. After fixing
+three compile failures, import into a distinct empty target, native apply
+and the control export all completed. The report records both remaining
+byte differences.
 [Windows run and results](evidence/ut11-sql-20261125.md).
 
 ## Inventory on the user's Mac, 2026-10-23
