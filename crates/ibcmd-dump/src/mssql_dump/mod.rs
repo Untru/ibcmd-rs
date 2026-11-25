@@ -3748,10 +3748,12 @@ struct DumpedRow {
     source_asset_rows: usize,
     source_assets: SourceAssetCompletenessReport,
     metadata_xml_diagnostic: Option<MetadataSourceExtractionDiagnostic>,
+    model_fallback: Option<String>,
     timings: MssqlDumpTimingReport,
 }
 
 struct DumpRowContext<'a> {
+    fail_on_model_fallback: bool,
     /// `--model-export`: descriptors of the modelled kinds go through it.
     model_export: Option<&'a model_export::ModelExport>,
     /// ExternalDataSource root/child rows, which carry their own owner chain.
@@ -4493,6 +4495,7 @@ fn dump_table_rows_with_options_mode(
     let output = OutputWriter::inline().with_existing_folder(output_dir);
     let context = DumpRowContext {
         output: &output,
+        fail_on_model_fallback: false,
         model_export: None,
         eds_export: eds_export.as_ref(),
         type_set_leaves: &type_set_leaves,
@@ -6250,6 +6253,7 @@ fn dump_table_rows_streamed(
     };
     let context = DumpRowContext {
         output: &output,
+        fail_on_model_fallback: model_writer_enabled && model_export::fail_on_fallback(),
         model_export: model.as_ref().filter(|_| model_writer_enabled),
         eds_export: eds_export.as_ref(),
         type_set_leaves: &type_set_leaves,
@@ -6316,6 +6320,7 @@ fn dump_table_rows_streamed(
     let mut source_asset_rows = 0;
     let mut source_asset_completeness = SourceAssetCompletenessReport::default();
     let mut metadata_extraction_diagnostics = BTreeMap::new();
+    let mut model_fallbacks = BTreeMap::new();
     let mut versions_blob = early_versions_blob;
     let file_name_batches = build_dump_file_name_batches(&headers, &convert_file_names);
     // Each batch is read while the one before it is being converted: the
@@ -6402,6 +6407,9 @@ fn dump_table_rows_streamed(
                     metadata_extraction_diagnostics
                         .insert(dumped.manifest.file_name.clone(), diagnostic);
                 }
+                if let Some(reason) = dumped.model_fallback {
+                    model_fallbacks.insert(dumped.manifest.file_name.clone(), reason);
+                }
                 timings.add_assign(&dumped.timings);
                 manifests.push(dumped.manifest);
             }
@@ -6409,6 +6417,17 @@ fn dump_table_rows_streamed(
         }
         Ok(())
     })?;
+    if !model_fallbacks.is_empty() {
+        let failures = model_fallbacks
+            .into_iter()
+            .map(|(name, reason)| format!("{name}: {reason}"))
+            .collect::<Vec<_>>();
+        bail!(
+            "metadata model refused {} descriptor rows:\n{}",
+            failures.len(),
+            failures.join("\n")
+        );
+    }
     // Native object selection must also cover nested descriptors, which the
     // top-level root inventory intentionally does not count. Diagnostics for
     // module/body/service rows are not descriptor-conversion failures.
@@ -7308,6 +7327,7 @@ fn dump_table_row_bytes(
     let mut metadata_xml_rows = 0;
     let mut metadata_xml_diagnostic = None;
     let mut model_row = false;
+    let mut model_fallback = None;
     let metadata_xml_relative = if context.extract_metadata_xml {
         let started = Instant::now();
         let mut shadow_us = 0;
@@ -7380,6 +7400,15 @@ fn dump_table_row_bytes(
                 MetadataSourceFailureClass::Unsupported,
                 "unknown",
                 "output_path_collision",
+            ))
+        } else if context.fail_on_model_fallback
+            && let Some(Err(error)) = &modelled
+        {
+            model_fallback = Some(format!("{error:#}"));
+            Err(MetadataSourceExtractionDiagnostic::legacy_option_none(
+                MetadataSourceFailureClass::Unsupported,
+                "unknown",
+                "metadata_model_fallback_refused",
             ))
         } else if let Some(row) = context.metadata_texts_by_file_name.get(file_name)
             && let Some(modelled) = modelled.and_then(|result| match result {
@@ -7701,6 +7730,7 @@ fn dump_table_row_bytes(
         source_asset_rows,
         source_assets,
         metadata_xml_diagnostic,
+        model_fallback,
         timings,
     })
 }

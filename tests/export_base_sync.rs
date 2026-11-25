@@ -100,6 +100,41 @@ fn dump(rows: &Path, out: &Path, extra: &[&OsStr]) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[test]
+fn strict_model_export_reports_http_service_fallback() {
+    let temp = common::temp_dir("strict-model-fallback");
+    let rows = temp.join("rows");
+    rows_of(&fixture("eds-matrix/configuration.cf"), &rows);
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .env("IBCMD_RS_FAIL_ON_MODEL_FALLBACK", "1")
+        .env_remove("IBCMD_RS_LEGACY_EXPORT")
+        .env_remove("IBCMD_RS_MODEL_EXPORT")
+        .args(["mssql-dump-config", "--rows-dir"])
+        .arg(&rows)
+        .args([
+            "--model-export",
+            "--extract-metadata-xml",
+            "--no-binary-rows",
+            "--source-version",
+            "2.21",
+            "-o",
+        ])
+        .arg(temp.join("strict"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("metadata model refused"), "{stderr}");
+    assert!(
+        stderr.contains("839141d0-9eb6-4c48-a445-9d5a2d58f77e: code 1000 is not mapped"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("the legacy converter writes it"),
+        "{stderr}"
+    );
+}
+
 fn base_arg(path: &Path) -> Vec<&OsStr> {
     vec!["--base".as_ref(), path.as_os_str()]
 }

@@ -65,6 +65,11 @@ pub(super) fn shadow() -> bool {
     })
 }
 
+/// Refuse descriptor rows whose model conversion would fall back to legacy.
+pub(super) fn fail_on_fallback() -> bool {
+    std::env::var("IBCMD_RS_FAIL_ON_MODEL_FALLBACK").is_ok_and(|value| value.trim() == "1")
+}
+
 /// A text row's raw row: inflated as stored, with no rewriting.
 fn raw_row_text(row: &ConfigRow) -> Result<Vec<u8>> {
     let bytes = row.binary_bytes()?;
