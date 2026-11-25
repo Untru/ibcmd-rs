@@ -1,9 +1,10 @@
 # UT11 SQL acceptance (#359)
 
-Status: **BLOCKED — no SQL acceptance run performed**. This runbook and the
-offline collector do not close #359. CF/filedb parity and the historical
-50,898-file result do not exercise the required SQL export/import paths.
-
+Status: **Partial SQL run on UT 11.5.27.113**. On 2026-11-25 both SQL
+exports completed from matching restored clones. Import into a distinct
+empty target stopped on three base-free compiler errors. The native
+post-import export remains pending.
+[Windows run and results](evidence/ut11-sql-20261125.md).
 ## Inventory on the user's Mac, 2026-10-23
 
 Read-only inspection under `/Volumes/Work/Dev/ibcmd-rs-lab` found:
