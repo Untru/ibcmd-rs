@@ -10153,3 +10153,15 @@ mod form_layout_policy_tests {
         assert_eq!(form_nondefault_percent_scale("1,0"), None);
     }
 }
+
+/// Recognize the two normalized language settings records used by embedded spreadsheets.
+/// True denotes the standard Russian language, false denotes explicitly empty settings.
+pub fn embedded_spreadsheet_language_settings(body: &str) -> Option<bool> {
+    const RU: &str = "<currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo>";
+    const EMPTY_LANGUAGES: &str = "<currentLanguage/><defaultLanguage/>";
+    match body {
+        RU => Some(true),
+        EMPTY_LANGUAGES => Some(false),
+        _ => None,
+    }
+}

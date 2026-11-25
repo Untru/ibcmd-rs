@@ -6091,8 +6091,6 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
         let to = body[from..].find(&close)? + from;
         Some(body[from..to].to_string())
     };
-    const RU: &str = "<currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo>";
-    const EMPTY_LANGUAGES: &str = "<currentLanguage/><defaultLanguage/>";
     let mut ru = false;
     let mut empty_languages = false;
     let mut columns = 0u32;
@@ -6106,8 +6104,16 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     let mut names = Vec::new();
     for (name, attributes, body) in elements {
         match name {
-            "languageSettings" if body == RU => ru = true,
-            "languageSettings" if body == EMPTY_LANGUAGES => {
+            "languageSettings"
+                if ibcmd_form_schema::embedded_spreadsheet_language_settings(body)
+                    == Some(true) =>
+            {
+                ru = true
+            }
+            "languageSettings"
+                if ibcmd_form_schema::embedded_spreadsheet_language_settings(body)
+                    == Some(false) =>
+            {
                 empty_languages = true;
             }
             "columns" => {
@@ -6212,18 +6218,7 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
 }
 
 #[cfg(test)]
-#[test]
-fn embedded_spreadsheet_preserves_explicit_empty_language_settings() {
-    let xml = r#"<Attribute name="Sheet"><Settings>
-        <mxl:languageSettings><mxl:currentLanguage/><mxl:defaultLanguage/></mxl:languageSettings>
-        <mxl:columns><mxl:size>2</mxl:size></mxl:columns>
-        <mxl:rowsItem><mxl:index>0</mxl:index><mxl:row><mxl:empty>true</mxl:empty></mxl:row></mxl:rowsItem>
-        <mxl:height>1</mxl:height><mxl:vgRows>1</mxl:vgRows>
-    </Settings></Attribute>"#;
-    let compiled = native_embedded_spreadsheet(xml, "Sheet").unwrap();
-    let language_record = r#"{8,1,12,{"","",0,0,0},"#;
-    assert!(compiled.contains(language_record));
-}
+mod embedded_spreadsheet_tests;
 
 /// Whether an attribute is a chart the chart codec writes: `Some(false)` for
 /// a single `Chart` type, `Some(true)` for a single `GanttChart` type, under
