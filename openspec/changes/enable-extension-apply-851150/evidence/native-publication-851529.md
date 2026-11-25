@@ -48,3 +48,23 @@ This measures one native metadata-only update and the OWN refusal. The
 SQL writer on 1529 still needs a measured storage profile, successful OWN
 staging and publication, whole-tree comparison and session visibility.
 The larger adopted-form regression corpus is tracked separately in #414.
+
+## Storage probe on 2026-11-25
+
+Restored the same Windows x64 native seed into a fresh disposable SQL database.
+The identity query returned `IBVersion=7` and `PlatformVersionReq=80313`.
+The 35 column records from Config, ConfigCAS, ConfigCASSave, ConfigSave
+and Params matched the existing storage contract. The canonical SHA-256,
+using the IBVersion line followed by the ordered column lines, was
+`49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3`.
+
+Repeated the native Version import and apply. Inflating the target staging
+configinfo gave format 80501. Import preserved the registry payload and SQL
+rowversion. After apply, bytes 4 through 23 of the payload held the SHA-1 of
+the packed staging configinfo, `37a18e66dab97ebd875ddcb973f9be580a0cd76e`.
+Byte 30 was zero, and bytes 31 through 34 held the last four bytes of the
+pre-publication SQL rowversion. The target staging configinfo was consumed,
+while the other extension's 80327 staging configinfo survived byte-for-byte.
+The platform profile records the measured schema fingerprint. Write admission
+still requires a comparison of ibcmd-rs staging and apply against this native
+transition.
