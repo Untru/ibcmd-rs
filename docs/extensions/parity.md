@@ -696,6 +696,8 @@ Other separator contexts remain unchanged. Own extension common attributes
 use the existing S1 catalog/document model; their contribution to new registers
 requires a separate measurement.
 
+Release-only selectors such as 8.5.1 cannot select a SQL extension writer. See the [8.5.1.1529 native twin measurement](../../openspec/changes/enable-extension-apply-851150/evidence/native-publication-851529.md).
+
 Both commands require explicit cluster/infobase IDs. Direct SQL commands use
 `rac infobase summary info`, which requires no infobase application account.
 The agent's exact build and the selected SQL database's storage fingerprint
