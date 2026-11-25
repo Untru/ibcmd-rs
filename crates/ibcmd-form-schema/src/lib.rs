@@ -10055,6 +10055,7 @@ impl FormStandardBindingMember {
 pub fn form_planner_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
         "2c75e90f-36f0-48c8-913d-0d92afdb4b93" => Some("Preview"),
+        "8e2632b7-adee-4525-9254-7c4d971944de" => Some("Back"),
         _ => None,
     }
 }

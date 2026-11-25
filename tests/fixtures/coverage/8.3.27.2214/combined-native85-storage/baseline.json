@@ -4,6 +4,8 @@
     "CommonForms/CovFacetChartAutoMaxWidth",
     "CommonForms/CovFacetChartMaxWidth",
     "CommonForms/CovFacetChartOnActivate",
-    "CommonForms/CovFacetPlannerCommandGenerateProcessing"
+    "CommonForms/CovFacetPlannerCommandGenerateProcessing",
+    "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen",
+    "CommonForms/CovGraphicalSchemaFieldBorderColorTomato"
   ]
 }

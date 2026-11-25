@@ -2288,6 +2288,7 @@ pub fn format_graphical_schema_payload(
     edit: bool,
     auto_max_width: bool,
     events: &str,
+    border_color: &str,
 ) -> Option<String> {
     let output = match output {
         None => "0",
@@ -2295,7 +2296,7 @@ pub fn format_graphical_schema_payload(
         Some(_) => return None,
     };
     Some(format!(
-        "{{3,{width},{height},{output},{edit},{{3,4,{{0}}}},{events},{auto_max_width},0,0,1,0,1,1}}",
+        "{{3,{width},{height},{output},{edit},{border_color},{events},{auto_max_width},0,0,1,0,1,1}}",
         edit = u8::from(edit),
         auto_max_width = u8::from(auto_max_width),
     ))
@@ -3221,6 +3222,12 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
         false,
         "Preview",
         "2c75e90f-36f0-48c8-913d-0d92afdb4b93",
+    ),
+    (
+        "PlannerField",
+        false,
+        "Back",
+        "8e2632b7-adee-4525-9254-7c4d971944de",
     ),
     (
         "FormattedDocumentField",

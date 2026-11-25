@@ -447,6 +447,7 @@ pub fn child_order(parent: &str) -> Option<&'static [&'static str]> {
             "Width",
             "Height",
             "Edit",
+            "BorderColor",
             "ContextMenu",
             "ExtendedTooltip",
             "Events",

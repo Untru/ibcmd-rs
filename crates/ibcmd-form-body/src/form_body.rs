@@ -15072,7 +15072,11 @@ fn parse_form_child_item_with_metadata_owners(
                     .get(schema.hidden_state_title_back_color_option_slot()?)
             })
             .and_then(|field| parse_form_control_color(field, object_refs)),
-        border_color: if let Some(schema) = button_color_schema {
+        border_color: if tag == "GraphicalSchemaField" {
+            form_document_field_geometry_options(tag, fields)
+                .and_then(|(_, options)| options.get(5).copied())
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if let Some(schema) = button_color_schema {
             fields
                 .get(schema.border_color_slot())
                 .and_then(|field| parse_form_control_color(field, object_refs))
@@ -35873,7 +35877,11 @@ pub(super) fn format_form_child_item_xml(
     // `ExtendedTooltip` (6); nothing else shares a check box with it.
     if matches!(
         item.tag,
-        "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField" | "CheckBoxField"
+        "LabelDecoration"
+            | "HTMLDocumentField"
+            | "SpreadSheetDocumentField"
+            | "CheckBoxField"
+            | "GraphicalSchemaField"
     ) {
         if let Some(back_color) = &item.back_color {
             xml.push_str(&format!(
