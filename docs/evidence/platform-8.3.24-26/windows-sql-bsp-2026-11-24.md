@@ -78,3 +78,11 @@ The follow-up on SQL Server used the repository's `tests/fixtures/external/old_r
 | 8.3.26.1656 | 0 / 0 / 0 | 0 / 0 | 2 / 2 |
 
 Every source export contained seven files. Every immediate reexport contained three. The immediate reexport ran before applying the staged XML import. The file counts differ, so the successful command exits establish the native import boundary without establishing a round-trip match. The candidate still refuses the exact build at argument parsing.
+
+The bytewise comparison below uses the same relative-path and file hashing procedure as the BSP measurements. On each build all three shared paths differed, and four source paths were absent before activation.
+
+| XML | Source tree SHA-256 | Before-apply tree SHA-256 | Identical / changed / missing / extra |
+| --- | --- | --- | --- |
+| 2.17 | `cf5a8db6536717b646193417ca5ae77294bf4cd62050fc12e9d412a16d29d71a` | `8f1eb88a5a3e055bb00075bb742a32a1c21cd849b76bafd1e835b862b301a8b7` | 0 / 3 / 4 / 0 |
+| 2.18 | `166680e2ac00be2156202d96c090dda5fbddfe1c338e3698e273a02ef4c75a3f` | `e18e55dcbb4d974d474f2d2049b396d711668b08aeb33619e38ae415141fcda1` | 0 / 3 / 4 / 0 |
+| 2.19 | `bdeb24383414595f116e0b2139109e0060326b5db353053f3c6f19c44deab841` | `a73b8eecf44c0a2044eff11feac7b596e10a19c5174f0c57278a53e373e97b71` | 0 / 3 / 4 / 0 |
