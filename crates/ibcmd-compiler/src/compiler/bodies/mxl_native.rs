@@ -3122,6 +3122,7 @@ fn web_color_code(name: &str) -> Option<u32> {
         "RoyalBlue" => 121,
         "SaddleBrown" => 122,
         "Silver" => 128,
+        "SkyBlue" => 129,
         "SlateBlue" => 130,
         "SlateGray" => 131,
         "SteelBlue" => 134,
@@ -3150,6 +3151,11 @@ fn windows_color_code(name: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sky_blue_maps_to_native_web_color_code() {
+        assert_eq!(web_color_code("SkyBlue"), Some(129));
+    }
 
     fn patch_fixture(name: &str) -> Vec<u8> {
         std::fs::read(
