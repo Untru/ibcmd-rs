@@ -2089,11 +2089,35 @@ impl<'a> ConfigTable<'a> {
         }
     }
 
+    /// Read the active versions row without building an inventory when there is
+    /// no dynamic update overlay. The marker and versions share one SQL query.
+    #[doc(hidden)]
+    pub fn plain_active_versions(&self) -> Result<Option<Vec<u8>>> {
+        let mut rows = self.rows(&BTreeSet::from([
+            "versions".to_owned(),
+            DYNAMIC_UPDATE_MARKER_ROW.to_owned(),
+        ]))?;
+        if rows.contains_key(DYNAMIC_UPDATE_MARKER_ROW) {
+            return Ok(None);
+        }
+        Ok(rows.remove("versions"))
+    }
+
     /// Every published row name. Installs the table's view for the reads
     /// that follow in the scope (see [`with_rows_dir_table`]).
     pub fn names(&self) -> Result<BTreeSet<String>> {
+        self.names_with_storage_view().map(|(names, _)| names)
+    }
+
+    /// Published names and whether their inventory was read without a generation marker.
+    #[doc(hidden)]
+    pub fn names_with_storage_view(&self) -> Result<(BTreeSet<String>, bool)> {
         let table = MssqlConfigurationTableRole::Current.sql_name();
         let headers = fetch_row_headers(self.sql, self.database, table, &BTreeSet::new())?;
+        let plain_active = !self.main_configuration
+            && !headers
+                .iter()
+                .any(|row| row.file_name == DYNAMIC_UPDATE_MARKER_ROW);
         let headers = install_storage_overlay(
             self.sql,
             self.database,
@@ -2102,7 +2126,10 @@ impl<'a> ConfigTable<'a> {
             headers,
             self.main_configuration,
         )?;
-        Ok(headers.into_iter().map(|header| header.file_name).collect())
+        Ok((
+            headers.into_iter().map(|header| header.file_name).collect(),
+            plain_active,
+        ))
     }
 
     /// The named rows as stored (raw deflate for most), each assembled from

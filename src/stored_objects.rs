@@ -934,6 +934,7 @@ pub struct StoredConfiguration {
     rows_snapshot: Option<Arc<BTreeMap<String, Arc<Vec<u8>>>>>,
     platform: PlatformSpec,
     inventory: Option<Inventory>,
+    plain_active_inventory: bool,
     /// By full name, for the inventory's digest.
     exports: HashMap<String, CachedExport>,
     cached_bytes: usize,
@@ -956,6 +957,7 @@ impl StoredConfiguration {
             rows_snapshot: None,
             platform,
             inventory: None,
+            plain_active_inventory: false,
             exports: HashMap::new(),
             cached_bytes: 0,
             main_configuration: false,
@@ -1014,23 +1016,37 @@ impl StoredConfiguration {
         let Self {
             source,
             inventory,
+            plain_active_inventory,
             exports,
             cached_bytes,
             main_configuration,
             ..
         } = self;
+        let plain_active_sql = matches!(source, ConfigSource::Database { .. })
+            && !*main_configuration
+            && self.rows_snapshot.is_none();
         let run = |table: &ConfigTable<'_>| -> Result<T> {
-            let names = table.names()?;
+            if plain_active_sql
+                && *plain_active_inventory
+                && let Some(known) = inventory.as_mut()
+                && let Some(versions) = table.plain_active_versions()?
+                && known.digest == sha256_hex(&versions)
+            {
+                return body(known, table);
+            }
+            let (names, plain_active) = table.names_with_storage_view()?;
             let current = table
                 .rows(&BTreeSet::from(["versions".to_string()]))?
                 .get("versions")
                 .map(|bytes| sha256_hex(bytes));
-            let stale = match (inventory.as_ref(), current) {
+            let stale = match (inventory.as_ref(), current.as_deref()) {
                 (Some(known), Some(current)) => known.digest != current,
                 _ => true,
             };
-            if stale {
+            let plain = plain_active_sql && plain_active;
+            if stale || plain != *plain_active_inventory {
                 *inventory = Some(Inventory::read(table, names)?);
+                *plain_active_inventory = plain;
                 exports.clear();
                 *cached_bytes = 0;
             }

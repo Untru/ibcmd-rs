@@ -1469,10 +1469,61 @@ fn sql_import_and_pending_through_stdio() {
         };
         blob
     };
+    let read_params = json!({"infobase":"sql","path":module});
+    let before = server.ok("source/read", read_params.clone());
+    assert_eq!(server.ok("source/read", read_params.clone()), before);
     let language = "9a236262-c0b7-41e5-a4f6-48c9778f198e";
+    let body_row = "6d1c2a0e-1cd0-4f00-9a00-000000000001.0";
+    // The physical versions row can stay identical across an overlay transition.
+    // The alias must supersede the active module only while its marker is present.
+    let generation_id = "06cb0442-0c47-4fad-986a-f08f28287c1b";
+    let alias = format!(
+        "{}_dynupdate_{generation_id}.0",
+        body_row.strip_suffix(".0").unwrap()
+    );
+    let marker = format!("{{1,1,{generation_id}}}");
+    let aliased_text = format!("{text}\r\n// SQL generation overlay\r\n");
+    let blob = ibcmd_module_blob::pack_module_blob_bytes(aliased_text.as_bytes(), None, None)
+        .unwrap()
+        .blob;
+    let insert_row = format!(
+        "INSERT INTO [{db}].dbo.Config (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo) \
+         SELECT @P1, Creation, Modified, Attributes, @P2, @P3, PartNo FROM [{db}].dbo.Config \
+         WHERE FileName=N'{body_row}' AND PartNo=0"
+    );
+    for (name, bytes) in [
+        (&alias[..], &blob[..]),
+        ("DynamicallyUpdated", marker.as_bytes()),
+    ] {
+        assert_eq!(
+            client
+                .execute(
+                    &insert_row,
+                    &[
+                        SqlParam::Text(name),
+                        SqlParam::I64(bytes.len() as i64),
+                        SqlParam::Binary(bytes),
+                    ]
+                )
+                .unwrap(),
+            1
+        );
+    }
+    let overlaid = server.ok("source/read", read_params.clone());
+    assert_eq!(overlaid["content"], aliased_text);
+    assert_eq!(overlaid["version"], before["version"]);
+    let delete_rows =
+        format!("DELETE FROM [{db}].dbo.Config WHERE FileName IN (N'DynamicallyUpdated', @P1)");
+    assert_eq!(
+        client
+            .execute(&delete_rows, &[SqlParam::Text(&alias)])
+            .unwrap(),
+        2
+    );
+    assert_eq!(server.ok("source/read", read_params.clone()), before);
     let patch = ibcmd_module_blob::patch_versions_blob_bytes(
         &versions("Config"),
-        &[language.into()],
+        &[language.into(), body_row.into()],
         false,
     )
     .unwrap();
@@ -1502,6 +1553,9 @@ fn sql_import_and_pending_through_stdio() {
             .unwrap(),
         1
     );
+    let after = server.ok("source/read", read_params);
+    assert_ne!(after["version"], before["version"]);
+    assert_eq!(after["content"], before["content"]);
     fs::write(
         source.join(module),
         format!("{text}\r\n// second SQL editor stage\r\n"),
