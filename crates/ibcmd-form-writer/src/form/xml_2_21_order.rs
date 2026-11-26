@@ -1313,6 +1313,7 @@ pub fn child_order(parent: &str) -> Option<&'static [&'static str]> {
             "SearchStringLocation",
             "ViewStatusLocation",
             "SearchControlLocation",
+            "HierarchyPanelLocation",
             "CurrentRowUse",
             "ShowCommandBar",
             "ViewMode",

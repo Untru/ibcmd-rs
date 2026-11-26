@@ -122,13 +122,7 @@ pub fn with_8_5_picture_values(
         )?;
         require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
         let reference = picture_reference(name, object_refs);
-        let mut depth = 1;
-        let mut parent = item.parent;
-        while let Some(index) = parent {
-            depth += 1;
-            parent = edits.elements[index].parent;
-        }
-        let prefix = format!("d{depth}p1");
+        let prefix = value_namespace_prefix(&edits, element);
         edits.replace(
             element,
             &format!(
@@ -244,16 +238,170 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
 /// The prefix of `open` (a value's start tag) when it declares the readable
 /// namespace under a generated prefix and types the value as its `Picture`.
 fn readable_picture_prefix(open: &str) -> Option<&str> {
-    let declaration = format!("=\"{READABLE_NS}\"");
+    picture_prefix(open, READABLE_NS)
+}
+
+fn value_namespace_prefix(edits: &XmlEdits<'_>, element: usize) -> String {
+    let mut depth = 1;
+    let mut parent = edits.elements[element].parent;
+    while let Some(index) = parent {
+        depth += 1;
+        parent = edits.elements[index].parent;
+    }
+    format!("d{depth}p1")
+}
+
+fn picture_prefix<'a>(open: &'a str, namespace: &str) -> Option<&'a str> {
+    let declaration = format!("=\"{namespace}\"");
     let at = open.find(&declaration)?;
     let prefix = open[..at].rsplit_once("xmlns:")?.1;
     open.contains(&format!("xsi:type=\"{prefix}:Picture\""))
         .then_some(prefix)
 }
 
+/// Loads the measured 2.21 absolute PNG companion into the native DCS value.
+pub fn store_absolute_png_values(
+    xml: &str,
+    read_png: impl FnOnce() -> Result<Vec<u8>>,
+) -> Result<Option<String>> {
+    use ibcmd_schema::{
+        DCS_PICTURE_PNG_FILE, DCS_PICTURE_PNG_SIGNATURE, dcs_absolute_picture_members,
+        dcs_inline_picture_xml,
+    };
+    if !xml.contains(DCS_PICTURE_PNG_FILE) {
+        return Ok(None);
+    }
+    let mut edits = XmlEdits::new(xml)?;
+    let mut reader = Some(read_png);
+    let mut base64 = String::new();
+    for element in 0..edits.elements.len() {
+        let item = &edits.elements[element];
+        if item.tag != VALUE_TAG || item.self_closing {
+            continue;
+        }
+        let open_end = item.open_start + xml[item.open_start..].find('>').unwrap() + 1;
+        let open = &xml[item.open_start..open_end - 1];
+        let Some(prefix) = readable_picture_prefix(open) else {
+            continue;
+        };
+        let close = xml[..item.line_end].rfind('<').unwrap();
+        let lines: Vec<_> = xml[open_end..close]
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        let [absolute, transparent] = dcs_absolute_picture_members(prefix);
+        if !lines.contains(&absolute.as_str()) {
+            continue;
+        }
+        if lines != [absolute.as_str(), transparent.as_str()] {
+            bail!("a DCS PNG value has unsupported members");
+        }
+        require_known_attributes(
+            open,
+            &[
+                (&format!("xmlns:{prefix}"), READABLE_NS),
+                ("xsi:type", &format!("{prefix}:Picture")),
+            ],
+        )?;
+        require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+        if let Some(reader) = reader.take() {
+            let png = reader()?;
+            if !png.starts_with(DCS_PICTURE_PNG_SIGNATURE) {
+                bail!("the DCS picture companion is not a PNG");
+            }
+            base64 = ibcmd_1c_text::encode_base64(&png);
+        }
+        edits.replace(element, &dcs_inline_picture_xml(VALUE_TAG, &base64));
+    }
+    if reader.is_some() {
+        return Ok(None);
+    }
+    edits.finish().map(Some)
+}
+
+/// Publishes native inline DCS PNG values and their one deduplicated sidecar.
+pub fn extract_absolute_png_values(xml: &str) -> Result<Option<(String, Vec<u8>)>> {
+    use ibcmd_schema::{
+        DCS_INLINE_PICTURE_NS, DCS_PICTURE_PNG_SIGNATURE, dcs_absolute_picture_xml,
+    };
+    if !xml.contains(DCS_INLINE_PICTURE_NS) {
+        return Ok(None);
+    }
+    let mut edits = XmlEdits::new(xml)?;
+    let mut png = None;
+    for element in 0..edits.elements.len() {
+        let item = &edits.elements[element];
+        if item.tag != VALUE_TAG || item.self_closing || !item.children.is_empty() {
+            continue;
+        }
+        let open_end = item.open_start + xml[item.open_start..].find('>').unwrap() + 1;
+        let open = &xml[item.open_start..open_end - 1];
+        let inline_prefix = picture_prefix(open, DCS_INLINE_PICTURE_NS);
+        if inline_prefix.is_none() && !open.contains(PICTURE_TYPE) {
+            continue;
+        }
+        let close = xml[..item.line_end].rfind('<').unwrap();
+        let Some(bytes) = ibcmd_1c_text::decode_base64_mime(&xml[open_end..close])
+            .filter(|bytes| bytes.starts_with(DCS_PICTURE_PNG_SIGNATURE))
+        else {
+            continue;
+        };
+        require_picture_lines(xml, item.open_start, item.line_end, true)?;
+        if !xml[close..item.line_end]
+            .strip_prefix(&format!("</{VALUE_TAG}>"))
+            .is_some_and(|trailing| trailing.trim().is_empty())
+        {
+            bail!("inline DCS picture has unmodeled trailing text");
+        }
+        if let Some(prefix) = inline_prefix {
+            require_known_attributes(
+                open,
+                &[
+                    (&format!("xmlns:{prefix}"), DCS_INLINE_PICTURE_NS),
+                    ("xsi:type", &format!("{prefix}:Picture")),
+                ],
+            )?;
+        } else {
+            require_known_attributes(open, &[("xsi:type", "v8ui:Picture")])?;
+        }
+        if png.as_ref().is_some_and(|known| known != &bytes) {
+            bail!("the DCS template contains different PNG values for one companion path");
+        }
+        png = Some(bytes);
+        let prefix = value_namespace_prefix(&edits, element);
+        edits.replace(
+            element,
+            &dcs_absolute_picture_xml(VALUE_TAG, &prefix, READABLE_NS),
+        );
+    }
+    png.map(|png| Ok((edits.finish()?, png))).transpose()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_absolute_png_references_round_trip_in_one_companion() {
+        let png = ibcmd_1c_text::decode_base64_mime(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5tUAAAAASUVORK5CYII=",
+        )
+        .unwrap();
+        let absolute = ibcmd_schema::dcs_absolute_picture_xml(VALUE_TAG, "d2p1", READABLE_NS);
+        let xml = format!(
+            "<document xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"{}\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n{absolute}{absolute}</document>",
+            ibcmd_schema::DCS_INLINE_PICTURE_NS
+        );
+        let stored = store_absolute_png_values(&xml, || Ok(png.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.matches("iVBOR").count(), 2);
+        let (published, companion) = extract_absolute_png_values(&stored).unwrap().unwrap();
+        assert_eq!(published, xml);
+        assert_eq!(companion, png);
+        assert!(store_absolute_png_values(&xml, || Ok(b"not png".to_vec())).is_err());
+    }
 
     #[test]
     fn the_8_5_spelling_is_stored_the_platforms_way() {

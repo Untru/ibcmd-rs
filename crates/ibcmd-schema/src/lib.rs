@@ -31,6 +31,33 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Settings pictures in a 2.21 DCS template use one companion file per
+/// observed PNG. Multiple references to the same picture share that file.
+pub const DCS_PICTURE_PNG_FILE: &str = "value.png";
+pub const DCS_INLINE_PICTURE_NS: &str = "http://v8.1c.ru/8.1/data/ui";
+pub const DCS_PICTURE_PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+pub fn dcs_inline_picture_xml(tag: &str, base64: &str) -> String {
+    format!("<{tag} xsi:type=\"v8ui:Picture\">{base64}</{tag}>\r\n")
+}
+
+pub fn dcs_absolute_picture_xml(tag: &str, prefix: &str, namespace: &str) -> String {
+    let [absolute, transparent] = dcs_absolute_picture_members(prefix);
+    format!(
+        "<{tag} xmlns:{prefix}=\"{namespace}\" xsi:type=\"{prefix}:Picture\">\r\n\
+         \t{absolute}\r\n\
+         \t{transparent}\r\n\
+         </{tag}>\r\n"
+    )
+}
+
+pub fn dcs_absolute_picture_members(prefix: &str) -> [String; 2] {
+    [
+        format!("<{prefix}:Abs>{DCS_PICTURE_PNG_FILE}</{prefix}:Abs>"),
+        format!("<{prefix}:LoadTransparent>true</{prefix}:LoadTransparent>"),
+    ]
+}
+
 /// Empty action panels generated in the appended field and table tails by 8.5.
 #[derive(Clone, Copy)]
 pub struct FormGeneratedActionPanel {

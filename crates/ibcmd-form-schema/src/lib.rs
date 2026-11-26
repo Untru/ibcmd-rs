@@ -1923,6 +1923,12 @@ pub struct FormCommandSchema<'a> {
 /// The plain table command observed in native 8.5.1.1529 ERP УХ exclusions.
 pub const TABLE_DESELECT_ALL_COMMAND_UUID: &str = "03022d03-1986-4dc4-93c2-03d995332357";
 
+/// The 8.5 ERP УХ 3.3.5.1 table head stores an explicit hidden hierarchy
+/// panel as 1. A table with no location in its source stores 0.
+pub const TABLE_HIERARCHY_PANEL_LOCATION_SLOT: usize = 36;
+pub const TABLE_HIERARCHY_PANEL_LOCATIONS: &[(&str, Option<&str>)] =
+    &[("0", None), ("1", Some("None"))];
+
 impl<'a> FormCommandSchema<'a> {
     /// Number of members in an 8.3.27 command with the given action-binding count.
     pub fn member_count_8_3_27(bindings: usize) -> Option<usize> {

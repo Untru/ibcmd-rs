@@ -5853,7 +5853,20 @@ fn prepare_raw_template_body_row(
         bytes
     };
     let compiled = if kind == TemplateKind::DataCompositionSchema {
-        compile_dcs_template_body(&bytes, source)
+        let prepared = ibcmd_compiler::compiler::bodies::dcs_2_21::store_absolute_png_values(
+            std::str::from_utf8(&bytes).context("DCS Template XML is not UTF-8")?,
+            || {
+                let png = body_path
+                    .with_extension("")
+                    .join(ibcmd_schema::DCS_PICTURE_PNG_FILE);
+                Ok(read_stage_source(source, &png)
+                    .with_context(|| {
+                        format!("failed to read DCS picture companion {}", png.display())
+                    })?
+                    .into_vec())
+            },
+        )?;
+        compile_dcs_template_body(prepared.as_deref().map_or(&*bytes, str::as_bytes), source)
     } else {
         compile_evidenced_template(kind, TemplateSource::Bytes(&bytes))
     };

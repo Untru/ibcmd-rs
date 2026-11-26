@@ -725,6 +725,16 @@ const FACT_RULES: &[FactRule] = &[
         replaces: &[],
         values: &[("1", None), ("2", Some("HorizontalIfPossible"))],
     },
+    FactRule {
+        tags: &["Table"],
+        source: FactSource::ItemMember(
+            "73",
+            ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_SLOT,
+        ),
+        element: "HierarchyPanelLocation",
+        replaces: &[],
+        values: ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATIONS,
+    },
     // Tables: members the `73` record appends. The line and alternation
     // flags moved: 2.21 names them `...BWA` and reads them here, while the
     // 8.3.27 slots stay zero.

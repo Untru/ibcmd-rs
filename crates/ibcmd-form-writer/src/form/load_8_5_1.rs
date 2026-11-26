@@ -837,6 +837,18 @@ fn load_table(
     item: &mut ItemFacts,
     layout: FormLayout,
 ) -> Result<()> {
+    let hierarchy = take(edits, element, "HierarchyPanelLocation")?;
+    if hierarchy.is_some() && layout != FormLayout::V8_5_1 {
+        bail!("<HierarchyPanelLocation> requires the measured 8.5 table layout");
+    }
+    item.record.insert(
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_SLOT,
+        code_of(
+            ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATIONS,
+            hierarchy.as_deref(),
+            "HierarchyPanelLocation",
+        )?,
+    );
     // The line and alternation flags: 8.5 reads the `...BWA` members and keeps
     // the 8.3.27 slot true only when the member says true. A body kept in the
     // 8.3.27 layout has only the slot: its export writes a member for a false
@@ -2143,6 +2155,24 @@ mod tests {
         let serialized = legacy.trailing.concat();
         assert!(serialized.contains("\"RunHandler\""), "{serialized}");
         assert!(serialized.contains("\"AfterHandler\",1"), "{serialized}");
+    }
+
+    #[test]
+    fn a_hidden_hierarchy_panel_is_distinct_from_the_absent_property() {
+        let slot = ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_SLOT;
+        for (element, expected) in [
+            ("", "0"),
+            (
+                "<HierarchyPanelLocation>None</HierarchyPanelLocation>\r\n",
+                "1",
+            ),
+        ] {
+            let xml = format!("<Form>\r\n<Table id=\"1\">\r\n{element}</Table>\r\n</Form>");
+            let mut edits = XmlEdits::new(&xml).unwrap();
+            let mut item = ItemFacts::default();
+            load_table(&mut edits, 1, &mut item, FormLayout::V8_5_1).unwrap();
+            assert_eq!(item.record[&slot], expected);
+        }
     }
 
     #[test]
