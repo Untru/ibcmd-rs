@@ -108,6 +108,8 @@ fn eds_inline_children_have_native_config_dump_info_names() {
     rows_of(&fixture("eds-matrix/configuration.cf"), &rows);
     dump(&rows, &out, &[]);
     let xml = config_dump_info(&out);
+    assert!(!xml.contains("02e16f33-60de-4fa4-a0a0-9550743d13ee"));
+    assert!(!xml.contains("38445275-c44f-4653-85a0-c7488ac3c6bd"));
     for name in [
         "Function.Функция1",
         "DimensionTable.ТаблицаИзмерения1.Field.Поле1",

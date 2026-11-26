@@ -979,6 +979,13 @@ fn build_config_dump_children(
         // taken for an unnameable child, and ConfigDumpInfo.xml is skipped
         // whole. Reading it from the record that states it holds either way.
         let configuration_identity = parse_configuration_header_uuid(&row.text);
+        let dimension_builtin_fields = (row.kind.as_deref() == Some(
+            ibcmd_schema::external_data_source_children::DIMENSION_TABLE_KIND,
+        ))
+        .then(|| {
+            ibcmd_metadata_model::metadata_model::external_data_source_children::dimension_table_builtin_field_ids(&row.text).ok()
+        })
+        .flatten();
         for (header, _) in
             nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
         {
@@ -993,6 +1000,14 @@ fn build_config_dump_children(
             }
             if header.uuid == CONFIGURATION_COMMAND_INTERFACE_UUID
                 && !object_refs.contains_key(&header.uuid)
+            {
+                continue;
+            }
+            // Native ConfigDumpInfo omits built-in dimension table fields,
+            // even though their layouts contain ordinary metadata headers.
+            if dimension_builtin_fields
+                .as_ref()
+                .is_some_and(|fields| fields.contains(&header.uuid))
             {
                 continue;
             }
