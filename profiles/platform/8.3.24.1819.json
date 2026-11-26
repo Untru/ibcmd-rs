@@ -2,5 +2,11 @@
   "schema_version": 1,
   "id": "platform-8.3.24.1819",
   "status": "experimental",
-  "platform_build": "8.3.24.1819"
+  "platform_build": "8.3.24.1819",
+  "fingerprints": {
+    "xcf.version": "2.17"
+  },
+  "evidence": [
+    "docs/evidence/platform-8.3.24-26/windows-sql-bsp-2026-11-24.md"
+  ]
 }

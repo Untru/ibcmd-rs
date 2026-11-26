@@ -73,7 +73,7 @@ and `crates/ibcmd-platform-spec` (`platform`) adds the command line's XML select
 capabilities to what it answers for
 `--platform 8.3.27 | 8.5.1 | 8.3.27.2214 | 8.5.1.1150`: an exact build, or a
 release standing for every known build of it while they agree. A build whose
-profile declares no XML format (`8.3.24.1819`) is known but refused, and so is
+profile declares no XML format is known but refused, and so is
 every version no profile names; nothing maps to the nearest version. The
 `--source-version` aliases `8.3`/`8.3.27` and `8.5`/`8.5.1` follow the same
 mapping. A new build that changes nothing for ibcmd-rs is one more profile; a
@@ -133,3 +133,9 @@ total. Callers may choose smaller bounds through `ProfileRegistryLimits`.
 Symlinks, subdirectories, and non-JSON files are ignored. Loading and resolution
 perform no platform, JVM, process, network, capability-probing, or profile-
 selection operations.
+
+The bundled seeds for 8.3.24.1819, 8.3.25.1633 and 8.3.26.1656 record
+the native `xcf.version` fingerprints 2.17, 2.18 and 2.19, respectively.
+The fingerprints describe the BSP export observed on each exact build.
+The seeds omit `platform.xml_format`, which gates runtime support.
+See the [native SQL measurements](../docs/evidence/platform-8.3.24-26/windows-sql-bsp-2026-11-24.md).
