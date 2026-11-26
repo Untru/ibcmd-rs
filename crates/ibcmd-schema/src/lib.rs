@@ -37,6 +37,12 @@ pub const DCS_PICTURE_PNG_FILE: &str = "value.png";
 pub const DCS_INLINE_PICTURE_NS: &str = "http://v8.1c.ru/8.1/data/ui";
 pub const DCS_PICTURE_PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
+pub fn dcs_picture_ends_line(closing_tag_and_tail: &str, tag: &str) -> bool {
+    closing_tag_and_tail
+        .strip_prefix(&format!("</{tag}>"))
+        .is_some_and(|trailing| trailing.trim().is_empty())
+}
+
 pub fn dcs_inline_picture_xml(tag: &str, base64: &str) -> String {
     format!("<{tag} xsi:type=\"v8ui:Picture\">{base64}</{tag}>\r\n")
 }

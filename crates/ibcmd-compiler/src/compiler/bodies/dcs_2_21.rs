@@ -324,6 +324,7 @@ pub fn store_absolute_png_values(
 pub fn extract_absolute_png_values(xml: &str) -> Result<Option<(String, Vec<u8>)>> {
     use ibcmd_schema::{
         DCS_INLINE_PICTURE_NS, DCS_PICTURE_PNG_SIGNATURE, dcs_absolute_picture_xml,
+        dcs_picture_ends_line,
     };
     if !xml.contains(DCS_INLINE_PICTURE_NS) {
         return Ok(None);
@@ -348,10 +349,7 @@ pub fn extract_absolute_png_values(xml: &str) -> Result<Option<(String, Vec<u8>)
             continue;
         };
         require_picture_lines(xml, item.open_start, item.line_end, true)?;
-        if !xml[close..item.line_end]
-            .strip_prefix(&format!("</{VALUE_TAG}>"))
-            .is_some_and(|trailing| trailing.trim().is_empty())
-        {
+        if !dcs_picture_ends_line(&xml[close..item.line_end], VALUE_TAG) {
             bail!("inline DCS picture has unmodeled trailing text");
         }
         if let Some(prefix) = inline_prefix {
