@@ -8,6 +8,8 @@
     "CovSheetAutoFontHeight",
     "CovSheetOEMFixedFont",
     "CovSheetSandyBrown",
-    "CovSheetPageSizeA4"
+    "CovSheetPageSizeA4",
+    "CovSheetDashDotted",
+    "CovSheetGapLine"
   ]
 }

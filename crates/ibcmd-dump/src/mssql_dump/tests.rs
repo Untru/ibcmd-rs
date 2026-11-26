@@ -15664,6 +15664,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: vec![MoxelLine {
+            gap: false,
             style: "Solid",
             line_type: "v8ui:SpreadsheetDocumentCellLineType",
             width: 1,
@@ -20452,6 +20453,7 @@ fn moxel_line_table_refuses_an_unknown_line_descriptor() {
     assert_eq!(
         parse_moxel_line_table(&fields),
         Some(vec![MoxelLine {
+            gap: false,
             style: "Solid",
             line_type: "v8ui:SpreadsheetDocumentCellLineType",
             width: 2,
