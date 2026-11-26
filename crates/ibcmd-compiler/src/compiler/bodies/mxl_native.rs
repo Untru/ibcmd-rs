@@ -3289,6 +3289,7 @@ mod tests {
                 &Default::default(),
                 &Default::default(),
                 |_| None,
+                |_| None,
                 None,
             )
             .unwrap();
@@ -3307,6 +3308,7 @@ mod tests {
             &unknown,
             &Default::default(),
             &Default::default(),
+            |_| None,
             |_| None,
             None,
         )
@@ -3340,6 +3342,7 @@ mod tests {
                 body,
                 &Default::default(),
                 &Default::default(),
+                |_| None,
                 |_| None,
                 None,
             )
@@ -3528,6 +3531,7 @@ mod native_font_tests {
                 &Default::default(),
                 &Default::default(),
                 |_| None,
+                |_| None,
                 None,
             )
             .unwrap();
@@ -3556,6 +3560,7 @@ mod native_font_tests {
             &body,
             &Default::default(),
             &Default::default(),
+            |_| None,
             |_| None,
             None,
         )
