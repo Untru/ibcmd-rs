@@ -268,6 +268,7 @@ struct FormXmlCommand {
     title: Vec<LocalizedString>,
     tooltip: Vec<LocalizedString>,
     action: Option<String>,
+    extra_actions: Vec<String>,
     functional_options: Vec<String>,
     modifies_saved_data: Option<bool>,
     /// `<Representation>`, member 10. Absent stores 3 and the three words 0,
@@ -7317,6 +7318,7 @@ fn format_native_form_body(
                 title: &title,
                 tooltip: &tooltip,
                 action: command.action.as_deref().unwrap_or(""),
+                extra_actions: &command.extra_actions,
                 representation: command.representation.as_deref(),
                 picture: &command_picture,
                 functional_options: &command_options,
@@ -10887,7 +10889,12 @@ pub fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyPropertie
                         if path_ends_with(&path, &["Form", "Commands", "Command", "Action"]) =>
                     {
                         if let Some(command) = current_command.as_mut() {
-                            command.action = Some(text_value.trim().to_string());
+                            let handler = text_value.trim().to_string();
+                            if command.action.is_some() {
+                                command.extra_actions.push(handler);
+                            } else {
+                                command.action = Some(handler);
+                            }
                         }
                     }
                     "ModifiesSavedData"
@@ -13127,6 +13134,7 @@ fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlComman
         title: Vec::new(),
         tooltip: Vec::new(),
         action: None,
+        extra_actions: Vec::new(),
         representation: None,
         functional_options: Vec::new(),
         picture: None,
@@ -13822,16 +13830,9 @@ fn apply_form_choice_list_part(
     Ok(())
 }
 
-fn form_child_item_supports_control_border(tag: &str) -> bool {
-    matches!(
-        tag,
-        "LabelField" | "PictureField" | "LabelDecoration" | "PictureDecoration" | "CalendarField"
-    )
-}
-
 fn path_ends_with_for_current_border_owner(path: &[String], items: &[FormXmlChildItem]) -> bool {
     items.last().is_some_and(|item| {
-        form_child_item_supports_control_border(&item.tag)
+        ibcmd_form_schema::FormControlBorderSchema::supports_item(&item.tag)
             && path.last().map(String::as_str) == Some(item.tag.as_str())
     })
 }
@@ -13840,7 +13841,7 @@ fn path_ends_with_for_child_control_border(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    form_child_item_supports_control_border(&item.tag)
+    ibcmd_form_schema::FormControlBorderSchema::supports_item(&item.tag)
         && path_ends_with(path, &[item.tag.as_str(), "Border"])
 }
 
@@ -13851,7 +13852,7 @@ fn path_ends_with_for_child_control_border_style(
     let Some(item) = items.last() else {
         return false;
     };
-    form_child_item_supports_control_border(&item.tag)
+    ibcmd_form_schema::FormControlBorderSchema::supports_item(&item.tag)
         && path_ends_with(path, &[item.tag.as_str(), "Border", "style"])
 }
 

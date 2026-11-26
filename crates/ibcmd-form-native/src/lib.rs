@@ -7498,6 +7498,7 @@ pub struct NativeFormCommand<'a> {
     pub picture: &'a str,
     /// `<Action>`: the procedure the command runs.
     pub action: &'a str,
+    pub extra_actions: &'a [String],
     /// `<Representation>`: `Text`, `Picture`, `TextPicture` or `Auto`.
     pub representation: Option<&'a str>,
     pub modifies_saved_data: bool,
@@ -7520,6 +7521,7 @@ impl Default for NativeFormCommand<'_> {
             picture_index: "{0,0,0}",
             picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
             action: "",
+            extra_actions: &[],
             representation: None,
             modifies_saved_data: false,
             functional_options: "{0,0}",
@@ -7551,9 +7553,15 @@ pub fn format_form_command(command: &NativeFormCommand<'_>) -> Option<String> {
         &[("Use", "0"), ("DontUse", "1"), ("Auto", "2")],
         "2",
     )?;
+    let extra_actions: String = command
+        .extra_actions
+        .iter()
+        .map(|handler| format!(",{},1", quoted(handler)))
+        .collect();
+    let bindings = command.extra_actions.len() + 1;
     Some(format!(
         "{{9,{{{id},{ns}}},{name},{title},{tooltip},{use_always},{picture_index},{picture},\
-         {action},{representation},{modifies},0,{options},{row_use_early},{fourteenth},1,0,0,\
+         {action},{representation},{modifies},0,{options},{row_use_early},{fourteenth},{bindings},0{extra_actions},0,\
          {row_use_late}}}",
         id = command.id,
         ns = FORM_COMMAND_NAMESPACE_UUID,
@@ -7568,6 +7576,19 @@ pub fn format_form_command(command: &NativeFormCommand<'_>) -> Option<String> {
         options = command.functional_options,
         fourteenth = command.fourteenth,
     ))
+}
+
+#[cfg(test)]
+#[test]
+fn writes_the_primary_and_later_form_command_actions() {
+    let record = format_form_command(&NativeFormCommand {
+        action: "RunHandler",
+        extra_actions: &["AfterHandler".to_owned()],
+        ..NativeFormCommand::default()
+    })
+    .expect("primary and later action bindings");
+    assert!(record.contains(r#""RunHandler",3,0,0,"#));
+    assert!(record.ends_with(r#",2,0,"AfterHandler",1,0,2}"#));
 }
 
 /// The `{0,…}` record of a form parameter.
