@@ -2810,7 +2810,7 @@ fn write_source_asset_inner(
                 context.output.create_dir_all(&directory)?;
                 context
                     .output
-                    .write(&directory.join(ibcmd_schema::DCS_PICTURE_PNG_FILE), png)?;
+                    .write(directory.join(ibcmd_schema::DCS_PICTURE_PNG_FILE), png)?;
             }
         }
         SourceAssetKind::WsDefinition => {
