@@ -1927,6 +1927,18 @@ pub const TABLE_DESELECT_ALL_COMMAND_UUID: &str = "03022d03-1986-4dc4-93c2-03d99
 /// panel as 1. A table with no location in its source stores 0.
 pub const TABLE_HIERARCHY_PANEL_LOCATION_SLOT: usize = 36;
 pub const TABLE_HIERARCHY_PANEL_LOCATION: &str = "HierarchyPanelLocation";
+
+/// 2.21 serializes the hierarchy panel immediately before CurrentRowUse.
+pub fn form_child_rank(parent: &str, order: &[&str], name: &str) -> Option<usize> {
+    let position = |name| order.iter().position(|known| *known == name);
+    let hierarchy_rank = (parent == "Table")
+        .then(|| position("CurrentRowUse"))
+        .flatten();
+    if name == TABLE_HIERARCHY_PANEL_LOCATION {
+        return hierarchy_rank;
+    }
+    position(name).map(|rank| rank + usize::from(hierarchy_rank.is_some_and(|at| at <= rank)))
+}
 pub const TABLE_HIERARCHY_PANEL_LOCATIONS: &[(&str, Option<&str>)] =
     &[("0", None), ("1", Some("None"))];
 

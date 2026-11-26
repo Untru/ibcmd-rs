@@ -287,7 +287,7 @@ impl<'a> XmlEdits<'a> {
             None if self.lenient => &[],
             None => bail!("no 2.21 child order is known for <{parent_tag}>"),
         };
-        let rank = |name: &str| order.iter().position(|known| *known == name);
+        let rank = |name: &str| ibcmd_form_schema::form_child_rank(&parent_tag, order, name);
         let mut before = None;
         let mut new_rank = usize::MAX - 1;
         match rank(tag) {
