@@ -379,6 +379,8 @@
     "WebSocketClients/CovUseOSAuthentication_true",
     "WebSocketClients/CovUseOSProxy_true",
     "XDTOPackages/CovTemplate",
-    "CommonTemplates/CovSheetValueListDetail"
+    "CommonTemplates/CovSheetValueListDetail",
+    "CommonTemplates/CovSheetAutoFontHeight",
+    "CommonTemplates/CovSheetOEMFixedFont"
   ]
 }
