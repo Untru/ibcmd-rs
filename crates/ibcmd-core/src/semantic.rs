@@ -538,11 +538,17 @@ mod tests {
         assert!(compare_objects(&original, &original).is_empty());
         assert_eq!(
             compare_objects(&original, &changed),
-            [ObjectChange::Modified(uuid(1)), ObjectChange::Removed(uuid(2))]
+            [
+                ObjectChange::Modified(uuid(1)),
+                ObjectChange::Removed(uuid(2))
+            ]
         );
         assert_eq!(
             compare_objects(&changed, &original),
-            [ObjectChange::Modified(uuid(1)), ObjectChange::Added(uuid(2))]
+            [
+                ObjectChange::Modified(uuid(1)),
+                ObjectChange::Added(uuid(2))
+            ]
         );
     }
 
