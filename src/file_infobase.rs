@@ -74,9 +74,6 @@ pub(crate) fn import_edt(
     tree: &ibcmd_xml::source_tree::SourceTree,
     profile: &ibcmd_core::profile::EffectiveProfile,
 ) -> Result<InfobaseConfigImportReport> {
-    use crate::mssql::{GuardRequest, StageKind, TreeFiles, verify_staged_state};
-    use crate::mssql_dump::{StagedRow, StateBase};
-
     let source = absolute_path(&args.source_dir)?;
     let dialect = &profile
         .xml_dialect
@@ -90,42 +87,15 @@ pub(crate) fn import_edt(
     if config.xml_version_given && config.legacy_source_version()? != version {
         bail!("the target XML dialect disagrees with the EDT profile");
     }
+    if config.postgres()?.is_some() {
+        let stage = plan_edt_stage(&source, version, tree)?;
+        return crate::postgres_infobase::import_edt(&config, source, version, stage);
+    }
     let data_file = config
         .file_infobase
         .as_deref()
         .context("EDT staging requires a file infobase")?;
-    // The existing compiler reads the Designer files already inside the project.
-    // Compare its output against the independently validated in-memory snapshot.
-    let entries = crate::mssql::base_free_cf::base_free_entries(
-        &source.join(".ibcmd-provenance/xml"),
-        version,
-    )?;
-    let staged = entries
-        .iter()
-        .map(|(name, bytes)| StagedRow {
-            file_name: name,
-            bytes,
-        })
-        .collect::<Vec<_>>();
-    let verification = verify_staged_state(
-        &GuardRequest {
-            kind: StageKind::BaseFree,
-            source_root: &source,
-            tree: TreeFiles::Memory(tree),
-            removed: &[],
-            path_prefix: &[],
-            source_version: Some(version),
-        },
-        StateBase::Nothing,
-        &staged,
-    )?;
-    let stage = Stage {
-        rows: stage_rows(&entries, &[])?,
-        base_free: true,
-        reason: "verified retained Designer XML for empty CONFIG".into(),
-        target_rows: 0,
-        verification: Some(verification),
-    };
+    let stage = plan_edt_stage(&source, version, tree)?;
     let mut session =
         ibcmd_filedb::open_for_write(data_file).map_err(|error| anyhow!("{error}"))?;
     if !session
@@ -148,6 +118,48 @@ pub(crate) fn import_edt(
     );
     report.format = "edt";
     Ok(report)
+}
+
+fn plan_edt_stage(
+    source: &Path,
+    version: InfobaseConfigSourceVersion,
+    tree: &ibcmd_xml::source_tree::SourceTree,
+) -> Result<Stage> {
+    use crate::mssql::{GuardRequest, StageKind, TreeFiles, verify_staged_state};
+    use crate::mssql_dump::{StagedRow, StateBase};
+
+    // The existing compiler reads the Designer files already inside the project.
+    // Compare its output against the independently validated in-memory snapshot.
+    let entries = crate::mssql::base_free_cf::base_free_entries(
+        &source.join(".ibcmd-provenance/xml"),
+        version,
+    )?;
+    let staged = entries
+        .iter()
+        .map(|(name, bytes)| StagedRow {
+            file_name: name,
+            bytes,
+        })
+        .collect::<Vec<_>>();
+    let verification = verify_staged_state(
+        &GuardRequest {
+            kind: StageKind::BaseFree,
+            source_root: source,
+            tree: TreeFiles::Memory(tree),
+            removed: &[],
+            path_prefix: &[],
+            source_version: Some(version),
+        },
+        StateBase::Nothing,
+        &staged,
+    )?;
+    Ok(Stage {
+        rows: stage_rows(&entries, &[])?,
+        base_free: true,
+        reason: "verified retained Designer XML for empty CONFIG".into(),
+        target_rows: 0,
+        verification: Some(verification),
+    })
 }
 
 /// The tree an import reads and the XML version it reads it in.
