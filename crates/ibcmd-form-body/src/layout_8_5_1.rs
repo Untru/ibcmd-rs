@@ -674,13 +674,47 @@ pub fn bag_revision(
     })
 }
 
+// Native XML omits these default panels and the 8.5 writer regenerates them.
+fn default_action_panel_slots(owner: &[Node]) -> impl Iterator<Item = usize> + '_ {
+    use ibcmd_schema::FormGeneratedActionPanel as Panel;
+    let owner_revision = item_identity(owner)
+        .and_then(|_| owner[0].leaf())
+        .unwrap_or_default();
+    Panel::slots(
+        owner_revision,
+        owner.len(),
+        matches!(owner.get(5), Some(Node::List(_))),
+    )
+    .filter_map(|(slot, name_slot, layout)| {
+        let panel = owner.get(slot)?.list()?;
+        item_identity(panel)?;
+        if panel[0].leaf() != Some(Panel::RECORD_REVISION) {
+            return None;
+        }
+        let owner_name = owner.get(name_slot)?.leaf()?;
+        let expected = parse_node(&layout.default_payload(owner_name)?).ok()?;
+        (expected.list()? == panel.get(Panel::PAYLOAD_SLOT..)?).then_some(slot)
+    })
+}
+
 fn convert_items(node: Node, facts: &mut FormFactsV8_5_1) -> Result<Node> {
     let Node::List(members) = node else {
         return Ok(node);
     };
+    let generated_panels = {
+        let mut panels = default_action_panel_slots(&members);
+        [panels.next(), panels.next()]
+    };
     let mut members = members
         .into_iter()
-        .map(|member| convert_items(member, facts))
+        .enumerate()
+        .map(|(slot, member)| {
+            if generated_panels.contains(&Some(slot)) {
+                Ok(member)
+            } else {
+                convert_items(member, facts)
+            }
+        })
         .collect::<Result<Vec<_>>>()?;
     let Some(id) = item_identity(&members).map(ToOwned::to_owned) else {
         return Ok(Node::List(members));
@@ -739,8 +773,8 @@ fn convert_items(node: Node, facts: &mut FormFactsV8_5_1) -> Result<Node> {
     Ok(Node::List(members))
 }
 
-/// Form commands: `{11,{<id>,<form command class>},...}` with 21 members, the
-/// 8.3.27 `{9,...}` with 19 plus two appended.
+/// Form commands append two members to the 8.3.27 record, after all action
+/// bindings. Native 8.5.1.1529 ERP УХ commands with two actions have 23 members.
 fn convert_values_and_commands(node: Node, facts: &mut FormFactsV8_5_1) -> Result<Node> {
     let Node::List(members) = node else {
         return Ok(node);
@@ -758,16 +792,20 @@ fn convert_values_and_commands(node: Node, facts: &mut FormFactsV8_5_1) -> Resul
         _ => None,
     };
     if let Some(id) = command_id {
-        match (members[0].leaf(), members.len()) {
-            (Some("11"), 21) => {
-                let tail = members.split_off(19);
-                members[0] = Node::Leaf("9".to_owned());
-                facts.commands.insert(id, tail);
-            }
-            (lead, len) => {
-                bail!("8.5 form command {id} declares unknown revision {lead:?} with {len} members")
-            }
-        }
+        let lead = members[0].leaf();
+        let len = members.len();
+        let body_len = members
+            .get(15)
+            .and_then(Node::leaf)
+            .and_then(|bindings| bindings.parse().ok())
+            .and_then(ibcmd_form_schema::FormCommandSchema::member_count_8_3_27)
+            .filter(|count| count.checked_add(2) == Some(len));
+        let Some(body_len) = body_len.filter(|_| lead == Some("11")) else {
+            bail!("8.5 form command {id} declares unknown revision {lead:?} with {len} members");
+        };
+        let tail = members.split_off(body_len);
+        members[0] = Node::Leaf("9".to_owned());
+        facts.commands.insert(id, tail);
         return Ok(Node::List(members));
     }
     // A choice-list value: `{"#",<value class>,{1,...}}` with seven members,
@@ -805,6 +843,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_default_selected_rows_action_panel_keeps_slots_and_rejects_a_changed_bag() {
+        let raw = concat!(
+            "{22,{66,02023637-7868-4a5f-8576-835a76e0c9ba},1,0,0,10,",
+            r#""TestПанельДействийВыделенныхСтрок","#,
+            "{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,",
+            "{0,1,0,1},0,1,0,0,0,3,3,0}"
+        );
+        let mut facts = FormFactsV8_5_1::default();
+        let panel = convert_primitives(parse_node(raw).unwrap(), &mut facts);
+        let mut owner = vec![Node::Leaf("0".to_owned()); 74];
+        owner[0] = Node::Leaf("48".to_owned());
+        owner[1] = parse_node("{4,02023637-7868-4a5f-8576-835a76e0c9ba}").unwrap();
+        owner[6] = Node::Leaf(r#""Test""#.to_owned());
+        owner[5] = Node::Leaf("10".to_owned());
+        owner[39] = Node::List(
+            std::iter::once(Node::Leaf("2".to_owned()))
+                .chain(std::iter::repeat_n(Node::Leaf("0".to_owned()), 17))
+                .collect(),
+        );
+        owner[63] = panel.clone();
+        assert!(default_action_panel_slots(&owner).any(|slot| slot == 63));
+        let converted = convert_items(Node::List(owner.clone()), &mut facts).unwrap();
+        assert_eq!(converted.list().unwrap().len(), 59);
+        assert_eq!(facts.items["4"].tail[4], panel);
+        owner[62] = panel.clone();
+        assert!(!default_action_panel_slots(&owner).any(|slot| slot == 62));
+        owner[6] = Node::Leaf(r#""Other""#.to_owned());
+        assert!(!default_action_panel_slots(&owner).any(|slot| slot == 63));
+        assert!(convert_items(panel, &mut facts).is_err());
+
+        owner[6] = Node::Leaf(r#""Test""#.to_owned());
+        let changed = raw.replace("{0,1,0,1}", "{0,1,0,0}");
+        owner[63] = convert_primitives(parse_node(&changed).unwrap(), &mut facts);
+        assert!(!default_action_panel_slots(&owner).any(|slot| slot == 63));
+    }
+
+    #[test]
     fn round_trips_a_tuple_with_strings_and_base64() {
         let text = "{4,\r\n{59,0,\"a,\"\"b}\"},{#base64:QUJD\r\nREVG},{},{1,}}";
         let node = parse_node(text).unwrap();
@@ -812,5 +887,22 @@ mod tests {
             node.to_text(),
             "{4,{59,0,\"a,\"\"b}\"},{#base64:QUJD\r\nREVG},{},{1,}}"
         );
+    }
+
+    #[test]
+    fn a_tables_common_prefix_shifts_the_generated_panel_owner_name() {
+        let mut owner = vec![Node::Leaf("0".to_owned()); 80];
+        owner[0] = Node::Leaf("73".to_owned());
+        owner[1] = parse_node("{4,02023637-7868-4a5f-8576-835a76e0c9ba}").unwrap();
+        owner[5] = parse_node(r#"{0,{0,{"B",1},0}}"#).unwrap();
+        owner[6] = Node::Leaf(r#""Rows""#.to_owned());
+        let panel = concat!(
+            "{22,{66,02023637-7868-4a5f-8576-835a76e0c9ba},1,0,0,10,",
+            r#""RowsПанельДействийВыделенныхСтрок","#,
+            "{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,",
+            "{0,1,0,1},0,1,0,0,0,3,3,0}"
+        );
+        owner[60] = convert_primitives(parse_node(panel).unwrap(), &mut FormFactsV8_5_1::default());
+        assert_eq!(default_action_panel_slots(&owner).collect::<Vec<_>>(), [60]);
     }
 }

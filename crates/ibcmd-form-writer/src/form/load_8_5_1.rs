@@ -1744,9 +1744,14 @@ impl UpConversion<'_> {
             return self.convert_item(members, &id);
         }
         if let Some(id) = command_identity(members) {
-            if leaf(&members[0]) != Some("9") || members.len() != 19 {
+            let member_count = members
+                .get(15)
+                .and_then(leaf)
+                .and_then(|bindings| bindings.parse().ok())
+                .and_then(ibcmd_form_schema::FormCommandSchema::member_count_8_3_27);
+            if leaf(&members[0]) != Some("9") || member_count != Some(members.len()) {
                 bail!(
-                    "form command {id} is not the 8.3.27 `{{9,...}}` of 19 members ({} members)",
+                    "form command {id} has an invalid 8.3.27 layout ({} members)",
                     members.len()
                 );
             }
@@ -2118,6 +2123,27 @@ pub fn compile_xml_2_21_form_body_in_layout_8_3(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn two_command_actions_survive_the_8_5_layout() {
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.21">
+	<AutoCommandBar name="FormCommandBar" id="-1"/>
+	<Commands>
+		<Command name="Run" id="2">
+			<Action>RunHandler</Action>
+			<Action>AfterHandler</Action>
+		</Command>
+	</Commands>
+</Form>"#;
+        let native = compile_native_form_body_8_5_1(xml, None, None, None).unwrap();
+        let parsed = ibcmd_form_body::parse_form_body_plain(&native).unwrap();
+        let (legacy, facts) =
+            ibcmd_form_body::layout_8_5_1::down_convert_form_body_8_5_1(&parsed).unwrap();
+        assert_eq!(facts.commands["2"].len(), 2);
+        let serialized = legacy.trailing.concat();
+        assert!(serialized.contains("\"RunHandler\""), "{serialized}");
+        assert!(serialized.contains("\"AfterHandler\",1"), "{serialized}");
+    }
 
     #[test]
     fn an_unset_table_line_member_is_a_true_slot_only_in_the_8_3_layout() {

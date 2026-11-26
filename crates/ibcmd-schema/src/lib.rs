@@ -31,6 +31,72 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Empty action panels generated in the appended field and table tails by 8.5.
+#[derive(Clone, Copy)]
+pub struct FormGeneratedActionPanel {
+    owner_revision: &'static str,
+    tail_offset: usize,
+    owner_name_slot: usize,
+    kind: u8,
+    suffix: &'static str,
+}
+
+const FORM_GENERATED_ACTION_PANELS: [FormGeneratedActionPanel; 3] = [
+    FormGeneratedActionPanel {
+        owner_revision: "48",
+        tail_offset: 11,
+        owner_name_slot: 6,
+        kind: 10,
+        suffix: "ПанельДействийВыделенныхСтрок",
+    },
+    FormGeneratedActionPanel {
+        owner_revision: "73",
+        tail_offset: 20,
+        owner_name_slot: 5,
+        kind: 10,
+        suffix: "ПанельДействийВыделенныхСтрок",
+    },
+    FormGeneratedActionPanel {
+        owner_revision: "73",
+        tail_offset: 14,
+        owner_name_slot: 5,
+        kind: 11,
+        suffix: "ДействияСтроки",
+    },
+];
+
+impl FormGeneratedActionPanel {
+    pub const RECORD_REVISION: &str = "22";
+    pub const PAYLOAD_SLOT: usize = 2;
+
+    pub fn slots(
+        owner_revision: &str,
+        owner_len: usize,
+        has_common_prefix: bool,
+    ) -> impl Iterator<Item = (usize, usize, Self)> + '_ {
+        FORM_GENERATED_ACTION_PANELS
+            .into_iter()
+            .filter_map(move |panel| {
+                if panel.owner_revision != owner_revision {
+                    return None;
+                }
+                let slot = owner_len.checked_sub(panel.tail_offset)?;
+                let name = panel.owner_name_slot + usize::from(has_common_prefix);
+                Some((slot, name, panel))
+            })
+    }
+
+    /// The record after color and font tuples have been normalized to 8.3.
+    /// The owner name retains its wire quoting and any escaped quotes.
+    pub fn default_payload(self, owner_name: &str) -> Option<String> {
+        let name = owner_name.strip_suffix('"')?;
+        Some(format!(
+            "{{1,0,0,{},{name}{}\",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{0,1,0,1}},0,1,0,0,0,3,3,0}}",
+            self.kind, self.suffix
+        ))
+    }
+}
+
 /// The optional direct `ContextMenu` owned exclusively by a serialized
 /// `TextDocumentField`.  The physical adapter supplies the decoded payload so
 /// this schema rule owns the wire contract without depending on form parsing.

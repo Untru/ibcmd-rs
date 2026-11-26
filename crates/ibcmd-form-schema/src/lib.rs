@@ -1920,7 +1920,15 @@ pub struct FormCommandSchema<'a> {
     extra_action_slots: (usize, usize),
 }
 
+/// The plain table command observed in native 8.5.1.1529 ERP УХ exclusions.
+pub const TABLE_DESELECT_ALL_COMMAND_UUID: &str = "03022d03-1986-4dc4-93c2-03d995332357";
+
 impl<'a> FormCommandSchema<'a> {
+    /// Number of members in an 8.3.27 command with the given action-binding count.
+    pub fn member_count_8_3_27(bindings: usize) -> Option<usize> {
+        19usize.checked_add(bindings.checked_sub(1)?.checked_mul(2)?)
+    }
+
     /// Slot 15 is the command's action-binding count, and each binding past
     /// the first inserts a `<handler>,1` pair behind slot 16, moving the two
     /// members that close the record along with it.
@@ -1947,8 +1955,8 @@ impl<'a> FormCommandSchema<'a> {
             .get(15)
             .and_then(|field| field.trim().parse::<usize>().ok())
             .filter(|bindings| *bindings >= 1)?;
-        let extra = bindings.checked_sub(1)?.checked_mul(2)?;
-        if fields.len() != 19usize.checked_add(extra)? {
+        let member_count = Self::member_count_8_3_27(bindings)?;
+        if fields.len() != member_count {
             return None;
         }
         for index in 0..bindings.checked_sub(1)? {
@@ -1985,7 +1993,7 @@ impl<'a> FormCommandSchema<'a> {
             return None;
         }
 
-        let current_row_use = match fields.get(18 + extra).map(|field| field.trim()) {
+        let current_row_use = match fields.last().map(|field| field.trim()) {
             Some("0") => Some(FormCommandCurrentRowUse::Use),
             Some("1") => Some(FormCommandCurrentRowUse::DontUse),
             Some("2") => None,

@@ -97,10 +97,7 @@ pub fn format_native_color(
     // `pal:<name>`, a platform 8.5 palette colour: space 4 with kind 5, the
     // index the 2.21 exporter names (`layout_8_5_1::palette_color_name_8_5_1`).
     if let Some(name) = value.strip_prefix("pal:") {
-        let index = PALETTE_COLORS_8_5_1
-            .iter()
-            .find_map(|(candidate, index)| (*candidate == name).then_some(*index))?;
-        return Some(format!("{{4,4,{{{index}}},5}}"));
+        return ibcmd_1c_text::encode_palette_color_8_5_1(name);
     }
     if let Some(name) = value.strip_prefix("win:") {
         let code = WINDOWS_COLOR_CODES
@@ -118,18 +115,7 @@ pub fn format_native_color(
     style_item_uuid(name).map(|uuid| format!("{{3,3,{{0,{uuid}}}}}"))
 }
 
-/// The platform 8.5 palette, by the index a colour tuple stores.
-pub const PALETTE_COLORS_8_5_1: &[(&str, u8)] = &[
-    ("FirstBrand", 0),
-    ("SecondBrand", 1),
-    ("Red", 2),
-    ("Orange", 3),
-    ("Yellow", 4),
-    ("Green", 5),
-    ("LightBlue", 6),
-    ("Blue", 7),
-    ("Gray", 15),
-];
+pub use ibcmd_1c_text::PALETTE_COLORS_8_5_1;
 
 /// The codes the platform's own style colours carry, as the corpus spells
 /// them.
@@ -4081,6 +4067,12 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
         false,
         "SelectAll",
         "51c99108-107c-43e1-8918-e48835bf2495",
+    ),
+    (
+        "Table",
+        false,
+        "DeselectAll",
+        ibcmd_form_schema::TABLE_DESELECT_ALL_COMMAND_UUID,
     ),
     (
         "Table",

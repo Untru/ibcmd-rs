@@ -9297,6 +9297,15 @@ fn extracts_primary_and_later_form_command_actions() {
     assert_eq!(command.extra_actions, ["AfterHandler"]);
 }
 
+#[test]
+fn extracts_deselect_all_from_a_native_table_exclusion() {
+    let fields = ["{2,03022d03-1986-4dc4-93c2-03d995332357,51c99108-107c-43e1-8918-e48835bf2495}"];
+    assert_eq!(
+        parse_form_table_command_set_excluded_commands(&fields),
+        ["DeselectAll", "SelectAll"]
+    );
+}
+
 /// One event of one item can be bound more than once, and every binding is
 /// written, each behind the head binding of its own event.
 ///

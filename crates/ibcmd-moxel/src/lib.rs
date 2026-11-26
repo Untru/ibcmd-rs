@@ -10468,7 +10468,7 @@ fn locate_moxel_style_ref_palette_in(
     let mut candidates = Vec::new();
     for (start, count_field) in fields.iter().enumerate() {
         // A canonical positive count is a scalar of digits with no leading
-        // zero, and the run's first slot is `{3, kind, payload}`.
+        // zero, and the run's first slot uses a supported colour record.
         let count = match shapes.map(|shapes| shapes.shapes[start].scalar_usize()) {
             Some(Err(()) | Ok(Some(0))) => continue,
             Some(Ok(Some(count))) => count,
@@ -10483,7 +10483,7 @@ fn locate_moxel_style_ref_palette_in(
             continue;
         }
         if !root_shape_allows(shapes, start + 1, |shape| {
-            shape.len == 3 && shape.leads_with(3)
+            (shape.len == 3 && shape.leads_with(3)) || (shape.len == 4 && shape.leads_with(4))
         }) {
             continue;
         }
@@ -10615,8 +10615,25 @@ pub fn parse_moxel_style_ref_slot(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<String>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 3 || fields.first()?.trim() != "3" {
-        return None;
+    match &fields[..] {
+        [revision, _, _] if revision.trim() == "3" => {}
+        [revision, kind, _, tail]
+            if revision.trim() == "4" && kind.trim() == "3" && tail.trim() == "3" => {}
+        [revision, kind, payload, tail]
+            if revision.trim() == "4" && kind.trim() == "4" && tail.trim() == "5" =>
+        {
+            let payload = split_1c_braced_fields(payload, 0)?;
+            let [code] = &payload[..] else {
+                return None;
+            };
+            let index = code.trim().parse::<u8>().ok()?;
+            return ibcmd_1c_text::PALETTE_COLORS_8_5_1
+                .iter()
+                .find_map(|(name, number)| {
+                    (*number == index).then(|| Some(format!("pal:{name}")))
+                });
+        }
+        _ => return None,
     }
     let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
     match fields.get(1)?.trim() {
@@ -11966,6 +11983,12 @@ fn render_moxel_spreadsheet_xml(
         push_moxel_picture_xml(&mut xml, picture);
     }
     xml.push_str("</document>");
+    if xml.contains(">pal:") {
+        return String::from_utf8(ibcmd_1c_text::declare_palette_namespace_beside_style(
+            xml.into_bytes(),
+        ))
+        .expect("namespace declaration preserves UTF-8");
+    }
     xml
 }
 
@@ -15850,6 +15873,18 @@ mod moxel_exact_parity_tests {
             parse_moxel_style_color("12971252").as_deref(),
             Some("#F4ECC5")
         );
+    }
+
+    #[test]
+    fn named_8_5_palette_gray_round_trips_as_a_palette_colour() {
+        let raw = ibcmd_1c_text::encode_palette_color_8_5_1("Gray").unwrap();
+        assert_eq!(raw, "{4,4,{15},5}");
+        assert_eq!(
+            parse_moxel_style_ref_slot(&raw, &BTreeMap::new()),
+            Some(Some("pal:Gray".to_owned()))
+        );
+        assert!(parse_moxel_style_ref_slot("{4,4,{255},5}", &BTreeMap::new()).is_none());
+        assert!(parse_moxel_style_ref_slot("{4,4,{15},3}", &BTreeMap::new()).is_none());
     }
 
     #[test]

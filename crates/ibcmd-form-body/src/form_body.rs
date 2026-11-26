@@ -30307,6 +30307,7 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         "62ff963c-9426-43af-bb23-1d2ef3a9a0c1" => Some("AddOrderItem"),
         "4a817da0-5797-4e16-906f-02fb869e1873" => Some("GroupFilterItems"),
         "51c99108-107c-43e1-8918-e48835bf2495" => Some("SelectAll"),
+        ibcmd_form_schema::TABLE_DESELECT_ALL_COMMAND_UUID => Some("DeselectAll"),
         "c0519548-2a9a-44de-a25e-faf01e089d4d" => Some("Find"),
         "44ad3ec9-f3c2-4913-9224-5f9fb6418743" => Some("CancelSearch"),
         "49602716-fea6-497f-8047-726404038857" => Some("OutputList"),
