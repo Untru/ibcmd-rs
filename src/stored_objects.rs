@@ -1074,6 +1074,13 @@ impl StoredConfiguration {
     /// included), for native version status. Does not replace `status`, which
     /// compares exported bytes with a source folder.
     pub fn native_config_dump_info(&mut self) -> Result<Vec<u8>> {
+        self.native_config_dump_info_reusing(None)
+    }
+
+    fn native_config_dump_info_reusing(
+        &mut self,
+        reuse: Option<Arc<crate::mssql_dump::NativeInventoryReuse>>,
+    ) -> Result<Vec<u8>> {
         let _engine = engine();
         let mut args = export_args(&self.source, self.platform, Vec::new());
         args.main_configuration = true;
@@ -1081,7 +1088,12 @@ impl StoredConfiguration {
             ConfigSource::Database { sql, .. } => Some(sql.clone()),
             _ => None,
         };
-        crate::mssql_dump::read_config_dump_info_with_sql(&args, sql, self.rows_snapshot.clone())
+        crate::mssql_dump::read_config_dump_info_reusing(
+            &args,
+            sql,
+            self.rows_snapshot.clone(),
+            reuse,
+        )
     }
 
     /// The children of a node of the tree (`None`: the configuration).

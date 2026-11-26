@@ -429,7 +429,14 @@ fn write_config_dump_info_entries(
     }
 
     metadata.sort_by(|left, right| left.name.cmp(&right.name));
+    let serialize_started = Instant::now();
     let xml = format_config_dump_info_xml(source_version, metadata)?;
+    if profile_native_inventory() {
+        eprintln!(
+            "native inventory XML serialization: {} ms",
+            elapsed_ms(serialize_started)
+        );
+    }
     let path = output_dir.join(CONFIG_DUMP_INFO_FILE_NAME);
     output
         .write(&path, xml)
@@ -1139,6 +1146,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inventory_attempts_commit_their_own_input_and_xml_pair() {
+        let key = |tag| NativeInventoryInputs {
+            format: InfobaseConfigSourceVersion::V2_21,
+            headers: [tag; 32],
+            metadata: [0; 32],
+            versions: [0; 32],
+            parent_files: BTreeSet::new(),
+            parents: [0; 32],
+        };
+        let reuse = Arc::new(NativeInventoryReuse::default());
+        let left = NativeInventoryAttempt::new(reuse.clone());
+        let right = NativeInventoryAttempt::new(reuse);
+        left.record(key(1));
+        right.record(key(2));
+        left.finish(b"left");
+        let (input, bytes) = right.cached().unwrap();
+        assert!(input == key(1));
+        assert_eq!(bytes.as_slice(), b"left");
+        right.finish(b"right");
+        let (input, bytes) = left.cached().unwrap();
+        assert!(input == key(2));
+        assert_eq!(bytes.as_slice(), b"right");
+    }
+
+    #[test]
     fn shared_register_part_id_retains_each_native_owner() {
         let shared = "11111111-2222-4222-8222-111111111111";
         let first = "55555555-6666-4666-8666-555555555555";
@@ -1413,18 +1445,124 @@ mod tests {
     }
 }
 
-struct InventorySink(Mutex<Option<Vec<u8>>>);
+/// One editor operation's independently checkable native inventory.
+#[derive(Default)]
+#[doc(hidden)]
+pub struct NativeInventoryReuse(Mutex<Option<VerifiedNativeInventory>>);
+
+type VerifiedNativeInventory = (NativeInventoryInputs, Arc<Vec<u8>>);
+
+/// Inputs collected by one invocation of the native inventory writer.
+#[doc(hidden)]
+pub struct NativeInventoryAttempt {
+    reuse: Arc<NativeInventoryReuse>,
+    pending: Mutex<Option<NativeInventoryInputs>>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct NativeInventoryInputs {
+    pub(super) format: InfobaseConfigSourceVersion,
+    pub(super) headers: [u8; 32],
+    pub(super) metadata: [u8; 32],
+    pub(super) versions: [u8; 32],
+    pub(super) parent_files: BTreeSet<String>,
+    pub(super) parents: [u8; 32],
+}
+
+impl NativeInventoryAttempt {
+    fn new(reuse: Arc<NativeInventoryReuse>) -> Self {
+        Self {
+            reuse,
+            pending: Mutex::new(None),
+        }
+    }
+
+    pub(super) fn cached(&self) -> Option<VerifiedNativeInventory> {
+        self.reuse.0.lock().ok()?.clone()
+    }
+
+    pub(super) fn record(&self, inputs: NativeInventoryInputs) {
+        if let Ok(mut pending) = self.pending.lock() {
+            *pending = Some(inputs);
+        }
+    }
+
+    fn finish(&self, bytes: &[u8]) {
+        if let Ok(mut pending) = self.pending.lock()
+            && let Some(inputs) = pending.take()
+            && let Ok(mut cached) = self.reuse.0.lock()
+        {
+            *cached = Some((inputs, Arc::new(bytes.to_vec())));
+        }
+    }
+}
+
+pub(super) fn native_headers_digest(rows: &[ConfigRowHeader]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    for row in rows {
+        digest.update(row.file_name.len().to_le_bytes());
+        digest.update(row.file_name.as_bytes());
+        digest.update(row.part_no.to_le_bytes());
+        digest.update(row.data_size.to_le_bytes());
+    }
+    digest.finalize().into()
+}
+
+pub(super) fn native_rows_digest(rows: &[ConfigRow]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    for row in rows {
+        digest.update(row.file_name.len().to_le_bytes());
+        digest.update(row.file_name.as_bytes());
+        digest.update(row.part_no.to_le_bytes());
+        digest.update(row.data_size.to_le_bytes());
+        digest.update(row.binary_hex.len().to_le_bytes());
+        digest.update(row.binary_hex.as_bytes());
+        #[cfg(not(test))]
+        if let Some(bytes) = &row.binary {
+            digest.update([1]);
+            digest.update(bytes.len().to_le_bytes());
+            digest.update(bytes);
+        } else {
+            digest.update([0]);
+        }
+    }
+    digest.finalize().into()
+}
+
+pub(super) fn native_versions_digest(row: &BinaryConfigRow) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(&row.binary).into()
+}
+
+pub(super) fn profile_native_inventory() -> bool {
+    std::env::var("IBCMD_RS_PROFILE_NATIVE_INVENTORY")
+        .ok()
+        .and_then(|value| value.parse::<u8>().ok())
+        == Some(1)
+}
+
+struct InventorySink {
+    bytes: Mutex<Option<Vec<u8>>>,
+    reuse: Option<NativeInventoryAttempt>,
+}
 impl FileSink for InventorySink {
     fn inventory_only(&self) -> bool {
         true
     }
+
+    fn inventory_reuse(&self) -> Option<&NativeInventoryAttempt> {
+        self.reuse.as_ref()
+    }
+
     fn accept(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         if path
             .file_name()
             .is_some_and(|name| name == CONFIG_DUMP_INFO_FILE_NAME)
         {
             *self
-                .0
+                .bytes
                 .lock()
                 .map_err(|_| anyhow!("inventory sink poisoned"))? = Some(bytes.to_vec());
         }
@@ -1445,6 +1583,16 @@ pub fn read_config_dump_info_with_sql(
     sql: Option<crate::sql::SqlExec>,
     rows_snapshot: Option<Arc<BTreeMap<String, Arc<Vec<u8>>>>>,
 ) -> Result<Vec<u8>> {
+    read_config_dump_info_reusing(args, sql, rows_snapshot, None)
+}
+
+#[doc(hidden)]
+pub fn read_config_dump_info_reusing(
+    args: &MssqlDumpConfigArgs,
+    sql: Option<crate::sql::SqlExec>,
+    rows_snapshot: Option<Arc<BTreeMap<String, Arc<Vec<u8>>>>>,
+    reuse: Option<Arc<NativeInventoryReuse>>,
+) -> Result<Vec<u8>> {
     if args.runtime_journal.is_some()
         || args.inflate
         || !args.file_names.is_empty()
@@ -1460,8 +1608,15 @@ pub fn read_config_dump_info_with_sql(
             "ConfigDumpInfo requires an unfiltered read-only inventory without runtime_journal or inflate"
         );
     }
-    let sink = Arc::new(InventorySink(Mutex::new(None)));
-    dump_config_with(
+    let reuse = reuse
+        .filter(|_| sql.is_some() && rows_snapshot.is_none())
+        .map(NativeInventoryAttempt::new);
+    let sink = Arc::new(InventorySink {
+        bytes: Mutex::new(None),
+        reuse,
+    });
+    let started = Instant::now();
+    let report = dump_config_with(
         args,
         DumpHooks {
             sql,
@@ -1472,10 +1627,21 @@ pub fn read_config_dump_info_with_sql(
             native_versions: false,
         },
     )?;
+    if profile_native_inventory() {
+        eprintln!(
+            "native inventory in {} ms: {}",
+            elapsed_ms(started),
+            serde_json::to_string(&report.timings)?
+        );
+    }
     let bytes = sink
-        .0
+        .bytes
         .lock()
         .map_err(|_| anyhow!("inventory sink poisoned"))?
         .take();
-    bytes.ok_or_else(|| anyhow!("configuration inventory was not emitted"))
+    let bytes = bytes.ok_or_else(|| anyhow!("configuration inventory was not emitted"))?;
+    if let Some(reuse) = &sink.reuse {
+        reuse.finish(&bytes);
+    }
+    Ok(bytes)
 }

@@ -39,7 +39,9 @@ impl StoredConfiguration {
             }
             _ => None,
         };
-        let before = view.native_config_dump_info()?;
+        let reuse = matches!(view.source, ConfigSource::Database { .. })
+            .then(|| Arc::new(crate::mssql_dump::NativeInventoryReuse::default()));
+        let before = view.native_config_dump_info_reusing(reuse.clone())?;
         progress(1, 4, "editor export: resolve selection");
         let current = ConfigDumpInfo::parse(&before)?;
         let snapshot = crate::native_export_status::ConfigDumpInfoSnapshot::parse(&before)?;
@@ -228,7 +230,7 @@ impl StoredConfiguration {
         // Keep final validation independent of the operation's immutable input.
         drop(read_scope);
         progress(3, 4, "editor export: verify inventory");
-        if view.native_config_dump_info()? != before {
+        if view.native_config_dump_info_reusing(reuse)? != before {
             bail!("Database changed during export; retry");
         }
         if !names.is_empty() || !removed.is_empty() {

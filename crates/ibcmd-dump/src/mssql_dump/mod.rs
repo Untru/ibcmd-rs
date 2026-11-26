@@ -1030,7 +1030,10 @@ pub mod cas;
 mod command_interface;
 pub use config_dump_info::read_config_dump_info;
 #[doc(hidden)]
-pub use config_dump_info::read_config_dump_info_with_sql;
+pub use config_dump_info::{
+    NativeInventoryAttempt, NativeInventoryReuse, read_config_dump_info_reusing,
+    read_config_dump_info_with_sql,
+};
 mod config_dump_info;
 mod config_rows;
 pub mod config_save;
@@ -4880,6 +4883,39 @@ fn dump_table_rows_with_options_mode(
     })
 }
 
+fn read_native_inventory_versions(
+    sql: &crate::sql::SqlExec,
+    database: &str,
+    table: &str,
+) -> Result<BinaryConfigRow> {
+    fetch_binary_rows(
+        sql,
+        database,
+        table,
+        &BTreeSet::from([STAGE_INVENTORY_ROW.to_owned()]),
+        false,
+    )?
+    .into_iter()
+    .find(|row| row.file_name == STAGE_INVENTORY_ROW && row.part_no == 0)
+    .ok_or_else(|| anyhow!("full Config export has no versions row"))
+}
+
+fn native_inventory_table_report(timings: MssqlDumpTimingReport) -> DumpedTable {
+    DumpedTable {
+        rows: Vec::new(),
+        failed_rows: Vec::new(),
+        binary_bytes: 0,
+        inflated_rows: 0,
+        module_text_rows: 0,
+        metadata_xml_rows: 0,
+        source_asset_rows: 0,
+        source_assets: SourceAssetCompletenessReport::default(),
+        metadata_root_inventory: RootMetadataInventoryReport::default(),
+        timings,
+        incremental: None,
+    }
+}
+
 #[expect(
     clippy::drop_non_drop,
     clippy::if_same_then_else,
@@ -5069,6 +5105,42 @@ fn dump_table_rows_streamed(
     cpu_add(&mut timings, "prepare.metadata_fetch", metadata_fetch_cpu);
     if metadata_fetch_used_bcp {
         timings.prepare_metadata_fetch_bcp_ms += elapsed;
+    }
+    let inventory_reuse = sink.as_deref().and_then(FileSink::inventory_reuse);
+    let inventory_input_hashes = inventory_reuse.map(|_| {
+        let start = PartClock::start();
+        let hashes = (
+            native_headers_digest(&headers),
+            native_rows_digest(&metadata_rows),
+        );
+        detail_ms(&mut timings, "inventory.input_hashes", start);
+        hashes
+    });
+    if let Some((headers, metadata)) = inventory_input_hashes
+        && let Some((verified, xml)) = inventory_reuse.and_then(NativeInventoryAttempt::cached)
+        && (verified.format, verified.headers, verified.metadata)
+            == (source_version, headers, metadata)
+    {
+        // Re-read the effective main view. The metadata and exact header
+        // sequence determine the routes and the parent-list selection.
+        let start = PartClock::start();
+        let versions = read_native_inventory_versions(sql, database, table)?;
+        let parents = if verified.parent_files.is_empty() {
+            Vec::new()
+        } else {
+            fetch_config_rows(sql, database, table, &verified.parent_files)?
+        };
+        detail_ms(&mut timings, "inventory.verification_reads", start);
+        if native_versions_digest(&versions) == verified.versions
+            && native_rows_digest(&parents) == verified.parents
+        {
+            sink.as_ref().unwrap().accept(
+                &output_dir.join(ibcmd_xml::config_dump_info::FILE_NAME),
+                &xml,
+            )?;
+            timings.prepare_indexes_ms = elapsed_ms(prepare_started);
+            return Ok(native_inventory_table_report(timings));
+        }
     }
     let standalone_body_rows = if !standalone_body_file_names.is_empty() {
         let metadata_fetch_started = Instant::now();
@@ -5415,7 +5487,10 @@ fn dump_table_rows_streamed(
         || needs_standalone_refs
         || needs_source_layout_refs
     {
-        if broad_metadata_indexes {
+        if inventory_only && selected_metadata_rows.len() == metadata_rows.len() {
+            // The per-selection audit decoded this exact sequence already.
+            selected_metadata_texts.to_vec()
+        } else if broad_metadata_indexes {
             build_metadata_text_rows(&metadata_rows)
         } else if selected_configuration_index_needs.is_some() && !metadata_rows.is_empty() {
             build_metadata_text_rows(&metadata_rows)
@@ -5823,8 +5898,12 @@ fn dump_table_rows_streamed(
     let parent_list_ids = source_assets::parent_configuration_list_ids(&source_assets)
         .into_iter()
         .collect::<BTreeSet<_>>();
+    let mut inventory_parents_digest = native_rows_digest(&[]);
     if !parent_list_ids.is_empty() {
         let list_rows = fetch_config_rows(sql, database, table, &parent_list_ids)?;
+        if inventory_reuse.is_some() {
+            inventory_parents_digest = native_rows_digest(&list_rows);
+        }
         let list_texts = list_rows
             .iter()
             .filter(|row| row.part_no == 0)
@@ -5998,17 +6077,9 @@ fn dump_table_rows_streamed(
     // Native export info/status need the same inventory and writer as a full
     // export, but never fetch or convert the body batches below.
     if inventory_only {
-        let blob = fetch_binary_rows(
-            sql,
-            database,
-            table,
-            &BTreeSet::from([STAGE_INVENTORY_ROW.to_owned()]),
-            false,
-        )?
-        .into_iter()
-        .find(|row| row.file_name == STAGE_INVENTORY_ROW && row.part_no == 0)
-        .ok_or_else(|| anyhow!("full Config export has no versions row"))?;
-        let output = OutputWriter::from_env_to_sink(sink.unwrap());
+        let blob = read_native_inventory_versions(sql, database, table)?;
+        let output = OutputWriter::from_env_to_sink(sink.clone().unwrap());
+        let write_started = PartClock::start();
         write_config_dump_info(
             &output,
             output_dir,
@@ -6030,20 +6101,21 @@ fn dump_table_rows_streamed(
             },
         )?;
         output.finish()?;
+        detail_ms(&mut timings, "inventory.render", write_started);
+        if let Some(reuse) = inventory_reuse
+            && let Some((headers, metadata)) = inventory_input_hashes
+        {
+            reuse.record(NativeInventoryInputs {
+                format: source_version,
+                headers,
+                metadata,
+                versions: native_versions_digest(&blob),
+                parent_files: parent_list_ids,
+                parents: inventory_parents_digest,
+            });
+        }
         timings.prepare_indexes_ms = elapsed_ms(prepare_started);
-        return Ok(DumpedTable {
-            rows: Vec::new(),
-            failed_rows: Vec::new(),
-            binary_bytes: 0,
-            inflated_rows: 0,
-            module_text_rows: 0,
-            metadata_xml_rows: 0,
-            source_asset_rows: 0,
-            source_assets: SourceAssetCompletenessReport::default(),
-            metadata_root_inventory: RootMetadataInventoryReport::default(),
-            timings,
-            incremental: None,
-        });
+        return Ok(native_inventory_table_report(timings));
     }
 
     // Predefined values are resolved for body writers. ConfigDumpInfo only
