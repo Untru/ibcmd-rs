@@ -99,3 +99,29 @@ chart of accounts (#627).
 - The pinned coverage round-trip suite passed on both routes. The only
   remaining #678 refusal entries concern panel height, implemented in the
   separate open PR #722.
+
+## Panel height with PR #722 applied locally
+
+The joint build at `548029fd` applies the panel-height commit from #722 on
+top of #739 at `a1dc3911`. The physical-adapter baseline was regenerated
+for the combined sources.
+
+For each pinned `corpus-client-application-interface` set, verify the CF
+and all four native XML files against its manifest. Export the original CF,
+bootstrap a new CF from native XML, then export the rebuilt CF. Each of
+these exports matched 4/4 files for both 8.3.27.2214 and 8.5.1.1150.
+For 8.5.1.1150, the decompressed interface record
+`7771fc81-e832-421e-9efa-adeb5ac05bbd.b` also matched byte for byte.
+
+Import each XML tree into a fresh file database created by native
+8.5.1.1529, using `--no-verify` as in the corpus route. Export from that
+database with ibcmd-rs, then apply and export with native 8.5.1.1529.
+The ibcmd-rs exports matched 4/4 files for both sets. The native re-export
+matched 4/4 for the 8.5.1.1150 set. For the older 8.3.27.2214 set the native
+re-export on the newer runtime matched the panel file exactly and changed
+the three other XML files. Thus the panel height was preserved on both
+routes for both inputs, including after native apply.
+
+The coverage round-trip suite passed all four tests after removing the two
+panel-height refusals. The previously built test harness ran the current
+joint-branch ibcmd-rs executable and read the updated expectations from disk.

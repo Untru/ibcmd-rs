@@ -65,7 +65,6 @@
     },
     "8.3.27.2214/corpus-client-application-interface": {
       "refused": {
-        "Configuration.xml": "#678: the base-free writer refuses Configuration ClientApplicationInterface Ext/ClientApplicationInterface.xml: <panel> has <height>, which the writer cannot encode"
       }
     },
     "8.3.27.2214/corpus-defined-type-resource": {
@@ -328,7 +327,6 @@
     },
     "8.5.1.1150/corpus-client-application-interface": {
       "refused": {
-        "Configuration.xml": "#678: the base-free writer refuses Configuration ClientApplicationInterface Ext/ClientApplicationInterface.xml: <panel> has <height>, which the writer cannot encode"
       }
     },
     "8.5.1.1150/corpus-defined-type-resource": {
