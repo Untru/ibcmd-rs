@@ -153,6 +153,8 @@ async function harness({
     AbortController,
     require: (id) => {
       if (id === "vscode") return vscode;
+      if (id === "./configuration-tree")
+        return require("../out/configuration-tree");
       if (id === "./rpc")
         return { RpcClient, RpcError: class extends Error {} };
       if (id === "./config")
