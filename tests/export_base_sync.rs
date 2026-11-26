@@ -101,6 +101,23 @@ fn dump(rows: &Path, out: &Path, extra: &[&OsStr]) -> Value {
 }
 
 #[test]
+fn eds_inline_children_have_native_config_dump_info_names() {
+    let temp = common::temp_dir("eds-config-dump-info");
+    let rows = temp.join("rows");
+    let out = temp.join("out");
+    rows_of(&fixture("eds-matrix/configuration.cf"), &rows);
+    dump(&rows, &out, &[]);
+    let xml = config_dump_info(&out);
+    for name in [
+        "Function.Функция1",
+        "DimensionTable.ТаблицаИзмерения1.Field.Поле1",
+        "Table.Таблица1.Field.Поле1",
+    ] {
+        assert!(xml.contains(&format!("{name}\" id=")), "missing {name}");
+    }
+}
+
+#[test]
 fn strict_model_export_reports_http_service_fallback() {
     let temp = common::temp_dir("strict-model-fallback");
     let rows = temp.join("rows");

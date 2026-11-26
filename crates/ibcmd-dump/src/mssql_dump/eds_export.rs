@@ -82,6 +82,10 @@ fn add_child(
 }
 
 impl EdsExport {
+    pub(super) fn reference_name(&self, uuid: &str) -> Option<&str> {
+        self.names.name(uuid)
+    }
+
     pub(crate) fn export_row(
         &self,
         file_name: &str,
