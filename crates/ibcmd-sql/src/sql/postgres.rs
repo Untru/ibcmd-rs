@@ -176,7 +176,7 @@ fn decode(oid: u32, bytes: Option<Vec<u8>>) -> Result<SqlValue> {
 
 // bytea can use either of PostgreSQL's output formats.
 fn decode_binary(bytes: &[u8]) -> Result<Vec<u8>> {
-    if bytes.starts_with(b"\\x") {
+    if matches!(bytes, [b'\\', b'x', ..]) {
         return decode_bytea(bytes);
     }
     let mut decoded = Vec::with_capacity(bytes.len());
