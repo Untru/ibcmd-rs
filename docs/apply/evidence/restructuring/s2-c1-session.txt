@@ -1,0 +1,48 @@
+== Справочник.ШаблоныЗаданийОчереди.ИмяМетода
+  limit: 1 024 (expected 1 024): Да
+  indexing: НеИндексировать
+  rows: 0, longest value 0, total length 0
+  the longest value fits the old limit: Да
+  wrote 1 024 characters, read back 1 024, equal: Да, found by query: Да
+  xdto of the written object holds the value: Да
+  test object deleted
+== Справочник.КлючевыеОперации.ИмяХеш
+  limit: 100 (expected 100): Да
+  indexing: Индексировать
+  rows: 716, longest value 32, total length 17 796
+  the longest value fits the old limit: Да
+  wrote 100 characters, read back 100, equal: Да, found by query: Да
+  xdto of the written object holds the value: Да
+  test object deleted
+== Справочник.КлассификаторБанков.Город
+  limit: 200 (expected 200): Да
+  indexing: НеИндексировать
+  rows: 4 840, longest value 28, total length 51 869
+  the longest value fits the old limit: Да
+  wrote 200 characters, read back 200, equal: Да, found by query: Да
+  xdto of the written object holds the value: Да
+  test object deleted
+== Справочник.КлассификаторБанков.ИНН
+  limit: 20 (expected 20): Да
+  indexing: Индексировать
+  rows: 4 840, longest value 10, total length 8 280
+  the longest value fits the old limit: Да
+  wrote 20 characters, read back 20, equal: Да, found by query: Да
+  xdto of the written object holds the value: Да
+  test object deleted
+== Документ.ТелефонныйЗвонок.АбонентКакСвязаться
+  limit: 300 (expected 300): Да
+  indexing: Индексировать
+  rows: 1, longest value 23, total length 23
+  the longest value fits the old limit: Да
+  wrote 300 characters, read back 300, equal: Да, found by query: Да
+  xdto of the written object holds the value: Да
+  test object deleted
+== Документ._ДемоЗаказПокупателя.ГородДоставки
+  limit: 51 (expected 51): Да
+  indexing: НеИндексировать
+  rows: 8, longest value 0, total length 0
+  the longest value fits the old limit: Да
+  wrote 51 characters, read back 51, equal: Да, found by query: Да
+  xdto of the written object holds the value: Да
+  test object deleted

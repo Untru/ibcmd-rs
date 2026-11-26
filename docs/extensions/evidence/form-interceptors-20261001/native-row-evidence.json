@@ -1,0 +1,23 @@
+[
+  {
+    "case": "before",
+    "row": "F:\\ibcmd\\lab\\05\\wave1\\extensions\\rows_before\\ServiceDesk\\52bddabb-6ba5-4616-9a71-5392d506cf86.0__part0.bin",
+    "packed_sha256": "a11d1dc0fc3e6309e22aaa3db82c6e8ea2b7ac4da0f1562ed775ecf1781c1fa0",
+    "plain_sha256": "d10a89625f99030c68395415a838bfb2e38166423599da309166d86a2646686b",
+    "event_block": "{1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,\"ПриСозданииНаСервере\",1,0,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}"
+  },
+  {
+    "case": "after",
+    "row": "F:\\ibcmd\\lab\\05\\wave1\\extensions\\rows_after\\ServiceDesk\\52bddabb-6ba5-4616-9a71-5392d506cf86.0__part0.bin",
+    "packed_sha256": "79c849c58183a45b36508f501698c345122c403a4e8c4b51cb7473c424976522",
+    "plain_sha256": "b01f2ac50dd10580e1f862b0b21bb65228bf88a347fcb2933d3e707dd0737609",
+    "event_block": "{1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,\"\",1,0,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,2,\"ПриСозданииНаСервере\",1}"
+  },
+  {
+    "case": "override",
+    "row": "F:\\ibcmd\\lab\\05\\wave1\\extensions\\rows_override\\ServiceDesk\\52bddabb-6ba5-4616-9a71-5392d506cf86.0__part0.bin",
+    "packed_sha256": "ddb815bc133fcf7cee0b76cb537af3b21787635b053447398f2042544af90d2d",
+    "plain_sha256": "aa8b3618aa574c61579fd025e3a57c74bb0f431c082f17fd2eb82c7ba6cfad9b",
+    "event_block": "{1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,\"ПриСозданииНаСервере\",1,0,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,2,1}"
+  }
+]

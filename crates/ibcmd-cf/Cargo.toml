@@ -1,0 +1,12 @@
+[package]
+name = "ibcmd-cf"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+flate2 = "1.1"
+ibcmd-core = { path = "../ibcmd-core" }
+ibcmd-v8 = { path = "../ibcmd-v8" }
+serde = { version = "1.0", features = ["derive"] }

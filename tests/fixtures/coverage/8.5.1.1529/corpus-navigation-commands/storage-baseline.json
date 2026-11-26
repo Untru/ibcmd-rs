@@ -1,0 +1,30 @@
+{
+  "equal": [
+    "AccountingRegisters/CovNavigationRegister.xml",
+    "AccumulationRegisters/CovNavigationAccumulation.xml",
+    "Catalogs/CovNavigationCatalog.xml",
+    "Catalogs/CovNavigationCatalog/Forms/EditListForm.xml",
+    "CommonForms/CovExchangePlanHistory.xml",
+    "CommonForms/CovExchangePlanHistory/Ext/Form.xml",
+    "CommonForms/CovGeneratedUserSettingsGroup.xml",
+    "CommonForms/CovNavigationAccountingRegister.xml",
+    "CommonForms/CovNavigationAccountingRegister/Ext/Form.xml",
+    "CommonForms/CovNavigationChartOfAccounts.xml",
+    "CommonForms/CovNavigationChartOfAccounts/Ext/Form.xml",
+    "CommonForms/CovNavigationTemplate.xml",
+    "CommonForms/CovNavigationTemplate/Ext/Form.xml",
+    "CommonForms/CovPlannerBackCommand.xml",
+    "CommonForms/CovRecordSetRowPicture.xml",
+    "CommonForms/CovReportExcludePreview.xml",
+    "CommonForms/CovTableOnlyDeselectAll.xml",
+    "CommonForms/CovTableOnlySelectAll.xml",
+    "DocumentJournals/CovNavigationJournal.xml",
+    "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
+    "Documents/CovNavigationAccountingRecorder.xml",
+    "Documents/CovNavigationAccumulationRecorder.xml",
+    "Documents/CovRecorder.xml",
+    "ExchangePlans/CovNavigationPlan.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+    "Reports/CovPreviewReport.xml"
+  ]
+}

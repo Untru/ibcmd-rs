@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "source_profile": "xml-2.21",
+  "target_profile": "xml-2.20",
+  "fixtures": [
+    {
+      "id": "unchanged-constant",
+      "path": "unchanged-constant.xml",
+      "family": "Constant",
+      "case": "unchanged",
+      "sha256": "e51df69b2aca52b3b0f14f6697b6fbfbc1bc261290016951f68b3ef1fab313b0",
+      "expected_losses": []
+    },
+    {
+      "id": "changed-catalog",
+      "path": "changed-catalog.xml",
+      "family": "Catalog",
+      "case": "changed",
+      "sha256": "378173a720cf0d0369f93352a62ae07e41a96ad8d86c90cc9c480b89dedccfa6",
+      "expected_losses": []
+    },
+    {
+      "id": "lossy-form-interface-mode",
+      "path": "lossy-form.json",
+      "family": "Form",
+      "case": "lossy",
+      "sha256": "64dc4e0d8f79697c4b411d0d762549877172c72b9c06bd9109317c9815bb665b",
+      "expected_losses": [
+        "migration.xcf-2-21-to-2-20.use-in-interface-compatibility-mode"
+      ]
+    }
+  ]
+}

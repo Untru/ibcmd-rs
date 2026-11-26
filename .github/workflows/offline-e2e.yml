@@ -1,0 +1,400 @@
+name: Offline E2E
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-e2e-${{ github.workflow }}-${{ github.ref }}
+  # A newer push supersedes a pull request's run; a run of master finishes,
+  # so every merged commit gets a complete result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  OPENSPEC_TELEMETRY: "0"
+  RUST_VERSION: "1.95.0"
+  # Test builds keep line tables only: full debug info made the debug
+  # executable ~700 MB and linking dominated the test steps. Backtraces keep
+  # file and line. The runners build from scratch, so incremental state is
+  # only written, never reused (dtolnay/rust-toolchain sets the same).
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  spec:
+    name: OpenSpec (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate the accepted design and specifications
+        env:
+          CI: "true"
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+        run: |
+          npx --yes @fission-ai/openspec@1.6.0 validate extract-coverage-corpus --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate add-coverage-configuration --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate add-fast-parity-evidence --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate add-selected-cf-extract --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate implement-edt-project-conversion --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate add-issue-self-service --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate enable-extension-apply-851150 --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate add-extension-restructuring --strict --no-interactive
+
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Enforce EDT-derived corpus governance
+        shell: pwsh
+        run: |
+          ./tools/validate-edt-corpus.ps1 -RepositoryRoot . -SelfTest
+          ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
+
+      - name: Enforce physical-adapter policy guard
+        shell: pwsh
+        run: |
+          ./tools/validate-physical-adapter-policy.ps1 -RepositoryRoot .
+          ./tools/validate-physical-adapter-policy.ps1 -RepositoryRoot . -SelfTest
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Only master writes caches: pull requests restore master's, and
+          # their own copies would push master's out of the 10 GB quota.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Test the lane selection of the offline matrix
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tests/scripts/test_ci_scope.py
+
+      - name: Lint standalone workspace crates offline
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo clippy --locked --workspace --exclude ibcmd-rs --all-targets -- -D warnings
+
+  offline-matrix:
+    name: Offline matrix (${{ matrix.name }})
+    needs: [spec, quality]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # pr_release: builds and audits the release binary on pull
+          # requests too; the other entries do so on pushes and manual runs.
+          - name: Linux
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            binary: target/release/ibcmd-rs
+            debug_binary: target/debug/ibcmd-rs
+            pr_release: true
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: target/release/ibcmd-rs.exe
+            debug_binary: target/debug/ibcmd-rs.exe
+            pr_release: false
+          - name: Linux ARM64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary: target/release/ibcmd-rs
+            debug_binary: target/debug/ibcmd-rs
+            pr_release: false
+          - name: macOS ARM64
+            os: macos-15
+            target: aarch64-apple-darwin
+            binary: target/release/ibcmd-rs
+            debug_binary: target/debug/ibcmd-rs
+            pr_release: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          # The base of a pull request, for the lane selection below.
+          fetch-depth: 0
+
+      # Runner speed differs by host: the same job takes ~23 or ~40 min on
+      # windows-latest. The hardware line explains a slow run.
+      - name: Describe the runner
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          if ($IsWindows) {
+            $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+            "cpu: $($cpu.Name.Trim()); logical processors: $([Environment]::ProcessorCount)"
+            "memory: $([math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)) GB"
+            $defender = Get-MpComputerStatus -ErrorAction SilentlyContinue
+            if ($defender) { "defender real-time protection: $($defender.RealTimeProtectionEnabled)" }
+          } elseif ($IsMacOS) {
+            "cpu: $(sysctl -n machdep.cpu.brand_string); logical processors: $([Environment]::ProcessorCount)"
+          } else {
+            $model = (lscpu | Select-String -Pattern '^Model name:\s*(.+)$' | Select-Object -First 1)
+            $name = if ($model) { $model.Matches[0].Groups[1].Value.Trim() } else { "$(uname -m) (lscpu names no model)" }
+            "cpu: $name; logical processors: $([Environment]::ProcessorCount)"
+          }
+          Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null -and ($_.Used + $_.Free) -gt 0 } |
+            ForEach-Object { "drive $($_.Name): $([math]::Round($_.Free / 1GB)) GB free" }
+
+      - name: Select a physical temporary directory
+        shell: pwsh
+        run: |
+          $physicalTemp = Join-Path $env:RUNNER_TEMP 'ibcmd-physical-tmp'
+          New-Item -ItemType Directory -Force -Path $physicalTemp | Out-Null
+          foreach ($name in @('TEMP', 'TMP', 'TMPDIR')) {
+            "$name=$physicalTemp" >> $env:GITHUB_ENV
+          }
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A pull request runs only the lanes its changed files can affect
+      # (scripts/ci_scope.py); pushes and manual runs run every lane. The
+      # job itself always runs, so the required checks always report.
+      - name: Select the lanes this change needs
+        id: scope
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            python scripts/ci_scope.py --base "origin/${{ github.base_ref }}" ${{ matrix.pr_release && '--pr-release' || '' }} | tee -a "$GITHUB_OUTPUT"
+          else
+            python scripts/ci_scope.py --all | tee -a "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enforce EDT-derived corpus governance
+        shell: pwsh
+        run: |
+          ./tools/validate-edt-corpus.ps1 -RepositoryRoot . -SelfTest
+          ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
+
+      # PowerShell 7 above runs the same validator on every target. Windows
+      # PowerShell 5.1 takes ~4 min on a slow runner, so a pull request runs
+      # it when the validator, its Pester test, its self-test fixtures, the
+      # corpus or this workflow change (the `powershell` lane); every push to
+      # master runs it.
+      - name: Test EDT corpus governance under Windows PowerShell
+        if: runner.os == 'Windows' && steps.scope.outputs.powershell == 'true'
+        shell: powershell
+        run: |
+          $pester = Get-Module -ListAvailable Pester |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+          if ($null -eq $pester) {
+            throw 'Pester is required for the Windows PowerShell governance test.'
+          }
+          Import-Module $pester.Path
+          if ($pester.Version.Major -ge 5) {
+            $result = Invoke-Pester -Path tests/scripts/validate-edt-corpus.Tests.ps1 -PassThru
+          } else {
+            $result = Invoke-Pester -Script tests/scripts/validate-edt-corpus.Tests.ps1 -PassThru
+          }
+          if ($result.FailedCount -ne 0) {
+            exit 1
+          }
+
+      - name: Enforce physical-adapter policy guard
+        shell: pwsh
+        run: |
+          ./tools/validate-physical-adapter-policy.ps1 -RepositoryRoot .
+          ./tools/validate-physical-adapter-policy.ps1 -RepositoryRoot . -SelfTest
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Test installed-EDT oracle guards without the platform
+        shell: pwsh
+        run: |
+          python tests/scripts/edt_oracle_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'edt_oracle_test failed' }
+          python tests/scripts/xml_to_edt_macos_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'xml_to_edt_macos_test failed' }
+          python tests/scripts/edt_warm_context_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'edt_warm_context_test failed' }
+          python tests/scripts/edt_release_audit_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'edt_release_audit_test failed' }
+          python tests/scripts/linux_abi_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'linux_abi_test failed' }
+          python tools/coverage/fixture_paths.py
+          if ($LASTEXITCODE -ne 0) { throw 'pinned fixtures validation failed' }
+          python -m unittest discover -s tests/fixtures/1c-fixtures/tools/coverage -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'native generator tests failed' }
+          python -m unittest discover -s tools/coverage -p 'test_*.py'
+          if ($LASTEXITCODE -ne 0) { throw 'coverage generator tests failed' }
+
+      - name: Cache Cargo artifacts
+        if: steps.scope.outputs.rust == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Native dependency objects must not cross runner ABI boundaries.
+          key: abi-v1-${{ matrix.os }}-${{ matrix.target }}
+          # Only master writes caches: pull requests restore master's (an
+          # exact key unless they change a manifest), and their own copies
+          # would push master's out of the 10 GB quota.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+
+      - name: Fetch locked dependencies
+        if: steps.scope.outputs.rust == 'true'
+        run: cargo fetch --locked
+
+      - name: Validate bundled schema corpus
+        if: steps.scope.outputs.crates == 'true'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo test --locked -p ibcmd-schema
+
+      - name: Lint standalone workspace crates on Windows
+        if: steps.scope.outputs.rust == 'true' && runner.os == 'Windows'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo clippy --locked --workspace --exclude ibcmd-rs --all-targets -- -D warnings
+
+      - name: Test standalone workspace crates offline
+        if: steps.scope.outputs.crates == 'true'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo test --locked --workspace --exclude ibcmd-rs
+
+      - name: Test root integration suites offline
+        if: steps.scope.outputs.rust == 'true'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo test --locked -p ibcmd-rs --test '*' --no-default-features
+
+      # Every unit test of the root library (the converters and the load and
+      # export engines). Their paths are built portably, so all five targets
+      # run them.
+      - name: Test the root library offline
+        if: steps.scope.outputs.lib == 'true'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo test --locked -p ibcmd-rs --lib --no-default-features
+
+      # Every test removes what it creates in the temporary directory, also
+      # when it fails (docs/testing.md, "Temporary directories"). Kept on
+      # purpose: the two editor-server corpora the VS Code tests read by name
+      # (`ibcmd-external-editor-server-protocol`, `-export`), and `ibcmd-rs`,
+      # the parent the engine's scratch folders share, when it is empty.
+      - name: Check that the tests left the temporary directory empty
+        if: steps.scope.outputs.crates == 'true' || steps.scope.outputs.rust == 'true' || steps.scope.outputs.lib == 'true'
+        # Not pwsh: the .NET runtime keeps its own pipes in TMPDIR while it runs.
+        shell: python
+        run: |
+          import os, sys
+          root = os.environ["TMPDIR"]
+          def kept(name):
+              path = os.path.join(root, name)
+              if name in ("ibcmd-external-editor-server-protocol", "ibcmd-external-editor-server-export"):
+                  return True
+              return name == "ibcmd-rs" and os.path.isdir(path) and not os.listdir(path)
+          left = sorted(name for name in os.listdir(root) if not kept(name))
+          for name in left:
+              print(f"left in {root}: {name}")
+          if left:
+              sys.exit(f"{len(left)} entries left in the temporary directory; a test must remove what it creates")
+          print(f"the temporary directory {root} holds nothing unexpected")
+
+      - name: Retain binary for failed release boundary investigation
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-boundary-binary-${{ matrix.target }}
+          path: |
+            target/debug/ibcmd-rs
+            target/debug/ibcmd-rs.exe
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # The release binary and the checks below that need it: on a pull
+      # request only where the matrix entry sets pr_release (Linux), on
+      # pushes and manual runs everywhere (the `release` lane).
+      - name: Build the release-shaped binary offline
+        if: steps.scope.outputs.release == 'true'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo build --locked --release --no-default-features
+
+      - name: Verify Ubuntu 22.04 GLIBC compatibility
+        if: steps.scope.outputs.release == 'true' && runner.os == 'Linux'
+        run: python scripts/audit_linux_abi.py --binary ${{ matrix.binary }} --target ${{ matrix.target }} --output target/offline-evidence/${{ matrix.target }}.abi.json
+
+      # Without the release build, on the debug binary the root integration
+      # suites built: the same sources with --no-default-features, plus the
+      # dev-dependencies' `test-fixtures` hooks, inert unless a test sets them.
+      - name: Verify native micro-corpus parity offline
+        if: steps.scope.outputs.rust == 'true'
+        shell: pwsh
+        run: ./tools/verify-native-evidence.ps1 -RepositoryRoot . -BinaryPath ${{ steps.scope.outputs.release == 'true' && matrix.binary || matrix.debug_binary }}
+
+      - name: Generate deterministic runtime SBOM
+        if: steps.scope.outputs.release == 'true'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: python scripts/generate_sbom.py --manifest-path Cargo.toml --output target/offline-evidence/${{ matrix.target }}.sbom.cdx.json --target ${{ matrix.target }}
+
+      - name: Audit clean-environment release boundary
+        if: steps.scope.outputs.release == 'true'
+        run: python scripts/audit_release.py --binary ${{ matrix.binary }} --sbom target/offline-evidence/${{ matrix.target }}.sbom.cdx.json
+
+      - name: Package and audit the exact tested binary
+        if: steps.scope.outputs.release == 'true'
+        shell: pwsh
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['package']['version'])"
+          $env:SOURCE_DATE_EPOCH = git log -1 --format=%ct
+          $stem = "target/offline-evidence/ibcmd-rs-$version-${{ matrix.target }}"
+          $sbom = "target/offline-evidence/${{ matrix.target }}.sbom.cdx.json"
+          python scripts/package_release.py --binary ${{ matrix.binary }} --sbom $sbom --output "$stem.zip" --version $version --target ${{ matrix.target }} --repository-root .
+          if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed' }
+          python scripts/audit_release.py --binary ${{ matrix.binary }} --sbom $sbom --archive "$stem.zip" --checksum "$stem.zip.sha256"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged release audit failed' }
+
+      - name: Upload evidence
+        if: steps.scope.outputs.release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-evidence-${{ matrix.target }}
+          path: target/offline-evidence/*
+          if-no-files-found: error
+          retention-days: 14

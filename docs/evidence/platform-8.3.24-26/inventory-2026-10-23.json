@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "platform_root": "/opt/1cv8",
+  "installed": [
+    {
+      "directory_build_hint": "8.3.27.1989",
+      "ibcmd_present": true,
+      "ibcmd_sha256": "9a6d5ac485352c91aaa16c78a1893db6a40fa30eb7d96e5e237e486f7765ddb9",
+      "runtime_version_verified": false
+    },
+    {
+      "directory_build_hint": "8.3.27.2170",
+      "ibcmd_present": true,
+      "ibcmd_sha256": "4216fda119e6cba5be0e2c5a315cf125d77c4a4a5c2197829b11c7019a7d9e45",
+      "runtime_version_verified": false
+    },
+    {
+      "directory_build_hint": "8.3.27.2214",
+      "ibcmd_present": true,
+      "ibcmd_sha256": "1a35bba7883a7fdf9a8678392e4b1520df452995ce005ff225f94594e70cfe25",
+      "runtime_version_verified": false
+    },
+    {
+      "directory_build_hint": "8.3.27.2342",
+      "ibcmd_present": true,
+      "ibcmd_sha256": "3e295f191eb08c8961a2e208b930852c303b9065fafe8672db6a3f8fc20cb9dc",
+      "runtime_version_verified": false
+    },
+    {
+      "directory_build_hint": "8.5.1.1592",
+      "ibcmd_present": true,
+      "ibcmd_sha256": "a6fa1cceb1b2cbefb77d145fd762cd6d5608d859c76e6ab498990ed83701a930",
+      "runtime_version_verified": false
+    },
+    {
+      "directory_build_hint": "8.5.4.1683",
+      "ibcmd_present": false,
+      "ibcmd_sha256": null,
+      "runtime_version_verified": false
+    }
+  ],
+  "requested_releases": [
+    "8.3.24",
+    "8.3.25",
+    "8.3.26"
+  ],
+  "native_acceptance": "not_measured"
+}

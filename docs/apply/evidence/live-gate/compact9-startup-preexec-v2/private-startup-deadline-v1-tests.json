@@ -1,0 +1,45 @@
+{
+  "scope": "Diagnostic-only startup seam; actual-function pure tests",
+  "parent_head": "830b97b36c04588fb3b63da1e258aa0235ebb17b",
+  "files": [
+    {
+      "path": "F:/ibcmd/src/ibcmd-rs-05-load-wave3/scripts/apply-lab/cluster/private-lib.ps1",
+      "length": 19977,
+      "sha256": "743F07AB3D0501F848BF59A7A9C6C9E90E4CD53A9008C3631FA0B5D6A7742B99"
+    },
+    {
+      "path": "F:/ibcmd/src/ibcmd-rs-05-load-wave3/scripts/apply-lab/cluster/private-start.ps1",
+      "length": 4254,
+      "sha256": "0B2F3DABD148713A56F8C63F3BAF6A0C16C133D5BEBFA57EF90AEDBF1CE4D821"
+    },
+    {
+      "path": "F:/ibcmd/src/ibcmd-rs-05-load-wave3/scripts/apply-lab/cluster/test_private_startup_deadline.ps1",
+      "length": 7199,
+      "sha256": "D5EA36DD87DF3856228D3DE32717F98F553E4657F77075D1204BC34CEA570419"
+    },
+    {
+      "path": "F:/ibcmd/src/ibcmd-rs-05-load-wave3/scripts/apply-lab/cluster/test_private_ownership.ps1",
+      "length": 17562,
+      "sha256": "ACF1EF5B6B43E77222325530E6D8DFA41431B0313142E30977BE2B3624A752BF"
+    }
+  ],
+  "tests": [
+    {
+      "test": "test_private_startup_deadline.ps1",
+      "exit_code": 0,
+      "stdout": "PASS 13 actual-function boundaries: stable, exact/+1 deadline, expired entry, missing/empty census, foreign before/after expiry, three identity drifts, invalid state, caller budget exhausted; starts=signals=files=leases=0"
+    },
+    {
+      "test": "test_private_ownership.ps1",
+      "exit_code": 0,
+      "stdout": "PASS bounded full-C1/listeners/full-C2 startup, immediate stop, non-whitelist/missing/deadline/PID-drift; retained ancestry/UTC/orphan/foreign/PID/executable/command/lease/registry/path/reparse/refusal/context mocks; starts=signals=deletes=archives=0"
+    }
+  ],
+  "parser_files": 4,
+  "os_starts": 0,
+  "signals": 0,
+  "sql": 0,
+  "fifo": 0,
+  "runtime_authorized": false,
+  "historical_D2_exact_deadline_available": false
+}

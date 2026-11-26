@@ -1,0 +1,21 @@
+[package]
+name = "ibcmd-dump-readers"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Independent readers of stored configuration records for source export"
+
+[dependencies]
+anyhow = "1.0"
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-schema = { path = "../ibcmd-schema" }
+# The metadata order sections `metadata_owner_graph` orders produced types by.
+ibcmd-xml = { path = "../ibcmd-xml" }
+
+[dev-dependencies]
+flate2 = "1.1"
+ibcmd-metadata-blob = { path = "../ibcmd-metadata-blob" }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "issue": 242,
+  "inputs": {
+    "canonical_diff": {
+      "path": "E:\\ibcmd_lab\\ut_full_87c8dc3_20260723_195521_canonical_diff.json",
+      "sha256": "3dd8af43b270402a1ac80e7cb09288b18db878ae705dbfcd3b8c34ee8f7d0251"
+    },
+    "native": {
+      "root": "E:\\ibcmd_lab\\parity\\ut_ibcmd_full_cfef6ee7_20260723_121002_ut\\native",
+      "run_id": "ut_ibcmd_full_cfef6ee7_20260723_121002_ut"
+    },
+    "baseline_candidate": {
+      "root": "E:\\ibcmd_lab\\ut_full_87c8dc3_20260723_195521",
+      "run_id": "ut_full_87c8dc3_20260723_195521"
+    },
+    "after_candidate": {
+      "root": "E:\\ibcmd_lab\\parity\\ut_nav_3713ec36_20260724_selected_after",
+      "run_id": "ut_nav_3713ec36_20260724_selected_after",
+      "commit": "3713ec36c4c8fc965b63219e28fb405bc9d1d093"
+    },
+    "raw_layout_roots": [
+      "E:\\ibcmd_lab\\parity\\ut_nav_raw_probe_3713ec36_20260724"
+    ]
+  },
+  "baseline_navigation_panel": {
+    "changed_form_pairs": 2569,
+    "actual_missing_multiset_scope": "changed forms with left-only NavigationPanel Items",
+    "left_only_item_signature_count": 209,
+    "actual_missing_command_multiset_count": 211,
+    "files_with_left_only_items": 57,
+    "files_with_missing_commands": 57
+  },
+  "raw_layout_probe": {
+    "probe_files": 4,
+    "navigation_panel_items": 17,
+    "command_kinds": [
+      {
+        "kind": "0",
+        "classification": "standard-or-object-reference",
+        "count": 3
+      },
+      {
+        "kind": "1",
+        "classification": "register-open-by-recorder",
+        "count": 6
+      },
+      {
+        "kind": "3",
+        "classification": "open-by-value-or-command",
+        "count": 4
+      },
+      {
+        "kind": "4",
+        "classification": "catalog-or-register-open-by-value",
+        "count": 2
+      },
+      {
+        "kind": "5",
+        "classification": "register-open-by-value",
+        "count": 2
+      }
+    ]
+  },
+  "selected_fragments": [
+    {
+      "path": "Catalogs/ВЕТИСПрисоединенныеФайлы/Forms/ФормаЭлемента/Ext/Form.xml",
+      "present": true,
+      "native": {
+        "bytes": 665,
+        "sha256": "b95b504fb3a41d54e25b6b764d887064bd740018ac7bfb4d9ea4203537ada9d8"
+      },
+      "after_candidate": {
+        "bytes": 665,
+        "sha256": "b95b504fb3a41d54e25b6b764d887064bd740018ac7bfb4d9ea4203537ada9d8"
+      }
+    },
+    {
+      "path": "Catalogs/ДоговорыМеждуОрганизациями/Forms/ФормаЭлемента/Ext/Form.xml",
+      "present": true,
+      "native": {
+        "bytes": 491,
+        "sha256": "873014a637ef69561f01466edbdd95f2d9291b8ae9f7a11d975403ae093678a1"
+      },
+      "after_candidate": {
+        "bytes": 491,
+        "sha256": "873014a637ef69561f01466edbdd95f2d9291b8ae9f7a11d975403ae093678a1"
+      }
+    },
+    {
+      "path": "Documents/АктВыполненныхРабот/Forms/ФормаДокумента/Ext/Form.xml",
+      "present": true,
+      "native": {
+        "bytes": 2214,
+        "sha256": "21dcab7268bb00f42100a6ea5ab4b2eba43c7b5f080e5d4c034557e16dff3abb"
+      },
+      "after_candidate": {
+        "bytes": 2214,
+        "sha256": "21dcab7268bb00f42100a6ea5ab4b2eba43c7b5f080e5d4c034557e16dff3abb"
+      }
+    },
+    {
+      "path": "Catalogs/ВЕТИСПрисоединенныеФайлы/Forms/ФормаОшибкиСтрокой/Ext/Form.xml",
+      "present": false,
+      "native": {
+        "bytes": 0,
+        "sha256": null
+      },
+      "after_candidate": {
+        "bytes": 0,
+        "sha256": null
+      }
+    }
+  ],
+  "assertions": {
+    "baseline_counts_match": true,
+    "raw_layout_is_well_formed_and_fully_classified": true,
+    "selected_native_after_fragments_are_byte_exact": true,
+    "selected_positive_count": 3,
+    "selected_absent_count": 1
+  }
+}

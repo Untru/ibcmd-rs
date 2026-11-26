@@ -1,0 +1,10 @@
+<RingBufferTarget>
+  <event name="sql_batch_completed">
+    <data name="duration"><value>10</value></data>
+    <data name="batch_text"><value>SELECT * FROM Config WHERE ID = 1</value></data>
+  </event>
+  <event name="sql_batch_completed">
+    <data name="duration"><value>20</value></data>
+    <data name="batch_text"><value>SELECT * FROM Config WHERE ID = 2</value></data>
+  </event>
+</RingBufferTarget>

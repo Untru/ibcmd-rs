@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "fixture_encoding": "base64-rfc4648",
+  "fixtures": [
+    {
+      "id": "cf-format15-clean-room",
+      "path": "format15-clean-room.cf.b64",
+      "artifact_kind": "configuration",
+      "decoded_size": 3731,
+      "decoded_sha256": "0f8463353c92f02123cf00d06dde173a8ec2e62b4b7bc5b5c4bd2f4d45fdcf63",
+      "coordinates": {
+        "container_revision": "Format15",
+        "container_base_offset": 0,
+        "address_width_bits": 32,
+        "block_header_size": 31,
+        "toc_entry_size": 12,
+        "sentinel": "0x7fffffff",
+        "declared_element_count": 5,
+        "compatibility_marker": "80315",
+        "platform_build": null,
+        "xml_dialect": null
+      },
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "CF-001",
+        "generator": "documented deterministic container recipe",
+        "contains_application_code": false,
+        "runtime_dependencies": []
+      },
+      "features": [
+        "raw-deflate-payloads",
+        "ordered-address-table",
+        "root-version-versions-object-graph",
+        "utf16le-element-names"
+      ],
+      "expected": {
+        "ordered_entries": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222",
+          "root",
+          "version",
+          "versions"
+        ],
+        "root_target": "11111111-1111-4111-8111-111111111111",
+        "losses": []
+      }
+    },
+    {
+      "id": "cf-format16-clean-room",
+      "path": "format16-clean-room.cf.b64",
+      "artifact_kind": "configuration",
+      "decoded_size": 8952,
+      "decoded_sha256": "66fe0d8a76f603f842e21a3ac792b7c8a3dda995186afc4c610a0653ad4a8a9f",
+      "coordinates": {
+        "container_revision": "Format16",
+        "container_base_offset": 4953,
+        "address_width_bits": 64,
+        "block_header_size": 55,
+        "toc_entry_size": 24,
+        "sentinel": "0xffffffffffffffff",
+        "declared_element_count": 5,
+        "compatibility_marker": "80316",
+        "platform_build": null,
+        "xml_dialect": null,
+        "preamble": {
+          "size": 4953,
+          "sha256": "40cb32f7599343b18a25265e40da8152d65a51a3b8364bb26f501c9c5093a573",
+          "model": "semantic-format15-envelope",
+          "declared_element_count": 5
+        },
+        "primary_container": {
+          "size": 3999,
+          "sha256": "60f8ff36991072065a7d1642597f84aea131ff10fa07eaad5be50a56e417650f"
+        }
+      },
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "CF-001",
+        "generator": "documented deterministic container recipe",
+        "contains_application_code": false,
+        "runtime_dependencies": []
+      },
+      "features": [
+        "64-bit-offsets",
+        "55-byte-block-headers",
+        "raw-deflate-payloads",
+        "semantic-format15-preamble",
+        "root-version-versions-object-graph",
+        "utf16le-element-names"
+      ],
+      "expected": {
+        "ordered_entries": [
+          "11111111-1111-4111-8111-111111111111",
+          "22222222-2222-4222-8222-222222222222",
+          "root",
+          "version",
+          "versions"
+        ],
+        "root_target": "11111111-1111-4111-8111-111111111111",
+        "losses": []
+      }
+    }
+  ],
+  "external_corpus": {
+    "environment_variable": "IBCMD_CF_EXTERNAL_CORPUS",
+    "network_access": false,
+    "artifacts": [
+      {
+        "id": "format15-platform8demo",
+        "local_name": "format15-platform8demo.cf",
+        "container_revision": "Format15",
+        "container_base_offset": 0,
+        "declared_element_count": 478,
+        "decoded_size": 16871204,
+        "sha256": "c0596df52f9c700cbaf23a903d720b4fa22e5e8e017c00ec29f411353efa8099",
+        "repository": "https://github.com/Infactum/onec_dtools",
+        "commit": "99c0b394f51fbd4225735ab37068c2dae00fdc00",
+        "source_path": "tests/fixtures/Platform8Demo/conf.cf",
+        "license": "MIT",
+        "checked_in": false,
+        "contains_application_code": true,
+        "required_entries": ["root", "version", "versions"]
+      },
+      {
+        "id": "format16-radchenko-base-13",
+        "local_name": "format16-radchenko-base-13.cf",
+        "container_revision": "Format16",
+        "container_base_offset": 4953,
+        "declared_element_count": 84,
+        "decoded_size": 178071,
+        "sha256": "fb1805a454fbd8037b634b4c37ea3147bdaf34cdac045e1b5f3cb6502b7ed0f7",
+        "repository": "https://github.com/sudomango/1C-Infobase-Radchenko",
+        "commit": "d33bd5f100cf8ccc37e19f070af87909cb3c24b6",
+        "source_path": "1C_Radchenko_Base_13.cf",
+        "license": "Apache-2.0",
+        "checked_in": false,
+        "contains_application_code": true,
+        "compatibility_marker": "80323",
+        "required_entries": ["root", "version", "versions"]
+      }
+    ]
+  }
+}

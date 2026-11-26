@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "database": "ibcmd_rs_05_online_a1",
+  "claimed_platform_profile": "platform-8.3.27.2214",
+  "verified_platform_profile": "platform-8.3.27.2214",
+  "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+  "target": "main",
+  "selected_path": "CommonModules/РаботаСКлассификаторамиКлиентСервер/Ext/Module.bsl",
+  "mode": "online",
+  "dry_run": true,
+  "executed": false,
+  "no_op": true,
+  "changed_paths": [],
+  "selected_storage_file_names": [
+    "16b3681c-426d-4d6f-9ffe-588a23974222",
+    "16b3681c-426d-4d6f-9ffe-588a23974222.0"
+  ],
+  "active_generation_or_root": "4832dd20-0b9e-45e3-a3e7-095525bf9b3f",
+  "proposed_generation_or_root": "4832dd20-0b9e-45e3-a3e7-095525bf9b3f",
+  "tables_changed": [],
+  "recovery_token": null,
+  "staging": null,
+  "activation": null,
+  "timings": {
+    "active_export_ms": 1997,
+    "classification_ms": 26,
+    "staging_ms": 0,
+    "activation_ms": 0,
+    "total_ms": 9016
+  }
+}

@@ -1,0 +1,224 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<HTTPService uuid="839141d0-9eb6-4c48-a445-9d5a2d58f77e">
+		<Properties>
+			<Name>HTTPСервис1</Name>
+			<Synonym/>
+			<Comment/>
+			<RootURL>www.test.ru</RootURL>
+			<ReuseSessions>AutoUse</ReuseSessions>
+			<SessionMaxAge>20</SessionMaxAge>
+		</Properties>
+		<ChildObjects>
+			<URLTemplate uuid="43796b0b-555c-4cad-9a37-e3bc4368558d">
+				<Properties>
+					<Name>ШаблонURL1</Name>
+					<Synonym/>
+					<Comment/>
+					<Template>/ШаблонURL1</Template>
+				</Properties>
+				<ChildObjects>
+					<Method uuid="58acb630-c13c-4844-8f90-8df3d633f2ef">
+						<Properties>
+							<Name>Метод1</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>GET</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="cfbcf7e8-984e-4d42-a79e-78f6a37b710f">
+						<Properties>
+							<Name>МетСин</Name>
+							<Synonym>
+								<v8:item>
+									<v8:lang>ru</v8:lang>
+									<v8:content>Син</v8:content>
+								</v8:item>
+							</Synonym>
+							<Comment/>
+							<HTTPMethod>HEAD</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="8c53d680-8781-44f2-879f-24374388b352">
+						<Properties>
+							<Name>МетКом</Name>
+							<Synonym/>
+							<Comment>Ком</Comment>
+							<HTTPMethod>PUT</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="1438ee1e-194b-4e9c-8cfd-61c1ef040034">
+						<Properties>
+							<Name>МетОбработчик</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>POST</HTTPMethod>
+							<Handler>ОбработчикМаркер</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="b9ae581d-7965-4bc8-91ed-527e0080ea1a">
+						<Properties>
+							<Name>МетМетодDELETE</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>DELETE</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="e1bbc497-8ce9-4e8a-b9f5-9578189a2e64">
+						<Properties>
+							<Name>МетМетодPATCH</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>PATCH</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="0510cb30-a4b5-4326-85cf-2ccd20c802d4">
+						<Properties>
+							<Name>МетМетодMERGE</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>MERGE</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="ea4631af-ee8c-4c00-8b2a-5928a907073b">
+						<Properties>
+							<Name>МетМетодOPTIONS</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>OPTIONS</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="0c4517da-a04b-497e-85bd-102021277016">
+						<Properties>
+							<Name>МетМетодTRACE</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>TRACE</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="c4e2ea60-414f-452e-b892-1fc2da302907">
+						<Properties>
+							<Name>МетМетодCONNECT</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>CONNECT</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="b7d84c8b-8981-44c0-a436-deae78dd26e5">
+						<Properties>
+							<Name>МетМетодPROPFIND</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>PROPFIND</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="52b2a598-6e84-4c2a-a3b6-46559f5ff43b">
+						<Properties>
+							<Name>МетМетодPROPPATCH</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>PROPPATCH</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="fa913568-18d7-42ff-9efa-5e94268d10cf">
+						<Properties>
+							<Name>МетМетодMOVE</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>MOVE</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="6a9d4355-0a8d-4247-87a2-ea2f2e93a5b8">
+						<Properties>
+							<Name>МетМетодCOPY</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>COPY</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="1521020e-4499-4c7a-b203-7e4fc32dd48e">
+						<Properties>
+							<Name>МетМетодLOCK</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>LOCK</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="502c9075-c76d-4a99-94fc-5322e1a25b65">
+						<Properties>
+							<Name>МетМетодUNLOCK</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>UNLOCK</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="42b30d1f-cc30-4401-bf0b-df6ddc8e732f">
+						<Properties>
+							<Name>МетМетодMKCOL</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>MKCOL</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+					<Method uuid="b7ca6bc7-59d5-4d01-ab1b-6fe373580477">
+						<Properties>
+							<Name>МетМетодAny</Name>
+							<Synonym/>
+							<Comment/>
+							<HTTPMethod>Any</HTTPMethod>
+							<Handler>Метод1</Handler>
+						</Properties>
+					</Method>
+				</ChildObjects>
+			</URLTemplate>
+			<URLTemplate uuid="fc6da771-33bf-4c0c-aaf3-a289c0e9d59e">
+				<Properties>
+					<Name>ШабСин</Name>
+					<Synonym>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Син</v8:content>
+						</v8:item>
+					</Synonym>
+					<Comment/>
+					<Template>/ШабСин</Template>
+				</Properties>
+				<ChildObjects/>
+			</URLTemplate>
+			<URLTemplate uuid="2a622eca-5605-45d1-973d-59e0206b5572">
+				<Properties>
+					<Name>ШабКом</Name>
+					<Synonym/>
+					<Comment>Ком</Comment>
+					<Template>/ШабКом</Template>
+				</Properties>
+				<ChildObjects/>
+			</URLTemplate>
+			<URLTemplate uuid="d2d2c7e1-f55a-4f4d-a114-9cf9cf5c94b8">
+				<Properties>
+					<Name>ШабШаблон</Name>
+					<Synonym/>
+					<Comment/>
+					<Template>/ШабШаблон</Template>
+				</Properties>
+				<ChildObjects/>
+			</URLTemplate>
+		</ChildObjects>
+	</HTTPService>
+</MetaDataObject>

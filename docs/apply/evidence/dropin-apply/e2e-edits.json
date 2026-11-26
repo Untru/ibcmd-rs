@@ -1,0 +1,252 @@
+[
+ {
+  "label": "CommonModule",
+  "path": "CommonModules/_ДемоЛокализация/Ext/Module.bsl",
+  "kind": "bsl",
+  "size": 8429,
+  "sha_before": "9d821b237247105157f0db725b674e821b2f93ea23a20b642d800e6512d91cf0",
+  "sha_after": "e8825d56d792cb80b48b6b2cfea4419efba8c31b40119b5713264d5dc197425f",
+  "bytes_before": 8429,
+  "bytes_after": 8449
+ },
+ {
+  "label": "CommonModule, updated online in the corpus",
+  "path": "CommonModules/_ДемоЗаметки/Ext/Module.bsl",
+  "kind": "bsl",
+  "size": 4880,
+  "sha_before": "87749c6e95242783ff77bba75fe2a8b85c1bb8615824cb50b80f0c0aa7a209b8",
+  "sha_after": "cb209083b7c5c8705f7f30a743bc2c9dffdffa9d45b971db884c904b92f334be",
+  "bytes_before": 4880,
+  "bytes_after": 4900
+ },
+ {
+  "label": "Catalog object module",
+  "path": "Catalogs/_ДемоВидыНоменклатуры/Ext/ObjectModule.bsl",
+  "kind": "bsl",
+  "size": 2194,
+  "sha_before": "9f78b74545d8e864354bacc100582c3ffcfae05124e77748d657bce867a84028",
+  "sha_after": "7cc43be8143e91fd9d0c520ec1744c801c0a6151743c83754ae32b99bfe8b1c2",
+  "bytes_before": 2194,
+  "bytes_after": 2216
+ },
+ {
+  "label": "Catalog manager module",
+  "path": "Catalogs/_ДемоБанковскиеСчета/Ext/ManagerModule.bsl",
+  "kind": "bsl",
+  "size": 11874,
+  "sha_before": "d5bb45c777c9f5591c7f7b8452f5a3fe84793c4c85b98fcba0de496c3fb739c7",
+  "sha_after": "658ff5e3637499b35ce2d7dadba0446f523c427358be01833e966095b15d19d2",
+  "bytes_before": 11874,
+  "bytes_after": 11896
+ },
+ {
+  "label": "Catalog form module",
+  "path": "Catalogs/_ДемоБанковскиеСчета/Forms/РеквизитыБанка/Ext/Form/Module.bsl",
+  "kind": "bsl",
+  "size": 7040,
+  "sha_before": "aedefcf840bb0c6ce862d75984c091800a2c89462fd0ca1b3805376b460f3942",
+  "sha_after": "697f9ebc0b5ad748429b5054ec871a668807405065303b73c7d58dbc94ec72d1",
+  "bytes_before": 7040,
+  "bytes_after": 7062
+ },
+ {
+  "label": "Catalog form",
+  "path": "Catalogs/_ДемоБанковскиеСчета/Forms/РеквизитыБанка/Ext/Form.xml",
+  "kind": "form_xml",
+  "size": 11972,
+  "sha_before": "792acdccd1a04575265eb19d6098a4e4cb714589a8e5e0443b4212bcb2728797",
+  "sha_after": "7111fcf9eb81551f1eda870b9ea8cebbdc28aefd68b02abef215ed9bbd5d0a02",
+  "bytes_before": 11972,
+  "bytes_after": 11983
+ },
+ {
+  "label": "Catalog help",
+  "path": "Catalogs/_ДемоБанковскиеСчета/Ext/Help/ru.html",
+  "kind": "help_html",
+  "size": 6662,
+  "sha_before": "97e7bf6f4a50c2c2b3d6e0002d7c9ccf61042c5acf182a6802a936a09ed6d122",
+  "sha_after": "e874fae07874c8b7ab953fda90e0e69cad4ad4b8d594b9d2dc9a6da0be4b21fa",
+  "bytes_before": 6662,
+  "bytes_after": 6686
+ },
+ {
+  "label": "Document object module",
+  "path": "Documents/_ДемоЗаказПокупателя/Ext/ObjectModule.bsl",
+  "kind": "bsl",
+  "size": 6639,
+  "sha_before": "a269bfb1579e29cf821e8ae37712261d65f0f6efe757badc650d85bd81885311",
+  "sha_after": "ed9703348bc5af8fe0071ef6f438ced5a57f0631cc5b65d6e83bde83d3758dc0",
+  "bytes_before": 6639,
+  "bytes_after": 6661
+ },
+ {
+  "label": "Document manager module",
+  "path": "Documents/_ДемоЗаказПокупателя/Ext/ManagerModule.bsl",
+  "kind": "bsl",
+  "size": 39648,
+  "sha_before": "31ed87537e3e170da3fe744815e93e996c082cf7413f10713856c28e6bd7ef0b",
+  "sha_after": "6769f02976f9efff4fcad72d8292e22145f66a706f57dd68a49477452bb79924",
+  "bytes_before": 39648,
+  "bytes_after": 39670
+ },
+ {
+  "label": "Document form module",
+  "path": "Documents/_ДемоЗаказПокупателя/Forms/РазблокированиеРеквизитов/Ext/Form/Module.bsl",
+  "kind": "bsl",
+  "size": 2633,
+  "sha_before": "63e76872e535a7d4ebd678911071e973b42291c114753bcaa9a93cff4f29b4db",
+  "sha_after": "26024f16d50ab525febce3c34a95e1a90f1d8bcd441f4da541949664f4bfb67e",
+  "bytes_before": 2633,
+  "bytes_after": 2653
+ },
+ {
+  "label": "Document template (spreadsheet)",
+  "path": "Documents/_ДемоПеремещениеТоваров/Templates/ПФ_MXL_НакладнаяНаПеремещение/Ext/Template.xml",
+  "kind": "template_xml",
+  "size": 24612,
+  "sha_before": "914e6a2e1b2ff353e946976a2b8b4efe850e7d896d4c3e39be316d51e283a9a2",
+  "sha_after": "5f2a49f45b988881967afccea73ac289212b94da07ad714f0117e528336f9086",
+  "bytes_before": 24612,
+  "bytes_after": 24623
+ },
+ {
+  "label": "Document template (binary)",
+  "path": "Documents/_ДемоСчетНаОплатуПокупателю/Templates/ПФ_DOC_СчетНаОплату_ru/Ext/Template.bin",
+  "kind": "template_bin",
+  "size": 21318,
+  "sha_before": "4c62dd794c20e0110b97e714f6c3c7c9fd57fe1d234b294ea3b2813ce6ee5d4c",
+  "sha_after": "c7d7fbcb498a9ade62371bd0091c79ace3519e198bbd4a8f6320777dd064ea03",
+  "bytes_before": 21318,
+  "bytes_after": 21319
+ },
+ {
+  "label": "DataProcessor object module",
+  "path": "DataProcessors/_ДемоВводНаОснованииОприходованийТоваров/Ext/ObjectModule.bsl",
+  "kind": "bsl",
+  "size": 11779,
+  "sha_before": "2302f7ee32566fc4245f7b8a1652b20030aa0d29aaf10ad95af3ca8111a1eeac",
+  "sha_after": "57613cbe57698b9f47d964d0192f847c22ae160f6e38ada5f90bb78146afe904",
+  "bytes_before": 11779,
+  "bytes_after": 11801
+ },
+ {
+  "label": "DataProcessor form module",
+  "path": "DataProcessors/_ДемоВводНаОснованииОприходованийТоваров/Forms/ОсновнаяФорма/Ext/Form/Module.bsl",
+  "kind": "bsl",
+  "size": 8609,
+  "sha_before": "81d1363081588260409c3c0ddb2dbc4a8d7ac5d6afcb2201657ca1a3271c5a32",
+  "sha_after": "914da05d5cc976c490e2f7795f89556672cbbca03384a819e2b1116043b2e9bd",
+  "bytes_before": 8609,
+  "bytes_after": 8629
+ },
+ {
+  "label": "DataProcessor form",
+  "path": "DataProcessors/_ДемоВводНаОснованииОприходованийТоваров/Forms/ОсновнаяФорма/Ext/Form.xml",
+  "kind": "form_xml",
+  "size": 7277,
+  "sha_before": "7ed91a3a4673c8301abde9a20d135780de808d23324cfcc53b954196143651f5",
+  "sha_after": "2cec000dd9709bbd54dfae1eaf265106cdf78d1464b0271de2dc7e3fec4978ee",
+  "bytes_before": 7277,
+  "bytes_after": 7288
+ },
+ {
+  "label": "Report manager module",
+  "path": "Reports/_ДемоДинамикаИзмененийФайлов/Ext/ManagerModule.bsl",
+  "kind": "bsl",
+  "size": 7332,
+  "sha_before": "597f0a2e83173bcbef45e3c55dbc6444b5da1747c5c89eac34ef0b67c050ac6d",
+  "sha_after": "2d1b9777cda68a8d4a62eae8596b75ee5385e0bd9b9dc468917fa272be0f8304",
+  "bytes_before": 7332,
+  "bytes_after": 7354
+ },
+ {
+  "label": "Report template (data composition schema)",
+  "path": "Reports/_ДемоДинамикаИзмененийФайлов/Templates/ОсновнаяСхемаКомпоновкиДанных/Ext/Template.xml",
+  "kind": "template_xml",
+  "size": 28051,
+  "sha_before": "571bf5948b5dbe03608093d1de4f4c21a92da61c2e9671d9d686246d6a3d6921",
+  "sha_after": "5a1feac0ca196b1c76ebbfb7823c832d4a59fad238bc24fef9e8b41ddb02332f",
+  "bytes_before": 28051,
+  "bytes_after": 28062
+ },
+ {
+  "label": "InformationRegister manager module",
+  "path": "InformationRegisters/_ДемоЗагружаемыеПоступленияОтЮридическихЛиц/Ext/ManagerModule.bsl",
+  "kind": "bsl",
+  "size": 1999,
+  "sha_before": "6c9112443f7cd52a4e31739e895489f4d1f8d3165ae9c76edb957ee6d1ac494c",
+  "sha_after": "165a35db8fa1bba4fe104bc56b2bd5bff3d324cf3c33845231b5a7af9afdee9a",
+  "bytes_before": 1999,
+  "bytes_after": 2019
+ },
+ {
+  "label": "InformationRegister record set module",
+  "path": "InformationRegisters/_ДемоЗаведующиеМестамиХранения/Ext/RecordSetModule.bsl",
+  "kind": "bsl",
+  "size": 1328,
+  "sha_before": "cd3e63a780377a0a2427e5e1c906e60b053cc35eee575a839a878245ba8d8ce3",
+  "sha_after": "e420b0ddc8749ebe7b9f3fcf0527e2e9ea4a54568fbd597e57d7e43169e11130",
+  "bytes_before": 1328,
+  "bytes_after": 1350
+ },
+ {
+  "label": "Constant value manager module",
+  "path": "Constants/_ДемоИспользоватьКонтактныеЛицаПартнеров/Ext/ValueManagerModule.bsl",
+  "kind": "bsl",
+  "size": 2575,
+  "sha_before": "782252a246d984326abe2bc9999a649a30b42da311ce5e7c9bc34b2c1a09dbac",
+  "sha_after": "2e5d57e82ad317ad10553b08afff1f3d1edd05d1a0d99f08f04ab53c66a1a1d8",
+  "bytes_before": 2575,
+  "bytes_after": 2597
+ },
+ {
+  "label": "CommonCommand module",
+  "path": "CommonCommands/_ДемоВнешнийОтчетОбработка/Ext/CommandModule.bsl",
+  "kind": "bsl",
+  "size": 4996,
+  "sha_before": "b9089d121da3794f1c18e814b2064bd5567fa6db0df2c65300cb0cccb9e81a15",
+  "sha_after": "08161a21df16cfab2a4a2f6abf4f61cdd6a504c154121ca2238dd9179f9f7863",
+  "bytes_before": 4996,
+  "bytes_after": 5016
+ },
+ {
+  "label": "CommonForm module",
+  "path": "CommonForms/_ДемоМоиНастройки/Ext/Form/Module.bsl",
+  "kind": "bsl",
+  "size": 24317,
+  "sha_before": "b15b8acbf026270852e3b7fdec9838fcd6e54c8dd832d2ad10f4088d6f441a42",
+  "sha_after": "57ac4f1fa5b11a0e89445865c71000ac7b3e3e509ffd5c90ddd3dfe733eb6cb7",
+  "bytes_before": 24317,
+  "bytes_after": 24337
+ },
+ {
+  "label": "CommonForm",
+  "path": "CommonForms/_ДемоМоиНастройки/Ext/Form.xml",
+  "kind": "form_xml",
+  "size": 47877,
+  "sha_before": "d3db10332c377aa0f64433a7471ca0ceda7e134c30e768ea988310b6e35b33d1",
+  "sha_after": "29a36580402865b8a8302ee44d2ab7d28183bc0c6e0172054c2f3263f0f799fd",
+  "bytes_before": 47877,
+  "bytes_after": 47888
+ },
+ {
+  "label": "CommonTemplate (binary)",
+  "path": "CommonTemplates/_ДемоПФ_ODT_СчетНаОплату_ru/Ext/Template.bin",
+  "kind": "template_bin",
+  "size": 23084,
+  "sha_before": "2d01729324997b4aa13feb4a8bdca32ef2b4e15a9c242774d3b729a682e779c1",
+  "sha_after": "d8bfcaa8ca73368efffe46ffee1212edc30293a74fbcef6b19fe127eb3459da2",
+  "bytes_before": 23084,
+  "bytes_after": 23085
+ },
+ {
+  "label": "BusinessProcess object module",
+  "path": "BusinessProcesses/_ДемоЗаданиеСРолевойАдресацией/Ext/ObjectModule.bsl",
+  "kind": "bsl",
+  "size": 21476,
+  "sha_before": "d14735b4b3bef398fa902265b328a7c32c92e737531872b3e949fa9315e345b8",
+  "sha_after": "5b2699a9bd3077bb0950b595f27ad35a845b714529fa3aaf3b4af1aa7eaf393c",
+  "bytes_before": 21476,
+  "bytes_after": 21498
+ }
+]

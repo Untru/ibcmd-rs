@@ -1,0 +1,30 @@
+{
+  "equal": [
+    "CovAutonumbering_false",
+    "CovCheckUnique_false",
+    "CovChoiceHistoryOnInput_DontUse",
+    "CovDataLockControlMode_Automatic",
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+    "CovExplanation_Cov",
+    "CovExtendedListPresentation_Cov",
+    "CovExtendedObjectPresentation_Cov",
+    "CovIncludeHelpInContents_true",
+    "CovListPresentation_Cov",
+    "CovNumberAllowedLength_Fixed",
+    "CovNumberLength_11",
+    "CovNumberPeriodicity_Year",
+    "CovObjectPresentation_Cov",
+    "CovPostInPrivilegedMode_false",
+    "CovPosting_Deny",
+    "CovRealTimePosting_Deny",
+    "CovRegisterRecordsDeletion_AutoDelete",
+    "CovRegisterRecordsDeletion_AutoDeleteOff",
+    "CovRegisterRecordsWritingOnPost_WriteModified",
+    "CovSequenceFilling_AutoFillOff",
+    "CovTemplate",
+    "CovUnpostInPrivilegedMode_false",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

@@ -1,0 +1,138 @@
+PASS 28 pure identity cases; starts/signals/moves/deletes/acquires=0
+PASS 27 archive worker binding cases; realReads/acquires/signals/moves/deletes0
+PASS actual parent issuer validates own proof/raw/current parent before emitting context; no filesystem/OS actions
+PASS actual issuer duplicate refusal; acquires/signals/writes0
+PASS actual issuer late-parent refusal; acquires/signals/writes0
+PASS actual issuer nonzero refusal; acquires/signals/writes0
+PASS exact 613 raw/597 retained archive validation is read-only
+PASS archive-replay refusal; moves/copies/deletes/creates0
+PASS active-state refusal; moves/copies/deletes/creates0
+PASS old6-receipt refusal; moves/copies/deletes/creates0
+PASS foreign-lease refusal; moves/copies/deletes/creates0
+PASS saved-PID refusal; moves/copies/deletes/creates0
+PASS listener refusal; moves/copies/deletes/creates0
+PASS reparse refusal; moves/copies/deletes/creates0
+PASS raw-change refusal; moves/copies/deletes/creates0
+PASS archive-extra refusal; moves/copies/deletes/creates0
+PASS foreign-input refusal; moves/copies/deletes/creates0
+PASS old-restore refusal; moves/copies/deletes/creates0
+PASS unknown-child refusal; moves/copies/deletes/creates0
+ALL PASS; realStarts=realSignals=SQLcalls=registryWrites=Moves=Deletes=0
+PASS actual authority saved Case5 raw + complete synthetic foreign reused PID; no signal authority
+PASS actual prior-archive lease-drift refusal; starts/signals/moves/deletes/acquires0
+PASS actual prior-archive state-drift refusal; starts/signals/moves/deletes/acquires0
+PASS actual prior-archive late-child refusal; starts/signals/moves/deletes/acquires0
+PASS actual copied private context nonce + separate exact restore manifest Trackload classification
+PASS actual old/foreign/replaced lease + foreign DB refusal; acquisitions/SQL/signals0
+PASS stdin Close fault retains original started child/receipt uncertainty; no real process/filesystem/SQL/signals
+PASS normal child preserves result schema/nonzero output, signals0
+PASS rapid child preserves result schema/nonzero output, signals0
+PASS race-exit child preserves result schema/nonzero output, signals0
+PASS initialmissing live refusal + unresolved receipt, signals0
+PASS initialunbound live refusal + unresolved receipt, signals0
+PASS exact direct child Kill(no args), bounded5000 reap; wrapper descendants remain unproved, lifecycle retained
+PASS timeoutbirthday live refusal/retained identity, signals0
+PASS timeoutexe live refusal/retained identity, signals0
+PASS timeoutcmd live refusal/retained identity, signals0
+PASS timeoutparent live refusal/retained identity, signals0
+PASS timeoutmissing live refusal/retained identity, signals0
+PASS unreaped child unresolved, original direct identity retained, no descendants signalled
+PASS inherited output pipe deadline5000 retains unresolved descendants/lifetime; no unbounded GetResult or signal
+PASS pure child mocks; realStarts=realSignals=SQLcalls=registryWrites=0
+PASS actual worker acquire/finally known success captures bytes and releases exact lease
+PASS actual acquire/finally preexisting retains potential hold; release0
+PASS actual acquire/finally preexisting-LOAD8-F8BD7D065A2C retains potential hold; release0
+PASS actual acquire/finally preexisting-Load8-f8bd7d065a2c retains potential hold; release0
+PASS actual acquire/finally nonzero retains potential hold; release0
+PASS actual acquire/finally unknown retains potential hold; release0
+PASS actual acquire/finally replacement retains potential hold; release0
+PASS actual acquire/finally foreign-replacement retains potential hold; release0
+PASS exact heavy byte drift no release
+PASS exact native byte drift no release
+PASS actual finally native-nonzero serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS actual finally native-release-nonzero serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS actual finally native-lease-drift serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS actual finally heavy-nonzero serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS actual finally heavy-release-nonzero serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS cross-child native acquired/released latest sequence and duplicate refusal
+PASS actual native lockTool/acquire callsite uses wrapper and serialized lease proof
+PASS actual native acquire/release both exact known path spellings retain lease/proof protocol
+PASS actual Run sticky cross-child resource marker with known nonzero and dead child
+PASS actual worker reader extra member refused before owner read/release
+PASS actual heavy reader extra member refused before owner read/release
+PASS actual native reader extra member refused before owner read/release
+ALL PASS actual new7 resource calls/finally; realStarts=realSignals=SQLcalls=registryWrites=acquires=releases=0
+PASS actual worker acquire grants then unknown; flags set before dispatch, finally worker/native retained; heavy independent
+PASS actual heavy acquire grants then unknown; flags set before dispatch, finally worker/native retained; heavy independent
+PASS actual finally case7 writer-completion=false without sticky receipt retains worker, unregister/stop/release0
+PASS actual successful release with newly uncertain receipt retains unconfirmed lease flag before clearing
+PASS pure actual acquire/finally AST mocks; realStarts=realSignals=SQLcalls=registryWrites=0
+PASS continuation warm acquire/child/release, unexpected warm exit0 remains protected
+PASS continuation continue acquire/child/release, unexpected warm exit0 remains protected
+PASS continuation noop acquire/child/release, unexpected warm exit0 remains protected
+PASS continuation failed acquire/child/release, unexpected warm exit0 remains protected
+PASS ordinary native child + bounded pipe reads
+PASS exact native timeout single-PID Kill(no args), reap5000 and retained times
+PASS timeoutbirthday refusal, signals0
+PASS timeoutexe refusal, signals0
+PASS timeoutcmd refusal, signals0
+PASS timeoutparent refusal, signals0
+PASS timeoutmissing refusal, signals0
+PASS bounded reap failure retains exact identity, no tree signal
+PASS actual native stdin-close-live retains original PID/unknown pipes and FIFO; signals/release0
+PASS actual native stdin-close-rapid retains original PID/unknown pipes and FIFO; signals/release0
+PASS nativeinitial-missing retains FIFO, releaseCalls0
+PASS nativebirthday retains FIFO, releaseCalls0
+PASS nativereap-fails retains FIFO, releaseCalls0
+PASS nativetimeout-complete retains FIFO, releaseCalls0
+PASS nativepipe-timeout retains FIFO, releaseCalls0
+PASS rapid native exit without CIM releases safely, signals0
+PASS unresolved descendant receipt retains FIFO despite direct native exit
+PASS actual finallyreceipt keeps native/worker; recheck after cleanup failure and before next transition; calls=
+PASS actual finallynative-exit-unproved keeps native/worker; recheck after cleanup failure and before next transition; calls=
+PASS actual finallyras keeps native/worker; recheck after cleanup failure and before next transition; calls=pure-ras-cleanup-empty
+PASS actual finallysql keeps native/worker; recheck after cleanup failure and before next transition; calls=pure-sql-cleanup-empty,pure-sql-cleanup-sql-work
+PASS actual finallyunregister keeps native/worker; recheck after cleanup failure and before next transition; calls=pure-unregister-cleanup-empty,pure-unregister-cleanup-sql-work,pure-unregister-unregister-native-acquire,pure-unregister-unregister
+PASS actual finallystop keeps native/worker; recheck after cleanup failure and before next transition; calls=pure-stop-stop
+PASS actual finallyheavy keeps native/worker; recheck after cleanup failure and before next transition; calls=release-heavy
+PASS actual clean finally keeps normal unregister/stop/native/worker release sequence
+PASS pure mocks: realStarts=realSignals=SQLcalls=registryWrites=0
+PASS actual case8 nested-native fallback retains lifecycle with no sticky receipt; no actions
+PASS invalid10 refusal
+PASS invalid1extra refusal
+PASS invalid0extra refusal
+PASS duplicate;report_ok=1 refusal
+PASS duplicate;committed=1 refusal
+PASS duplicate;attempt=1 refusal
+PASS valid1, malformed3, duplicate3, report0/commit0 excluded; no process/native/SQL starts
+RED verified original actual Header admits foreign canonical database GUID
+PASS actual Header sets=1 index=30 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=1 index=31 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=1 index=33 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=30 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=31 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=33 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header malformed/count/order/foreignDB refused; realStarts=realSignals=SQLcalls=registryWrites=Moves=0
+PASS actual CloseCohort exact PID/start/exe/command/parent + UUID/IB/session/app/start bound; only owned UUID terminated
+PASS unknown refused; termination0/retained ownership
+PASS pid-command refused; termination0/retained ownership
+PASS pid-exe refused; termination0/retained ownership
+PASS pid-parent refused; termination0/retained ownership
+PASS pid-birth refused; termination0/retained ownership
+PASS wrong-session-id refused; termination0/retained ownership
+PASS wrong-ib refused; termination0/retained ownership
+PASS wrong-start refused; termination0/retained ownership
+PASS wrong-app refused; termination0/retained ownership
+ALL PASS exact close/unknown mocks; realStarts=realSignals=SQLcalls=registryWrites=0
+PASS actual repeat assertion refuses third-cycle
+PASS actual repeat assertion refuses tail-change
+PASS actual repeat assertion refuses wrong-state
+PASS actual fullheader refusal/repeat compare catches Config Creation drift
+PASS actual fullheader refusal/repeat compare catches ConfigSave Creation drift
+PASS actual fullheader refusal/repeat compare catches Params Creation drift
+PASS operational Files difference retained explicitly, no false full equality
+PASS actual bounded N3 readiness requires at least5 confirmed document+report receipts per client; third client4 refused
+ALL PASS postcondition mocks; realStarts=realSignals=SQLcalls=registryWrites=0; no runtime/readiness acceptance claim
+PASS actual negative block all5 unavailable endpoints/exact input refusals under FIFO; original SHA checks; realStarts=realSignals=SQLcalls=registryWrites=0
+PASS prior unknown child refuses negative execution before acquire/spawn
+PASS all prepared copied8 pure suites; no FIFO/native/SQL/registry/signals/deletes

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "1C:Enterprise Development Tools",
+    "release": "2025.1",
+    "derivation": "Curated public schema facts"
+  },
+  "artifact": "C:\\EDT\\plugins\\model.xcore"
+}

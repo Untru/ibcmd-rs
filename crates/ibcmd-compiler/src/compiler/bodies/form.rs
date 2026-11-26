@@ -1,0 +1,300 @@
+//! Profile-gated base-free codec for managed `Form.xml` native bodies.
+//!
+//! The detailed typed XML model and the evidenced marker-50 formatter live in
+//! `module_blob` while the legacy dump/export code is being decomposed.  This
+//! module is the compiler boundary: it selects the platform cohort, applies
+//! bounded payload decoding, and rejects every native layout other than the
+//! evidenced marker-50 body with four typed trailing sections.
+
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+
+use ibcmd_core::artifact::ProfileId;
+use ibcmd_core::profile::EffectiveProfile;
+
+use super::{BodyProfileError, SelectedBodyProfile};
+use crate::compiler::families::native::{NativeError, inflate};
+use ibcmd_metadata_blob::{
+    MetadataSourceContext, ParsedFormBodyBlob, pack_form_body_blob_from_form_xml_base_free,
+    parse_form_body_blob,
+};
+
+const LAYOUT_KEY: &str = "bootstrap.body.form.layout";
+const LAYOUT: &str = "managed-form-marker50-v1-raw-deflate-utf8-bom";
+const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
+const FORM_LAYOUT_MARKER: &str = "50";
+const FORM_TRAILING_SECTIONS: usize = 4;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManagedFormCodecProfile(SelectedBodyProfile);
+
+impl ManagedFormCodecProfile {
+    pub fn from_effective(profile: &EffectiveProfile) -> Result<Self, BodyProfileError> {
+        SelectedBodyProfile::from_effective(profile, LAYOUT_KEY, LAYOUT).map(Self)
+    }
+
+    pub const fn profile_id(&self) -> &ProfileId {
+        self.0.profile_id()
+    }
+
+    #[cfg(any(test, feature = "test-fixtures"))]
+    #[doc(hidden)]
+    pub fn fixture() -> Self {
+        Self(SelectedBodyProfile::fixture("platform-8.3.27.1989"))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManagedFormBody {
+    plain: Vec<u8>,
+    parsed: ParsedFormBodyBlob,
+}
+
+impl ManagedFormBody {
+    pub const fn parsed(&self) -> &ParsedFormBodyBlob {
+        &self.parsed
+    }
+
+    pub fn plaintext(&self) -> &[u8] {
+        &self.plain
+    }
+
+    pub fn module_text(&self) -> &str {
+        &self.parsed.module_text
+    }
+}
+
+pub fn compile_managed_form(
+    profile: &ManagedFormCodecProfile,
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<u8>, ManagedFormCodecError> {
+    let _ = profile;
+    let packed = pack_form_body_blob_from_form_xml_base_free(form_xml, module_text, source)
+        .map_err(|error| ManagedFormCodecError::Source(error.to_string()))?;
+    // Validate our own output through the same strict boundary used for
+    // storage input. This keeps new formatter branches fail-closed.
+    decode_strict(&packed.blob)?;
+    Ok(packed.blob)
+}
+
+pub fn decode_managed_form(
+    profile: &ManagedFormCodecProfile,
+    blob: &[u8],
+) -> Result<ManagedFormBody, ManagedFormCodecError> {
+    let _ = profile;
+    decode_strict(blob)
+}
+
+/// Transitional reader for historic synthetic fixtures that did not carry a
+/// UTF-8 BOM. New profile-selected compilation and decoding remain strict.
+#[doc(hidden)]
+pub fn decode_compatible_managed_form(
+    blob: &[u8],
+) -> Result<ManagedFormBody, ManagedFormCodecError> {
+    decode(blob, false, false)
+}
+
+fn decode_strict(blob: &[u8]) -> Result<ManagedFormBody, ManagedFormCodecError> {
+    decode(blob, true, true)
+}
+
+fn decode(
+    blob: &[u8],
+    require_bom: bool,
+    require_evidenced_layout: bool,
+) -> Result<ManagedFormBody, ManagedFormCodecError> {
+    // `inflate` applies the shared compressed/plain payload bounds before the
+    // mature Form parser sees the body.
+    let plain = inflate(blob)?;
+    if require_bom && !plain.starts_with(UTF8_BOM) {
+        return Err(ManagedFormCodecError::MissingBom);
+    }
+    let parsed = parse_form_body_blob(blob)
+        .map_err(|error| ManagedFormCodecError::NativeBody(error.to_string()))?;
+    if require_evidenced_layout {
+        validate_layout(&parsed)?;
+    }
+    Ok(ManagedFormBody { plain, parsed })
+}
+
+fn validate_layout(parsed: &ParsedFormBodyBlob) -> Result<(), ManagedFormCodecError> {
+    let marker = parsed
+        .layout
+        .trim()
+        .strip_prefix('{')
+        .and_then(|value| value.split([',', '}']).next())
+        .map(str::trim);
+    if marker != Some(FORM_LAYOUT_MARKER) {
+        return Err(ManagedFormCodecError::UnsupportedLayout(
+            marker.unwrap_or("<absent>").to_owned(),
+        ));
+    }
+    if parsed.trailing_fields != FORM_TRAILING_SECTIONS
+        || parsed.trailing.len() != FORM_TRAILING_SECTIONS
+    {
+        return Err(ManagedFormCodecError::InvalidShape(format!(
+            "expected {FORM_TRAILING_SECTIONS} trailing sections, got {}",
+            parsed.trailing_fields
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ManagedFormCodecError {
+    Profile(BodyProfileError),
+    Native(String),
+    Source(String),
+    NativeBody(String),
+    MissingBom,
+    UnsupportedLayout(String),
+    InvalidShape(String),
+}
+
+impl Display for ManagedFormCodecError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Profile(source) => Display::fmt(source, formatter),
+            Self::Native(reason) => write!(formatter, "native Form payload was rejected: {reason}"),
+            Self::Source(reason) => write!(formatter, "Form source cannot be compiled: {reason}"),
+            Self::NativeBody(reason) => write!(formatter, "native Form body is invalid: {reason}"),
+            Self::MissingBom => write!(formatter, "native Form body has no UTF-8 BOM"),
+            Self::UnsupportedLayout(marker) => write!(
+                formatter,
+                "native Form layout marker `{marker}` is outside the evidenced marker-50 cohort"
+            ),
+            Self::InvalidShape(reason) => {
+                write!(formatter, "native Form body is invalid: {reason}")
+            }
+        }
+    }
+}
+
+impl Error for ManagedFormCodecError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Profile(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl From<BodyProfileError> for ManagedFormCodecError {
+    fn from(source: BodyProfileError) -> Self {
+        Self::Profile(source)
+    }
+}
+
+impl From<NativeError> for ManagedFormCodecError {
+    fn from(source: NativeError) -> Self {
+        Self::Native(source.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::families::native::deflate_bytes;
+
+    #[test]
+    fn unsupported_source_layout_is_a_hard_blocker() {
+        let profile = ManagedFormCodecProfile::fixture();
+        let unsupported = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><LabelDecoration name="Future" id="1"/></ChildItems></Form>"#;
+        let error = compile_managed_form(&profile, unsupported, None, None).unwrap_err();
+        assert!(error.to_string().contains("unsupported base-free element"));
+    }
+
+    /// Measures — rather than assumes — what the base-free packer can do with a
+    /// real platform form.
+    ///
+    /// The input is the platform's own `Ext/Form.xml` for
+    /// `Catalogs/CorpusList/Forms/ListForm`, retained under
+    /// `tests/fixtures/native-evidence/8.3.27.2214/dcs-form-list-settings-server-state`.
+    /// It sits outside the evidenced base-free cohort, and the exact reasons are
+    /// pinned here so the gap list is a checked fact rather than a note: when
+    /// the packer grows a facet this test fails, and whoever grew it has to
+    /// restate what is still missing.
+    #[test]
+    fn retained_native_form_is_refused_with_an_exact_gap_list() {
+        let form_xml = decode_base64_fixture(include_str!(concat!(
+            "../../../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-form-list-settings-server-state/native-form.xml.b64"
+        )));
+        let profile = ManagedFormCodecProfile::fixture();
+        let error = compile_managed_form(&profile, &form_xml, None, None)
+            .expect_err("the retained native form is outside the base-free cohort");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("Form XML is outside the evidenced base-free marker-50 cohort"),
+            "{rendered}"
+        );
+        for blocker in [
+            "has a dynamic-list MainTable but no source resolver",
+            "uses an unsupported decoration/font/border creation facet",
+            "uses strict-schema properties without an evidenced creation layout",
+        ] {
+            assert!(
+                rendered.contains(blocker),
+                "missing `{blocker}` in {rendered}"
+            );
+        }
+    }
+
+    /// Minimal decoder for the retained base64 evidence files.
+    fn decode_base64_fixture(input: &str) -> Vec<u8> {
+        fn value(byte: u8) -> u32 {
+            match byte {
+                b'A'..=b'Z' => u32::from(byte - b'A'),
+                b'a'..=b'z' => u32::from(byte - b'a') + 26,
+                b'0'..=b'9' => u32::from(byte - b'0') + 52,
+                b'+' => 62,
+                b'/' => 63,
+                _ => panic!("invalid base64 byte {byte}"),
+            }
+        }
+        let bytes = input
+            .as_bytes()
+            .iter()
+            .copied()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect::<Vec<_>>();
+        assert!(
+            bytes.len().is_multiple_of(4),
+            "base64 length is not canonical"
+        );
+        let mut output = Vec::with_capacity(bytes.len() / 4 * 3);
+        for chunk in bytes.chunks_exact(4) {
+            let padding = chunk.iter().filter(|byte| **byte == b'=').count();
+            let packed = (value(chunk[0]) << 18)
+                | (value(chunk[1]) << 12)
+                | (if padding > 1 { 0 } else { value(chunk[2]) } << 6)
+                | (if padding > 0 { 0 } else { value(chunk[3]) });
+            output.push((packed >> 16) as u8);
+            if padding < 2 {
+                output.push((packed >> 8) as u8);
+            }
+            if padding < 1 {
+                output.push(packed as u8);
+            }
+        }
+        output
+    }
+
+    #[test]
+    fn strict_reader_rejects_no_bom_and_legacy_layout() {
+        let profile = ManagedFormCodecProfile::fixture();
+        let no_bom = deflate_bytes(br#"{4,{50,0},"",{0},{0},{0},{0}}"#).unwrap();
+        assert!(matches!(
+            decode_managed_form(&profile, &no_bom),
+            Err(ManagedFormCodecError::MissingBom)
+        ));
+
+        let legacy = deflate_bytes(b"\xef\xbb\xbf{4,{59,0},\"\",{0},{0},{0},{0}}").unwrap();
+        assert!(matches!(
+            decode_managed_form(&profile, &legacy),
+            Err(ManagedFormCodecError::UnsupportedLayout(marker)) if marker == "59"
+        ));
+    }
+}

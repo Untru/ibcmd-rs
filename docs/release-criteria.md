@@ -1,0 +1,205 @@
+# Standalone release criteria
+
+This document defines the fail-closed merge and release gates for the portable
+XML/CF converter. A release is the default-feature-disabled Rust binary and its
+audited archive. Installed 1C platform tools, EDT, Java, and the research-only
+platform oracle are outside that boundary.
+
+## Required merge checks
+
+The `Offline E2E` workflow is the source of merge evidence. Repository branch
+rules must require all four named checks:
+
+- `OpenSpec (strict)`;
+- `Quality`;
+- `Offline matrix (Linux)`;
+- `Offline matrix (Windows)`.
+
+The matrix fetches the locked dependency set once and then sets
+`CARGO_NET_OFFLINE=true` for compilation, tests, release build, and SBOM
+generation. It runs:
+
+1. all tests in the standalone workspace crates;
+2. all root integration targets (`--test '*'`) with default features disabled;
+3. every unit test of the root library (`--lib`), and on Windows clippy of the
+   standalone crates;
+4. clean-environment XML to CF, CF to XML, same-profile, and cross-profile
+   conversion for the registered Format15/Format16 and XCF 2.20/2.21 routes;
+5. malformed/truncated input and unknown-profile cases, which must fail before
+   publication;
+6. the evidence-derived compatibility matrix and bootstrap manifest checks;
+7. the default `LossPolicy::Error` downgrade case, which must report the exact
+   loss and block publication;
+8. a release-binary boundary audit with an empty child-process `PATH` and all
+   known 1C/Java discovery variables removed.
+
+On a pull request the matrix skips the steps the changed files cannot
+affect (`scripts/ci_scope.py`, see `docs/testing.md`); the job always runs,
+so the four required checks always report. On a pull request the release
+binary is built and audited (item 8, the SBOM and packaging) on Linux x86_64
+only, and Windows PowerShell 5.1 validates the corpus only when its inputs
+change; every push to master builds and audits the release binary on all
+four targets and runs Windows PowerShell 5.1 on Windows, and `Standalone
+Release` builds, packages and audits all four targets again. The root library's unit tests
+run in full on every target; the research
+probes and the live database tests are behind the `research-corpus-tests` and
+`mssql-live-tests` features, which these gates never enable.
+
+GitHub Actions can report these checks but cannot make them mandatory by
+itself. After the workflow exists on the default branch, the branch protection
+rule or repository ruleset must require the four check names above and reject
+force-push bypasses for ordinary contributors.
+
+## Milestone check before tagging
+
+Mandatory for every release. Before the `v*` tag is created, go through the
+GitHub milestone of that release (`gh issue list --repo Untru/ibcmd-rs
+--milestone "<X.Y — title>" --state all`):
+
+- every issue in the milestone is verified as actually done and is closed
+  with a comment naming the evidence (commit, measurement, test);
+- an issue that is not done is either finished first or moved to a later
+  milestone with the reason in a comment;
+- every status is up to date, and older issues that this release resolves are
+  closed the same way.
+
+A release is not tagged while its milestone holds an open or stale issue.
+
+## Release gate
+
+`Standalone Release` runs for `v*` tags and by explicit manual dispatch. A
+manual run produces artifacts but does not publish a GitHub release. A tag run
+publishes only after the gate and both target builds succeed.
+
+The gate rejects a tag or input version that differs from the version in
+`Cargo.toml` after removal of an optional leading `v`. It then repeats strict
+OpenSpec validation, formatting, standalone linting, standalone workspace
+tests, and all root integration suites.
+
+Each target build uses:
+
+- Rust `1.95.0`;
+- the checked-in `Cargo.lock`;
+- `--no-default-features`;
+- a target-specific dependency fetch followed by `CARGO_NET_OFFLINE=true`;
+- the source commit time as `SOURCE_DATE_EPOCH`.
+
+The offline and release matrices cover these targets:
+
+| Target | Build and offline test host |
+| --- | --- |
+| `x86_64-unknown-linux-gnu` | Ubuntu 22.04 x64 |
+| `aarch64-unknown-linux-gnu` | Ubuntu 22.04 ARM64 |
+| `x86_64-pc-windows-msvc` | Windows x64 |
+| `aarch64-apple-darwin` | macOS 15 ARM64 |
+
+`x86_64-apple-darwin` (macOS Intel) is no longer built or tested after
+v0.4.1; v0.4.1 and older releases keep their Intel archives.
+
+Linux binaries are built and executed on Ubuntu 22.04. Before packaging,
+`scripts/audit_linux_abi.py` verifies ELF64 architecture and rejects GLIBC
+requirements newer than 2.35, including the 2.38/2.39 failure reported in #441.
+The offline matrix tests the actual host binary, verifies native fixture parity,
+and audits the exact ZIP, checksum and SBOM on every target. Linux ABI receipts
+are retained as CI evidence separately from the published three-file contract.
+New platforms require green offline checks and retained evidence before they
+are advertised as available release downloads. Changing these workflows does
+not replace historical release assets.
+
+Runner labels are explicit for Linux and macOS because `*-latest` can change
+architecture or OS baseline. Label availability was verified against the
+[GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+on 2026-10-08. A new target must be added to both matrices and its green evidence
+checked in before it is treated as a supported release target.
+
+## Artifact contract
+
+Every target produces three externally published files:
+
+- `ibcmd-rs-<version>-<target>.zip`;
+- the matching `.zip.sha256` sidecar;
+- `ibcmd-rs-<version>-<target>.sbom.cdx.json`.
+
+The archive contains exactly one versioned root and this allowlist:
+
+- `ibcmd-rs` or `ibcmd-rs.exe`;
+- `README.md`;
+- `LICENSE`, the MIT license for the project's own code;
+- `compatibility/matrix.json`;
+- `compatibility/matrix.schema.json`;
+- `sbom.cdx.json`.
+- `third-party/ibcmd-number-format/{Cargo.toml,src/lib.rs,src/parse.rs,LICENSE,NOTICE.md}`,
+  the complete source and notices of the separately licensed Rust number formatter.
+- `third-party/morph1c/{LICENSE-APACHE,NOTICE.md}`, the selected license and
+  attribution notice of the source-only codec snapshot.
+
+No DLL/shared library, Java archive/class, EDT/OSGi payload, vendor executable,
+or hidden runtime can be added without making `scripts/audit_release.py` fail.
+The audit also rejects platform-oracle markers and commands in the default
+binary and verifies that the archived binary and SBOM exactly equal the audited
+files.
+The audit requires MIT in the SBOM's `ibcmd-rs` root component and checks the
+archived `LICENSE` against the repository file after text line ending
+normalization. The archived SBOM is validated even when no separate SBOM is
+supplied to the audit. Dependency licenses remain separate from the root
+license; morph1c retains its Apache-2.0 distribution license and notices.
+The number formatter is a Rust translation of OpenJDK 17 binary32/binary64 emission,
+licensed `GPL-2.0-only WITH Classpath-exception-2.0`. Its original notice and
+exception are retained, its actual license enters the SBOM, and the audit
+checks all five distributed source/notice files against the repository source,
+including the locally implemented Java-compatible floating-point lexical parser.
+
+The CycloneDX 1.5 SBOM is generated from Cargo's locked, normal-dependency
+graph. Components and dependency edges are sorted, registry checksums are read
+from `Cargo.lock`, and the target/default-feature coordinates are recorded.
+
+The ZIP writer normalizes text line endings, sorts member names, stores fixed
+Unix modes, uses no variable compression metadata, and takes its timestamp from
+`SOURCE_DATE_EPOCH` (or the current Git commit). It serializes the archive twice
+in memory and refuses output if the bytes differ. The SHA-256 sidecar is then
+verified against the final archive.
+
+## Local reproduction
+
+From a checkout with the locked crates already fetched:
+
+```powershell
+$env:CARGO_NET_OFFLINE = "true"
+cargo fmt --all --check
+cargo test --locked --workspace --exclude ibcmd-rs
+cargo test --locked -p ibcmd-rs --test '*' --no-default-features
+cargo test --locked -p ibcmd-rs --lib --no-default-features
+cargo build --locked --release --no-default-features
+
+python scripts/generate_sbom.py `
+  --manifest-path Cargo.toml `
+  --output target/release-artifacts/ibcmd-rs-0.4.0-x86_64-pc-windows-msvc.sbom.cdx.json `
+  --target x86_64-pc-windows-msvc
+
+python scripts/package_release.py `
+  --binary target/release/ibcmd-rs.exe `
+  --sbom target/release-artifacts/ibcmd-rs-0.4.0-x86_64-pc-windows-msvc.sbom.cdx.json `
+  --output target/release-artifacts/ibcmd-rs-0.4.0-x86_64-pc-windows-msvc.zip `
+  --version 0.4.0 --target x86_64-pc-windows-msvc --repository-root .
+
+python scripts/audit_release.py `
+  --binary target/release/ibcmd-rs.exe `
+  --sbom target/release-artifacts/ibcmd-rs-0.4.0-x86_64-pc-windows-msvc.sbom.cdx.json `
+  --archive target/release-artifacts/ibcmd-rs-0.4.0-x86_64-pc-windows-msvc.zip `
+  --checksum target/release-artifacts/ibcmd-rs-0.4.0-x86_64-pc-windows-msvc.zip.sha256
+```
+
+On Linux, use the Linux target coordinate and binary path. Strict specification
+validation is reproducible with:
+
+```text
+npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
+```
+
+## Adding a platform or XCF version
+
+A new version starts unsupported. Add its exact profile and capabilities, codec
+or guarded migration edge, clean-room fixtures, green repository evidence, and
+compatibility-matrix route. Extend the offline matrix before changing a route
+to `verified`. Missing evidence, an unknown profile, an unexpected opaque
+record, or an unclassified loss must continue to fail closed.

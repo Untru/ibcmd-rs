@@ -1,0 +1,6 @@
+PASS fmt 30s
+PASS guard 7s
+PASS clippy-1.95 3s
+PASS test-root-lib 326s
+DONE
+root-lib: 3607 passed; 0 failed; 9 ignored; final source, sequential run after all edits.

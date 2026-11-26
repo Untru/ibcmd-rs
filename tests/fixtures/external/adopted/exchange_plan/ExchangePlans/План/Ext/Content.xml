@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ExchangePlanContent xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<Item>
+		<Metadata>Catalog.ТестРасширение_Второй</Metadata>
+		<AutoRecord>Deny</AutoRecord>
+	</Item>
+	<ExtensionProperty>
+		<Item>
+			<Metadata>Catalog.ТестРасширение_Второй</Metadata>
+			<State>Modify</State>
+		</Item>
+		<Item>
+			<Metadata>Catalog.ТестРасширение_Первый</Metadata>
+			<State>Modify</State>
+		</Item>
+	</ExtensionProperty>
+</ExchangePlanContent>

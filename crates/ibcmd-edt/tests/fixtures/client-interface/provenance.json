@@ -1,0 +1,9 @@
+{
+  "scope": "Public synthetic DcsFilterEvidence, not ERP/BSP/UH; native export and genuine installed EDT import/export",
+  "native_build": "8.5.1.1592",
+  "xml_profile": "xml-2.21",
+  "installed_edt_build": "2026.2.1.3",
+  "writer_model_profile": "edt-2025.2.3-xml-2.21",
+  "direct.xml_sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8",
+  "direct-lf.cai_sha256": "f1659827aed39cb1240e6dc9e4252c8efa66559a3c5448e7e75e96d29e52d62b"
+}

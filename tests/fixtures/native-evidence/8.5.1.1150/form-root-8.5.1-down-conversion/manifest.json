@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.5.1.1150-xml-2.21-form-root-8.5.1-down-conversion",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_written",
+    "created_on": "2026-09-27",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "database_kind": "real_configuration",
+    "note": "Config table rows of the BSP 3.2 lab clone ibcmd_rs_bsp_85_src_20260922, re-saved by platform 8.5.1.1150 (root revision 59, 12 members appended to the root trailer), read offline from the lab row cache; the native 8.5.1.1150 export writes each `proves` property. The source export reads such a body through its 8.3.27 down-conversion (form/layout_8_5_1.rs), and extract_form_body_xml reads it the same way."
+  },
+  "objects": [
+    {
+      "kind": "Form body (managed form, 8.5 root revision 59)",
+      "form": "DataProcessors/ТранспортСообщенийОбменаCOM/Forms/Форма",
+      "form_uuid": "1415ba25-2477-4d93-b248-95235d5086ed",
+      "proves": "<SaveWindowSettings>false</SaveWindowSettings>",
+      "raw_entry": {
+        "path": "raw/1415ba25-2477-4d93-b248-95235d5086ed.deflate",
+        "compression": "raw-deflate",
+        "size": 1329,
+        "sha256": "4508889e3a3bebedb5fd5cab3bcb6dab8b2f753f86d095b5d8cdea071f77cbf9"
+      }
+    },
+    {
+      "kind": "Form body (managed form, 8.5 root revision 59)",
+      "form": "DataProcessors/ФайлыБТС/Forms/ДлительнаяОперация",
+      "form_uuid": "13797e94-aac4-40ef-a64b-a2fba16959b6",
+      "proves": "<ShowTitle>false</ShowTitle>, <ShowCloseButton>false</ShowCloseButton>",
+      "raw_entry": {
+        "path": "raw/13797e94-aac4-40ef-a64b-a2fba16959b6.deflate",
+        "compression": "raw-deflate",
+        "size": 1815,
+        "sha256": "ab9a5acc8f47f8aeb2306a13fb92b99d51ea3666d1130ccc85c56b636268781e"
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "equal": [
+    "CovEvent_BeforeDelete",
+    "CovEvent_FillCheckProcessing",
+    "CovEvent_Filling",
+    "CovEvent_OnCopy",
+    "CovEvent_OnSetNewNumber",
+    "CovEvent_OnWrite",
+    "CovEvent_Posting",
+    "CovTemplate",
+    "configuration"
+  ]
+}

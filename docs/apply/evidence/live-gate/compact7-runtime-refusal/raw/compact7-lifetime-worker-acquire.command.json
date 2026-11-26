@@ -1,0 +1,16 @@
+{
+  "started_utc": "2026-10-02T06:40:12.9013035Z",
+  "executable": "pwsh",
+  "deadline_seconds": 1240,
+  "arguments": [
+    "-NoProfile",
+    "-File",
+    "F:/ibcmd/lab/04/tools/heavy-lock.ps1",
+    "acquire",
+    "load",
+    "-Name",
+    "worker",
+    "-TimeoutMin",
+    "20"
+  ]
+}

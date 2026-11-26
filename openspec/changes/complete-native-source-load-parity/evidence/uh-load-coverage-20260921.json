@@ -1,0 +1,316 @@
+{
+  "root": "\\\\?\\E:\\ibcmd_lab\\parity\\ibcmd_rs_uha_8327_native_20260919_20260919_uha_8327_85head\\native",
+  "total_files": 140709,
+  "total_bytes": 9581783022,
+  "files_by_kind": [
+    {
+      "kind": "metadata_xml",
+      "count": 36104,
+      "bytes": 825314081
+    },
+    {
+      "kind": "template",
+      "count": 35093,
+      "bytes": 5540542910
+    },
+    {
+      "kind": "form",
+      "count": 32766,
+      "bytes": 641315949
+    },
+    {
+      "kind": "module",
+      "count": 29818,
+      "bytes": 1659624797
+    },
+    {
+      "kind": "binary",
+      "count": 3772,
+      "bytes": 836281280
+    },
+    {
+      "kind": "other",
+      "count": 3154,
+      "bytes": 23691405
+    },
+    {
+      "kind": "configuration_root",
+      "count": 1,
+      "bytes": 2446427
+    },
+    {
+      "kind": "other_xml",
+      "count": 1,
+      "bytes": 52566173
+    }
+  ],
+  "stage_entry_files": 55789,
+  "stage_metadata_xml_files": 51085,
+  "stage_common_module_xml_files": 4704,
+  "potentially_stageable_body_files": 73752,
+  "module_files": 29818,
+  "supported_module_files": 29818,
+  "supported_ext_body_files": 30890,
+  "partially_supported_form_xml_files": 13044,
+  "partially_supported_form_xml_bytes": 583839162,
+  "unsupported_form_xml_files": 13044,
+  "unsupported_form_xml_bytes": 583839162,
+  "form_xml_stageable_by_module": 12216,
+  "form_xml_without_stageable_module": 828,
+  "ignored_form_ext_files": 0,
+  "ignored_form_ext_bytes": 0,
+  "known_uncovered_files": 13044,
+  "known_uncovered_bytes": 583839162,
+  "top_known_uncovered": [
+    {
+      "path": "Catalogs/МЧД003/Forms/ЧерновикПередоверияМЧД/Ext/Form.xml",
+      "bytes": 1373100,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Catalogs/МЧД003/Forms/ЧерновикМЧД/Ext/Form.xml",
+      "bytes": 1046350,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ДокументооборотСКонтролирующимиОрганами/Forms/УправлениеОбменом/Ext/Form.xml",
+      "bytes": 1044606,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ЭлектроннаяТранспортнаяНакладная/Forms/ОсновнаяФорма/Ext/Form.xml",
+      "bytes": 1008279,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ВводОстатковТоваров/Forms/ФормаТовары/Ext/Form.xml",
+      "bytes": 934940,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "CommonForms/РегламентированнаяОтчетность/Ext/Form.xml",
+      "bytes": 889387,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ВерсияСоглашенияКоммерческийДоговор/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 828179,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Reports/РегламентированныйОтчетСтатистикаФорма1ЦеныПриобр/Forms/ФормаОтчета2013Кв1/Ext/Form.xml",
+      "bytes": 800943,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ЕдиныйНалоговыйСчетЛичныйКабинет/Forms/Форма/Ext/Form.xml",
+      "bytes": 793326,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/Увольнение/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 762472,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/УвольнениеСписком/Forms/ФормаСтроки/Ext/Form.xml",
+      "bytes": 760450,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ДокументооборотСКонтролирующимиОрганами/Forms/МастерФормированияЗаявкиНаПодключениеУпрощенное/Ext/Form.xml",
+      "bytes": 710390,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Catalogs/РесурсныеСпецификации/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 665143,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ПоясненияКДекларацииПоНДС/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 662512,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ЭтапПроизводства2_2/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 652210,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/НачислениеЗарплаты/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 650985,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ЗаказПереработчику/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 635160,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ИнтерфейсДокументовЭДО/Forms/ТекущиеДелаПоЭДОЛегкийИнтерфейс/Ext/Form.xml",
+      "bytes": 624043,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/СервисДоставки/Forms/КарточкаЗаказа/Ext/Form.xml",
+      "bytes": 620750,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/НастройкаОтраженияДокументовВРеглУчете/Forms/ФормаНастройки/Ext/Form.xml",
+      "bytes": 608213,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/БольничныйЛист/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 602087,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ИнтерфейсДокументовЭДО/Forms/ТекущиеДелаПоЭДОЛегкийКлиентЭДО/Ext/Form.xml",
+      "bytes": 599342,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/СведенияОДоходахСотрудникаДляСоцВыплат/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 578680,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Catalogs/ЦиклыОбмена/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 561570,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml",
+      "bytes": 546591,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/СправкаНДФЛ/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 541767,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/СправкиНДФЛДляПередачиВНалоговыйОрган/Forms/ФормаСтроки/Ext/Form.xml",
+      "bytes": 540485,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Catalogs/ВидыНоменклатуры/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 516772,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Catalogs/Партнеры/Forms/ПомощникНового/Ext/Form.xml",
+      "bytes": 516645,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ОтпускПоУходуЗаРебенком/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 515421,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ОбщиеОбъектыРеглОтчетности/Forms/УправлениеОтчетностью/Ext/Form.xml",
+      "bytes": 513837,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ОбеспечениеПотребностей/Forms/Форма/Ext/Form.xml",
+      "bytes": 509178,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ЗаказПереработчику2_5/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 492670,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ДокументооборотСКонтролирующимиОрганами/Forms/МастерФормированияЗаявкиНаИзменениеПараметровПодключения/Ext/Form.xml",
+      "bytes": 479336,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/НачалоРаботыОблачной1СО/Forms/БыстрыйСтарт/Ext/Form.xml",
+      "bytes": 474484,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/РедактированиеПоследовательностиЭтаповПроизводства/Forms/Форма/Ext/Form.xml",
+      "bytes": 474221,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ИнтерфейсДокументовЭДО/Forms/ТекущиеДелаПоЭДО/Ext/Form.xml",
+      "bytes": 466156,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ПанельАдминистрированияУТ/Forms/Продажи/Ext/Form.xml",
+      "bytes": 465846,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/Лот/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 463859,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ЗаявкаНаВозвратТоваровОтКлиента/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 451091,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/Отпуск/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 445624,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ВводОстатков/Forms/ФормаТовары/Ext/Form.xml",
+      "bytes": 445128,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ГрупповаяОбработкаРаспознанныхДокументов/Forms/ГрупповаяОбработка/Ext/Form.xml",
+      "bytes": 443460,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "ChartsOfCalculationTypes/Начисления/Forms/ФормаВидаРасчета/Ext/Form.xml",
+      "bytes": 432797,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/ДиспетчированиеПроизводства/Forms/ДиспетчированиеПроизводства/Ext/Form.xml",
+      "bytes": 430586,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Catalogs/Номенклатура/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 426585,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "DataProcessors/СервисДоставки/Forms/КарточкаЗаказаСДЭК/Ext/Form.xml",
+      "bytes": 425351,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Documents/ВводОстатковВнеоборотныхАктивов2_4/Forms/РедактированияСтрокиОС/Ext/Form.xml",
+      "bytes": 418710,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Catalogs/Организации/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 415014,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    },
+    {
+      "path": "Catalogs/ДоговорыКонтрагентов/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 413027,
+      "reason": "Form.xml body is partially compiled; full ibcmd parity is not complete"
+    }
+  ]
+}

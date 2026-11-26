@@ -1,0 +1,22 @@
+{
+  "base": "6a7cbbf60e70d35c03767e0ad06c1afa4915e6e7",
+  "head": "8a4e8456159d3d666b94c7dc72305a46d5b577f7",
+  "branch": "feat/0.5-platform85-form-experiment",
+  "binary": "F:/ibcmd/lab/05/wave3/platform85/bin/ibcmd-rs-form85-experimental.exe",
+  "binary_sha256": "EE92AB1FB8863E8592CBB547CFC2345C34633EB5F73A2AF29C644908E9C27525",
+  "build_log": "F:/ibcmd/lab/05/wave3/platform85/logs/form-candidate-iter-build.log",
+  "quick": "gates-form-experiment",
+  "source_file_sha256": {
+    "src/mssql_config_apply/dynamic.rs": "5A49A5B2810030644A250D71C9CA022C711879092D652FBCFDA9110C3785DD99",
+    "src/mssql_config_apply/dynamic_platform85.rs": "AEAB2AE82D7F903F93E10A404D0E9167F5750BAB33899FCCBF43C962E663F4D8",
+    "src/mssql_config_apply/mod.rs": "7F98ECFB4D3FB462521E76997FBB36A19BD8FD8683BE94952460D4D6B7E594D8",
+    "src/mssql_platform_profile.rs": "ACA34A37C22DD21289F31A0740B4F729FE3A356408584C4B69A034D704D46AF9",
+    "src/dropin/apply.rs": "E36C56F50F2F7D3E0DF6E8CAC4D807E3A86BF519437B205703DAE791E255C9F8",
+    "profiles/platform/8.5.1.1150.json": "02096E95960479829F74BC78D961FBEF83244B033A386D8182CD3190CB8CF589",
+    "src/mssql_main_activation.rs": "74973E64ABFF7D25EEDBC6221317E0324AA70FB4559FEF67259009A301A7A4C4",
+    "src/mssql_dump/mod.rs": "910547C6B2CE515DD5E8C691F7B0C8258DA0B77B5487868B738B21C83E8AD78C",
+    "src/mssql_dump/fetch.rs": "C752A42E566C665D389862C07E69C13166A6F835404C89912104FCFCB7F001A5"
+  },
+  "scope": "EXPERIMENT ONLY initial five-row existing CommonForm .0 module-only; no main/ext/LIVE/worker/repeat admission",
+  "owned_database": "ibcmd_rs_05_p85_w3_own_form_20261001"
+}

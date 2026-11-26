@@ -1,0 +1,186 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-conditional-appearance",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 283,
+  "contract": "8.3.27-xml-2.20-dcs-settings-conditional-appearance-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-13",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_fresh_file_infobases",
+    "database_locale": "not explicitly overridden; both fresh rounds used the same current application locale and produced byte-identical selected native XML",
+    "creation_args": "infobase create --load <input.cf> --apply --force (without --locale)",
+    "patch_build_policy": "the exact build is retained as experiment provenance; this component contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "seed": {
+    "kind": "unica_main_clean_room_hypothesis_then_platform_attested",
+    "unica_main_sha": "a527d40962d047c6922c903b37510b30f697da42",
+    "commands": [
+      "unica.dcs.edit add-conditionalAppearance",
+      "unica.dcs.info variant",
+      "unica.dcs.validate detailed",
+      "ibcmd partial import/apply/save/selected export"
+    ],
+    "objects_definition": {
+      "path": "seed/unica-main-objects.json",
+      "size": 167,
+      "sha256": "89505883ea0f16b1090c493b683d84e69861b01305885bae55ea64873c3e6754"
+    },
+    "dcs_definition": {
+      "path": "seed/unica-main-dcs.json",
+      "size": 751,
+      "sha256": "e478ee9d69a50d759f6b40ebc66bcded671817cda6a6ae4cd790a8da6271078b"
+    },
+    "base_fixture_id": "8.3.27.2214-xml-2.20-dcs-filter",
+    "base_cf_size": 87661,
+    "base_cf_sha256": "fad8f529230bc474920f925245eba0054f3f85d97039aa38d1fd850fd7c5bd4c",
+    "authority": "hypothesis_seed_only",
+    "platform_delta": "the same one-item conditional appearance rule was inserted into the standalone DCS Settings and the DynamicList Form ListSettings"
+  },
+  "rounds": {
+    "round_1": {
+      "cf_size": 88367,
+      "cf_sha256": "f567593d322818ce4bc1874c24f8c0c705be4f08f2d7005bfedacb3bc7e852c0"
+    },
+    "round_2": {
+      "cf_size": 88369,
+      "cf_sha256": "f929d6ecbf896d3dfaf202fb2df36370237a9fdcdbd627db1eb891176951d843"
+    },
+    "selected_native_equal_between_rounds": true,
+    "packed_rows_equal_between_rounds": true,
+    "unpacked_rows_equal_between_rounds": true
+  },
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "encoded_size": 117829,
+    "encoded_sha256": "882d889e9a68febd926d44a2587b6bc6c9460a01250c012a1ef2bbbdf9fbdd8d",
+    "decoded_size": 88369,
+    "decoded_sha256": "f929d6ecbf896d3dfaf202fb2df36370237a9fdcdbd627db1eb891176951d843"
+  },
+  "form": {
+    "owner": "Catalog.FilterProbe",
+    "name": "ListForm",
+    "metadata_key": "c5de5590-395f-4f83-99ad-804a46463cf3",
+    "body_key": "c5de5590-395f-4f83-99ad-804a46463cf3.0",
+    "metadata_row": {
+      "packed_size": 151,
+      "packed_sha256": "187d47b2db27d4cd1560c5321951d1f3f84ca4492c5f5c4d0cc7c69a47834e77",
+      "unpacked_size": 261,
+      "unpacked_sha256": "108595043138bc92226c6e5bb3b9646926839c1e2d7f6db2185cf45462641972"
+    },
+    "body_row": {
+      "packed_size": 3311,
+      "packed_sha256": "bcf87867e9224259c493a7b65630da9e142c4857e734cb819fd0476aa5337b2f",
+      "unpacked_size": 15089,
+      "unpacked_sha256": "f3ba8e137652de596fb5d773b021d29ccb39cbf9875fcd2fd0ea4da9916b92bd"
+    },
+    "native_xml": {
+      "path": "native-form.xml.b64",
+      "encoded_size": 9625,
+      "encoded_sha256": "71728b60dced2e429d32cbf668f3fe0cd3d915b3e8ad7b56d11f9f7f2036fe5e",
+      "decoded_size": 7216,
+      "sha256": "fbb4dbd511bf7ca07c875a80b55132661e051addb41a371395431999e9bab0eb"
+    },
+    "embedded_conditional_appearance": {
+      "path": "form-embedded-conditional-appearance.xml.b64",
+      "encoded_size": 1349,
+      "encoded_sha256": "34139210c9da06de9fe6d7fd0caa56a99691eeb1b9b18c1e8abebb7b207b5083",
+      "decoded_size": 1009,
+      "sha256": "74b5e6c4374f09e6863d191a783575a894957207b0a017cf6259289a5d61bbca"
+    },
+    "storage_property_name": "Appearance",
+    "storage_record_type_uuid": "93de27ad-a2d8-4b10-a82b-483c9b0648fe",
+    "storage_conditional_appearance": {
+      "path": "form-storage-conditional-appearance.xml.b64",
+      "encoded_size": 1533,
+      "encoded_sha256": "b56e96820d2ed3cf301ff23a7aacb70f5faed554c4bb78c53c7a40615be75e3d",
+      "decoded_size": 1148,
+      "sha256": "1fe7b7a8d20a6c54a09028a640f33bff39ab0c1eb670bcbcc86f5474b998cf1e"
+    },
+    "metadata_only_baseline": {
+      "fixture_id": "8.3.27.2214-xml-2.20-dcs-filter",
+      "native_path": "../dcs-filter/native-form-metadata-only.xml.b64",
+      "embedded_fragment_size": 206,
+      "embedded_fragment_sha256": "d460e6379896a179d0eaba233890075da0e87b01190275f20b51ddb3f233537f",
+      "storage_representation": "Appearance property absent from the exact raw Form body in both baseline rounds"
+    }
+  },
+  "standalone": {
+    "owner": "Report.FilterProbeReport",
+    "template": "MainSchema",
+    "metadata_key": "952a4216-9b06-42b0-b0c4-2f3a13aa00d7",
+    "body_key": "952a4216-9b06-42b0-b0c4-2f3a13aa00d7.0",
+    "metadata_row": {
+      "packed_size": 100,
+      "packed_sha256": "ee3a1906f59c4e7ec4ea3ac35df929636503c4d25885ee702f20c2c4d8e1500f",
+      "unpacked_size": 152,
+      "unpacked_sha256": "16f10c8534554c13eb47b14103638e65b32e81270985b47b9b4121d380cd528b"
+    },
+    "body_row": {
+      "packed_size": 914,
+      "packed_sha256": "ee69f7550b175720e69d2e416f0e3da09efe9e7422ac7e599c6595556a5f94da",
+      "unpacked_size": 3361,
+      "unpacked_sha256": "065929c29a0042fd9c065f4aa57fcc429537a539e9c55791c9a15e35fe0e004e"
+    },
+    "native_xml": {
+      "path": "native-template.xml.b64",
+      "encoded_size": 4281,
+      "encoded_sha256": "d870d14a31976360e3b862150295aa2c3d5272db95f8c0a7d093d92c575cf581",
+      "decoded_size": 3209,
+      "sha256": "bfc3b612dd6140d3cb0cba5f8a0cf11e4867986a1518b13db46ada8a31901487"
+    },
+    "conditional_appearance": {
+      "path": "standalone-conditional-appearance.xml.b64",
+      "encoded_size": 1109,
+      "encoded_sha256": "f9b37b3fdf0d354387b43d184d810b34b552809b22e0e34d798bb0085dbd363d",
+      "decoded_size": 829,
+      "sha256": "e824a8fbd5998542dd57865f0359799b5344080ec8bd29e76c4b1961fb504f57"
+    }
+  },
+  "selected_native_files": [
+    {"path": "Catalogs/FilterProbe.xml", "size": 15309, "sha256": "b1863a5d4f6379912b1784733e09553bf4095fac7794ea65426d9de670d094bf"},
+    {"path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl", "size": 3, "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"},
+    {"path": "Catalogs/FilterProbe/Forms/ListForm.xml", "size": 1494, "sha256": "f8e11a1cf75666c4b989ca9222cc7a816bffd2659f86d7f833518d236cde0cf8"},
+    {"path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml", "size": 7216, "sha256": "fbb4dbd511bf7ca07c875a80b55132661e051addb41a371395431999e9bab0eb"},
+    {"path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl", "size": 492, "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"},
+    {"path": "Reports/FilterProbeReport.xml", "size": 2229, "sha256": "d75ebaf21c9ee4e9482552e8b92b7a4225c453451f312b32d372b1fa0ac75e1b"},
+    {"path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl", "size": 3, "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"},
+    {"path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl", "size": 3, "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"},
+    {"path": "Reports/FilterProbeReport/Templates/MainSchema.xml", "size": 1262, "sha256": "a18fda8c76a551fd89d7ddbf8fcd0b947606a380459b8e8e22eaeed946c3614c"},
+    {"path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml", "size": 3209, "sha256": "bfc3b612dd6140d3cb0cba5f8a0cf11e4867986a1518b13db46ada8a31901487"}
+  ],
+  "proven_shape": {
+    "container_child_order": ["item", "viewMode?", "userSettingID?"],
+    "item_child_order": ["selection", "filter", "appearance"],
+    "selection": {"field": "SortKey", "item_type": "none"},
+    "filter": {"item_type": "FilterItemComparison", "left_type": "dcscor:Field", "left": "SortKey", "comparison_type": "Equal", "right_type": "xs:string", "right": "A"},
+    "appearance": {"item_namespace": "core", "item_type": "SettingsParameterValue", "parameter": "ЦветТекста", "value_type": "v8ui:Color", "value": "web:Red"},
+    "form_metadata": {"view_mode": "Normal", "user_setting_id": "b75fecce-942b-4aed-abc9-e6a02e460fb3"},
+    "standalone_placement": "after-filter-before-structure-items",
+    "form_placement": "after-order-before-items-tail"
+  },
+  "negative_observation": {
+    "unica_empty_filter_hypothesis": "Unica dcs.edit generated an item with an explicit empty filter and its validator reported success.",
+    "platform_result": "8.3.27.2214 accepted the XML import but dropped the entire conditional-appearance item in both standalone and Form output.",
+    "policy": "an empty nested filter is unsupported and must never be emitted or silently normalized into a supported rule"
+  },
+  "proven_claims": [
+    "Pinned 8.3.27.2214 accepted the same conditional-appearance semantics in standalone Settings, embedded Form ListSettings, and the Form storage ConditionalAppearance document.",
+    "Both selected native trees and both raw body rows are byte-stable across two fresh load/apply/save/native-export rounds.",
+    "The Form storage property name is Appearance and its record type UUID is 93de27ad-a2d8-4b10-a82b-483c9b0648fe.",
+    "The metadata-only Form default is reconstructed in native Form.xml while the physical Appearance property is absent.",
+    "Unica supplied only the clean-room hypothesis; the pinned platform output is the authority."
+  ],
+  "non_claims": [
+    "No empty nested filter, omitted selection/filter/appearance, use flag, multiple rule, multiple selected field, multiple appearance value, different operator/right/value type, item metadata, presentation, chart reference, or group behavior is inferred.",
+    "The Form Attributes conditional-appearance and UniversalListServerOnlyState wrappers are outside this ListSettings contract.",
+    "The evidence runner compares the exact conditionalAppearance fragment, not unrelated Form.xml fields such as AutoCommandBar that remain outside this DCS slice.",
+    "No nested structure conditional-appearance policy, actual EDT round-trip, or whole-profile alias is inferred.",
+    "The fixture is diagnostic-only and is never read as a production fallback."
+  ]
+}

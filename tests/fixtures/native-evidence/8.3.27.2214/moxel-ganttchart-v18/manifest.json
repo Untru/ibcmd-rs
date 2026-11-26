@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-moxel-ganttchart-v18",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-09-29",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "isolated_file_infobase",
+    "host": "Windows",
+    "note": "Extracted from the Библиотека стандартных подсистем release's own .cf via `ibcmd-rs cf extract <cf> <template uuid>.0`; the raw files are the version-18 `{18,...}` GanttChart record inside the drawing (its `fields[12]` unwrapped once), the native files the `<object xsi:type=\"d3p1:GanttChart\">` of the platform's own dump of the same template."
+  },
+  "objects": [
+    {
+      "kind": "MOXCEL GanttChart drawing (object payload only, not the whole <drawing> wrapper)",
+      "variant": "analiz-zhurnala-registratsii",
+      "description": "Reports/АнализЖурналаРегистрации/Templates/ПродолжительностьРаботыРегламентныхЗаданий, template uuid beb44b02-5d5e-4127-aee7-e184a43a4210.",
+      "raw_entry": { "path": "raw/analiz-zhurnala-registratsii-object-payload.txt" },
+      "native_object_fragment": { "path": "native/analiz-zhurnala-registratsii-object.xml" }
+    },
+    {
+      "kind": "MOXCEL GanttChart drawing (object payload only, not the whole <drawing> wrapper)",
+      "variant": "dlitelnost-otlozhennogo-obnovleniya",
+      "description": "Reports/ДлительностьОтложенногоОбновления/Templates/ДиаграммаГанта, template uuid 3c2c192e-4869-4cc6-ba47-1fadac5b9678.",
+      "raw_entry": { "path": "raw/dlitelnost-otlozhennogo-obnovleniya-object-payload.txt" },
+      "native_object_fragment": { "path": "native/dlitelnost-otlozhennogo-obnovleniya-object.xml" }
+    }
+  ],
+  "proven_claims": [
+    "Both records are version 18 (31 members) and store member 30 as `0`, where the version-19 records of `moxel-ganttchart-remainder` store `1`; the platform publishes `<d3p1:intervalTextRepresentation>Auto</d3p1:intervalTextRepresentation>` and `<d3p1:showData>Auto</d3p1:showData>` for both. A reader demanding `1` dropped both drawings without a note."
+  ],
+  "non_claims": [
+    "Member 30 is observed at `0` and `1` only, both publishing `Auto`; what another code would publish is not known."
+  ]
+}

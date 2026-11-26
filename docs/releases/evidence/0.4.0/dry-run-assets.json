@@ -1,0 +1,18 @@
+[
+  {
+    "target": "x86_64-pc-windows-msvc",
+    "archive": "ibcmd-rs-0.4.0-x86_64-pc-windows-msvc.zip",
+    "sha256": "1a928a781338fabb40bd2b81bfacd3119b02aabfa0cb652c34d87f948a1db1d6",
+    "binary_sha256": "986ae592de4be14b7c3e67473b24d010c9849c16b2cd9119d8c4d2439d1afba3",
+    "components": 137,
+    "status": "PASS"
+  },
+  {
+    "target": "x86_64-unknown-linux-gnu",
+    "archive": "ibcmd-rs-0.4.0-x86_64-unknown-linux-gnu.zip",
+    "sha256": "9d81673b047786b5026fe60e2a301ed909293c0d5e32d36d885a0db5a3f1dd58",
+    "binary_sha256": "b268f48f72c72645948876e1d5c179689c8186c2b4332559c1ee3e6ac61ea34c",
+    "components": 122,
+    "status": "PASS"
+  }
+]

@@ -1,0 +1,96 @@
+{
+  "base": "8b54d2edbb849e7c88266f9bc15dcc96e267b0c8",
+  "candidates": [
+    {
+      "candidate": "src/restructure",
+      "files": 50,
+      "lines": 22200,
+      "explicit_root_modules": 13,
+      "root_reference_count": 95,
+      "root_modules": {
+        "apply_check": 4,
+        "brace_list": 2,
+        "cli": 1,
+        "compiler": 1,
+        "metadata_model": 53,
+        "module_blob": 2,
+        "mssql_config_apply": 14,
+        "mssql_dump": 2,
+        "mssql_extension_export": 1,
+        "mssql_extensions": 1,
+        "mssql_platform_profile": 1,
+        "settings": 2,
+        "sql": 11
+      },
+      "parent_references_to_resolve": 15,
+      "method": "Lexical direct crate:: references after removing comments and strings, excluding self references for whole modules; includes tests. Parent aliases and transitive dependencies require name analysis before extraction."
+    },
+    {
+      "candidate": "src/metadata_model",
+      "files": 37,
+      "lines": 27024,
+      "explicit_root_modules": 7,
+      "root_reference_count": 56,
+      "root_modules": {
+        "brace_list": 18,
+        "compiler": 4,
+        "module_blob": 8,
+        "mssql_dump": 9,
+        "parallel": 5,
+        "platform": 7,
+        "test_scratch": 5
+      },
+      "parent_references_to_resolve": 264,
+      "method": "Lexical direct crate:: references after removing comments and strings, excluding self references for whole modules; includes tests. Parent aliases and transitive dependencies require name analysis before extraction."
+    },
+    {
+      "candidate": "src/mssql_dump/source_assets.rs",
+      "files": 1,
+      "lines": 6108,
+      "explicit_root_modules": 3,
+      "root_reference_count": 44,
+      "root_modules": {
+        "compiler": 37,
+        "mssql_dump": 6,
+        "v8_container": 1
+      },
+      "parent_references_to_resolve": 19,
+      "method": "Lexical direct crate:: references after removing comments and strings, excluding self references for whole modules; includes tests. Parent aliases and transitive dependencies require name analysis before extraction."
+    },
+    {
+      "candidate": "src/mssql_dump/refs.rs",
+      "files": 1,
+      "lines": 5550,
+      "explicit_root_modules": 2,
+      "root_reference_count": 8,
+      "root_modules": {
+        "extension": 3,
+        "metadata_model": 5
+      },
+      "parent_references_to_resolve": 13,
+      "method": "Lexical direct crate:: references after removing comments and strings, excluding self references for whole modules; includes tests. Parent aliases and transitive dependencies require name analysis before extraction."
+    },
+    {
+      "candidate": "src/mssql_dump/dcs.rs",
+      "files": 1,
+      "lines": 1353,
+      "explicit_root_modules": 1,
+      "root_reference_count": 54,
+      "root_modules": {
+        "compiler": 54
+      },
+      "parent_references_to_resolve": 2,
+      "method": "Lexical direct crate:: references after removing comments and strings, excluding self references for whole modules; includes tests. Parent aliases and transitive dependencies require name analysis before extraction."
+    },
+    {
+      "candidate": "src/sql",
+      "files": 8,
+      "lines": 2530,
+      "explicit_root_modules": 0,
+      "root_reference_count": 0,
+      "root_modules": {},
+      "parent_references_to_resolve": 10,
+      "method": "Lexical direct crate:: references after removing comments and strings, excluding self references for whole modules; includes tests. Parent aliases and transitive dependencies require name analysis before extraction."
+    }
+  ]
+}

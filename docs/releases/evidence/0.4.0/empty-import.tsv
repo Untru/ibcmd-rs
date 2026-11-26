@@ -1,0 +1,25 @@
+2026-10-01T07:51:39	ibcmd_rs_04_trace_relempty_bsp8327_r1	create_database	1,7s	rc=0
+2026-10-01T07:51:45	ibcmd_rs_04_trace_relempty_bsp8327_r1	native_create_empty	5,2s	rc=0
+2026-10-01T07:51:56	ibcmd_rs_04_trace_relempty_bsp8327_r1	ours_import	11,0s	rc=0
+2026-10-01T07:52:42	ibcmd_rs_04_trace_relempty_bsp8327_r1	native_apply	46,1s	rc=-1
+2026-10-01T07:52:46	ibcmd_rs_04_trace_relempty_bsp8327_r1	native_apply_retry	3,8s	rc=0
+2026-10-01T07:52:58	ibcmd_rs_04_trace_relempty_bsp8327_r1	native_export	12,5s	rc=0
+2026-10-01T07:53:01	ibcmd_rs_04_trace_relempty_bsp8327_r1	RESULT	2,6s	rc=0	files=12198 identical=12197 total=12198 left_only=0 right_only=0 different=1 cdi_raw_equal=False cdi_blank_equal=True ref_bytes=3110746 our_bytes=3110746 ref_sha=bbd10505ba41 our_sha=392d155ac8c5
+2026-10-01T07:53:03	ibcmd_rs_04_trace_relempty_bsp85_r1	create_database	1,1s	rc=0
+2026-10-01T07:53:07	ibcmd_rs_04_trace_relempty_bsp85_r1	native_create_empty	3,9s	rc=0
+2026-10-01T07:53:21	ibcmd_rs_04_trace_relempty_bsp85_r1	ours_import	13,9s	rc=0
+2026-10-01T07:54:10	ibcmd_rs_04_trace_relempty_bsp85_r1	native_apply	49,1s	rc=0
+2026-10-01T07:54:23	ibcmd_rs_04_trace_relempty_bsp85_r1	native_export	12,5s	rc=0
+2026-10-01T07:54:25	ibcmd_rs_04_trace_relempty_bsp85_r1	RESULT	2,6s	rc=0	files=12337 identical=12336 total=12337 left_only=0 right_only=0 different=1 cdi_raw_equal=False cdi_blank_equal=True ref_bytes=3085415 our_bytes=3085415 ref_sha=c7664952b46e our_sha=3874df66bcd0
+2026-10-01T07:54:28	ibcmd_rs_04_trace_relempty_uha8327_r1	create_database	1,1s	rc=0
+2026-10-01T07:54:32	ibcmd_rs_04_trace_relempty_uha8327_r1	native_create_empty	3,9s	rc=0
+2026-10-01T07:56:56	ibcmd_rs_04_trace_relempty_uha8327_r1	ours_import	143,8s	rc=0
+2026-10-01T08:06:25	ibcmd_rs_04_trace_relempty_uha8327_r1	native_apply	568,7s	rc=0
+2026-10-01T08:10:45	ibcmd_rs_04_trace_relempty_uha8327_r1	native_export	259,8s	rc=0
+2026-10-01T08:12:46	ibcmd_rs_04_trace_relempty_uha8327_r1	RESULT	120,9s	rc=0	files=140709 identical=140708 total=140709 left_only=0 right_only=0 different=1 cdi_raw_equal=False cdi_blank_equal=True ref_bytes=52566173 our_bytes=52566173 ref_sha=108907c79350 our_sha=1d7aa6a4df0a
+2026-10-01T08:12:52	ibcmd_rs_04_trace_relempty_uha85_r1	create_database	1,2s	rc=0
+2026-10-01T08:12:58	ibcmd_rs_04_trace_relempty_uha85_r1	native_create_empty	5,1s	rc=0
+2026-10-01T08:15:21	ibcmd_rs_04_trace_relempty_uha85_r1	ours_import	143,9s	rc=0
+2026-10-01T08:25:43	ibcmd_rs_04_trace_relempty_uha85_r1	native_apply	621,5s	rc=0
+2026-10-01T08:29:40	ibcmd_rs_04_trace_relempty_uha85_r1	native_export	236,5s	rc=0
+2026-10-01T08:31:23	ibcmd_rs_04_trace_relempty_uha85_r1	RESULT	103,5s	rc=0	files=140709 identical=140708 total=140709 left_only=0 right_only=0 different=1 cdi_raw_equal=False cdi_blank_equal=True ref_bytes=52566173 our_bytes=52566173 ref_sha=037952260222 our_sha=44895e268906

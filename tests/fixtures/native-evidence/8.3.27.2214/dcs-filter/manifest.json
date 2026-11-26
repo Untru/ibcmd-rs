@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-filter",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 283,
+  "contract": "8.3.27-xml-2.20-dcs-settings-filter-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-13",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "four_fresh_file_infobases_in_two_two_round_cohorts",
+    "patch_build_policy": "the exact build is retained as experiment provenance; the component contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "seed": {
+    "kind": "unica_main_clean_room_hypothesis_then_platform_attested",
+    "unica_main_sha": "a527d40962d047c6922c903b37510b30f697da42",
+    "commands": [
+      "unica.cf.init",
+      "unica.meta.compile",
+      "unica.template.add",
+      "unica.dcs.compile",
+      "unica.form.add",
+      "unica.form.compile",
+      "unica.dcs.validate",
+      "unica.form.validate"
+    ],
+    "objects_definition": {
+      "path": "seed/unica-main-objects.json",
+      "size": 167,
+      "sha256": "89505883ea0f16b1090c493b683d84e69861b01305885bae55ea64873c3e6754"
+    },
+    "dcs_definition": {
+      "path": "seed/unica-main-dcs.json",
+      "size": 517,
+      "sha256": "fed262e7bfdd7afa5cf4aba709dcc5ad06cef8c492e785fc588afd80c28d4e5f"
+    },
+    "authority": "hypothesis_seed_only",
+    "platform_delta": "one exact FilterItemComparison was inserted in the generated DynamicList Form; the metadata-only cohort removes only that item"
+  },
+  "comparison_cohort": {
+    "round_1_cf": {
+      "size": 87661,
+      "sha256": "a5ac836be4d0d04f7445cfd9744863e8b90723eca12de353e790ecdff110bd4b"
+    },
+    "round_2_cf": {
+      "size": 87661,
+      "sha256": "fad8f529230bc474920f925245eba0054f3f85d97039aa38d1fd850fd7c5bd4c"
+    },
+    "configuration_cf": {
+      "path": "configuration-comparison.cf.b64",
+      "encoded_size": 116885,
+      "encoded_sha256": "83462fcaf018063a1fee3c7e75a1c68a3ad0e099d4d025bb7b3e545e5e24f8e8",
+      "decoded_size": 87661,
+      "decoded_sha256": "fad8f529230bc474920f925245eba0054f3f85d97039aa38d1fd850fd7c5bd4c"
+    },
+    "selected_native_file_count": 10,
+    "selected_native_equal_between_rounds": true,
+    "form": {
+      "owner": "Catalog.FilterProbe",
+      "name": "ListForm",
+      "metadata_key": "c5de5590-395f-4f83-99ad-804a46463cf3",
+      "body_key": "c5de5590-395f-4f83-99ad-804a46463cf3.0",
+      "metadata_row": {
+        "packed_size": 151,
+        "packed_sha256": "187d47b2db27d4cd1560c5321951d1f3f84ca4492c5f5c4d0cc7c69a47834e77",
+        "unpacked_size": 261,
+        "unpacked_sha256": "108595043138bc92226c6e5bb3b9646926839c1e2d7f6db2185cf45462641972"
+      },
+      "body_row": {
+        "packed_size": 2773,
+        "packed_sha256": "7931b4c02ec6a58f525e7518975ae6f7d269e757ae6059ec6e753f5ceab86665",
+        "unpacked_size": 13426,
+        "unpacked_sha256": "af500de1fb95017835b050b457f0c7d22ea317f4a2737bd7b9b2e9ad3e3b2706"
+      },
+      "native_xml": {
+        "path": "native-form-comparison.xml.b64",
+        "decoded_size": 6413,
+        "sha256": "8e73cb500558cbc496dc132153a1bac7a696f442765d74d0c27c8535164d4a31"
+      },
+      "storage_record_type_uuid": "f6841c6b-6c71-4c82-ae9e-d08b49db326c",
+      "storage_filter": {
+        "path": "form-comparison-storage.xml.b64",
+        "decoded_size": 567,
+        "sha256": "58a66d4cef0c358da6969524f635600e4cdf1e20845069c86bc3f8ed46924757"
+      },
+      "embedded_filter": {
+        "path": "form-comparison-embedded.xml.b64",
+        "decoded_size": 446,
+        "sha256": "838234d631b355ca86778af8fd48fc204a2c4cb83a6f8ae2a34bcc764d326677"
+      }
+    },
+    "standalone": {
+      "owner": "Report.FilterProbeReport",
+      "template": "MainSchema",
+      "metadata_key": "952a4216-9b06-42b0-b0c4-2f3a13aa00d7",
+      "body_key": "952a4216-9b06-42b0-b0c4-2f3a13aa00d7.0",
+      "body_row": {
+        "packed_size": 774,
+        "packed_sha256": "6288d1b0a2b790e22964073af4e1516b6aea09b42510f8246261daff4890e0c2",
+        "unpacked_size": 2739,
+        "unpacked_sha256": "b8e1e2cb0b47ce2fdb5cd44caf382a24ad5d8c3afd044bb8b3ed26e50707b718"
+      },
+      "native_xml": {
+        "path": "native-template.xml.b64",
+        "decoded_size": 2375,
+        "sha256": "bcc29901ebd9edbb863d4eaa9ba3c1d40350dd92c001437aaa0358deddf02b45"
+      },
+      "filter_fragment": {
+        "path": "standalone-filter.xml.b64",
+        "decoded_size": 296,
+        "sha256": "e9058eb6bce0ddd7329fca322e1438e054d1d5cd889173931e434c5df05333f3"
+      }
+    }
+  },
+  "metadata_only_cohort": {
+    "round_1_cf": {
+      "size": 86579,
+      "sha256": "e20edfec01797e60c4f00d32bb97c435afefa1ab39df0f085bb1f73795a735ce"
+    },
+    "round_2_cf": {
+      "size": 86579,
+      "sha256": "4721e712a24edc1f00a7adce14f2b0f155f96915ae84245cfa153e601a82e0c6"
+    },
+    "configuration_cf": {
+      "path": "configuration-metadata-only.cf.b64",
+      "encoded_size": 115441,
+      "encoded_sha256": "ca7b919c9e4dd6300f0e9bc289736fdcb4e7b4df9aafa535be23c08cf23280d2",
+      "decoded_size": 86579,
+      "decoded_sha256": "4721e712a24edc1f00a7adce14f2b0f155f96915ae84245cfa153e601a82e0c6"
+    },
+    "selected_native_file_count": 5,
+    "selected_native_equal_between_rounds": true,
+    "form_body_row": {
+      "packed_size": 2393,
+      "packed_sha256": "fa29bb9ea299a5f35a2b2f4f5a955d20ae8f6ed67968aa3bef9e6e7f596b0b11",
+      "unpacked_size": 12568,
+      "unpacked_sha256": "1e5c4292c55143a1175115380e0bdd39ad47a02790babc98d245333b5e689071"
+    },
+    "native_xml": {
+      "path": "native-form-metadata-only.xml.b64",
+      "decoded_size": 6143,
+      "sha256": "9e503c83bf2f183b9f2013c95cec91b389cff423d86989f6834b8e764a5f379a"
+    },
+    "embedded_filter": {
+      "path": "form-metadata-only-embedded.xml.b64",
+      "decoded_size": 176,
+      "sha256": "cbe32fff31ce82ea3809801f2297dc5e4902b4ce4092d8644b0d51dd9ce55478"
+    },
+    "storage_representation": "Filter property absent from the exact raw Form body in both rounds",
+    "auto_save_user_settings": true
+  },
+  "proven_shape": {
+    "comparison": {
+      "item_type": "FilterItemComparison",
+      "use": "omitted",
+      "left_type": "dcscor:Field",
+      "left": "SortKey",
+      "comparison_type": "Equal",
+      "right_type": "xs:string",
+      "right": "A"
+    },
+    "form_metadata": {
+      "view_mode": "Normal",
+      "user_setting_id": "dfcece9d-5077-440b-b6b3-45a5cb4538eb"
+    },
+    "standalone_placement": "after-selection-before-structure-items",
+    "form_child_order": ["item(left,comparisonType,right)", "viewMode", "userSettingID"]
+  },
+  "proven_claims": [
+    "Pinned 8.3.27.2214 accepted the same FilterItemComparison semantics in standalone Settings, embedded Form ListSettings, and the Form storage Filter document.",
+    "Both comparison and metadata-only cohorts are byte-stable across two fresh load/apply/save/native-export rounds.",
+    "The comparison Form metadata row, raw body row, standalone template body row, storage Filter document, and selected native XML are exact platform-authenticated evidence.",
+    "A metadata-only Form filter is reconstructed in native Form.xml from AutoSaveUserSettings=true while the physical Filter property is absent from storage.",
+    "The storage Filter record type for the comparison cohort is f6841c6b-6c71-4c82-ae9e-d08b49db326c.",
+    "Unica supplied only the clean-room scaffold and hypothesis; the pinned platform output is the authority."
+  ],
+  "non_claims": [
+    "No FilterItemGroup, use=false/true emission, operator other than Equal, right type other than xs:string, multiple items, missing right, item metadata, propertyless empty filter, or duplicate behavior is inferred.",
+    "The metadata-only embedded filter does not authorize a metadata-only storage Filter document; exact platform storage omits the property.",
+    "No nested structure or conditional-appearance filter policy is inferred from this root/Form cohort.",
+    "The production verifier requires byte-exact DCS filter fragments and the complete standalone Template.xml; unrelated outer Form.xml namespace declarations remain outside this bounded slice.",
+    "No actual EDT round-trip or whole-profile alias for build 8.3.27.2214 is inferred.",
+    "The fixture is diagnostic-only and is never read as a production fallback."
+  ]
+}

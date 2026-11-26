@@ -1,0 +1,17 @@
+{
+  "verdict": "PASS",
+  "scope": "Source bytes only; runtime remains unapproved. No producer/copy/acquire/SQL/native/worker execution.",
+  "certificate_sha256": "7AC02A657D0F4D404227C3BCEE69AD33B12B2DEC0F19E409C6F3019BF5DD8264",
+  "pins": 10,
+  "baseline_files": 12198,
+  "desired_files": 12198,
+  "differences": 3,
+  "all_sha_length_no_reparse": true,
+  "donors_exact": true,
+  "AA58_preserved_partial_exact": true,
+  "original_unknown_exit_null": true,
+  "CDI_retained": true,
+  "non_template_modules_retained": true,
+  "runtime_approved": false,
+  "elapsed_seconds": 9.393
+}

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" version="2.20">
+	<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>
+	<ChildItems>
+		<InputField name="Поле" id="30">
+			<DataPath>Номер</DataPath>
+			<ContextMenu name="ПолеКонтекстноеМеню" id="31"/>
+			<ExtendedTooltip name="ПолеРасширеннаяПодсказка" id="32"/>
+		</InputField>
+		<Table name="Таблица" id="1">
+			<DataPath>Таблица</DataPath>
+			<ContextMenu name="ТаблицаКонтекстноеМеню" id="2"/>
+			<AutoCommandBar name="ТаблицаКоманднаяПанель" id="3"/>
+			<ExtendedTooltip name="ТаблицаРасширеннаяПодсказка" id="4"/>
+			<ChildItems>
+				<InputField name="ТаблицаКолонка" id="5">
+					<DataPath>Таблица.Колонка</DataPath>
+					<ContextMenu name="ТаблицаКолонкаКонтекстноеМеню" id="6"/>
+					<ExtendedTooltip name="ТаблицаКолонкаРасширеннаяПодсказка" id="7"/>
+				</InputField>
+			</ChildItems>
+		</Table>
+		<Table name="Список" id="20">
+			<DataPath>Список</DataPath>
+			<ContextMenu name="СписокКонтекстноеМеню" id="21"/>
+			<AutoCommandBar name="СписокКоманднаяПанель" id="22"/>
+			<ExtendedTooltip name="СписокРасширеннаяПодсказка" id="23"/>
+			<ChildItems>
+				<InputField name="СписокПоле1" id="24">
+					<DataPath>Список.Поле1</DataPath>
+					<ContextMenu name="СписокПоле1КонтекстноеМеню" id="25"/>
+					<ExtendedTooltip name="СписокПоле1РасширеннаяПодсказка" id="26"/>
+				</InputField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Номер" id="3">
+			<Type>
+				<v8:Type>xs:decimal</v8:Type>
+				<v8:NumberQualifiers>
+					<v8:Digits>10</v8:Digits>
+					<v8:FractionDigits>0</v8:FractionDigits>
+					<v8:AllowedSign>Nonnegative</v8:AllowedSign>
+				</v8:NumberQualifiers>
+			</Type>
+		</Attribute>
+		<Attribute name="Таблица" id="2">
+			<Type>
+				<v8:Type>v8:ValueTable</v8:Type>
+			</Type>
+			<Columns>
+				<Column name="Колонка" id="1">
+					<Type>
+						<v8:Type>xs:string</v8:Type>
+						<v8:StringQualifiers>
+							<v8:Length>10</v8:Length>
+							<v8:AllowedLength>Variable</v8:AllowedLength>
+						</v8:StringQualifiers>
+					</Type>
+				</Column>
+			</Columns>
+		</Attribute>
+		<Attribute name="Список" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>true</ManualQuery>
+				<DynamicDataRead>false</DynamicDataRead>
+				<QueryText>ВЫБРАТЬ
+	1 КАК Поле1</QueryText>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>

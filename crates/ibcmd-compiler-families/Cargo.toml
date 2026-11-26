@@ -1,0 +1,25 @@
+[package]
+name = "ibcmd-compiler-families"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Native metadata-family compilation, bootstrap identities and profile loading, with the body-profile selection and the command-interface and interface-asset codecs"
+
+[dependencies]
+anyhow = "1.0"
+flate2 = "1.1"
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-cf = { path = "../ibcmd-cf" }
+ibcmd-core = { path = "../ibcmd-core" }
+ibcmd-module-blob = { path = "../ibcmd-module-blob" }
+ibcmd-schema = { path = "../ibcmd-schema" }
+ibcmd-xml = { path = "../ibcmd-xml" }
+sha2 = "0.10"
+
+[features]
+# `SelectedBodyProfile::fixture`, for the root's codec tests.
+test-fixtures = []
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,17 @@
+{
+  "scope": "Lab common-module marker9 only; descriptor unchanged",
+  "copies": [
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-8\\CommonModules\\\u041e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u044f\u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0439\u041a\u043b\u0438\u0435\u043d\u0442\u0421\u0435\u0440\u0432\u0435\u0440\\Ext\\Module.bsl",
+      "source_sha256": "6864CE11847A1687060FFFF7FA79949D8980343A9DA44E79E7255B1ADA122F89",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-9\\CommonModules\\\u041e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u044f\u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0439\u041a\u043b\u0438\u0435\u043d\u0442\u0421\u0435\u0440\u0432\u0435\u0440\\Ext\\Module.bsl",
+      "sha256": "410CEACA1B9CA614D0A13CC0CCDC17C33E53496E3EDA07EB5E3A157D0EF83980"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-8\\CommonModules\\\u041e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u044f\u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0439\u041a\u043b\u0438\u0435\u043d\u0442\u0421\u0435\u0440\u0432\u0435\u0440.xml",
+      "source_sha256": "6D6C10E3205D82194C8682B98B987E42460E3E00420547A9E804A6240CAB3A3A",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-9\\CommonModules\\\u041e\u0431\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u044f\u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0439\u041a\u043b\u0438\u0435\u043d\u0442\u0421\u0435\u0440\u0432\u0435\u0440.xml",
+      "sha256": "6D6C10E3205D82194C8682B98B987E42460E3E00420547A9E804A6240CAB3A3A"
+    }
+  ]
+}

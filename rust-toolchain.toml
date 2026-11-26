@@ -1,0 +1,8 @@
+# The toolchain of CI and the release builds (`RUST_VERSION` in
+# .github/workflows/offline-e2e.yml and release.yml): rustup installs it on
+# first use, so local clippy and rustfmt agree with CI. Bump all three
+# together. The fuzz harness overrides it with `cargo +nightly`.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,3 @@
+PASS reviewed diagnostic AST exact; existing ownership/immediate-stop/registry predicates exact; actual lifetime diff only V2 routing + caller120 under same180 outer bound; no runtime actions
+PASS 13 actual-function boundaries: stable, exact/+1 deadline, expired entry, missing/empty census, foreign before/after expiry, three identity drifts, invalid state, caller budget exhausted; starts=signals=files=leases=0
+PASS parser45; only new diagnostic/budget suites run; old16 logs preserved historical; no real lifecycle/FIFO/native/SQL

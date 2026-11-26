@@ -1,0 +1,11 @@
+[
+  {
+    "type": "Catalog",
+    "name": "FilterProbe",
+    "attributes": ["SortKey: String(20)"]
+  },
+  {
+    "type": "Report",
+    "name": "FilterProbeReport"
+  }
+]

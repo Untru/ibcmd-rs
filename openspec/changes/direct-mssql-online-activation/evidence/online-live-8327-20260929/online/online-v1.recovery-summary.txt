@@ -1,0 +1,16 @@
+old_generation: 848a0a59-8803-445f-b89d-3cfae4f98bbd
+new_generation: 4832dd20-0b9e-45e3-a3e7-095525bf9b3f
+overwritten_config_rows: 5 rows
+    313d9858-3995-4a4c-b2b0-15d2350417b4 part=0 data_size=165 creation='' modified='' attributes=0 binary_data=[165 bytes as a JSON number array]
+    313d9858-3995-4a4c-b2b0-15d2350417b4.0 part=0 data_size=680 creation='' modified='' attributes=0 binary_data=[680 bytes as a JSON number array]
+    root part=0 data_size=45 creation='' modified='' attributes=0 binary_data=[45 bytes as a JSON number array]
+    version part=0 data_size=28 creation='' modified='' attributes=0 binary_data=[28 bytes as a JSON number array]
+    versions part=0 data_size=340602 creation='' modified='' attributes=0 binary_data=[340602 bytes as a JSON number array]
+prior_config_dynamically_updated: None
+prior_params_dynamically_updated: None
+staged_rows: 5 rows
+    313d9858-3995-4a4c-b2b0-15d2350417b4 part=0 data_size=165 creation='' modified='' attributes=0 binary_data=[165 bytes as a JSON number array]
+    313d9858-3995-4a4c-b2b0-15d2350417b4.0 part=0 data_size=704 creation='' modified='' attributes=0 binary_data=[704 bytes as a JSON number array]
+    root part=0 data_size=45 creation='' modified='' attributes=0 binary_data=[45 bytes as a JSON number array]
+    version part=0 data_size=28 creation='' modified='' attributes=0 binary_data=[28 bytes as a JSON number array]
+    versions part=0 data_size=344212 creation='' modified='' attributes=0 binary_data=[344212 bytes as a JSON number array]

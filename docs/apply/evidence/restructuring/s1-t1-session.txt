@@ -1,0 +1,93 @@
+== Справочник.Удалить_ДемоОбщиеСведения
+  attribute ДемоТ1Первый: Строка
+  rows ДемоТ1Первый: [] Строка x3; 
+  xdto of an existing item: all new attributes present: Да
+  wrote ДемоТ1Первый = [значение], read back [значение], found by query: Да
+  xdto of the written object: Да
+  test object deleted
+== Справочник.КлючевыеОперации
+  attribute ДемоТ1Булево: Булево
+  attribute ДемоТ1СтрокаПеременная: Строка
+  attribute ДемоТ1СтрокаФикс: Строка
+  attribute ДемоТ1СтрокаНеогр: Строка
+  attribute ДемоТ1ЧислоЦелое: Число
+  attribute ДемоТ1ЧислоДробное: Число
+  attribute ДемоТ1ЧислоНеотр: Число
+  attribute ДемоТ1Дата: Дата
+  attribute ДемоТ1ДатаВремя: Дата
+  rows ДемоТ1Булево: [Нет] Булево x716; 
+  rows ДемоТ1СтрокаПеременная: [] Строка x716; 
+  rows ДемоТ1СтрокаФикс: [                    ] Строка x716; 
+  rows ДемоТ1СтрокаНеогр: [] Строка x716; 
+  rows ДемоТ1ЧислоЦелое: [0] Число x716; 
+  rows ДемоТ1ЧислоДробное: [0] Число x716; 
+  rows ДемоТ1ЧислоНеотр: [0] Число x716; 
+  rows ДемоТ1Дата: [01.01.0001 0:00:00] Дата x716; 
+  rows ДемоТ1ДатаВремя: [01.01.0001 0:00:00] Дата x716; 
+  xdto of an existing item: all new attributes present: Да
+  wrote ДемоТ1Булево = [Да], read back [Да], found by query: Да
+  wrote ДемоТ1СтрокаПеременная = [значение], read back [значение], found by query: Да
+  wrote ДемоТ1СтрокаФикс = [значение], read back [значение            ], found by query: Да
+  wrote ДемоТ1СтрокаНеогр = [значение], read back [значение], found by query: not queried (unlimited string)
+  wrote ДемоТ1ЧислоЦелое = [42], read back [42], found by query: Да
+  wrote ДемоТ1ЧислоДробное = [3,5], read back [3,5], found by query: Да
+  wrote ДемоТ1ЧислоНеотр = [42], read back [42], found by query: Да
+  wrote ДемоТ1Дата = [29.09.2026 0:00:00], read back [29.09.2026 0:00:00], found by query: Да
+  wrote ДемоТ1ДатаВремя = [29.09.2026 13:14:15], read back [29.09.2026 13:14:15], found by query: Да
+  xdto of the written object: Да
+  test object deleted
+== Справочник._ДемоМестаХранения
+  attribute ДемоТ1Дата: Дата
+  attribute ДемоТ1Число: Число
+  rows ДемоТ1Дата: [] Null x1; [01.01.0001 0:00:00] Дата x4; 
+  rows ДемоТ1Число: [0] Число x5; 
+  xdto of an existing item: all new attributes present: Да
+  wrote ДемоТ1Дата = [29.09.2026 0:00:00], read back [29.09.2026 0:00:00], found by query: Да
+  wrote ДемоТ1Число = [3,5], read back [3,5], found by query: Да
+  xdto of the written object: Да
+  test object deleted
+== Справочник._ДемоГруппыДоступаПартнеров
+  attribute ДемоТ1Булево: Булево
+  rows ДемоТ1Булево: [] Null x1; [Нет] Булево x6; 
+  xdto of an existing item: all new attributes present: Да
+  wrote ДемоТ1Булево = [Да], read back [Да], found by query: Да
+  xdto of the written object: Да
+  test object deleted
+== Справочник._ДемоПартнеры
+  attribute ДемоТ1Строка: Строка
+  attribute ДемоТ1Время: Дата
+  attribute ДемоТ1ЧислоПапки: Число
+  rows ДемоТ1Строка: [] Null x1; [] Строка x13; 
+  rows ДемоТ1Время: [01.01.0001 0:00:00] Дата x14; 
+  rows ДемоТ1ЧислоПапки: [] Null x13; [0] Число x1; 
+  xdto of an existing item: all new attributes present: Нет, missing: ДемоТ1ЧислоПапки 
+  ДемоТ1ЧислоПапки is not for this object: Реквизит недоступен для элемента
+  wrote ДемоТ1Строка = [значение], read back [значение], found by query: Да
+  wrote ДемоТ1Время = [01.01.0001 13:14:15], read back [01.01.0001 13:14:15], found by query: Да
+  xdto of the written object: Да
+  test object deleted
+== Документ._ДемоЗаказПокупателя
+  attribute ДемоТ1Середина: Число
+  attribute ДемоТ1Булево: Булево
+  attribute ДемоТ1Строка: Строка
+  attribute ДемоТ1Число: Число
+  attribute ДемоТ1Дата: Дата
+  attribute ДемоТ1ДатаВремя: Дата
+  attribute ДемоТ1СтрокаНеогр: Строка
+  rows ДемоТ1Середина: [0] Число x8; 
+  rows ДемоТ1Булево: [Нет] Булево x8; 
+  rows ДемоТ1Строка: [] Строка x8; 
+  rows ДемоТ1Число: [0] Число x8; 
+  rows ДемоТ1Дата: [01.01.0001 0:00:00] Дата x8; 
+  rows ДемоТ1ДатаВремя: [01.01.0001 0:00:00] Дата x8; 
+  rows ДемоТ1СтрокаНеогр: [] Строка x8; 
+  xdto of an existing item: all new attributes present: Да
+  wrote ДемоТ1Середина = [42], read back [42], found by query: Да
+  wrote ДемоТ1Булево = [Да], read back [Да], found by query: Да
+  wrote ДемоТ1Строка = [значение], read back [значение], found by query: Да
+  wrote ДемоТ1Число = [3,5], read back [3,5], found by query: Да
+  wrote ДемоТ1Дата = [29.09.2026 0:00:00], read back [29.09.2026 0:00:00], found by query: Да
+  wrote ДемоТ1ДатаВремя = [29.09.2026 13:14:15], read back [29.09.2026 13:14:15], found by query: Да
+  wrote ДемоТ1СтрокаНеогр = [значение], read back [значение], found by query: not queried (unlimited string)
+  xdto of the written object: Да
+  test object deleted

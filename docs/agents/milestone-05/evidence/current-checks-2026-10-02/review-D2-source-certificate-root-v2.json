@@ -1,0 +1,12 @@
+{
+  "verdict": "PASS",
+  "certificate_sha256": "7AC02A657D0F4D404227C3BCEE69AD33B12B2DEC0F19E409C6F3019BF5DD8264",
+  "pins": 10,
+  "baseline_files": 12198,
+  "desired_files": 12198,
+  "differences": 3,
+  "all_sha_length_no_reparse": true,
+  "no_copy_acquire_SQL_native_worker": true,
+  "runtime_approved": false,
+  "elapsed_seconds": 35.826
+}

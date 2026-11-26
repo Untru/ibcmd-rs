@@ -1,0 +1,481 @@
+{
+  "base": "8b54d2edbb849e7c88266f9bc15dcc96e267b0c8",
+  "candidate_code": "f6df6905",
+  "date": "2026-10-29",
+  "environment": {
+    "os": "Windows x86_64",
+    "logical_processors": 24,
+    "physical_ram_bytes": 134876139520,
+    "cargo_build_jobs": 8,
+    "dev_debug": "line-tables-only",
+    "rust": "1.95.0",
+    "comparison": "two interleaved rounds, base/candidate/base/candidate; separate targets per worktree; dependencies cached; only ibcmd-rs cleaned before full builds"
+  },
+  "measurements": [
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 90.393,
+      "peak_tree_working_set_bytes": 4580716544,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68694016,
+        "rustc.exe": 4530216960
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-base-full"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 17.402,
+      "peak_tree_working_set_bytes": 2533224448,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68788224,
+        "rustc.exe": 2456186880
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-base-neighbor"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 13.606,
+      "peak_tree_working_set_bytes": 2485780480,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68898816,
+        "rustc.exe": 2436157440
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-base-neighbor-restore"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 14.237,
+      "peak_tree_working_set_bytes": 2508361728,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68644864,
+        "rustc.exe": 2434412544
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-base-family"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 14.423,
+      "peak_tree_working_set_bytes": 2510864384,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68886528,
+        "rustc.exe": 2436235264
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-base-family-restore"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 81.166,
+      "peak_tree_working_set_bytes": 4397432832,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68804608,
+        "rustc.exe": 4386807808
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-candidate-full"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 13.415,
+      "peak_tree_working_set_bytes": 2410647552,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68849664,
+        "rustc.exe": 2337886208
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-candidate-neighbor"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 13.738,
+      "peak_tree_working_set_bytes": 2311897088,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68714496,
+        "rustc.exe": 2316722176
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-candidate-neighbor-restore"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 12.978,
+      "peak_tree_working_set_bytes": 2396135424,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68911104,
+        "rustc.exe": 2318950400
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-candidate-family"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 13.023,
+      "peak_tree_working_set_bytes": 2346123264,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68481024,
+        "rustc.exe": 2316021760
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r1-candidate-family-restore"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 70.691,
+      "peak_tree_working_set_bytes": 4569075712,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68763648,
+        "rustc.exe": 4565467136
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-base-full"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 25.762,
+      "peak_tree_working_set_bytes": 2534096896,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68870144,
+        "rustc.exe": 2458333184
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-base-neighbor"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 14.123,
+      "peak_tree_working_set_bytes": 2503135232,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68382720,
+        "rustc.exe": 2435178496
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-base-neighbor-restore"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 14.065,
+      "peak_tree_working_set_bytes": 2474500096,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68554752,
+        "rustc.exe": 2436939776
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-base-family"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 19.995,
+      "peak_tree_working_set_bytes": 2515369984,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68780032,
+        "rustc.exe": 2447024128
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-base-family-restore"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 72.435,
+      "peak_tree_working_set_bytes": 4337991680,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68792320,
+        "rustc.exe": 4324327424
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-candidate-full"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 11.815,
+      "peak_tree_working_set_bytes": 2322284544,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68780032,
+        "rustc.exe": 2337312768
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-candidate-neighbor"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 10.955,
+      "peak_tree_working_set_bytes": 2350047232,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68616192,
+        "rustc.exe": 2314711040
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-candidate-neighbor-restore"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 11.735,
+      "peak_tree_working_set_bytes": 2298068992,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68882432,
+        "rustc.exe": 2317012992
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-candidate-family"
+    },
+    {
+      "args": [
+        "build",
+        "--locked",
+        "--lib",
+        "-p",
+        "ibcmd-rs"
+      ],
+      "exit_code": 0,
+      "seconds": 13.155,
+      "peak_tree_working_set_bytes": 2387824640,
+      "peak_process_working_set_bytes": {
+        "cargo.exe": 68927488,
+        "rustc.exe": 2316087296
+      },
+      "memory_metric": "Windows sampled summed process working set; per-process peaks are PeakWorkingSetSize, not Linux RSS",
+      "jobs": 8,
+      "dev_debug": "line-tables-only",
+      "label": "bench-r2-candidate-family-restore"
+    }
+  ],
+  "guard_probes": [
+    {
+      "probe": "unchanged",
+      "expected": "pass",
+      "exit_code": 0,
+      "as_expected": true,
+      "required_diagnostic": null
+    },
+    {
+      "probe": "uuid",
+      "expected": "reject",
+      "exit_code": 1,
+      "as_expected": true,
+      "required_diagnostic": "category=uuid-literal"
+    },
+    {
+      "probe": "name",
+      "expected": "reject",
+      "exit_code": 1,
+      "as_expected": true,
+      "required_diagnostic": "category=name-special-case"
+    },
+    {
+      "probe": "xml",
+      "expected": "reject",
+      "exit_code": 1,
+      "as_expected": true,
+      "required_diagnostic": "category=xml-policy"
+    },
+    {
+      "probe": "test-only",
+      "expected": "pass",
+      "exit_code": 0,
+      "as_expected": true,
+      "required_diagnostic": null
+    },
+    {
+      "probe": "new-file",
+      "expected": "reject",
+      "exit_code": 1,
+      "as_expected": true,
+      "required_diagnostic": "unbaselined"
+    },
+    {
+      "probe": "missing-file",
+      "expected": "reject",
+      "exit_code": 1,
+      "as_expected": true,
+      "required_diagnostic": "missing"
+    },
+    {
+      "probe": "missing-directory",
+      "expected": "reject",
+      "exit_code": 1,
+      "as_expected": true,
+      "required_diagnostic": "missing"
+    },
+    {
+      "probe": "crlf",
+      "expected": "pass",
+      "exit_code": 0,
+      "as_expected": true,
+      "required_diagnostic": null
+    }
+  ]
+}

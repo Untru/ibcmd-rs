@@ -1,0 +1,829 @@
+S1 combination matrix (issue #391, docs/apply/restructuring.md 12.15): the stages of edit_cases_s4.py through the drop-in route
+`ibcmd-rs infobase config apply --recovery-backup=<file>`, staged with the platform's partial import (mix_case.ps1) and, for the cases
+that must work, with OUR import of the full tree as well (mix_case.ps1 -Ours, mix_ours.ps1). Summaries as the scripts wrote them.
+
+====================================================================================================
+CASE m1
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+m1: the platform's route, first pass (the binary before the merge of feat/0.4 029b4a2b)
+----------------------------------------------------------------------------------------------------
+case m1 (must work), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T07:45:46] done: ibcmd_rs_04_ddl_s2_m1_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет, Fld7060 = МеждународноеНаименование; widened attributes Fld2567 = Город (50 -> 200), Fld2568 = Адрес (500 -> 1000), Fld5512 = ИНН (12 -> 20) | catalog КлючевыеОперации (Reference2598): removed attributes Fld6495 = Длительная; widened attributes Fld5283 = ИмяХеш (40 -> 100) | catalog ШаблоныЗаданийОчереди (Reference3408): removed attributes Fld3520 = Ключ; widened attributes Fld3519 = ИмяМетода (255 -> 1024), Fld3524 = Имя (255 -> 300)
+tables: 3
+caches: Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: 4 property line(s) added or removed in the XDTO model | Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: 0 record(s) of attributes added, 4 removed in the object registry | Params.siVersions: new versions of 2 cache row(s)
+drop-in exit 0 in 23.4s, backup file 269 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: e00e1c85c12a7e4089867b2838b9436100000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference2565,_Reference2598,_Reference3408
+changed (6):
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347170 347170
+16 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 27,9s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_m1_nat : export exit=0 in 67,0s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_m1_own : export exit=0 in 71,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+done m1
+
+----------------------------------------------------------------------------------------------------
+m1: mix_case.ps1 (second pass)
+----------------------------------------------------------------------------------------------------
+case m1 (must work), binary F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix2.exe
+staged: [2026-09-30T09:17:41] done: ibcmd_rs_04_ddl_s2_m1_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет, Fld7060 = МеждународноеНаименование; widened attributes Fld2567 = Город (50 -> 200), Fld2568 = Адрес (500 -> 1000), Fld5512 = ИНН (12 -> 20) | catalog КлючевыеОперации (Reference2598): removed attributes Fld6495 = Длительная; widened attributes Fld5283 = ИмяХеш (40 -> 100) | catalog ШаблоныЗаданийОчереди (Reference3408): removed attributes Fld3520 = Ключ; widened attributes Fld3519 = ИмяМетода (255 -> 1024), Fld3524 = Имя (255 -> 300)
+tables: 3
+caches: Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: 4 property line(s) added or removed in the XDTO model | Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: 0 record(s) of attributes added, 4 removed in the object registry | Params.siVersions: new versions of 2 cache row(s)
+drop-in exit 0 in 48.5s, backup file 269 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: d799c71469c1d14eb5a64897732361bf00000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference2565,_Reference2598,_Reference3408
+changed (6):
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347170 347170
+16 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 273,7s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_m1_nat : export exit=0 in 68,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_m1_own : export exit=0 in 74,1s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+our import exit 0 in 43s, 9521 rows in ConfigSave
+ours: drop-in exit 0 in 206.2s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: 0b8d798582d6eb47857eb088158b864700000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways): no row differs
+
+----------------------------------------------------------------------------------------------------
+m1: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case m1, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix2.exe
+ours: check 3 (EXCEPT both ways, 3 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (6):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+ours: DBNames text equal: True 347170 347170
+ours: 16 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (Config rows, informative until #395): rows: 9841 in A, 9841 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 678; equal after inflate only: 6095; different text: 3068; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 2275, '2': 554, '1': 108, '3': 103, '6': 6, '15': 5, '16': 5, '8': 3, 'uuid': 3, '7': 2, '14': 1, '5': 1}
+ours: check 7: native apply exit=0 in 437,5s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_m1_own : export exit=0 in 49,8s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_m1_ours : export exit=0 in 32,6s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 4, 'unchanged': 12194}
+done m1 (all)
+ours: check 8: 4 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+
+====================================================================================================
+CASE m2
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+m2: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case m2 (must work), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T07:57:38] done: ibcmd_rs_04_ddl_s2_m2_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): widened attributes Fld2567 = Город (50 -> 200), Fld2569 = Телефоны (250 -> 400), Fld5512 = ИНН (12 -> 20); switched indexes Fld2567 = Город (DontIndex -> Index), Fld2569 = Телефоны (DontIndex -> IndexWithAdditionalOrder), Fld5512 = ИНН (Index -> DontIndex) | catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100); switched indexes Fld5283 = ИмяХеш (Index -> DontIndex) | document _ДемоЗаказПокупателя (Document39): widened attributes Fld3825 = ГородДоставки (50 -> 70), Fld3824 = РегионДоставки (50 -> 60); switched indexes Fld3825 = ГородДоставки (DontIndex -> IndexWithAdditionalOrder), Fld3824 = РегионДоставки ...
+tables: 6
+caches:
+drop-in exit 0 in 8.5s, backup file 269 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: a11f7fd791f96c4f84a13315980003b600000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference2565,_Reference2598,_Document39,_Document39_VT970,_Document39_VT2148,_Document39_VT3663
+changed (5):
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347170 347170
+16 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 777,9s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_m2_nat : export exit=0 in 47,8s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_m2_own : export exit=0 in 44,8s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+done m2
+
+----------------------------------------------------------------------------------------------------
+m2: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case m2, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix2.exe
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): widened attributes Fld2567 = Город (50 -> 200), Fld2569 = Телефоны (250 -> 400), Fld5512 = ИНН (12 -> 20); switched indexes Fld2567 = Город (DontIndex -> Index), Fld2569 = Телефоны (DontIndex -> IndexWithAdditionalOrder), Fld5512 = ИНН (Index -> DontIndex) | catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100); switched indexes Fld5283 = ИмяХеш (Index -> DontIndex) | document _ДемоЗаказПокупателя (Document39): widened attributes Fld3825 = ГородДоставки (50 -> 70), Fld3824 = РегионДоставки (50 -> 60); switched indexes Fld3825 = ГородДоставки (DontIndex -> IndexWithAdditionalOrder), Fld3824 = РегионДоставки ...
+drop-in exit 0 in 27.2s
+own: added (0):
+own: removed (0):
+own: changed (5):
+own: only in 1: []  only in 2: []
+own: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+own: DBNames text equal: True 347170 347170
+own: 16 of 16 `.si` rows have the same text (compared after inflate)
+our import exit 0 in 87.7s, 9521 rows in ConfigSave
+ours: drop-in exit 0 in 242.1s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: 0ad913007ec49948b1ef9e001a04e0af00000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways, 6 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (5):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+ours: DBNames text equal: True 347170 347170
+ours: 16 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (Config rows, informative until #395): rows: 9841 in A, 9841 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 678; equal after inflate only: 6095; different text: 3068; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 2275, '2': 554, '1': 108, '3': 103, '6': 6, '15': 5, '16': 5, '8': 3, 'uuid': 3, '7': 2, '14': 1, '5': 1}
+done m2 (prepare)
+ours: check 7: native apply exit=0 in 14,7s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_m2_own : export exit=0 in 45,8s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_m2_ours : export exit=0 in 64,2s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 1, 'unchanged': 12197}
+ours: check 8: 1 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+ours: check 8: 0 of 0 edited forms come back from the twin's export byte for byte
+done m2 (finish)
+
+====================================================================================================
+CASE m3
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+m3: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case m3 (must work), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T08:42:20] done: ibcmd_rs_04_ddl_s2_m3_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100); new tabular sections VT11034 = ДемоТЧ (2 attribute(s)) | document _ДемоЗаказПокупателя (Document39): new attributes Fld11038 = ДемоРеквизит; widened attributes Fld3825 = ГородДоставки (50 -> 60); new tabular sections VT11040 = ДемоТЧ2 (1 attribute(s)); new attributes of tabular sections СчетаНаОплату: Fld11039 = ДемоСтрока | document ТелефонныйЗвонок (Document1564): new attributes Fld11043 = ДемоРеквизит; new tabular sections VT11044 = ДемоТЧ (1 attribute(s))
+tables: 11
+caches: Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: records of the new tabular sections and attributes in the object registry | Params.2203278d-ef4f-4f68-98f1-feb257d53ecc.si: entries of the new tabular sections in the index of the generated types | Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: row types, properties and property lines of the tabular sections in the XDTO model | Params.siVersions: new versions of 3 cache row(s)
+drop-in exit 0 in 41.6s, backup file 269 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: 8f64b64dac359e48996ff665999efc0100000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference2598,_Reference2598_VT11034,_Document39,_Document39_VT970,_Document39_VT2148,_Document39_VT3663,_Document39_VT11040,_Document1564,_Document1564_VT1962,_Document1564_VT2440,_Document1564_VT11044
+changed (4):
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347865 347865
+16 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 886,7s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_m3_nat : export exit=0 in 41,4s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_m3_own : export exit=0 in 51,5s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+done m3
+
+----------------------------------------------------------------------------------------------------
+m3: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case m3, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix2.exe
+dry run exit 0
+plan: catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100); new tabular sections VT11034 = ДемоТЧ (2 attribute(s)) | document _ДемоЗаказПокупателя (Document39): new attributes Fld11038 = ДемоРеквизит; widened attributes Fld3825 = ГородДоставки (50 -> 60); new tabular sections VT11040 = ДемоТЧ2 (1 attribute(s)); new attributes of tabular sections СчетаНаОплату: Fld11039 = ДемоСтрока | document ТелефонныйЗвонок (Document1564): new attributes Fld11043 = ДемоРеквизит; new tabular sections VT11044 = ДемоТЧ (1 attribute(s))
+drop-in exit 0 in 28.9s
+own: added (0):
+own: removed (0):
+own: changed (4):
+own: only in 1: []  only in 2: []
+own: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+own: DBNames text equal: True 347865 347865
+own: 16 of 16 `.si` rows have the same text (compared after inflate)
+our import exit 0 in 37.1s, 9521 rows in ConfigSave
+ours: drop-in exit 0 in 170.9s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: 77fbc7b6521ac04c9c832f5d313ab11f00000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways, 11 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (4):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+ours: DBNames text equal: True 347865 347865
+ours: 16 of 16 `.si` rows have the same text (compared after inflate)
+done m3 (prepare)
+ours: check 4 (Config rows, informative until #395): rows: 9841 in A, 9841 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 678; equal after inflate only: 6095; different text: 3068; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 2275, '2': 554, '1': 108, '3': 103, '6': 6, '15': 5, '16': 5, '8': 3, 'uuid': 3, '7': 2, '14': 1, '5': 1}
+ours: check 7: native apply exit=0 in 5,9s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_m3_own : export exit=0 in 44,8s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_m3_ours : export exit=0 in 39,6s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 1, 'unchanged': 12197}
+ours: check 8: 1 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+ours: check 8: 0 of 0 edited forms come back from the twin's export byte for byte
+done m3 (finish)
+
+====================================================================================================
+CASE m4
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+m4: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case m4 (must work), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T07:45:43] done: ibcmd_rs_04_ddl_s2_m4_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет, Fld9935 = КодСтраны | catalog КлючевыеОперации (Reference2598): new tabular sections VT11034 = ДемоТЧ (2 attribute(s)) | catalog ШаблоныЗаданийОчереди (Reference3408): removed attributes Fld3520 = Ключ | document _ДемоОприходованиеТоваров (Document578): new attributes of tabular sections Товары: Fld11038 = ДемоЧисло, Fld11039 = ДемоСтрока | document _ДемоСчетФактураПолученный (Document4883): new tabular sections VT11040 = ДемоТЧ (1 attribute(s))
+tables: 8
+caches: Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: records of the new tabular sections and attributes in the object registry; 0 record(s) of attributes added, 3 removed in the object registry | Params.2203278d-ef4f-4f68-98f1-feb257d53ecc.si: entries of the new tabular sections in the index of the generated types | Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: row types, properties and property lines of the tabular sections in the XDTO model; 3 property line(s) added or removed in the XDTO model | Params.siVersions: new versions of 3 cache row(s)
+drop-in exit 0 in 37.3s, backup file 269 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: 0be23f0746409c47acf52030a2fe90db00000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference2565,_Reference2598,_Reference2598_VT11034,_Reference3408,_Document578,_Document578_VT668,_Document4883,_Document4883_VT11040
+changed (6):
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347651 347651
+16 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 62,3s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_m4_nat : export exit=0 in 46,9s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_m4_own : export exit=0 in 60,5s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+done m4
+
+----------------------------------------------------------------------------------------------------
+m4: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case m4, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix2.exe
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет, Fld9935 = КодСтраны | catalog КлючевыеОперации (Reference2598): new tabular sections VT11034 = ДемоТЧ (2 attribute(s)) | catalog ШаблоныЗаданийОчереди (Reference3408): removed attributes Fld3520 = Ключ | document _ДемоОприходованиеТоваров (Document578): new attributes of tabular sections Товары: Fld11038 = ДемоЧисло, Fld11039 = ДемоСтрока | document _ДемоСчетФактураПолученный (Document4883): new tabular sections VT11040 = ДемоТЧ (1 attribute(s))
+drop-in exit 0 in 32.8s
+own: added (0):
+own: removed (0):
+own: changed (6):
+own: only in 1: []  only in 2: []
+own: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+own: DBNames text equal: True 347651 347651
+own: 16 of 16 `.si` rows have the same text (compared after inflate)
+our import exit 0 in 42.8s, 9521 rows in ConfigSave
+ours: drop-in exit 0 in 223.2s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: fecebe2da94b0f4a98e2cd9439bcd9ce00000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways, 8 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (6):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+ours: DBNames text equal: True 347651 347651
+ours: 16 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (Config rows, informative until #395): rows: 9841 in A, 9841 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 678; equal after inflate only: 6093; different text: 3070; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 2275, '2': 554, '1': 108, '3': 103, '6': 6, '15': 5, '16': 5, 'uuid': 5, '8': 3, '7': 2, '14': 1, '5': 1}
+done m4 (prepare)
+ours: check 7: native apply exit=0 in 13,3s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_m4_own : export exit=0 in 54,1s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_m4_ours : export exit=0 in 45,4s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 4, 'unchanged': 12194}
+ours: check 8: 4 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+ours: check 8: 3 of 3 edited forms come back from the twin's export byte for byte
+done m4 (finish)
+
+====================================================================================================
+CASE m5
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+m5: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case m5 (must work), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T07:57:19] done: ibcmd_rs_04_ddl_s2_m5_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog _ДемоПодразделения (Reference21): new attributes Fld11034 = ДемоРеквизит; new attributes of tabular sections Сотрудники: Fld11035 = ДемоСтрока | catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет; widened attributes Fld2567 = Город (50 -> 200); switched indexes Fld2569 = Телефоны (DontIndex -> IndexWithAdditionalOrder) | catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100); switched indexes Fld2646 = ЦелевоеВремя (DontIndex -> Index); new tabular sections VT11036 = ДемоТЧ (2 attribute(s)) | catalog ТомаХраненияФайлов (Reference576): switched indexes Fld1355 = МаксимальныйРазмер (DontIndex -> Index) | catalog Ш ...
+tables: 12
+caches: Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: records of the new tabular sections and attributes in the object registry; 1 record(s) of attributes added, 2 removed in the object registry | Params.2203278d-ef4f-4f68-98f1-feb257d53ecc.si: entries of the new tabular sections in the index of the generated types | Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: row types, properties and property lines of the tabular sections in the XDTO model; 3 property line(s) added or removed in the XDTO model | Params.siVersions: new versions of 3 cache row(s)
+drop-in exit 0 in 27.5s, backup file 269 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: cbab67d27dd2ef4c88a82211f63b199b00000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference21,_Reference21_VT960,_Reference2565,_Reference2598,_Reference2598_VT11036,_Reference576,_Reference3408,_Document39,_Document39_VT970,_Document39_VT2148,_Document39_VT3663,_Document39_VT11043
+changed (7):
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347810 347810
+16 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 789,1s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_m5_nat : export exit=0 in 74,4s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_m5_own : export exit=0 in 50,4s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+done m5
+
+----------------------------------------------------------------------------------------------------
+m5: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case m5, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix2.exe
+dry run exit 0
+plan: catalog _ДемоПодразделения (Reference21): new attributes Fld11034 = ДемоРеквизит; new attributes of tabular sections Сотрудники: Fld11035 = ДемоСтрока | catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет; widened attributes Fld2567 = Город (50 -> 200); switched indexes Fld2569 = Телефоны (DontIndex -> IndexWithAdditionalOrder) | catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100); switched indexes Fld2646 = ЦелевоеВремя (DontIndex -> Index); new tabular sections VT11036 = ДемоТЧ (2 attribute(s)) | catalog ТомаХраненияФайлов (Reference576): switched indexes Fld1355 = МаксимальныйРазмер (DontIndex -> Index) | catalog Ш ...
+drop-in exit 0 in 18.1s
+own: added (0):
+own: removed (0):
+own: changed (7):
+own: only in 1: []  only in 2: []
+own: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+own: DBNames text equal: True 347810 347810
+own: 16 of 16 `.si` rows have the same text (compared after inflate)
+our import exit 0 in 56.1s, 9521 rows in ConfigSave
+ours: drop-in exit 0 in 299.5s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: b4c637100a7cbe4badd0ea325355e0e000000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways, 12 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (7):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+ours: DBNames text equal: True 347810 347810
+ours: 16 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (informative, #395): == only in A (9520 rows)
+ours: check 4 (informative, #395): == only in B (9520 rows)
+done m5 (prepare)
+ours: check 4 (Config rows, informative until #395): rows: 9841 in A, 9841 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 678; equal after inflate only: 6092; different text: 3071; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 2275, '2': 554, '1': 108, '3': 103, 'uuid': 6, '6': 6, '15': 5, '16': 5, '8': 3, '7': 2, '14': 1, '5': 1}
+ours: check 7: native apply exit=0 in 86,5s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_m5_own : export exit=0 in 38,3s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_m5_ours : export exit=0 in 45,5s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 4, 'unchanged': 12194}
+ours: check 8: 4 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+ours: check 8: 3 of 3 edited forms come back from the twin's export byte for byte
+done m5 (finish)
+
+====================================================================================================
+CASE m6
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+m6: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case m6 (must work), binary F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix2.exe
+staged: [2026-09-30T10:13:00] done: ibcmd_rs_04_ddl_s2_m6_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog _ДемоКонтактныеЛицаПартнеров (Reference14): new attributes of tabular sections КонтактнаяИнформация: Fld11034 = ДемоСтрока15 | catalog _ДемоПодразделения (Reference21): new attributes Fld11035 = ДемоРеквизит; new attributes of tabular sections Сотрудники: Fld11036 = ДемоСтрока | catalog _ДемоПроекты (Reference22): switched indexes Fld179 = РеквизитДопУпорядочивания (IndexWithAdditionalOrder -> DontIndex) | catalog ВнешниеКомпоненты (Reference6358): removed attributes Fld6363 = Версия; widened attributes Fld6362 = Идентификатор (150 -> 200) | catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет; widened attributes Fld2567 = Город (50 -> 200); switch ...
+tables: 30
+caches: Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: records of the new tabular sections and attributes in the object registry; 1 record(s) of attributes added, 4 removed in the object registry | Params.2203278d-ef4f-4f68-98f1-feb257d53ecc.si: entries of the new tabular sections in the index of the generated types | Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: row types, properties and property lines of the tabular sections in the XDTO model; 5 property line(s) added or removed in the XDTO model | Params.siVersions: new versions of 3 cache row(s)
+drop-in exit 0 in 66.6s, backup file 269 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: 8513637643aa254da9471bba9d9b6b6a00000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference14,_Reference14_VT67,_Reference21,_Reference21_VT960,_Reference22,_Reference6358,_Reference2565,_Reference2598,_Reference2598_VT11037,_Reference8513,_Reference7444,_Reference576,_Reference3408,_Document39,_Document39_VT970,_Document39_VT2148,_Document39_VT3663,_Document39_VT11044,_Document996,_Document996_VT1121,_Document996_VT2191,_Document578,_Document578_VT668,_Document8409,_Document8409_VT8415,_Document8409_VT11049,_Document1436,_Document5028,_Document4883,_Document4883_VT11052
+changed (9):
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 348344 348344
+16 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 426,5s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_m6_nat : export exit=0 in 217,0s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_m6_own : export exit=0 in 42,8s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+our import exit -1 in 33.8s, 0 rows in ConfigSave
+  ours import: model export: every descriptor through the model: true; still legacy by kind: {}; left out: recalculation refs true, root recalculation refs true, functional option refs true
+  ours import: model export: name index of 10821 names, 4631 types, 314 predefined items in 51 ms; object_names read 4929 rows (0 failed) of 44 kinds, 1410 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types)
+  ours import: [ERROR] Загрузка отменена: конфигурация базы после неё не совпала бы с деревом F:\ibcmd\lab\04\restructure\tree_full\m6 (файлов с расхождениями: 1 из 12197). В ConfigSave ничего не записано.
+  ours import: [ERROR]   Catalogs/ВнешниеКомпоненты/Forms/ФормаСписка/Ext/Form.xml:
+  ours import: [ERROR]     - Form/Attributes/Attribute/UseAlways/Field: в дереве «Список.Ссылка», в собранной конфигурации «~Список.Ссылка»
+  ours import: [ERROR]     - Form/ChildItems/Pages/ChildItems/Page/ChildItems/Table/ChildItems/CheckBoxField/DataPath: в дереве «Список.ОбновлятьСПортала1СИТС», в собранной конфигурации «~Список.ОбновлятьСПортала1СИТС»
+  ours import: [ERROR]     - Form/ChildItems/Pages/ChildItems/Page/ChildItems/Table/ChildItems/LabelField/DataPath: в дереве «Список.Идентификатор», в собранной конфигурации «~Список.Идентификатор»
+  ours import: [ERROR]     - и ещё различий: 2
+  ours import: [ERROR] Загрузка в базу, где конфигурация уже есть, собирает из дерева то, что в нём отличается от базы (описания объектов, новые и удалённые объекты, модули, формы, макеты, права ролей, командные интерфейсы), а остальные строки оставляет как в базе; перечисленное выше так не переносится.
+  ours import: [ERROR] Что делать: загрузите эту конфигурацию штатным ibcmd (или Конфигуратором), либо в пустую базу. Ключ --base-free в базу с конфигурацией собирает все строки из дерева заново и теряет то, чего в XML нет (счётчики схем бизнес-процессов, признак «использовать всегда» у констант): применяйте его только к базе, где это допустимо.
+  ours import: [ERROR] Чтобы всё равно загрузить остальное, добавьте --no-verify (перечисленное выше в базу не попадёт).
+  ours import: [ERROR] Импорт конфигурации из XML завершен с ошибкой
+done m6
+
+----------------------------------------------------------------------------------------------------
+m6: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case m6, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix2.exe
+our import exit 0 in 105.2s, 9521 rows in ConfigSave
+ours: drop-in exit 0 in 546.9s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: 2795fb1b9c4f5b4386b18942adac91ae00000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways, 30 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (9):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+ours: DBNames text equal: True 348344 348344
+ours: 16 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (Config rows, informative until #395): rows: 9841 in A, 9841 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 678; equal after inflate only: 6081; different text: 3082; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 2275, '2': 554, '1': 108, '3': 103, 'uuid': 17, '6': 6, '15': 5, '16': 5, '8': 3, '7': 2, '14': 1, '5': 1}
+done m6 (prepare)
+ours: check 7: native apply exit=0 in 7,1s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_m6_own : export exit=0 in 56,9s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_m6_ours : export exit=0 in 68,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 6, 'unchanged': 12192}
+ours: check 8: 6 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+ours: check 8: 5 of 5 edited forms come back from the twin's export byte for byte
+done m6 (finish)
+
+====================================================================================================
+CASE m7
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+m7: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case m7 (must work), binary F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix2.exe
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): new attributes Fld11034 = ДемоИндексная, Fld11035 = ДемоИндексная2 | catalog КлючевыеОперации (Reference2598): new attributes Fld11036 = ДемоИндексная, Fld11037 = ДемоЧисло | catalog ТомаХраненияФайлов (Reference576): new attributes Fld11038 = ДемоДата | catalog ШаблоныЗаданийОчереди (Reference3408): new attributes Fld11039 = ДемоПорядок | document _ДемоЗаказПокупателя (Document39): new attributes Fld11040 = ДемоИндексная
+tables: 8
+caches: Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: 7 property line(s) added or removed in the XDTO model | Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: 7 record(s) of attributes added, 0 removed in the object registry | Params.siVersions: new versions of 2 cache row(s)
+drop-in exit 0 in 63.7s, backup file 269 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: 76975d2e7c3f84438eb08c463180ed0e00000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference2565,_Reference2598,_Reference576,_Reference3408,_Document39,_Document39_VT970,_Document39_VT2148,_Document39_VT3663
+changed (7):
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347541 347541
+16 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 229,4s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_m7_nat : export exit=0 in 103,2s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_m7_own : export exit=0 in 84,5s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+our import exit 0 in 44.8s, 9521 rows in ConfigSave
+ours: drop-in exit 0 in 445.5s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: 8b7eb4861b07794686786859f0cd6efb00000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways): no row differs
+
+----------------------------------------------------------------------------------------------------
+m7: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case m7, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix2.exe
+ours: check 3 (EXCEPT both ways, 8 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (7):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+ours: DBNames text equal: True 347541 347541
+ours: 16 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (Config rows, informative until #395): rows: 9841 in A, 9841 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 678; equal after inflate only: 6093; different text: 3070; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 2275, '2': 554, '1': 108, '3': 103, '6': 6, '15': 5, '16': 5, 'uuid': 5, '8': 3, '7': 2, '14': 1, '5': 1}
+ours: check 7: native apply exit=0 in 640,6s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_m7_own : export exit=0 in 35,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_m7_ours : export exit=0 in 96,6s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 1, 'unchanged': 12197}
+done m7 (all)
+ours: check 8: 1 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+
+====================================================================================================
+CASE f1
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+f1: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case f1 (must work), binary F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix3.exe
+staged: [2026-09-30T12:35:45] done: ibcmd_rs_04_ddl_s2_f1_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): switched indexes Fld2569 = Телефоны (DontIndex -> IndexWithAdditionalOrder) | catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100) | catalog ТомаХраненияФайлов (Reference576): switched indexes Fld1355 = МаксимальныйРазмер (DontIndex -> Index) | document _ДемоСписаниеБезналичныхДенежныхСредств (Document5028): widened attributes Fld5031 = НазначениеПлатежа (210 -> 300); switched indexes Fld5030 = НомерВходящегоДокумента (DontIndex -> Index) | catalog ДемоКатН1 (Reference11041): new catalog, tables _Reference11041
+tables: 5
+caches: Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: rows of the new ДемоКатН1 | Params.2203278d-ef4f-4f68-98f1-feb257d53ecc.si: rows of the new ДемоКатН1 | Params.42ed49cc-765d-4314-bc2d-af425af7bf13.si: rows of the new ДемоКатН1 | Params.a07b62f0-1f01-484a-93d9-d42764cedac0.si: rows of the new ДемоКатН1 | Params.c4629235-4823-4320-b8b5-1d08f4c6d612.si: rows of the new ДемоКатН1 (the order of some entries is approximate) | Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: rows of the new ДемоКатН1 | Params.facbfffe-feb2-4d30-8930-a557b185e5c4.si: rows of the new ДемоКатН1 | Params.fe8acd6a-22c9-4b5a-aeae-232a1c8324cb.si: rows of the new ДемоКатН1 | Params.siVersions: new versions of 8 cach ...
+drop-in exit 0 in 65.1s, backup file 233 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: e622898a39c81a4eaf72efe4d4e6732a00000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference2565,_Reference2598,_Reference576,_Document5028,_Reference11041
+changed (4):
+only in 1: []  only in 2: []
+entries that differ (0): []
+DBNames text equal: True 347975 347975
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 1 165,4s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_f1_nat : export exit=0 in 140,9s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_f1_own : export exit=0 in 112,4s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12200}
+our import exit -1 in 43s, 0 rows in ConfigSave
+  ours import: [INFO] Импорт конфигурации из XML...
+  ours import: [ERROR] Загрузка отменена: в дереве F:\ibcmd\lab\04\restructure\tree_full\f1 есть объекты, которые нельзя загрузить в базу с конфигурацией (всего: 1). В ConfigSave ничего не записано.
+  ours import: [ERROR]   Catalogs/ДемоКатН1.xml: справочник не удалось собрать из дерева: descriptor: no <Use>
+  ours import: [ERROR] Причина названа выше: такой объект сборка из дерева не берёт. Исправьте файл дерева или загрузите эту конфигурацию штатным ibcmd (или Конфигуратором).
+  ours import: [ERROR] Импорт конфигурации из XML завершен с ошибкой
+done f1
+
+----------------------------------------------------------------------------------------------------
+f1: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case f1, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix-20261001.exe
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): switched indexes Fld2569 = Телефоны (DontIndex -> IndexWithAdditionalOrder) | catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100) | catalog ТомаХраненияФайлов (Reference576): switched indexes Fld1355 = МаксимальныйРазмер (DontIndex -> Index) | document _ДемоСписаниеБезналичныхДенежныхСредств (Document5028): widened attributes Fld5031 = НазначениеПлатежа (210 -> 300); switched indexes Fld5030 = НомерВходящегоДокумента (DontIndex -> Index) | catalog ДемоКатН1 (Reference11041): new catalog, tables _Reference11041
+drop-in exit 0 in 16.8s
+own: added (0):
+own: removed (0):
+own: changed (4):
+own: only in 1: []  only in 2: []
+own: entries that differ (0): []
+own: DBNames text equal: True 347975 347975
+own: 15 of 16 `.si` rows have the same text (compared after inflate)
+our import exit 0 in 15.3s, 9 rows in ConfigSave
+ours: drop-in exit 0 in 8.3s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: 2b5aadcf56c52d418c30f0adc8f9a5e300000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways, 5 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (4):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (0): []
+ours: DBNames text equal: True 347975 347975
+ours: 15 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (Config rows, informative until #395): rows: 9840 in A, 9840 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 9792; equal after inflate only: 21; different text: 27; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 17, 'uuid': 6, '3': 2, '2': 1, 'versions': 1}
+ours: check 7: native apply exit=0 in 37,6s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_f1_own : export exit=0 in 23,1s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_f1_ours : export exit=0 in 15,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 1, 'unchanged': 12199}
+ours: check 8: 1 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+ours: check 8: 0 of 0 edited forms come back from the twin's export byte for byte
+done f1 (all)
+
+====================================================================================================
+CASE f3
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+f3: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case f3 (must work), binary F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix3.exe
+staged: [2026-09-30T13:39:27] done: ibcmd_rs_04_ddl_s2_f3_base, _nat, _own
+native apply exit 0
+dry run exit 0
+plan: catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100) | catalog ТомаХраненияФайлов (Reference576): switched indexes Fld1355 = МаксимальныйРазмер (DontIndex -> Index) | catalog ШаблоныЗаданийОчереди (Reference3408): new attributes Fld11049 = КлючНовый | document _ДемоНачислениеЗарплаты (Document996): switched indexes Fld4062 = ПериодРегистрации (IndexWithAdditionalOrder -> DontIndex) | document _ДемоРасходныйКассовыйОрдер (Document1436): new attributes Fld11050 = ДемоРеквизит | catalog ДемоКатН5 (Reference11041): new catalog, tables _Reference11041 | document ДемоДокН5 (Document11042): new document, tables _Document11042, _Document11042_VT11045
+tables: 10
+caches: Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: rows of the new ДемоКатН5, ДемоДокН5 | Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: rows of the new ДемоКатН5, ДемоДокН5 | Params.2203278d-ef4f-4f68-98f1-feb257d53ecc.si: rows of the new ДемоКатН5, ДемоДокН5 | Params.42ed49cc-765d-4314-bc2d-af425af7bf13.si: rows of the new ДемоКатН5, ДемоДокН5 | Params.a07b62f0-1f01-484a-93d9-d42764cedac0.si: rows of the new ДемоКатН5, ДемоДокН5 | Params.c4629235-4823-4320-b8b5-1d08f4c6d612.si: rows of the new ДемоКатН5, ДемоДокН5 (the order of some entries is approximate) | Params.facbfffe-feb2-4d30-8930-a557b185e5c4.si: rows of the new ДемоКатН5, ДемоДокН5 | Params.fe8acd6a-22c9-4b5a-aeae-232a1c832 ...
+drop-in exit 0 in 285.8s, backup file 233 MB
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.out: [INFO] Создано поколение конфигурации: 68d0dc53ef3dd441b15c84a4e0448e3c00000000
+  apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+rebuilt tables: _Reference2598,_Reference576,_Reference3408,_Document996,_Document996_VT1121,_Document996_VT2191,_Document1436,_Reference11041,_Document11042,_Document11042_VT11045
+changed (4):
+only in 1: []  only in 2: []
+entries that differ (0): []
+DBNames text equal: True 348035 348035
+15 of 16 `.si` rows have the same text (compared after inflate)
+check 3 (EXCEPT both ways): no row differs
+check 4 (Config rows): no row differs
+check 7: native apply exit=0 in 843,3s
+check 7: [INFO] Обновление конфигурации базы данных не требуется
+export ibcmd_rs_04_ddl_s2_f3_nat : export exit=0 in 68,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export ibcmd_rs_04_ddl_s2_f3_own : export exit=0 in 48,3s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+check 8 (source-diff): {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12201}
+our import exit 0 in 160.3s, 9523 rows in ConfigSave
+ours: drop-in exit 0 in 252s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: da1f2fe9a6458d41ba0d0524642b167300000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways): no row differs
+ours: check 7: native apply exit=0 in 40,6s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export : export exit=0 in 71,2s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff against the platform's twin): {'left_only': 0, 'right_only': 0, 'different': 1, 'unchanged': 12200}
+done f3
+
+----------------------------------------------------------------------------------------------------
+f3: mix_ours.ps1, the route through our import
+----------------------------------------------------------------------------------------------------
+case f3, the route through our import, binary F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix4.exe
+dry run exit 0
+plan: catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100) | catalog ТомаХраненияФайлов (Reference576): switched indexes Fld1355 = МаксимальныйРазмер (DontIndex -> Index) | catalog ШаблоныЗаданийОчереди (Reference3408): new attributes Fld11049 = КлючНовый | document _ДемоНачислениеЗарплаты (Document996): switched indexes Fld4062 = ПериодРегистрации (IndexWithAdditionalOrder -> DontIndex) | document _ДемоРасходныйКассовыйОрдер (Document1436): new attributes Fld11050 = ДемоРеквизит | catalog ДемоКатН5 (Reference11041): new catalog, tables _Reference11041 | document ДемоДокН5 (Document11042): new document, tables _Document11042, _Document11042_VT11045
+drop-in exit 0 in 21.3s
+own: added (0):
+own: removed (0):
+own: changed (4):
+own: only in 1: []  only in 2: []
+own: entries that differ (0): []
+own: DBNames text equal: True 348035 348035
+own: 15 of 16 `.si` rows have the same text (compared after inflate)
+our import exit 0 in 23.1s, 9523 rows in ConfigSave
+ours: drop-in exit 0 in 62.2s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: 168ef1ee64555a4bbe178f8cfe5ce56b00000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways, 10 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (4):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (0): []
+ours: DBNames text equal: True 348035 348035
+ours: 15 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (Config rows, informative until #395): rows: 9841 in A, 9844 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 9795; equal after inflate only: 16; different text: 30; only in A: 0; only in B: 3
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 17, 'uuid': 8, '3': 2, '2': 2, 'versions': 1}
+done f3 (prepare)
+
+====================================================================================================
+CASE r1
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+r1: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case r1 (must be refused), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T09:26:11] done: ibcmd_rs_04_ddl_s2_r1_base, _nat, _own
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 4 blocker(s)
+  dry.err:   2b63b94b-a7a3-4864-98d3-433b28e56984: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural
+  blocker: S1: catalog КлючевыеОперации removes an attribute and adds a tabular section (or attributes of one) in one stage: not built (the caches of a removal are not composed with the ones of a section of the same object)
+drop-in exit 1 in 2.2s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 2b63b94b-a7a3-4864-98d3-433b28e56984: the descriptor's text differs from the active one: a metadata change, possibly structural; 344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural; b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural; S1: catalog КлючевыеОперации removes an attribute and adds a tabular section (or attributes of one) in one stage: not built (the caches of a removal are not composed with the ones of a section of the same object)
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r1
+
+====================================================================================================
+CASE r2
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+r2: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case r2 (must be refused), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T09:30:20] done: ibcmd_rs_04_ddl_s2_r2_base, _nat, _own
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 3 blocker(s)
+  dry.err:   4eee25b1-2da6-459b-953b-4c8d519c9bce: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   d912e472-9553-4b96-8b16-7aaff6c14239: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   : S1: document _ДемоЗаказПокупателя removes an attribute and adds a tabular section (or attributes of one) in one stage: not built (the caches of a removal are not composed with the ones of a section of the same object)
+  blocker: S1: document _ДемоЗаказПокупателя removes an attribute and adds a tabular section (or attributes of one) in one stage: not built (the caches of a removal are not composed with the ones of a section of the same object)
+drop-in exit 1 in 11.1s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 4eee25b1-2da6-459b-953b-4c8d519c9bce: the descriptor's text differs from the active one: a metadata change, possibly structural; d912e472-9553-4b96-8b16-7aaff6c14239: the descriptor's text differs from the active one: a metadata change, possibly structural; S1: document _ДемоЗаказПокупателя removes an attribute and adds a tabular section (or attributes of one) in one stage: not built (the caches of a removal are not composed with the ones of a section of the same object)
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r2
+
+====================================================================================================
+CASE r3
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+r3: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case r3 (must be refused), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T09:35:31] done: ibcmd_rs_04_ddl_s2_r3_base, _nat, _own
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 5 blocker(s)
+  dry.err:   344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   5422610d-b92c-4213-a58c-8db067d93b66: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   5eab8a1b-070f-4dcf-bdcc-a259c62c3693: the descriptor's text differs from the active one: a metadata change, possibly structural
+  blocker: S1: catalog _ДемоПартнеры is adopted by the extension _ДемоРасширение (object _ДемоПартнеры 3014d9c1-cb00-49fb-81b3-e8ced354975f, active image); the extension keeps no table of its own for it: the own restructure does not change an object an extension adopts, the platform's apply does
+drop-in exit 1 in 4.5s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural; 5422610d-b92c-4213-a58c-8db067d93b66: the descriptor's text differs from the active one: a metadata change, possibly structural; 5eab8a1b-070f-4dcf-bdcc-a259c62c3693: the descriptor's text differs from the active one: a metadata change, possibly structural; b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural; S1: catalog _ДемоПартнеры is adopted by the extension _ДемоРасширение (object _ДемоПартнеры 3014d9c1-cb00-49fb-81b3-e8ced354975f, a ...
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r3
+
+====================================================================================================
+CASE r4
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+r4: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case r4 (must be refused), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T09:21:48] done: ibcmd_rs_04_ddl_s2_r4_base, _nat, _own
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 5 blocker(s)
+  dry.err:   344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   5422610d-b92c-4213-a58c-8db067d93b66: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural
+  blocker: S1: length-not-widened: Catalog.ОчередьЗаданий: ChildObjects/Attribute[ИмяПользователя]/Properties/Type/StringQualifiers/Length: 32 -> 16 (a property of an attribute no rule covers) [32 -> 16 (a property of an attribute no rule covers)]
+drop-in exit 1 in 2.3s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural; 5422610d-b92c-4213-a58c-8db067d93b66: the descriptor's text differs from the active one: a metadata change, possibly structural; b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural; ecee1ec8-aa1f-4b90-a1b3-2538a53c0dd7: the descriptor's text differs from the active one: a metadata change, possibly structural; S1: length-not-widened: Catalog.ОчередьЗаданий: ChildObjects/Attribute[ИмяПользователя]/Properties/Type/StringQualifiers/Length: 32 ...
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r4
+
+====================================================================================================
+CASE r5
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+r5: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case r5 (must be refused), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix.exe
+staged: [2026-09-30T09:27:42] done: ibcmd_rs_04_ddl_s2_r5_base, _nat, _own
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 9 blocker(s)
+  dry.err:   344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   5422610d-b92c-4213-a58c-8db067d93b66: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural
+  blocker: S1: attribute-property-outside-s1: Catalog.ОчередьЗаданий: ChildObjects/Attribute[ИмяПользователя]/Properties/Type/Type: xs:string -> xs:decimal (a property of an attribute no rule covers) [ChildObjects/Attribute[ИмяПользователя]/Properties/Type/Type]
+  blocker: S1: attribute-property-outside-s1: Catalog.ОчередьЗаданий: ChildObjects/Attribute[ИмяПользователя]/Properties/Type/StringQualifiers: removed (a property of an attribute no rule covers) [ChildObjects/Attribute[ИмяПользователя]/Properties/Type/StringQualifiers]
+  blocker: S1: attribute-property-outside-s1: Catalog.ОчередьЗаданий: ChildObjects/Attribute[ИмяПользователя]/Properties/Type/NumberQualifiers: added (a property of an attribute no rule covers) [ChildObjects/Attribute[ИмяПользователя]/Properties/Type/NumberQualifiers]
+  blocker: S1: attribute-property-outside-s1: Catalog.ОчередьЗаданий: ChildObjects/Attribute[ИмяПользователя]/Properties/FillValue/@nil: "" -> true (a property of an attribute no rule covers) [ChildObjects/Attribute[ИмяПользователя]/Properties/FillValue/@nil]
+  blocker: S1: attribute-property-outside-s1: Catalog.ОчередьЗаданий: ChildObjects/Attribute[ИмяПользователя]/Properties/FillValue/@type: xs:string -> "" (a property of an attribute no rule covers) [ChildObjects/Attribute[ИмяПользователя]/Properties/FillValue/@type]
+drop-in exit 1 in 8.2s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural; 5422610d-b92c-4213-a58c-8db067d93b66: the descriptor's text differs from the active one: a metadata change, possibly structural; b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural; ecee1ec8-aa1f-4b90-a1b3-2538a53c0dd7: the descriptor's text differs from the active one: a metadata change, possibly structural; S1: attribute-property-outside-s1: Catalog.ОчередьЗаданий: ChildObjects/Attribute[ИмяПользователя]/Properties/Type/Type: xs:string  ...
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r5
+
+====================================================================================================
+CASE r6
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+r6: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case r6 (must be refused), binary F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix2.exe
+staged: [2026-09-30T11:24:44] done: ibcmd_rs_04_ddl_s2_r6_base, _nat, _own
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 5 blocker(s)
+  dry.err:   344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   5422610d-b92c-4213-a58c-8db067d93b66: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   b4e1435c-482c-4e14-afee-045b1489fcd0: the descriptor's text differs from the active one: a metadata change, possibly structural
+  blocker: S1: catalog _ДемоБанковскиеСчета is subordinate to owners: its owner field is not covered
+drop-in exit 1 in 2.3s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural; 5422610d-b92c-4213-a58c-8db067d93b66: the descriptor's text differs from the active one: a metadata change, possibly structural; b4e1435c-482c-4e14-afee-045b1489fcd0: the descriptor's text differs from the active one: a metadata change, possibly structural; b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural; S1: catalog _ДемоБанковскиеСчета is subordinate to owners: its owner field is not covered
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r6
+
+====================================================================================================
+CASE r7
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+r7: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case r7 (must be refused), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix-20261001.exe
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 7 blocker(s)
+  dry.err:   1153ba8d-0ff5-4da1-97d8-8ddd4b6c7422: [structure] Document.ДемоДокН4: added (Document; an object that owns tables or stored data is added or dropped)
+  dry.err:   344cb0de-315d-4d05-93f8-8a1f53208470: [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ИмяХеш]/Properties/Type/StringQualifiers/Length: 40 -> 100 (a property of an attribute no rule covers)
+  dry.err:   66193438-abc5-410b-a1f1-a204102d1a62: [structure] Configuration: ChildObjects/Document[ДемоДокН4]: added (an object that owns tables or stored data is added or dropped)
+  blocker: S1: a new object together with removed attributes of existing objects is not built: the caches of the new object are chained on the additions only (N3, N6 and N7 trace additions)
+drop-in exit 1 in 2.2s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 1153ba8d-0ff5-4da1-97d8-8ddd4b6c7422: [structure] Document.ДемоДокН4: added (Document; an object that owns tables or stored data is added or dropped); 344cb0de-315d-4d05-93f8-8a1f53208470: [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ИмяХеш]/Properties/Type/StringQualifiers/Length: 40 -> 100 (a property of an attribute no rule covers); 66193438-abc5-410b-a1f1-a204102d1a62: [structure] Configuration: ChildObjects/Document[ДемоДокН4]: added (an object that owns tables or stored data is added or dropped); b56f25d2-72a9-4d80-8998-77ac3097c873: [structure] Catalog.КлассификаторБанков: ChildObjects/Attribute[КоррСчет]: removed (a ...
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r7
+
+====================================================================================================
+CASE r8
+====================================================================================================
+----------------------------------------------------------------------------------------------------
+r8: mix_case.ps1 (the platform's route)
+----------------------------------------------------------------------------------------------------
+case r8 (must be refused), binary F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix3.exe
+staged: [2026-09-30T14:30:28] done: ibcmd_rs_04_ddl_s2_r8_base, _nat, _own
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 8 blocker(s)
+  dry.err:   146f0d17-633a-4421-9206-cba57738c0b3: a new object the own apply cannot create (only a new form or template of an existing object)
+  dry.err:   344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural
+  dry.err:   4a7aa9ca-5e44-4ffa-bebc-26e2685e48f0: the descriptor's text differs from the active one: a metadata change, possibly structural
+  blocker: S1: a new object together with new tabular sections (or attributes of them) of existing objects is not built: both rewrite the registry, the index of the generated types and the XDTO model
+drop-in exit 1 in 10.8s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 146f0d17-633a-4421-9206-cba57738c0b3: a new object the own apply cannot create (only a new form or template of an existing object); 344cb0de-315d-4d05-93f8-8a1f53208470: the descriptor's text differs from the active one: a metadata change, possibly structural; 4a7aa9ca-5e44-4ffa-bebc-26e2685e48f0: the descriptor's text differs from the active one: a metadata change, possibly structural; 66193438-abc5-410b-a1f1-a204102d1a62: the descriptor's text differs from the active one: a metadata change, possibly structural; b56f25d2-72a9-4d80-8998-77ac3097c873: the descriptor's text differs from the active one: a metadata change, possibly structural; ...
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r8
+

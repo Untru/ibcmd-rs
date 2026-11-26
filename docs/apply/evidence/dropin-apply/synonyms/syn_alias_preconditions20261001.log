@@ -1,0 +1,5 @@
+1d6b8425-360c-4ab1-9bab-cc9a3b590bb2 native staged SHA equals physical base: False
+Regression staged SHA: 5099806bed815c33e8e467550cfa4eb39f395ce3063b9adb340405a814a9301a
+4eee25b1-2da6-459b-953b-4c8d519c9bce native staged SHA equals physical base: False
+Regression staged SHA: 278b0968e986c88c38e262776cdf305b97682ad49d0e641086f01ef1a82d0e1e
+Both descriptor stages now EXACT physical-base A bytes; published aliases/registry still native B.

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-chart-of-characteristic-types-ut-managed-lock",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "storage_element": "dabae379-6356-497a-aab5-cf102f16a72a",
+    "source_path": "ChartsOfCharacteristicTypes/ВопросыДляАнкетирования.xml",
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body.",
+    "expectation": "The platform export of this chart carries <DataLockControlMode>Managed</DataLockControlMode>; the referenced export file is 49197 bytes, sha256 a2105a5985e5452e8c4004f2f04dcf552ff584bb07c38ac1772bec98662329f3, and is not retained here because only the owner property slots are asserted."
+  },
+  "retained": {
+    "packed_body": {
+      "size": 4284,
+      "sha256": "6988feda821613ac0866240949273f7fb115f4ec8237a781bac30088751be053"
+    },
+    "unpacked_body": {
+      "size": 34040,
+      "sha256": "e215b50a4b159affe09b6392b4d675aa5b17c9f5bc43be2053b759ad9e874395"
+    }
+  }
+}

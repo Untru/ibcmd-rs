@@ -1,0 +1,11 @@
+{
+  "source_head": "6144fc4ab2c4473887123b33bbc336245fa05d44",
+  "threads": 4,
+  "binary_sha256": "521373855608B9BB12F59307042F8E6C43408837EA81FCEF77CBBC089EC98B32",
+  "binary": "F:/ibcmd/lab/05/wave3/platform85/bin/ibcmd-rs-initial85-candidate.exe",
+  "experimental_only": true,
+  "patch": "logs/candidate-private-profile.patch",
+  "published_profile_dynamic": "unsupported",
+  "main_extension_live_worker": "not enabled",
+  "private_profile_sha256": "BF09E3DFB49A3D6F80A6DBA84ACD3263161B8A0352FFB0F5D510476D3B3C995B"
+}

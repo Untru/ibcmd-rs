@@ -1,0 +1,8 @@
+{
+  "equal": [
+    "CovExchangePlanHistory",
+    "CovNavigationAccountingRegister",
+    "CovNavigationChartOfAccounts",
+    "CovNavigationTemplate"
+  ]
+}

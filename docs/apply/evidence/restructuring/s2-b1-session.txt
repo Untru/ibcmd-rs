@@ -1,0 +1,49 @@
+== Справочник.КлючевыеОперации
+  attributes: Имя МинимальноДопустимыйУровень Приоритет ВыполненаСОшибкой 
+  deleted ИмяХеш is gone: Да
+  deleted ЦелевоеВремя is gone: Да
+  deleted Длительная is gone: Да
+  rows: 716, digest of the kept attributes 6B FB 8D 6F D6 8C 78 0D 8D 80 0F E2 2F A6 DD 7E
+  xdto: no deleted attribute in the serialization: Да
+  wrote 3 attribute values, read back equal: 3
+  test object deleted
+== Справочник.ПоставщикиУслугСервиса
+  attributes: 
+  deleted Идентификатор is gone: Да
+  rows: 0, digest of the kept attributes D4 1D 8C D9 8F 00 B2 04 E9 80 09 98 EC F8 42 7E
+  xdto: no object to serialize
+  wrote 0 attribute values, read back equal: 0
+  test object deleted
+== Справочник.КлассификаторБанков
+  attributes: Город Адрес Телефоны ДеятельностьПрекращена СВИФТБИК ИНН УдалитьСтрана ГородМеждународный АдресМеждународный БИКРКЦ ВнутреннийКодЦБ 
+  deleted КоррСчет is gone: Да
+  deleted МеждународноеНаименование is gone: Да
+  deleted КодСтраны is gone: Да
+  rows: 4 840, digest of the kept attributes FB 28 FF 56 AE C8 55 5B 47 66 5A A3 B9 01 FC 1F
+  xdto: no deleted attribute in the serialization: Да
+  wrote 9 attribute values, read back equal: 9
+  test object deleted
+== Документ.ТелефонныйЗвонок
+  attributes: АбонентКонтакт АбонентПредставление Автор Важность Входящий Описание Ответственный ВзаимодействиеОснование Тема 
+  deleted АбонентКакСвязаться is gone: Да
+  deleted Комментарий is gone: Да
+  rows: 1, digest of the kept attributes 81 E4 5E D5 B0 50 D7 0D 82 70 4C E4 AE 41 36 E5
+  xdto: no deleted attribute in the serialization: Да
+  wrote 4 attribute values, read back equal: 4
+  test object deleted
+== Справочник._ДемоСтавкиНДС
+  attributes: СтавкаНовая 
+  deleted Ставка is gone: Да
+  added СтавкаНовая is there: Да
+  rows: 2, digest of the kept attributes 44 42 3B C3 7B 9F 8A 68 ED 61 34 8F 4E EB 45 85
+  xdto: no deleted attribute in the serialization: Да
+  wrote 1 attribute values, read back equal: 1
+  test object deleted
+== Справочник.ШаблоныЗаданийОчереди
+  attributes: Использование ИмяМетода КоличествоПовторовПриАварийномЗавершении ИнтервалПовтораПриАварийномЗавершении Расписание Имя КлючНовый 
+  deleted Ключ is gone: Да
+  added КлючНовый is there: Да
+  rows: 0, digest of the kept attributes D4 1D 8C D9 8F 00 B2 04 E9 80 09 98 EC F8 42 7E
+  xdto: no object to serialize
+  wrote 6 attribute values, read back equal: 6
+  test object deleted

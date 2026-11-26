@@ -1,0 +1,4 @@
+# Format15 file header followed by a block header whose first size digit is `g`.
+ff ff ff 7f 00 02 00 00 01 00 00 00 00 00 00 00
+0d 0a 67 30 30 30 30 30 30 63 20 30 30 30 30 30 30 30 63
+20 37 66 66 66 66 66 66 66 20 0d 0a

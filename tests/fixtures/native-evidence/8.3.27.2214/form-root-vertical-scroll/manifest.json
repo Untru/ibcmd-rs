@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-root-vertical-scroll",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_written",
+    "created_on": "2026-09-27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "note": "Config table rows of the BSP demo lab database ibcmd_rs_bsp_8327_native_20260919 (stored by platform 8.3.27.2214), read offline from the lab row cache; each `proves` property is what the native ibcmd 8.3.27.2214 export of that database writes for the form. They replace hand-made fixtures of the mssql_dump unit tests in layouts no platform writes."
+  },
+  "objects": [
+    {
+      "kind": "Form body (managed form, root layout 50)",
+      "form": "DataProcessors/ИнформационныйЦентр/Forms/ОтображениеСообщений",
+      "form_uuid": "fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f",
+      "proves": "form root trailer: <VerticalScroll>useIfNecessary</VerticalScroll>",
+      "raw_entry": {
+        "path": "raw/fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f.deflate",
+        "compression": "raw-deflate",
+        "size": 635,
+        "sha256": "6cea3ce922485051c0d6d78d21c624b280e16642ccd9daa770012f57a37c8c89"
+      }
+    }
+  ]
+}

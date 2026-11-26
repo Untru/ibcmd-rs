@@ -1,0 +1,22 @@
+S1 cache necessity: a new catalog (case c) exists; one Params *.si row at a time is removed, or replaced by its state before the object.
+Server: stand-alone ibsrv on the database; client: thin client running probe/jobs/newcat.bsl (metadata, query, write, type of the reference,
+XDTO of the reference and of the object, query by the reference, catalog attribute of case a2, document attribute of case b, names).
+Database: ibcmd_rs_04_ddl_s1_cache (native state of case c). Logs: logs/cache_bisect.log (absent), logs/cache_bisect2.log (stale).
+
+absent   1a621f0f   the server exits at start (ibsrv exited, no error text)
+absent   2203278d   the client fails: Тип не определен 'c8eb8c05-29bb-4bb0-a4f2-e000e2cd57c2'
+absent   42ed49cc   works: all ten steps of the probe pass
+absent   a07b62f0   the server exits at start (ibsrv exited, no error text)
+absent   c4629235   works: all ten steps of the probe pass
+absent   ea13a2c9   works: all ten steps of the probe pass
+absent   facbfffe   works: all ten steps of the probe pass
+absent   fe8acd6a   works: all ten steps of the probe pass
+
+stale    1a621f0f   the client fails: Тип не определен 'cb22daec-5083-41eb-97f9-59febdb46a46'
+stale    2203278d   the client fails: Тип не определен 'cb22daec-5083-41eb-97f9-59febdb46a46'
+stale    42ed49cc   works: all ten steps of the probe pass
+stale    a07b62f0   the client hangs and exits without a result (job took 348,6 s)
+stale    c4629235   works: all ten steps of the probe pass
+stale    ea13a2c9   works, except: xdto of the object: ERROR Несоответствие типов (параметр номер '2') (Ошибка отображения типов)
+stale    facbfffe   works: all ten steps of the probe pass
+stale    fe8acd6a   works: all ten steps of the probe pass

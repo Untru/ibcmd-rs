@@ -1,0 +1,109 @@
+{
+  "scope": "Public nonempty DcsFilterEvidence compatibility probe; not BSP/UH acceptance",
+  "status": "FAIL_CLOSED_BEFORE_OUTPUT_PUBLICATION",
+  "installed_edt": "2026.2.1.3",
+  "native_sdk": "8.5.1.1592",
+  "source_profile": "edt-2025.2.3-xml-2.21",
+  "selected_vm": "Explicit inventoried Java-home lib/server/libjvm.dylib",
+  "original_public_native_input": {
+    "file_count": 19,
+    "total_bytes": 86112,
+    "tree_sha256": "efc5814c4b31e7c8892511003e591fe0f0567a9f0d1d69e3a2594ada60b51a72"
+  },
+  "candidate_sha256": "e4ac476fad5b93723ecf2c335921efa19e61572f49956cdeddd611a53cd9ebbd",
+  "candidate_rust_tree": "f9ebb8dd6a4b84d57c72a72d5941931e48fae73b",
+  "inventories": {
+    "authentic_project": {
+      "file_count": 19,
+      "total_bytes": 79140,
+      "tree_sha256": "c9781c7a36e856978b337d695dd92abf0c5d93ee89eefb6523a6fc0cce897a80"
+    },
+    "installed_edt_export": {
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2"
+    },
+    "fresh_native_reference": {
+      "file_count": 19,
+      "total_bytes": 86112,
+      "tree_sha256": "8628cfab808f7414be1e6e8912ff7912fe7c027b95ab4c303cf451d17141cc67"
+    }
+  },
+  "commands": {
+    "convert": {
+      "exit_code": 2
+    },
+    "edt-export": {
+      "exit_code": 0
+    },
+    "edt-version": {
+      "exit_code": 0
+    },
+    "native-create": {
+      "exit_code": 0
+    },
+    "native-export": {
+      "exit_code": 0
+    },
+    "native-import": {
+      "exit_code": 0
+    },
+    "native-version": {
+      "exit_code": 0
+    },
+    "ours-version": {
+      "exit_code": 0
+    }
+  },
+  "immutability": {
+    "project_unchanged": true,
+    "changed_tools": [],
+    "installation_unchanged": true,
+    "schema_evidence_unchanged": true
+  },
+  "failure": {
+    "code": "conversion.edt-encode-preflight-failed",
+    "phase": "encode_preflight",
+    "decode_completed": true,
+    "output_published": false,
+    "sidecar": "src/Configuration/ClientApplicationInterface.cai",
+    "cause": "Guard expects CRLF declaration/root shape; genuine current EDT serializer emits LF",
+    "minimal_public_fixture_bytes": 639,
+    "minimal_public_fixture_sha256": "f1659827aed39cb1240e6dc9e4252c8efa66559a3c5448e7e75e96d29e52d62b",
+    "shared_fix_owner": "#357; coordinated with #355"
+  },
+  "comparison": "NOT_REACHED: converter correctly refused publication; no missing/extra-file comparison is fabricated",
+  "diagnostics": {
+    "edt-version": {
+      "error_lines": [],
+      "error_count": 0,
+      "workspace_error_entries": [],
+      "workspace_error_count": 0
+    },
+    "edt-export": {
+      "error_lines": [
+        {
+          "file": "edt-export.stdout",
+          "line": 1,
+          "text": "[Fatal Error] :1:1: Premature end of file."
+        }
+      ],
+      "error_count": 1,
+      "workspace_error_entries": [
+        {
+          "file": "edt-export.workspace-log",
+          "line": 57,
+          "entry": "!ENTRY com.e1c.g5.dt.applications.infobases.ui 4 0 2026-10-23 16:30:18.417"
+        }
+      ],
+      "workspace_error_count": 1
+    }
+  },
+  "limits": [
+    "No full BSP/UH corpus",
+    "No current-model semantic-support claim",
+    "SDK Fatal Error and workspace error remain unsuppressed",
+    "Timing is not a performance measurement: overlapping unrelated #381 compilation",
+    "No activation or runtime behavior claim; native slot released; next heavy phase pending parent grant"
+  ]
+}

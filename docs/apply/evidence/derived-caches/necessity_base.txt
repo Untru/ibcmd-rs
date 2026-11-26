@@ -1,0 +1,57 @@
+necessity base on ibcmd_rs_05_trace_n_base at 2026-09-30T03:48:51
+good rows dumped to F:\ibcmd\lab\05\s1g\rows\good_base
+== absent:1a621f0f (1a621f0f-5568-4183-bd9f-f6ef670e7090.si)
+  the server did not become ready (4,1 s): Exception: F:\ibcmd\lab\05\s1g\kit\srv.ps1:33 Line | 33 | : if ($p.HasExited) { throw "ibsrv exited: $(Get-Content $err -Raw)" } | ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ | ibsrv exited: 
+== stale:1a621f0f (1a621f0f-5568-4183-bd9f-f6ef670e7090.si)
+  server ready in 10,4 s
+  job took 3,2 s
+  | client exited without a result; log:
+  | Тип не определен 'cb22daec-5083-41eb-97f9-59febdb46a46'
+== absent:a07b62f0 (a07b62f0-1f01-484a-93d9-d42764cedac0.si)
+  the server did not become ready (5,6 s): Exception: F:\ibcmd\lab\05\s1g\kit\srv.ps1:33 Line | 33 | : if ($p.HasExited) { throw "ibsrv exited: $(Get-Content $err -Raw)" } | ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ | ibsrv exited: 
+== stale:a07b62f0 (a07b62f0-1f01-484a-93d9-d42764cedac0.si)
+  server ready in 4,6 s
+  job took 151,6 s
+  | Exception: F:\ibcmd\lab\05\s1g\kit\job.ps1:35
+  | Line |
+  |   35 |  … lyContinue; throw "session job timeout ($TimeoutSec s); log: $base.lo …
+  |      |                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  |      | session job timeout (150 s); log: F:\ibcmd\lab\05\s1g\kit\probe\run\job_b35814a9.log
+== absent:2203278d (2203278d-ef4f-4f68-98f1-feb257d53ecc.si)
+  server ready in 8,3 s
+  job took 9,7 s
+  | client exited without a result; log:
+  | Тип не определен 'c8eb8c05-29bb-4bb0-a4f2-e000e2cd57c2'
+== stale:2203278d (2203278d-ef4f-4f68-98f1-feb257d53ecc.si)
+  server ready in 10,2 s
+  job took 7,1 s
+  | client exited without a result; log:
+  | Тип не определен 'cb22daec-5083-41eb-97f9-59febdb46a46'
+== absent:ea13a2c9 (ea13a2c9-0c2f-40fa-b855-710387e3271d.si)
+  server ready in 10,3 s
+  job took 11,5 s
+  | 1 metadata catalog: Да
+  | 2 query count: 2
+  | 3 write item: cache probe 035406
+  | 4 type of the reference: Да / Справочник.ДемоНовыйСправочник
+  | 5 xdto of the reference: <CatalogRef.ДемоНовыйСправочник xmlns="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">6e67ad8c-bc69-11f1-8f5b-00e04c680093</CatalogRef.ДемоНовыйСправочник>
+  | 6 xdto of the object: 385 characters
+  | 7 query by the reference: 1
+  | 8 catalog attribute (case a2): 3 rows
+  | 9 document attribute (case b): 3 rows
+  | 10 names: Справочник.ДемоНовыйСправочник; synonym Демо: Новый справочник
+== stale:ea13a2c9 (ea13a2c9-0c2f-40fa-b855-710387e3271d.si)
+  server ready in 3,6 s
+  job took 8,4 s
+  | 1 metadata catalog: Да
+  | 2 query count: 3
+  | 3 write item: cache probe 035427
+  | 4 type of the reference: Да / Справочник.ДемоНовыйСправочник
+  | 5 xdto of the reference: <CatalogRef.ДемоНовыйСправочник xmlns="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">77cd01b5-bc69-11f1-8f5b-00e04c680093</CatalogRef.ДемоНовыйСправочник>
+  | 6 xdto of the object: ERROR Несоответствие типов (параметр номер '2') (Ошибка отображения типов)
+  | 7 query by the reference: 1
+  | 8 catalog attribute (case a2): 3 rows
+  | 9 document attribute (case b): 3 rows
+  | 10 names: Справочник.ДемоНовыйСправочник; synonym Демо: Новый справочник
+good rows put back
+done

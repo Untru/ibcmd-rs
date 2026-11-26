@@ -1,0 +1,9 @@
+{
+  "scope": "owned clone; exact final generated appended-files fragment; executed twice after both generations",
+  "pending_appends_per_run": [
+    0,
+    0
+  ],
+  "all_existing_keys_and_names_unchanged": true,
+  "script_sha256": "0fb4201614b1cbc29241a88f1d03319735032d61151316ce53c975b8e797819c"
+}

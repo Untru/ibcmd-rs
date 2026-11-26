@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.21">
+	<ConfigVersions>
+		<Metadata name="CommonModule.AddedLabModule" id="6d1c2a0e-1cd0-4f00-9a00-000000000002" configVersion="8b63ae7433d2974b9b5aca31fb9f8ac000000000"/>
+		<Metadata name="CommonModule.AddedLabModule.Module" id="6d1c2a0e-1cd0-4f00-9a00-000000000002.0" configVersion="4bdfbac2e19ecf4fb9746dc2e411e0f500000000"/>
+		<Metadata name="CommonModule.ФайловаяБазаПроверка" id="6d1c2a0e-1cd0-4f00-9a00-000000000001" configVersion="d7d3c9dec7f35445ae90ee360dbc618000000000"/>
+		<Metadata name="CommonModule.ФайловаяБазаПроверка.Module" id="6d1c2a0e-1cd0-4f00-9a00-000000000001.0" configVersion="1c51fe029ee26e40ac94d43ced77c3eb00000000"/>
+		<Metadata name="Configuration.Configuration" id="afb733a6-eae8-418b-b73c-fb9eb581e093" configVersion="99c09374dd3e764b9f4043fa863aa1d700000000"/>
+		<Metadata name="Language.English" id="9a236262-c0b7-41e5-a4f6-48c9778f198e" configVersion="110ddf5231dfc74aabd057db5816a2f300000000"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

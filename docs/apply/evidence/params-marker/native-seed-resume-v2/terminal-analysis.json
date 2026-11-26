@@ -1,0 +1,478 @@
+{
+  "scope": "ONE actual native Bforce/Cforce/Ddisable natural seed, not N1/OWN product marker admission",
+  "original_terminal": {
+    "manifest_sha256": "44B76309AB13DA33EB0A3B97BAEF3D4AD80335B695387B4EA7D119A49EC5532C",
+    "controller_sha256": "7A8E522A18255A4709ED5C1AEB0E7243CDB5D3750BA5982EAA44F70302B5FDF2",
+    "execution_state": "known_terminal",
+    "signal_attempted": false,
+    "release_attempted": false,
+    "maximum_observer_seconds": 64800,
+    "pid": 49788,
+    "handle_birth_utc": "2026-10-02T10:55:55.7619697Z",
+    "parent_pid": 71384,
+    "cim_birth_utc": "2026-10-02T10:55:55.7619690Z",
+    "exe": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    "command": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\native_seed_resume_control_v2.ps1 -ManifestSha 44B76309AB13DA33EB0A3B97BAEF3D4AD80335B695387B4EA7D119A49EC5532C",
+    "command_sha256": "CE5B0F56B7D98F92DF9CB811B36AE00F7E6521C226F73A482DB6A80BFDFCEBCF",
+    "exit": 0
+  },
+  "final_state": {
+    "original_restore_confirmed": true,
+    "native_potential": false,
+    "database": "ibcmd_rs_05_marker_w3_seed_c9e54c",
+    "no_restore_in_resume": true,
+    "worker_used": false,
+    "bound_names": [],
+    "uncertain": false,
+    "drop_attempted": false
+  },
+  "known_steps": 117,
+  "native_commands": [
+    {
+      "leaf": "019-force_b-import.json",
+      "command": {
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "arguments": [
+          "infobase",
+          "config",
+          "import",
+          "files",
+          "--base-dir=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\fixtures-c9e54c656b4447edb3034c20a6d1469a\\force_B",
+          "--partial",
+          "CommonModules/РаботаСКлассификаторамиКлиентСервер/Ext/Module.bsl",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--user=Администратор"
+        ],
+        "deadline_seconds": 180
+      },
+      "known_exit": 0
+    },
+    {
+      "leaf": "037-force_b-apply.json",
+      "command": {
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "arguments": [
+          "infobase",
+          "config",
+          "apply",
+          "--force",
+          "--dynamic=force",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--user=Администратор"
+        ],
+        "deadline_seconds": 180
+      },
+      "known_exit": 0
+    },
+    {
+      "leaf": "054-force_c-import.json",
+      "command": {
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "arguments": [
+          "infobase",
+          "config",
+          "import",
+          "files",
+          "--base-dir=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\fixtures-c9e54c656b4447edb3034c20a6d1469a\\force_C",
+          "--partial",
+          "CommonModules/РаботаСКлассификаторамиКлиентСервер/Ext/Module.bsl",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--user=Администратор"
+        ],
+        "deadline_seconds": 180
+      },
+      "known_exit": 0
+    },
+    {
+      "leaf": "072-force_c-apply.json",
+      "command": {
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "arguments": [
+          "infobase",
+          "config",
+          "apply",
+          "--force",
+          "--dynamic=force",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--user=Администратор"
+        ],
+        "deadline_seconds": 180
+      },
+      "known_exit": 0
+    },
+    {
+      "leaf": "089-fold_d-import.json",
+      "command": {
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "arguments": [
+          "infobase",
+          "config",
+          "import",
+          "files",
+          "--base-dir=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\fixtures-c9e54c656b4447edb3034c20a6d1469a\\fold_D",
+          "--partial",
+          "CommonModules/РаботаСКлассификаторамиКлиентСервер/Ext/Module.bsl",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--user=Администратор"
+        ],
+        "deadline_seconds": 180
+      },
+      "known_exit": 0
+    },
+    {
+      "leaf": "107-fold_d-apply.json",
+      "command": {
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "arguments": [
+          "infobase",
+          "config",
+          "apply",
+          "--force",
+          "--dynamic=disable",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_seed_c9e54c",
+          "--user=Администратор"
+        ],
+        "deadline_seconds": 180
+      },
+      "known_exit": 0
+    }
+  ],
+  "known_native_releases": 6,
+  "verified_snapshots": [
+    {
+      "tag": "seed-cold-settle-after-v1",
+      "rows": 23036,
+      "bytes": 104666438,
+      "groups": 23033,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "seed-resume-initial-v2",
+      "rows": 23036,
+      "bytes": 104666438,
+      "groups": 23033,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_b-import-prequeue-v2",
+      "rows": 23036,
+      "bytes": 104666438,
+      "groups": 23033,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_b-import-postqueue-v2",
+      "rows": 23036,
+      "bytes": 104666438,
+      "groups": 23033,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_b-staged-v2",
+      "rows": 23041,
+      "bytes": 105008171,
+      "groups": 23038,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_b-apply-prequeue-v2",
+      "rows": 23041,
+      "bytes": 105008171,
+      "groups": 23038,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_b-apply-postqueue-v2",
+      "rows": 23041,
+      "bytes": 105008171,
+      "groups": 23038,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_b-applied-v2",
+      "rows": 23039,
+      "bytes": 105008172,
+      "groups": 23036,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_c-import-prequeue-v2",
+      "rows": 23039,
+      "bytes": 105008172,
+      "groups": 23036,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_c-import-postqueue-v2",
+      "rows": 23039,
+      "bytes": 105008172,
+      "groups": 23036,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_c-staged-v2",
+      "rows": 23044,
+      "bytes": 105349906,
+      "groups": 23041,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_c-apply-prequeue-v2",
+      "rows": 23044,
+      "bytes": 105349906,
+      "groups": 23041,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_c-apply-postqueue-v2",
+      "rows": 23044,
+      "bytes": 105349906,
+      "groups": 23041,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "force_c-applied-v2",
+      "rows": 23042,
+      "bytes": 105349907,
+      "groups": 23039,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "fold_d-import-prequeue-v2",
+      "rows": 23042,
+      "bytes": 105349907,
+      "groups": 23039,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "fold_d-import-postqueue-v2",
+      "rows": 23042,
+      "bytes": 105349907,
+      "groups": 23039,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "fold_d-staged-v2",
+      "rows": 23047,
+      "bytes": 105691637,
+      "groups": 23044,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "fold_d-apply-prequeue-v2",
+      "rows": 23047,
+      "bytes": 105691637,
+      "groups": 23044,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "fold_d-apply-postqueue-v2",
+      "rows": 23047,
+      "bytes": 105691637,
+      "groups": 23044,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "fold_d-applied-v2",
+      "rows": 23030,
+      "bytes": 104321827,
+      "groups": 23027,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "seed-resume-after-backup-v2",
+      "rows": 23030,
+      "bytes": 104321827,
+      "groups": 23027,
+      "full_headers_and_raw_ranges_and_pack_SHA_verified": true,
+      "auxiliary_tables": 10
+    }
+  ],
+  "exact_comparisons": {
+    "initial": true,
+    "last_judged_to_prequeue": 6,
+    "prequeue_to_postqueue": 6,
+    "backup_before_after": true,
+    "normalizations": []
+  },
+  "staged_semantics": [
+    {
+      "tag": "force_b-staged-v2",
+      "stage_names": [
+        "16b3681c-426d-4d6f-9ffe-588a23974222",
+        "16b3681c-426d-4d6f-9ffe-588a23974222.0",
+        "root",
+        "version",
+        "versions"
+      ],
+      "descriptor_present": true,
+      "descriptor_decoded_equal": true,
+      "body_raw_changed": true
+    },
+    {
+      "tag": "force_c-staged-v2",
+      "stage_names": [
+        "16b3681c-426d-4d6f-9ffe-588a23974222",
+        "16b3681c-426d-4d6f-9ffe-588a23974222.0",
+        "root",
+        "version",
+        "versions"
+      ],
+      "descriptor_present": true,
+      "descriptor_decoded_equal": true,
+      "body_raw_changed": true
+    },
+    {
+      "tag": "fold_d-staged-v2",
+      "stage_names": [
+        "16b3681c-426d-4d6f-9ffe-588a23974222",
+        "16b3681c-426d-4d6f-9ffe-588a23974222.0",
+        "root",
+        "version",
+        "versions"
+      ],
+      "descriptor_present": true,
+      "descriptor_decoded_equal": true,
+      "body_raw_changed": true
+    }
+  ],
+  "final_shape": {
+    "scope": "natural seed terminal observation only",
+    "usable": true,
+    "stage_count": 0,
+    "config_pending": [],
+    "params_aliases": [],
+    "params_marker": [
+      {
+        "name": "DynamicallyUpdated",
+        "part": 0,
+        "creation": "4026-09-19 23:33:02",
+        "modified": "4026-10-02 13:59:40",
+        "attributes": 0,
+        "data_size": 156,
+        "byte_len": 156,
+        "sha256": "a6a4becf0894197ff52642b07a26dafd9c9b5298e084a615a031a54b4906a1e6",
+        "offset": 1189079
+      }
+    ],
+    "history": [
+      "848a0a59-8803-445f-b89d-3cfae4f98bbd",
+      "06cb0442-0c47-4fad-986a-f08f28287c1b",
+      "e7215806-d7fc-4ce0-a4dd-80ad2a4f9aa1",
+      "93d00b81-dac6-496d-b4fd-513e7b45535c"
+    ],
+    "no_synthetic_repair": true
+  },
+  "marker_utf8": "{0,4,848a0a59-8803-445f-b89d-3cfae4f98bbd,06cb0442-0c47-4fad-986a-f08f28287c1b,e7215806-d7fc-4ce0-a4dd-80ad2a4f9aa1,93d00b81-dac6-496d-b4fd-513e7b45535c}",
+  "backup_header": {
+    "scope": "read-only complete HEADERONLY",
+    "kind": "seed",
+    "file": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\baselines\\marker-seed-resumed-v2.bak",
+    "bytes": 254169088,
+    "sha256": "7dfa18301dc8edb2e0bb70136abe369e7ad370a45447da61f2e8955977eb8d41",
+    "rows": [
+      {
+        "BackupName": null,
+        "BackupDescription": null,
+        "BackupType": 1,
+        "ExpirationDate": null,
+        "Compressed": 1,
+        "Position": 1,
+        "DeviceType": 2,
+        "UserName": "DESKTOP-SMI5N4O\\Pavel",
+        "ServerName": "DESKTOP-SMI5N4O",
+        "DatabaseName": "ibcmd_rs_05_marker_w3_seed_c9e54c",
+        "DatabaseVersion": 998,
+        "DatabaseCreationDate": "2026-10-02 12:19:03",
+        "BackupSize": 675377152,
+        "FirstLSN": "313000003264000008",
+        "LastLSN": "313000003266400001",
+        "CheckpointLSN": "313000003264000008",
+        "DatabaseBackupLSN": "305000001991200010",
+        "BackupStartDate": "2026-10-02 14:01:33",
+        "BackupFinishDate": "2026-10-02 14:01:35",
+        "SortOrder": 0,
+        "CodePage": 0,
+        "UnicodeLocaleId": 1049,
+        "UnicodeComparisonStyle": 196609,
+        "CompatibilityLevel": 170,
+        "SoftwareVendorId": 4608,
+        "SoftwareVersionMajor": 17,
+        "SoftwareVersionMinor": 0,
+        "SoftwareVersionBuild": 1135,
+        "MachineName": "DESKTOP-SMI5N4O",
+        "Flags": 1552,
+        "BindingID": "48D3658F-7680-4ABB-88A6-8BF776E6AEEB",
+        "RecoveryForkID": "64D692D6-B3F4-4457-904B-8CAE3EFED338",
+        "Collation": "Cyrillic_General_CI_AS",
+        "FamilyGUID": "F983A0CD-5F73-4C71-A197-CD58FB079188",
+        "HasBulkLoggedData": false,
+        "IsSnapshot": false,
+        "IsReadOnly": false,
+        "IsSingleUser": false,
+        "HasBackupChecksums": true,
+        "IsDamaged": false,
+        "BeginsLogChain": false,
+        "HasIncompleteMetaData": false,
+        "IsForceOffline": false,
+        "IsCopyOnly": true,
+        "FirstRecoveryForkID": "64D692D6-B3F4-4457-904B-8CAE3EFED338",
+        "ForkPointLSN": null,
+        "RecoveryModel": "SIMPLE",
+        "DifferentialBaseLSN": null,
+        "DifferentialBaseGUID": null,
+        "BackupTypeDescription": "Database",
+        "BackupSetGUID": "EF79872B-B49D-4B33-A360-7E29CC4C415E",
+        "CompressedBackupSize": 254155481,
+        "Containment": 0,
+        "KeyAlgorithm": null,
+        "EncryptorThumbprint": null,
+        "EncryptorType": null,
+        "LastValidRestoreTime": null,
+        "TimeZone": 0,
+        "CompressionAlgorithm": "MS_XPRESS"
+      }
+    ]
+  },
+  "product_rule_enabled": false,
+  "N1_matrix_unexecuted": true,
+  "OWN_unexecuted": true
+}

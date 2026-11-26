@@ -1,0 +1,110 @@
+{
+  "operation": "infobase config apply",
+  "ok": true,
+  "nothing_to_apply": false,
+  "apply": {
+    "schema_version": 1,
+    "mode": "dynamic",
+    "database": "ibcmd_rs_05_p85_w3_own_form_20261001",
+    "platform_profile": "platform-8.5.1.1150",
+    "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+    "dry_run": false,
+    "rehearsal": false,
+    "executed": true,
+    "nothing_to_apply": false,
+    "exclusivity": "not_required",
+    "active_generation": "d24c01b5-ffc3-45bb-bca8-5f4dcd3fb2ea",
+    "new_generation": "018e9ec8-63cf-4aca-8e44-68e7fa5b60e9",
+    "stage": {
+      "rows": 5,
+      "bytes": 346637,
+      "descriptors": 1,
+      "bodies": 1,
+      "service_rows": 3,
+      "new_rows": 0,
+      "identical_rows": 2,
+      "replaced_rows": 5,
+      "replaced_parts_dropped": 0,
+      "consumed_rows": 0
+    },
+    "dynamic": null,
+    "published": {
+      "generation": "018e9ec8-63cf-4aca-8e44-68e7fa5b60e9",
+      "previous_generation": "d24c01b5-ffc3-45bb-bca8-5f4dcd3fb2ea",
+      "history": [
+        "018e9ec8-63cf-4aca-8e44-68e7fa5b60e9"
+      ],
+      "alias_rows": [
+        "a627e390-8fad-4a95-afe6-674f54813188_dynupdate_018e9ec8-63cf-4aca-8e44-68e7fa5b60e9",
+        "a627e390-8fad-4a95-afe6-674f54813188_dynupdate_018e9ec8-63cf-4aca-8e44-68e7fa5b60e9.0",
+        "versions_dynupdate_018e9ec8-63cf-4aca-8e44-68e7fa5b60e9"
+      ],
+      "replaced_in_place": [
+        "root",
+        "version"
+      ],
+      "warn_after_generations": 50
+    },
+    "gate": {
+      "restructuring_required": false,
+      "blockers": [],
+      "blockers_omitted": 0,
+      "stats": {
+        "rows_identical": 0,
+        "descriptors_layout_only": 0,
+        "service_rows": 0,
+        "extra_parts": 0,
+        "new_objects": 0,
+        "bodies_by_role": {
+          "Form": 1
+        },
+        "restructure_check": {
+          "staged_rows": 5,
+          "descriptors_compared": 0,
+          "body_rows_compared": 0,
+          "objects_changed": 0,
+          "notes": 1
+        }
+      },
+      "gate": "apply-check"
+    },
+    "structure": null,
+    "backup": null,
+    "registrations": {
+      "nodes": 3,
+      "changed_objects": 1,
+      "rows_added": 0,
+      "file_rows_added": 0,
+      "objects_of_dropped_rows": 0
+    },
+    "new_objects": null,
+    "removals": null,
+    "tables_touched": [
+      "Config",
+      "ConfigSave",
+      "Params",
+      "_ConfigChngR",
+      "Files"
+    ],
+    "not_written": [
+      "Params .ui rows (the platform's configuration-licensing records, track ui #340): never written",
+      "the help/search index in Files (userDocs_ru*, userPostings_ru*, userVocabulary_ru*): not rebuilt; native-derived payloads can differ and help-search equivalence is not claimed",
+      "the ordinary rows the aliases stand beside: they keep the previous text until an exclusive apply folds the generation"
+    ],
+    "warnings": [],
+    "script_sha256": "81b02040df96404fddd902a7e5c26f014acf3c245b02bae0132643f642d277cd",
+    "script_path": null,
+    "recovery_dir": "C:\\Users\\Pavel\\AppData\\Local\\Temp\\ibcmd-rs\\config-apply-recovery\\ibcmd_rs_05_p85_w3_own_form_20261001-81b02040df96404f",
+    "recovery_token": "81b02040df96404f",
+    "timings": {
+      "storage_check_ms": 101,
+      "inventory_ms": 74,
+      "gate_ms": 461,
+      "fingerprints_ms": 0,
+      "recovery_ms": 50,
+      "backup_ms": 0,
+      "sql_ms": 328,
+      "total_ms": 1600
+    }
+  }
+}

@@ -1,0 +1,10 @@
+run=online
+tag=online-v2b-single
+mode=online
+dry_run=False
+database=ibcmd_rs_05_online_a1
+src=o2b
+start_utc=2026-09-29T17:29:45.739Z
+end_utc=2026-09-29T17:29:54.002Z
+wall_ms=8252
+exit=1

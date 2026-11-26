@@ -1,0 +1,233 @@
+{
+  "rust_cli_executed": false,
+  "files": [
+    {
+      "sha256": "a88ec100aa9527b288c6672f27959f0ce752c6bb5b4a9152f44e68f36909a828",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-settled-backup-checkpoint-v5.json",
+      "file": "checkpoint.json",
+      "bytes": 16063
+    },
+    {
+      "sha256": "f9269eefd76690641000cb9a79656710be3326c6c0f9f4444bb80d3ac4080104",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-preservation-frozen-v5.json",
+      "file": "frozen-preparation.json",
+      "bytes": 4477
+    },
+    {
+      "sha256": "f2d8d187843b8c6c882259578ef99ff9b49b8a1c31a458370d4ff2676f92c384",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\preserve_extension_settled_A.ps1",
+      "file": "preservation-driver.ps1",
+      "bytes": 8204
+    },
+    {
+      "sha256": "e19b1be153f802f7251443ea0a630c924a25d6a692ba14f18677b163028689ad",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\verify_extension_backup_header.py",
+      "file": "header-reader-original.py",
+      "bytes": 2700
+    },
+    {
+      "sha256": "9da91f272d68c5a49e88dbb445ade94571f19a8541ec50b8f59e9c047440641d",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\verify_extension_backup_header_readback_v5.py",
+      "file": "header-reader-readback.py",
+      "bytes": 2717
+    },
+    {
+      "sha256": "6d81a3c4e19bf5517274f273fba9967da09dc93c18c9b2b1efd70ccde764ce8c",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\test_extension_header_label_v5.ps1",
+      "file": "header-label-regression.ps1",
+      "bytes": 2020
+    },
+    {
+      "sha256": "9ad06f2a8178e81d3c59d7ad84ab7f744d5330d32d98be6ef28e8bbff47fdf8e",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\test_extension_preservation_v5.ps1",
+      "file": "preservation-regressions.ps1",
+      "bytes": 5800
+    },
+    {
+      "sha256": "6fdda30c31b945c9c56049804b0d133bc87ec83ee672b541b26130d244a453c4",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-preservation-header-label-RED-GREEN-v5.log",
+      "file": "header-label-RED-GREEN.log",
+      "bytes": 123
+    },
+    {
+      "sha256": "ec4529d7b4cf532b4a5ce103bf149f94dca711e83e3e6bcfa8ff34682997fb90",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-preservation-v5-header-pure.log",
+      "file": "header-pure.log",
+      "bytes": 63
+    },
+    {
+      "sha256": "8599fb9d816668b0f55d3f1493833e1b9a207a468755d088b57ec9aac4fd7014",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-preservation-v5-pure.log",
+      "file": "preservation-pure.log",
+      "bytes": 113
+    },
+    {
+      "sha256": "77b30e381c6ba3b7fb5ddd4e1af7f445766c9c79c94ab7bc6e1bf3f65e2ab289",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-existing-reference-diagnosis.json",
+      "file": "existing-reference-diagnosis.json",
+      "bytes": 3047
+    },
+    {
+      "sha256": "d5f1bb1db706e06ce79819355c24081767db0e6c2316987686421aef92275f77",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\01-idle.command.json",
+      "file": "01-idle.command.json",
+      "bytes": 1429
+    },
+    {
+      "sha256": "99bc778861089502d7b58c82093f1ac8320e904ac48732172633025f4d9fe6ba",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\01-idle.json",
+      "file": "01-idle.json",
+      "bytes": 140
+    },
+    {
+      "sha256": "713d6184b3a49be1047951b01ad6471afbe3dff7141cec6c4fbe6976c9ce4e84",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\02-idle.command.json",
+      "file": "02-idle.command.json",
+      "bytes": 1429
+    },
+    {
+      "sha256": "99bc778861089502d7b58c82093f1ac8320e904ac48732172633025f4d9fe6ba",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\02-idle.json",
+      "file": "02-idle.json",
+      "bytes": 140
+    },
+    {
+      "sha256": "3e8f53c4bd8b284b898344fd53c6d5a78fd0d32fcedc3679f8a87f29635fd755",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\03-idle.command.json",
+      "file": "03-idle.command.json",
+      "bytes": 1429
+    },
+    {
+      "sha256": "99bc778861089502d7b58c82093f1ac8320e904ac48732172633025f4d9fe6ba",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\03-idle.json",
+      "file": "03-idle.json",
+      "bytes": 140
+    },
+    {
+      "sha256": "f367027d6e8f0e0bab8abc6836520ecd97b2862db6b428865da8bf13d7959d77",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\04-idle.command.json",
+      "file": "04-idle.command.json",
+      "bytes": 1429
+    },
+    {
+      "sha256": "99bc778861089502d7b58c82093f1ac8320e904ac48732172633025f4d9fe6ba",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\04-idle.json",
+      "file": "04-idle.json",
+      "bytes": 140
+    },
+    {
+      "sha256": "ebf6b629d502d66b4000975fc81aeda17c902c5d76e03acb99e0490c6bf59683",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\backup-header-readback-v5.command.json",
+      "file": "backup-header-readback-v5.command.json",
+      "bytes": 442
+    },
+    {
+      "sha256": "bb3da621808034aca2c71aeff719a3f8ffdc71bb3a3a4a5d7bdbbe82b7edac21",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\backup-header-readback-v5.json",
+      "file": "backup-header-readback-v5.json",
+      "bytes": 57
+    },
+    {
+      "sha256": "8f8e32dd353bf3afb4e994b0eccbadd4c264aa7e3fc2b2ccc66b187d367209af",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\backup-header-rows-readback-v5.json",
+      "file": "backup-header-rows-readback-v5.json",
+      "bytes": 2112
+    },
+    {
+      "sha256": "d1b7a6eaead8d5558c4c923e4e57847c0eead09e71a6887d2c5d649e502e2765",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\backup-header.command.json",
+      "file": "backup-header.command.json",
+      "bytes": 413
+    },
+    {
+      "sha256": "bb3da621808034aca2c71aeff719a3f8ffdc71bb3a3a4a5d7bdbbe82b7edac21",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\backup-header.json",
+      "file": "backup-header.json",
+      "bytes": 57
+    },
+    {
+      "sha256": "40e5d2be2f297d77bf02ef2d2b421ff8ef2e0e6b76f9422063adcbf83ade6e9c",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\backup-verifyonly.command.json",
+      "file": "backup-verifyonly.command.json",
+      "bytes": 343
+    },
+    {
+      "sha256": "a463a35af600ee5cc658e6e439828264f406565b8dec5be07a4b4eb0d6c98a48",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\backup-verifyonly.json",
+      "file": "backup-verifyonly.json",
+      "bytes": 156
+    },
+    {
+      "sha256": "a6f485b6dcb8632c00193cb7cc635b1a1b897f82afa620d0d7e61ec234a6e1f9",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\ext_version_settled_backup_after_v5-compare.command.json",
+      "file": "ext_version_settled_backup_after_v5-compare.command.json",
+      "bytes": 462
+    },
+    {
+      "sha256": "a82397f15fcae901edab974e7fe506ded3104edd4f18b3934b7c1b95036b99e5",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\ext_version_settled_backup_after_v5-compare.json",
+      "file": "ext_version_settled_backup_after_v5-compare.json",
+      "bytes": 167
+    },
+    {
+      "sha256": "c5f1fbc4c2dd3146e0339aaedbc439073aea66f6e748db7f9e375f13ab41918a",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\ext_version_settled_backup_after_v5.command.json",
+      "file": "ext_version_settled_backup_after_v5.command.json",
+      "bytes": 305
+    },
+    {
+      "sha256": "739f4e2b73b41909aff3bd0705287f975d87212e89d97c920800c87f2a69a801",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\ext_version_settled_backup_after_v5.json",
+      "file": "ext_version_settled_backup_after_v5.json",
+      "bytes": 187
+    },
+    {
+      "sha256": "16a4798fd01d4157b0ee95a6855490437b329afc14ec27f0255d7a85dbfc7f6d",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\ext_version_settled_backup_before_v5-compare.command.json",
+      "file": "ext_version_settled_backup_before_v5-compare.command.json",
+      "bytes": 463
+    },
+    {
+      "sha256": "a82397f15fcae901edab974e7fe506ded3104edd4f18b3934b7c1b95036b99e5",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\ext_version_settled_backup_before_v5-compare.json",
+      "file": "ext_version_settled_backup_before_v5-compare.json",
+      "bytes": 167
+    },
+    {
+      "sha256": "380e1517bc661d6dbef0cf460d0c1a57ce6dcf4e9ba8a17347eb137d4b5deb78",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\ext_version_settled_backup_before_v5.command.json",
+      "file": "ext_version_settled_backup_before_v5.command.json",
+      "bytes": 306
+    },
+    {
+      "sha256": "51f8053ea0a731e8060da119223473bc23df8dd529af7a0d1356cadd15b67d31",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\ext_version_settled_backup_before_v5.json",
+      "file": "ext_version_settled_backup_before_v5.json",
+      "bytes": 188
+    },
+    {
+      "sha256": "4abb78896cd92dd2a76dfc604518d8f2b056c1f40c14862f9b4c1c6779638b4d",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\one-copy-only-backup.command.json",
+      "file": "one-copy-only-backup.command.json",
+      "bytes": 445
+    },
+    {
+      "sha256": "805202970af0bf12df7fa314649a577e6c11bdf9f17e9f12091696d3b96fab2e",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\one-copy-only-backup.json",
+      "file": "one-copy-only-backup.json",
+      "bytes": 517
+    },
+    {
+      "sha256": "d32a2232e64830582d1a02f0e031509cf9b52da666b302367cef707ddfc6151f",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\result.json",
+      "file": "result.json",
+      "bytes": 392
+    }
+  ],
+  "scope": "Byte-exact selected P0 evidence; full packs and ONE COPY_ONLY backup retained in F lab",
+  "native_executed": false,
+  "future_control_executed": false,
+  "format": 1,
+  "runtime_source": "7688a9feb2f2e3e7a4b752f67d4606baddce8940",
+  "backup_invocations": 1
+}

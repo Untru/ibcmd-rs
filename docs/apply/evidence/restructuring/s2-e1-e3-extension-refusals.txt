@@ -1,0 +1,9 @@
+S1-E (#401): the stages of cases e1 and e3 through the gate that has S1-I (the merged binary, feat/0.4-s1-e after 6da15c61): a dry run of 'mssql-config-apply --allow-restructure s1' on the staged state of each case is refused because a changed object is adopted by an extension of the БСП clone. e5 and e6 are the same shapes on objects no extension adopts.
+
+== case e1 (database ibcmd_rs_04_ddl_s2_e1_base, the staged state, nothing applied)
+dry run exit 1
+  blocker: S1: catalog _ДемоМестаХранения is adopted by the extension _ДемоРасширение (object _ДемоМестаХранения 4cbb1dbc-9a29-4649-993b-1bbd320107ba, active image); the extension keeps no table of its own for it: the own restructure does not change an object an extension adopts, the platform's apply does
+
+== case e3 (database ibcmd_rs_04_ddl_s2_e3_base, the staged state, nothing applied)
+dry run exit 1
+  blocker: S1: catalog _ДемоПартнеры is adopted by the extension _ДемоРасширение (object _ДемоПартнеры 3014d9c1-cb00-49fb-81b3-e8ced354975f, active image); the extension keeps no table of its own for it: the own restructure does not change an object an extension adopts, the platform's apply does

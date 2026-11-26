@@ -1,0 +1,18 @@
+{
+  "equal": [
+    "CovHybridChildrenAlign",
+    "CovHybridCollapseUse",
+    "CovHybridDetailsTemplate",
+    "CovHybridLabelDecorationAutoBold",
+    "CovHybridLabelDecorationTextLevel3",
+    "CovHybridLabelDecorationTitleLevel2",
+    "CovHybridLabelFieldAutoBold",
+    "CovHybridLabelFieldTextLevel3",
+    "CovHybridLabelFieldTitleLevel2",
+    "CovHybridUsualGroupAutoBold",
+    "CovHybridUsualGroupTextLevel3",
+    "CovHybridUsualGroupTitleLevel2",
+    "CovHybridUsualGroupTitleLevel4",
+    "CovHybridVerticalSingle"
+  ]
+}

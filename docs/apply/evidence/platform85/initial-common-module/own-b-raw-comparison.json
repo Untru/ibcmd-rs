@@ -1,0 +1,330 @@
+{
+  "native_vs_own": {
+    "Config": {
+      "left_count": 9942,
+      "right_count": 9942,
+      "left_only": [],
+      "right_only": [],
+      "changed": [
+        {
+          "name": "DynamicallyUpdated",
+          "part": 0,
+          "fields": {
+            "creation": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 19:00:13"
+            },
+            "modified": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 19:00:13"
+            }
+          }
+        }
+      ]
+    },
+    "ConfigSave": {
+      "left_count": 0,
+      "right_count": 0,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "Params": {
+      "left_count": 39,
+      "right_count": 39,
+      "left_only": [],
+      "right_only": [],
+      "changed": [
+        {
+          "name": "54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui",
+          "part": 0,
+          "fields": {
+            "modified": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 17:24:44"
+            }
+          }
+        },
+        {
+          "name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+          "part": 0,
+          "fields": {
+            "modified": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 17:24:50"
+            },
+            "sha256": {
+              "before": "82bd22eb494d9da5775e8c766c92758cec0c3589bb97ba2635be3150191e7f91",
+              "after": "8a92614dea0ca20df61a2a6c6bc1272e0ec1b06ef1ce1eb3d35d5725789079f9"
+            }
+          }
+        },
+        {
+          "name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+          "part": 0,
+          "fields": {
+            "modified": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 17:24:50"
+            },
+            "sha256": {
+              "before": "a0153521c61efab9dd021f3b599a8a5892d0ac30ccaf5050f7026be55b0d1dd5",
+              "after": "56767bff878deecf02af41fb8c8371142751920eb0e6d0d81dc6887f7dbe664c"
+            }
+          }
+        },
+        {
+          "name": "DynamicallyUpdated",
+          "part": 0,
+          "fields": {
+            "creation": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 19:00:13"
+            },
+            "modified": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 19:00:13"
+            }
+          }
+        }
+      ]
+    },
+    "Files": {
+      "left_count": 370,
+      "right_count": 370,
+      "left_only": [],
+      "right_only": [],
+      "changed": [
+        {
+          "name": "MobileVersions.dat",
+          "part": 0,
+          "fields": {
+            "creation": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 19:00:13"
+            },
+            "modified": {
+              "before": "4026-10-01 17:26:44",
+              "after": "4026-10-01 19:00:13"
+            },
+            "sha256": {
+              "before": "3dfab0014c1fa67a0b1ebda3be5f9b3d49ebc5ce8ed1efe82681a2e7190e7b48",
+              "after": "60a90178888c0baccfb9cc475ee03957aafd6aaef0582733b5d803e37b94cdb4"
+            }
+          }
+        }
+      ]
+    },
+    "ConfigCAS": {
+      "left_count": 19359,
+      "right_count": 19359,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "ConfigCASSave": {
+      "left_count": 5,
+      "right_count": 5,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "auxiliary_equal": true,
+    "auxiliary_changed": []
+  },
+  "own_write_delta": {
+    "Config": {
+      "left_count": 9938,
+      "right_count": 9942,
+      "left_only": [],
+      "right_only": [
+        [
+          "313d9858-3995-4a4c-b2b0-15d2350417b4_dynupdate_79f150a7-6688-4795-8fd6-e3e1177b70f3",
+          0
+        ],
+        [
+          "313d9858-3995-4a4c-b2b0-15d2350417b4_dynupdate_79f150a7-6688-4795-8fd6-e3e1177b70f3.0",
+          0
+        ],
+        [
+          "DynamicallyUpdated",
+          0
+        ],
+        [
+          "versions_dynupdate_79f150a7-6688-4795-8fd6-e3e1177b70f3",
+          0
+        ]
+      ],
+      "changed": [
+        {
+          "name": "root",
+          "part": 0,
+          "fields": {
+            "creation": {
+              "before": "4026-10-01 17:12:03",
+              "after": "4026-10-01 17:25:59"
+            },
+            "modified": {
+              "before": "4026-10-01 17:12:03",
+              "after": "4026-10-01 17:25:59"
+            },
+            "data_size": {
+              "before": 213,
+              "after": 212
+            },
+            "byte_len": {
+              "before": 213,
+              "after": 212
+            },
+            "sha256": {
+              "before": "3de5610599468ddae6ccaedab5c93eade8880ffaf2c92f3afb7b9b3254e35f69",
+              "after": "a19776ad0b6b8559f0646c71e00a321be47de0dd490979564da6736502f2283e"
+            }
+          }
+        },
+        {
+          "name": "version",
+          "part": 0,
+          "fields": {
+            "creation": {
+              "before": "4026-10-01 17:12:03",
+              "after": "4026-10-01 17:25:59"
+            },
+            "modified": {
+              "before": "4026-10-01 17:12:03",
+              "after": "4026-10-01 17:25:59"
+            }
+          }
+        }
+      ]
+    },
+    "ConfigSave": {
+      "left_count": 5,
+      "right_count": 0,
+      "left_only": [
+        [
+          "313d9858-3995-4a4c-b2b0-15d2350417b4",
+          0
+        ],
+        [
+          "313d9858-3995-4a4c-b2b0-15d2350417b4.0",
+          0
+        ],
+        [
+          "root",
+          0
+        ],
+        [
+          "version",
+          0
+        ],
+        [
+          "versions",
+          0
+        ]
+      ],
+      "right_only": [],
+      "changed": []
+    },
+    "Params": {
+      "left_count": 38,
+      "right_count": 39,
+      "left_only": [],
+      "right_only": [
+        [
+          "DynamicallyUpdated",
+          0
+        ]
+      ],
+      "changed": []
+    },
+    "Files": {
+      "left_count": 370,
+      "right_count": 370,
+      "left_only": [],
+      "right_only": [],
+      "changed": [
+        {
+          "name": "MobileVersions.dat",
+          "part": 0,
+          "fields": {
+            "creation": {
+              "before": "4026-10-01 17:24:44",
+              "after": "4026-10-01 19:00:13"
+            },
+            "modified": {
+              "before": "4026-10-01 17:24:45",
+              "after": "4026-10-01 19:00:13"
+            },
+            "sha256": {
+              "before": "f20e970b2d0d65a6fdcd141182e260f00a640efc0085d474e4872e9f4cd84b51",
+              "after": "60a90178888c0baccfb9cc475ee03957aafd6aaef0582733b5d803e37b94cdb4"
+            }
+          }
+        }
+      ]
+    },
+    "ConfigCAS": {
+      "left_count": 19359,
+      "right_count": 19359,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "ConfigCASSave": {
+      "left_count": 5,
+      "right_count": 5,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "auxiliary_equal": true,
+    "auxiliary_changed": []
+  },
+  "own_startup_delta": {
+    "Config": {
+      "left_count": 9938,
+      "right_count": 9938,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "ConfigSave": {
+      "left_count": 5,
+      "right_count": 5,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "Params": {
+      "left_count": 38,
+      "right_count": 38,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "Files": {
+      "left_count": 370,
+      "right_count": 370,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "ConfigCAS": {
+      "left_count": 19359,
+      "right_count": 19359,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "ConfigCASSave": {
+      "left_count": 5,
+      "right_count": 5,
+      "left_only": [],
+      "right_only": [],
+      "changed": []
+    },
+    "auxiliary_equal": true,
+    "auxiliary_changed": []
+  }
+}

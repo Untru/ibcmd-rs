@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<InformationRegister uuid="e3000000-0000-4000-8000-000000000004">
+		<InternalInfo>
+			<xr:GeneratedType name="InformationRegisterRecord.РегистрСведений" category="Record">
+				<xr:TypeId>d0000004-0000-4000-8000-000000000001</xr:TypeId>
+				<xr:ValueId>d0000004-0000-4000-8000-000000000002</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterManager.РегистрСведений" category="Manager">
+				<xr:TypeId>d0000004-0000-4000-8000-000000000003</xr:TypeId>
+				<xr:ValueId>d0000004-0000-4000-8000-000000000004</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterSelection.РегистрСведений" category="Selection">
+				<xr:TypeId>d0000004-0000-4000-8000-000000000005</xr:TypeId>
+				<xr:ValueId>d0000004-0000-4000-8000-000000000006</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterList.РегистрСведений" category="List">
+				<xr:TypeId>d0000004-0000-4000-8000-000000000007</xr:TypeId>
+				<xr:ValueId>d0000004-0000-4000-8000-000000000008</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordSet.РегистрСведений" category="RecordSet">
+				<xr:TypeId>d0000004-0000-4000-8000-000000000009</xr:TypeId>
+				<xr:ValueId>d0000004-0000-4000-8000-000000000010</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordKey.РегистрСведений" category="RecordKey">
+				<xr:TypeId>d0000004-0000-4000-8000-000000000011</xr:TypeId>
+				<xr:ValueId>d0000004-0000-4000-8000-000000000012</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="InformationRegisterRecordManager.РегистрСведений" category="RecordManager">
+				<xr:TypeId>d0000004-0000-4000-8000-000000000013</xr:TypeId>
+				<xr:ValueId>d0000004-0000-4000-8000-000000000014</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>РегистрСведений</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>b3000000-0000-4000-8000-000000000004</ExtendedConfigurationObject>
+		</Properties>
+		<ChildObjects/>
+	</InformationRegister>
+</MetaDataObject>

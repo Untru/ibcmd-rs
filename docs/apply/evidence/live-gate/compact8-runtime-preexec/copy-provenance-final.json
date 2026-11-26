@@ -1,0 +1,160 @@
+{
+  "scope": "Full8 copied successor: case8 routes; current audited release authority; unique nonce worker/raw acquire proof; explicit CIM microsecond precision; valid closed stdin with original PID/pipe ownership before Close; readonly archived613 admission, no replay. Original sources unchanged.",
+  "runtime_authorized": false,
+  "copies": [
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_activate.ps1",
+      "source_sha256": "878F91A8F8C81C686700EF191D13E9C9ECDBF618731E4E4E8D434261343BA410",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_activate.ps1",
+      "sha256": "26DD1D19C24BE28B1FDD8B6EAD54A45E325A08332CE1AD0CB928B6B157A33BF8",
+      "creation_sha256": "45BCE8AA559D5BC0F3BD614036E1EC87459554C7D854BB521717CEF5906A17E0"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_checkpoint_v2.ps1",
+      "source_sha256": "244788348D5B5A4EF54F9451C4C1F8864AA1F3D0EF99FCD673010019D6C38943",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_checkpoint_v2.ps1",
+      "sha256": "444208AF6227C26F9835A9FD46A53C3E5EFB1F2BC00B4BE97C04FD1BD8145149",
+      "creation_sha256": "1FF3728C36BC01687D80FADCF08AA58D9FC399CCD1EE9D5625C1AD0A7255F9AF"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_lifetime_v2.ps1",
+      "source_sha256": "76D73CCCCEDB6B83D1FD6131C783DBC03D6FEC377D79FA10B87787158C3A611A",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_lifetime_v2.ps1",
+      "sha256": "E1701FE4EE57D7521163498C97ACEFDA0BE941624D5916736C36603127501EE1",
+      "creation_sha256": "F7FC0D9E89AF9C9F0F05F319EC27E105AFD70024E5ADC661BCF0A5B23BCB07B5"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_native.ps1",
+      "source_sha256": "3F8C4F00CBAC665BF42DD71DAEE49779FB76A35D6CCFD44F69DD543105F2A1E8",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_native.ps1",
+      "sha256": "5CA8427335E2EB7BDE1C2F65882A364AA0D97681559B1ABADB2389CA54C4971C",
+      "creation_sha256": "D0433393D3439191CF70F46BCB3FD300D945689466AB17BB18D95DFF026140C5"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_prior_archive.ps1",
+      "source_sha256": "4599205E8B94964C8B4CE57FE68ABB098C5B56803C1C226319F9614CE69FB674",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_prior_archive.ps1",
+      "sha256": "B3BFDFDA4BE60423E2B0B6C5772352F34E6CBA0592D155933A2ABDCE94C069CC",
+      "creation_sha256": "E5F7AA8E125EB744E1EF657258548AE9437BAD5F682C792F7FB904EB92799D11"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_snapshot.ps1",
+      "source_sha256": "87E4F625E47315275FC7C7F68977F08412B89A24E510923E04F62A8B82AE8F32",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_snapshot.ps1",
+      "sha256": "731FB94E3EC03DDFBA7AD74250259184F5B444814FE7AA03123CE34255B6EA51",
+      "creation_sha256": "731FB94E3EC03DDFBA7AD74250259184F5B444814FE7AA03123CE34255B6EA51"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\runtime_child.ps1",
+      "source_sha256": "41C98EB550D91016F2BF817A5510F727BB634CF7D0E845DDC1A69539128B3B19",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\runtime_child.ps1",
+      "sha256": "A695CB8052576E8E8CD5406871A776C071E224B16D73538281829E30F9B31573",
+      "creation_sha256": "A695CB8052576E8E8CD5406871A776C071E224B16D73538281829E30F9B31573"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\runtime_closure.ps1",
+      "source_sha256": "865DE20051A42872C17BC22890568F2539AF7AEF3B2D334D0CF0A55802713D4F",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\runtime_closure.ps1",
+      "sha256": "1F03EB010A5398C33B162ACBE469B8CB05B5EE296552D4890C891CF81C348F49",
+      "creation_sha256": "214357CA4EDDE75B3EF7EE41AAD7C6E9DA6C28C557990CD6B4947B06545EC078"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\lib.ps1",
+      "source_sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\cluster\\lib.ps1",
+      "sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594",
+      "creation_sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\private-lib.ps1",
+      "source_sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\cluster\\private-lib.ps1",
+      "sha256": "5536F179D9DC4AC584D5D1D1AE54E578D5C8FB7A4CD36A242675EA40A388DBCA",
+      "creation_sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\private-register.ps1",
+      "source_sha256": "DF4CF95A237E9AFFFC43702E97DE7B11CAFE80AAA518956D441ECE53D7E454AE",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\cluster\\private-register.ps1",
+      "sha256": "18F2FF4EEF3924C31B4E9BA80B0F58B2C0635AAC1800C18EC417F27ED5583C75",
+      "creation_sha256": "DF4CF95A237E9AFFFC43702E97DE7B11CAFE80AAA518956D441ECE53D7E454AE"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\private-start.ps1",
+      "source_sha256": "70A85D8162FD10811B2136E432C1D2FFA5363D927EF212406FE4AB02EED5F0A7",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\cluster\\private-start.ps1",
+      "sha256": "5F50421C0D636B4984FC7C984D67C51463509E24488DC03ACBB4B598B53C2E18",
+      "creation_sha256": "5F50421C0D636B4984FC7C984D67C51463509E24488DC03ACBB4B598B53C2E18"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\private-stop.ps1",
+      "source_sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\cluster\\private-stop.ps1",
+      "sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F",
+      "creation_sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\start.ps1",
+      "source_sha256": "50DB7C39C4EA5BCF9E3E7D559615D5CE9B9C27E1A00527E48B0195FE93CA480E",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\cluster\\start.ps1",
+      "sha256": "CC20164CA4A63D0B9842E4BEBC41A4D6D4AE7DB629D20046C03495328CB3332B",
+      "creation_sha256": "CC20164CA4A63D0B9842E4BEBC41A4D6D4AE7DB629D20046C03495328CB3332B"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\stop.ps1",
+      "source_sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\cluster\\stop.ps1",
+      "sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C",
+      "creation_sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\live\\obs.ps1",
+      "source_sha256": "7735168902AEB5C7D7A66D2E447187963F74AF4C12BB1E3E72E62838F080DE09",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\live\\obs.ps1",
+      "sha256": "88D38D9503779F5B0A8C406797A7AA8DA720DEDB32FACF5FF0069597ED037F73",
+      "creation_sha256": "88D38D9503779F5B0A8C406797A7AA8DA720DEDB32FACF5FF0069597ED037F73"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\live\\process.ps1",
+      "source_sha256": "0768EF6899C6819E002C2B5A740F8648B97E5FFD96108346B377952465BB4255",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\live\\process.ps1",
+      "sha256": "C68C59C23CB56E09F98173BD767647E4C5EA0CF22B43DEE682DE849352D111D2",
+      "creation_sha256": "17C799E03193FA0455877C3DEE0E86E6749E4D3CF10FA375E320FF7263EC4956"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\live\\workload_lab.ps1",
+      "source_sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8-tools\\live\\workload_lab.ps1",
+      "sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71",
+      "creation_sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_locks.ps1",
+      "source_sha256": "E67EF3208B9220162BD60BD5E401F882CE74C45F614F16D2C4B3E56751D2EB06",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_locks.ps1",
+      "sha256": "5758A853A63F6E621730A01FC910AFBDDB83D54A0BBE3C0783D39CB5270DE99F",
+      "creation_sha256": "C80069ABD4243D555D47DC0F3C0AD66C79F388C4C955F9F9F4632C4814D71736"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_receipts.ps1",
+      "source_sha256": "B4632BD6FE1A3B68F459EFCFFE8CA6C2BE0B63B7D10D946A912362BE648DDC61",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_receipts.ps1",
+      "sha256": "5D4637A47C84E24F94277B02DA76BE9D707943EB5AC54BE1F90E489F17F0ECA4",
+      "creation_sha256": "5D4637A47C84E24F94277B02DA76BE9D707943EB5AC54BE1F90E489F17F0ECA4"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\make_compact7_negatives.py",
+      "source_sha256": "D6888DDAD9A2A4F04DD6E8FB7F76FE7068A66BA59C5D3AA644DE98244DF4B601",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\make_compact8_negatives.py",
+      "sha256": "CD262F4DD4CFF42FB1F5C64EB30FBD80573F71B30B0C06F9CA981128F40B9955",
+      "creation_sha256": "D23A8F4A72B24422815B355531FB7220751B0EEA65CB0F27E7280E94AC1F2EF2"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\read_compact7_recovery.py",
+      "source_sha256": "E91FCE0D9CC04DF50A10A29B3DA3E064604A421CAE9B36BF0835011DF9620E4D",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\read_compact8_recovery.py",
+      "sha256": "8EC01B3B8D70F810193BE77313AF68826FD103C456BF65E3C630362AC7B8D671",
+      "creation_sha256": "8EC01B3B8D70F810193BE77313AF68826FD103C456BF65E3C630362AC7B8D671"
+    }
+  ]
+}

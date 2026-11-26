@@ -1,0 +1,32 @@
+name: EDT model inventory controls
+
+on:
+  push:
+    paths:
+      - 'scripts/edt-lab/model_inventory.py'
+      - 'scripts/edt-lab/test_model_inventory.py'
+      - '.github/workflows/edt-model-inventory.yml'
+  pull_request:
+    paths:
+      - 'scripts/edt-lab/model_inventory.py'
+      - 'scripts/edt-lab/test_model_inventory.py'
+      - '.github/workflows/edt-model-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  controls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run in-memory controls without installed EDT
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest discover -s scripts/edt-lab -p test_model_inventory.py -v

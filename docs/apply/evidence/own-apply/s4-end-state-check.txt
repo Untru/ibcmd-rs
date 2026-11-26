@@ -1,0 +1,9 @@
+# tools/verify_new.py (lab) on the traced S4 pair: native twin vs own twin, after the applies
+Config         OK rows native 9845 ours 9845 only-native [] only-ours [] differ []
+_ConfigChngR   OK rows native 20691 ours 20691 only-native 0 only-ours 0 message differs 0 ids unique True
+ExtProps       OK objects native 16349 ours 16349 differ 0
+.si rows       OK 16 identical text, 0 only permuted by the native apply, 0 different []
+siVersions     OK 16 entries native, 16 ours
+Params         OK rows native 38 ours 38 missing [] extra []
+Files          OK rows native 353 ours 353 missing [] extra []
+PROBLEMS: 0

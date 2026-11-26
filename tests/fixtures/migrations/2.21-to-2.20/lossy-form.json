@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "family": "Form",
+  "uuid": "44444444-4444-4444-8444-444444444444",
+  "object_path": "Catalog.Products.Form.Main",
+  "name": "Main",
+  "property": "UseInInterfaceCompatibilityMode",
+  "value": "Any",
+  "loss_code": "migration.xcf-2-21-to-2-20.use-in-interface-compatibility-mode",
+  "default_policy": "error",
+  "warn_action": "retain",
+  "drop_action": "remove"
+}

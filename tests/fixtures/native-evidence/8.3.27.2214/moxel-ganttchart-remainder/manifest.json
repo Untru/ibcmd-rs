@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-moxel-ganttchart-remainder",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS",
+    "note": "Not a seed -- extracted directly from native UT 11.5.27.75's own 1cv8.cf via `ibcmd-rs cf extract`. Re-extraction of raw bytes a prior wave (2026-08-25, first half of the day) had captured in scratch and lost when /tmp was wiped (see docs/evidence/scratchpad-wipe-recovery-20260824.md); this time saved permanently as a fixture per that wave's own recommendation."
+  },
+  "objects": [
+    {
+      "kind": "MOXCEL GanttChart drawing (object payload only, not the whole <drawing> wrapper)",
+      "variant": "analiz-zhurnala-registratsii",
+      "description": "Reports/АнализЖурналаРегистрации/Templates/ПродолжительностьРаботыРегламентныхЗаданий, template uuid beb44b02-5d5e-4127-aee7-e184a43a4210, drawing type uuid e5fdc112-5c84-4a16-9728-72b85692b6e2 (GanttChart, not a3p1's plain Chart's a8b97779-...). Extracted via `ibcmd-rs cf extract 1cv8.cf beb44b02-5d5e-4127-aee7-e184a43a4210.0`.",
+      "raw_entry": { "path": "raw/analiz-zhurnala-registratsii-object-payload.txt" },
+      "native_object_fragment": { "path": "native/analiz-zhurnala-registratsii-object.xml" }
+    },
+    {
+      "kind": "MOXCEL GanttChart drawing",
+      "variant": "dlitelnost-otlozhennogo-obnovleniya",
+      "description": "Reports/ДлительностьОтложенногоОбновления/Templates/ДиаграммаГанта, template uuid 3c2c192e-4869-4cc6-ba47-1fadac5b9678. Extracted via `ibcmd-rs cf extract 1cv8.cf 3c2c192e-4869-4cc6-ba47-1fadac5b9678.0`.",
+      "raw_entry": { "path": "raw/dlitelnost-otlozhennogo-obnovleniya-object-payload.txt" },
+      "native_object_fragment": { "path": "native/dlitelnost-otlozhennogo-obnovleniya-object.xml" }
+    }
+  ],
+  "proven_claims": [
+    "CLOSED (wave 2026-08-25 night): the whole GanttChart wrapper decodes and both records round-trip byte for byte -- see `parse_moxel_gantt_chart`/`push_moxel_gantt_chart_xml` in src/mssql_dump/moxel.rs and regression tests `renders_gantt_chart_with_elements_not_init_to_platform_proven_xml`/`renders_gantt_chart_with_elements_init_to_platform_proven_xml` in src/mssql_dump/tests.rs.",
+    "IMPORTANT CORRECTION found only by testing against native UT 11.5.27.75's own 1cv8.cf directly (not this fixture's raw_entry files): `parse_moxel_drawing`'s own `fields[12]` (the whole object slot, as split from the real `<drawing>` record) carries ONE EXTRA WRAPPING BRACE around the `{19,...}` object for `GanttChart` specifically -- `{ {19,...} }`, a single member with no top-level comma -- unlike the plain `Chart` kind, whose `fields[12]` is `{{11},{74,...}}` with no such extra wrap. This fixture's `raw/*-object-payload.txt` files are already the UNWRAPPED `{19,...}` text (a prior wave sliced them by searching for that marker directly inside a whole-document `cf extract`, not via the object-level `cf extract <cf> <uuid>.0` the `description` fields above literally name), so unit tests built directly against them never exercised the wrap and passed while the real corpus export still produced zero `<drawing>` elements for both GanttChart templates (`ut` gate stayed at `exact=50456`, unchanged, on the first attempt this wave). Found by decoding native UT 11.5.27.75's real `1cv8.cf` through the full `parse_moxel_spreadsheet_text` pipeline (not just the isolated payload) and observing `parse_moxel_drawing` return `None` where the isolated-payload test returned `Some`. Fixed in `parse_moxel_drawing`'s `GanttChart` match arm: unwrap `fields[12]` one more level (`split_1c_braced_fields`, require exactly one member) before calling `parse_moxel_gantt_chart`.",
+    "The GanttChart object payload's own top-level shape is `{19, <32 more top-level fields>}` -- 33 fields total. Field[1] is `{0,{11},{74,...}}` (the plain-Chart `parse_moxel_chart`-compatible payload, re-wrapped by stripping the leading `0,`); fields[2..33) are GanttChart-specific.",
+    "field[2]/field[3] are `<d3p1:points>`/`<d3p1:series>`: `{1,{3,0,1,0,<value>,<contentCacheItem>,<autoText>,0}}` / `{0,{3,0,1,0,<value>,<contentCacheItem>,<autoText>,0}}` respectively, where `<value>`'s key record `{8,0,0,0,0,0,{\"U\"},{1,0},{\"U\"},0,<baseData>}` is shared (only `baseData` -- the cache-template id -- and `autoText` vary; both proven on two independent values each across the two records). `points` alone carries an extra `font`/`picture` pair its `value` element has and `series` does not.",
+    "field[6] is `drawEmpty` (bool). field[7] is `<d3p1:timeScale>`: `{3,0,1,<level>,<transparent=false>,<backColor>,<textColor=style:FormTextColor>,<currentLevel=0>}`, with `<level>` `{8,<measure>,<interval=1>,<show>,<line>,<scaleColor=#C0C0C0>,<dayFormatRule>,<format=empty>,<labels.ticks=0>,<backColor=auto>,<textColor=auto>,<showPereodicalLabels=true>}`. `measure` and `dayFormatRule` are enums proven at two codes each; `show` and `backColor` are real per-record fields (`backColor` reuses `parse_moxel_chart_color`, extended with a new `-10` = `style:FieldBackColor` code this fixture is the first to need); `line` is the fixed `width=1`/`Dotted` record, unvaried.",
+    "field[9] (`fixedVariantMeasure`) shares its code table with `level.measure` (`moxel_gantt_time_measure`: `10`=Minute, `20`=Hour, `30`=Day, `50`=Month -- evenly spaced by 10, suggesting an unobserved longer ladder this reader does not guess at).",
+    "field[12], field[13] and field[14] are dates in a fixed 14-digit `YYYYMMDDHHMMSS` numeric-string format (no separators), matching `<d3p1:fullIntervalBegin>`, `<d3p1:fullIntervalEnd>` and `<d3p1:visualBegin>` (ISO `YYYY-MM-DDTHH:MM:SS`) respectively in both examples.",
+    "field[15] (`intervalDrawType`) is a two-code enum: `0`=Flat, `3`=Gradient. field[22]/field[25] (`outboundColor`/`linksColor`) reuse `parse_moxel_chart_color`'s existing direct-RGB branch unchanged. field[26] (`linksLine`) reuses `parse_moxel_chart_line` unchanged (width 1, Solid). field[31] (`textPlacement`) is a two-code enum: `0`=Auto, `1`=Cut.",
+    "field[19] (`verticalScrollEnable`) is a real bool field, proven independently by a `seed.sh`-built control (`gantt-control`, CommonTemplate `GanttChartTest` on the `Web_Service` skeleton, holding the `dlitelnost` record's own bytes) with only this one XML element toggled true.",
+    "The rest of the wrapper (fields 4, 5, 8, 10, 11, 16, 17, 18, 20, 21, 23, 24, 27, 28, 29, 30, 32) is validated as a positional literal, unvaried between the two native records -- same treatment `parse_moxel_chart` already gives most of the plain Chart's own tail/post."
+  ],
+  "non_claims": [
+    "Every literal field above is validated against exactly two native examples, not derived from seed variation (the seed factory can round-trip a hand-built GanttChart CommonTemplate -- see `gantt-control` -- but cannot force alternate values for most of these fields without a real Designer session). `showPointsText`/`showData`/`intervalTextRepresentation` (fields 28/29/30, hard-coded `Show`/`Auto`/`Auto` in the writer) and `keepScaleVariant`/`fixedVariantInterval`/`autoFullInterval`/`noneVariantChars`/`noneVariantMeasure`/`verticalStretch`/`showValueText`/`extTitle` in particular are single-value observations that could in principle take other codes a future record might need.",
+    "The plain Chart payload embedded as field[1] needed five new real fields plus one new chartType code beyond what the pre-existing 13-record corpus ever exercised -- see moxel.rs's `MoxelChart`/`validate_moxel_chart_v74_front` doc comments, not repeated here."
+  ]
+}

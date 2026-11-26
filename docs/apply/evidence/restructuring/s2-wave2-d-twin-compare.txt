@@ -1,0 +1,264 @@
+S1-D (#400): the twin protocol of docs/apply/restructuring.md 12.6 for the cases d0 (one index flag alone) and d1 (the index flag on and off in six objects), ours through mssql-config-apply --allow-restructure s1 --i-have-a-backup. Assembled by assemble_evidence_run.py from the out files of twin_run.ps1.
+
+====================================================================================================
+CASE d0
+====================================================================================================
+plan: catalog КлючевыеОперации (Reference2598): switched indexes Fld2646 = ЦелевоеВремя (DontIndex -> Index)
+rebuilt tables: _Reference2598
+caches: (none written)
+
+--- 2. tables, columns, indexes (snapdiff native vs ours)
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (4):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C4095051F4 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C4A37577B9 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     - C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     - C _UpdateId binary(16) NULL
+     - C _LastUpdateResult numeric(2,0) NULL
+     - C _LastUpdateError varbinary(max) NULL
+  T _Reference2598
+     - I PK___Referen__AC8ED0C4638B75F5 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___Referen__AC8ED0C46F611D5B CLUSTERED [PK UNIQUE] (_IDRRef)
+== data: tables whose rowcount/checksum changed
+(9)
+  ConfigCAS: (636, '1634444173') -> (12797, '-472238273')
+  DBSchema: (1, '302360146') -> (1, '1145096947')
+  Files: (44, '-1184941569') -> (353, '-1291273960')
+  Params: (38, '1744018605') -> (38, '489594829')
+  SchemaStorage: (2, '1691359828') -> (2, '566016770')
+  _ConfigChngR: (20685, '1245545612') -> (20685, '-1354141076')
+  _ConfigChngR_ExtProps: (21357, '-673532357') -> (21357, '-1552377122')
+  _ExtensionsRestructNGS: (3, '2045766927') -> (0, 'None')
+  _Reference2598: (716, '259281026') -> (716, '259318146')
+== service blobs
+DBSchema same: False ['11bcd35330499b31eff4bce6be5e8bd4634fdef6cddb8eabb9948f10db194c59'] ['d7dd8b331363e834d76df0786f77189ca2e0c2b7f23fcd636056032d15e466b3']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 5 meta-only 17
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  4fcf7faa -> 8732478b
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  4509e016 -> dd001d83
+    ~ DBNames [0] 143619 -> 144916 bytes  e1d48608 -> 98fb18e0
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  ac10b5b7 -> 39203643
+    ~ siVersions [0] 1273 -> 1273 bytes  b9e9e782 -> a2df3595
+    m 0b698dcd-501d-42d9-892d-5a9157bc996a.si [0] 4026-09-30 00:13:48 -> 4026-08-22 09:47:35
+    m 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 4026-09-30 00:13:50 -> 4026-08-22 09:47:36
+    m 215d232c-9c9e-4f7c-8a87-142cd3797264.si [0] 4026-09-30 00:13:48 -> 4026-08-22 09:47:35
+    m 2203278d-ef4f-4f68-98f1-feb257d53ecc.si [0] 4026-09-30 00:13:48 -> 4026-08-22 09:47:35
+    m 42ed49cc-765d-4314-bc2d-af425af7bf13.si [0] 4026-09-30 00:13:48 -> 4026-08-22 09:47:35
+    m 54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui [0] 4026-09-30 00:10:39 -> 4026-09-19 23:33:02
+    m 59274b8d-4447-4bf4-9d29-bfa099a1de37.si [0] 4026-09-30 00:13:48 -> 4026-08-22 09:47:35
+    m a07b62f0-1f01-484a-93d9-d42764cedac0.si [0] 4026-09-30 00:13:48 -> 4026-08-22 09:47:35
+    m c40aafd6-c889-4229-807a-851d0bc5bc97.si [0] 4026-09-30 00:13:50 -> 4026-08-22 09:47:36
+    m c4629235-4823-4320-b8b5-1d08f4c6d612.si [0] 4026-09-30 00:13:48 -> 4026-08-22 09:47:35
+Config: rows 9841 -> 9841; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+
+--- 3. data of the rebuilt tables, EXCEPT both ways (A = native, B = ours)
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+
+--- 4. Config rows (rows one twin has and the other has not)
+== only in A (0 rows)
+== only in B (0 rows)
+
+--- 5. DBSchema entries and DBNames
+tables: 1761 / 1761
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+order of the common entries is the same: False
+first positions that differ (1 vs 2): [('DbCopiesSettings', 'DbCopies'), ('DbCopiesTrLogs', 'DbCopiesSettings'), ('DbCopiesTablesStates', 'DbCopiesTrLogs'), ('DbCopiesInitialLast', 'DbCopiesUpdates'), ('DbCopiesTrChObj', 'DbCopiesTablesStates'), ('ChrcOpt', 'DbCopiesInitialLast'), ('CKindsOpt', 'DbCopiesTrChObj'), ('AccOpt', 'ChrcOpt'), ('DbCopiesTrChanges', 'CKindsOpt'), ('Ecs', 'AccOpt'), ('Bots', 'DbCopiesTrChanges'), ('DbCopiesTrTables', 'Ecs')]
+
+--- 6. the .si rows
+== ibcmd_rs_04_ddl_s2_d0_nat/nat_after  ->  ibcmd_rs_04_ddl_s2_d0_own/own_after
+16 of 16 `.si` rows have the same text (compared after inflate)
+
+--- 7. native config apply on our twin
+native apply exit=0 in 4,6s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+
+--- 8. native export of both, ibcmd-rs source-diff
+summary: {"left_only": 0, "right_only": 0, "different": 0, "unchanged": 12198}
+
+--- 9. cluster session
+outputs identical: True (8 lines)
+
+--- 10. a rehearsal changes nothing (snapdiff staged vs after the rehearsal)
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (0):
+== data: tables whose rowcount/checksum changed
+(0)
+== service blobs
+DBSchema same: True ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef']
+SchemaStorage id=0 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 39 -> 39; added 0 removed 0 changed 0 meta-only 0
+
+--- 11. refusals (dry run on a fresh twin whose stage has one change more; nothing written)
+(unit tests only)
+
+====================================================================================================
+CASE d1
+====================================================================================================
+plan: catalog _ДемоПроекты (Reference22): switched indexes Fld179 = РеквизитДопУпорядочивания (IndexWithAdditionalOrder -> DontIndex) | catalog КлассификаторБанков (Reference2565): switched indexes Fld2567 = Город (DontIndex -> Index), Fld2569 = Телефоны (DontIndex -> IndexWithAdditionalOrder) | catalog КлючевыеОперации (Reference2598): switched indexes Fld2645 = Приоритет (Index -> DontIndex), Fld2646 = ЦелевоеВремя (DontIndex -> Index), Fld5921 = ВыполненаСОшибкой (Index -> DontIndex) | catalog ТомаХраненияФайлов (Reference576): switched indexes Fld1355 = МаксимальныйРазмер (DontIndex -> Index), Fld659 = ПорядокЗаполнения (Index -> DontIndex) | document _ДемоЗаказПокупателя (Document39): switched indexes Fld3827 = ДатаДоставки (DontIndex -> IndexWithAdditionalOrder), Fld3824 = РегионДоставки (DontIndex -> Index), Fld3821 = СтатусЗаказа (Index -> DontIndex) | document _ДемоНачислениеЗарплаты (Document996): switched indexes Fld4062 = ПериодРегистрации (IndexWithAdditionalOrder -> DontIndex)
+rebuilt tables: _Reference22, _Reference2565, _Reference2598, _Reference576, _Document39, _Document39_VT970, _Document39_VT2148, _Document39_VT3663, _Document996, _Document996_VT1121, _Document996_VT2191
+caches: (none written)
+
+--- 2. tables, columns, indexes (snapdiff native vs ours)
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (6):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C481F7C59E CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C4A37577B9 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     - C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     - C _UpdateId binary(16) NULL
+     - C _LastUpdateResult numeric(2,0) NULL
+     - C _LastUpdateError varbinary(max) NULL
+  T _Reference2565
+     - I PK___Referen__AC8ED0C44B84561B CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___Referen__AC8ED0C4EFB0857E CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _Reference2598
+     - I PK___Referen__AC8ED0C4A86C3273 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___Referen__AC8ED0C4E3E51483 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _Reference576
+     - I PK___Referen__AC8ED0C494541283 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___Referen__AC8ED0C4725E983A CLUSTERED [PK UNIQUE] (_IDRRef)
+== data: tables whose rowcount/checksum changed
+(14)
+  ConfigCAS: (636, '1634444173') -> (12797, '-472238273')
+  DBSchema: (1, '-2108524937') -> (1, '1007040840')
+  Files: (44, '1665411493') -> (353, '1718631569')
+  Params: (38, '-1462844744') -> (38, '-1999409778')
+  SchemaStorage: (2, '855654340') -> (2, '1733230714')
+  _ConfigChngR: (20685, '1860794474') -> (20685, '-1354141076')
+  _ConfigChngR_ExtProps: (21357, '-1983623419') -> (21357, '-1552377122')
+  _Document39: (8, '1367717836') -> (8, '1367521228')
+  _Document996: (2, '704007234') -> (2, '704006210')
+  _ExtensionsRestructNGS: (3, '2045766927') -> (0, 'None')
+  _Reference22: (3, '373774419') -> (3, '373638995')
+  _Reference2565: (4840, '1513003374') -> (4840, '1509923182')
+  _Reference2598: (716, '259297154') -> (716, '259320194')
+  _Reference576: (2, '-837227602') -> (2, '-837232722')
+== service blobs
+DBSchema same: False ['2962bb183bf3a9a8fcaf9cd88403712fda95c90fa4af6fa414ab0ac24fbd1b42'] ['0917788700580f30f2b10c433322e4aaa81ab1d93f5221d49549aaacf207c4b2']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 5 meta-only 17
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  410ee74f -> 8732478b
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  a2cfcb71 -> dd001d83
+    ~ DBNames [0] 143619 -> 144916 bytes  e1d48608 -> 98fb18e0
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  ac10b5b7 -> cfab2f42
+    ~ siVersions [0] 1273 -> 1273 bytes  8215f3a8 -> a2df3595
+    m 0b698dcd-501d-42d9-892d-5a9157bc996a.si [0] 4026-09-30 00:24:11 -> 4026-08-22 09:47:35
+
+--- 3. data of the rebuilt tables, EXCEPT both ways (A = native, B = ours)
+_Reference22	rows 3 / 3	only in A 0	only in B 0
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference576	rows 2 / 2	only in A 0	only in B 0
+_Document39	rows 8 / 8	only in A 0	only in B 0
+_Document39_VT970	rows 7 / 7	only in A 0	only in B 0
+_Document39_VT2148	rows 4 / 4	only in A 0	only in B 0
+_Document39_VT3663	rows 1 / 1	only in A 0	only in B 0
+_Document996	rows 2 / 2	only in A 0	only in B 0
+_Document996_VT1121	rows 6 / 6	only in A 0	only in B 0
+_Document996_VT2191	rows 4 / 4	only in A 0	only in B 0
+
+--- 4. Config rows (rows one twin has and the other has not)
+== only in A (0 rows)
+== only in B (0 rows)
+
+--- 5. DBSchema entries and DBNames
+tables: 1761 / 1761
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+order of the common entries is the same: False
+first positions that differ (1 vs 2): [('DbCopiesSettings', 'DbCopies'), ('DbCopiesTrLogs', 'DbCopiesSettings'), ('DbCopiesTablesStates', 'DbCopiesTrLogs'), ('DbCopiesInitialLast', 'DbCopiesUpdates'), ('DbCopiesTrChObj', 'DbCopiesTablesStates'), ('ChrcOpt', 'DbCopiesInitialLast'), ('CKindsOpt', 'DbCopiesTrChObj'), ('AccOpt', 'ChrcOpt'), ('DbCopiesTrChanges', 'CKindsOpt'), ('Ecs', 'AccOpt'), ('Bots', 'DbCopiesTrChanges'), ('DbCopiesTrTables', 'Ecs')]
+
+--- 6. the .si rows
+== ibcmd_rs_04_ddl_s2_d1_nat/nat_after  ->  ibcmd_rs_04_ddl_s2_d1_own/own_after
+16 of 16 `.si` rows have the same text (compared after inflate)
+
+--- 7. native config apply on our twin
+native apply exit=0 in 7,4s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+
+--- 8. native export of both, ibcmd-rs source-diff
+summary: {"left_only": 0, "right_only": 0, "different": 0, "unchanged": 12198}
+
+--- 9. cluster session
+outputs identical: True (60 lines)
+
+--- 10. a rehearsal changes nothing (snapdiff staged vs after the rehearsal)
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (0):
+== data: tables whose rowcount/checksum changed
+(0)
+== service blobs
+DBSchema same: True ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef']
+SchemaStorage id=0 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 39 -> 39; added 0 removed 0 changed 0 meta-only 0
+
+--- 11. refusals (dry run on a fresh twin whose stage has one change more; nothing written)
+index_to_additional: needs_native_apply
+                                            S1: index-mode-outside-s1: Catalog.КлючевыеОперации: ChildObjects/Attribute[Приоритет]/Properties/Indexing: Index -> IndexWithAdditionalOrder (a property of an attribute no rule covers) [Index -> IndexWithAdditionalOrder (a proper
+  344cb0de-315d-4d05-93f8-8a1f53208470      the descriptor's text differs from the active one: a metadata change, possibly structural
+  4eee25b1-2da6-459b-953b-4c8d519c9bce      the descriptor's text differs from the active one: a metadata change, possibly structural
+root_changed: needs_native_apply
+                                            S1: service-row-changed: Configuration: the root row differs: another configuration [the root row differs]
+  root                                      the service row root changes
+  344cb0de-315d-4d05-93f8-8a1f53208470      the descriptor's text differs from the active one: a metadata change, possibly structural
+
+--- 12. a THROW before COMMIT on a fresh twin
+the script ran for 8,6 s and said: Контекст базы данных изменен на "ibcmd_rs_04_ddl_s2_d1_fail2". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 706 | injected failure before COMMIT
+before:
+Config rows|9847
+ConfigSave rows|9
+Params rows|39
+Config checksum|522196957
+ConfigSave checksum|-478719591
+Params checksum|369288792
+SchemaStorage 0 status|100
+SchemaStorage 0 schema|-970237343
+DBSchema|-970237343
+DBNames|-2047740313
+columns|188573852
+indexes|-513582142
+tables *NG|0
+tables|2234
+after:
+Config rows|9847
+ConfigSave rows|9
+Params rows|39
+Config checksum|522196957
+ConfigSave checksum|-478719591
+Params checksum|369288792
+SchemaStorage 0 status|100
+SchemaStorage 0 schema|-970237343
+DBSchema|-970237343
+DBNames|-2047740313
+columns|188573852
+indexes|-513582142
+tables *NG|0
+tables|2234
+digest unchanged: True

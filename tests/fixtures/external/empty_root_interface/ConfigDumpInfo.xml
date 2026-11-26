@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.20">
+	<ConfigVersions>
+		<Metadata name="Configuration.БазаТест" id="ba46775a-8ecc-49a2-8dc9-f4173b708a73" configVersion="cfcf629f04df2a4ba013766bed8f0f0800000000"/>
+		<Metadata name="Configuration.БазаТест.ClientApplicationInterface" id="00000000-0000-0000-0000-000000000002.b" configVersion="1f5a69d1f6e4b546886b55e72340a4ad00000000"/>
+		<Metadata name="Configuration.БазаТест.CommandInterface" id="00000000-0000-0000-0000-000000000002.a" configVersion="40c9ceb031c8f547a23a4ba51bec445400000000"/>
+		<Metadata name="Configuration.БазаТест.MainSectionCommandInterface" id="00000000-0000-0000-0000-000000000002.9" configVersion="fc2319ad01308741a12f5efc9d94ebb300000000"/>
+		<Metadata name="Language.Русский" id="00000000-0000-0000-0000-000000000001" configVersion="7dd053096d548040bb1689bc572b236b00000000"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

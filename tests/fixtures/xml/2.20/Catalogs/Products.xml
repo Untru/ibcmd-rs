@@ -1,0 +1,75 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:f="urn:ibcmd-rs:xml-corpus:future" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+  <Catalog uuid="30000000-0000-4000-8000-000000000001">
+    <Properties>
+      <Name>Products</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>en</v8:lang>
+          <v8:content>Products</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>Catalog with ordered child objects</Comment>
+      <UseStandardCommands>true</UseStandardCommands>
+      <Hierarchical>false</Hierarchical>
+      <CodeLength>9</CodeLength>
+      <DescriptionLength>100</DescriptionLength>
+      <f:FutureCatalogSetting f:mode="preserve">catalog-opaque</f:FutureCatalogSetting>
+    </Properties>
+    <ChildObjects>
+      <Attribute uuid="31000000-0000-4000-8000-000000000001">
+        <Properties>
+          <Name>Sku</Name>
+          <Synonym/>
+          <Comment>Stable stock code</Comment>
+          <Type>
+            <v8:Type>xs:string</v8:Type>
+            <v8:StringQualifiers>
+              <v8:Length>32</v8:Length>
+              <v8:AllowedLength>Variable</v8:AllowedLength>
+            </v8:StringQualifiers>
+          </Type>
+        </Properties>
+      </Attribute>
+      <f:FutureChild f:mode="preserve">child-opaque</f:FutureChild>
+      <TabularSection uuid="32000000-0000-4000-8000-000000000001">
+        <Properties>
+          <Name>Lines</Name>
+          <Synonym/>
+          <Comment>Ordered nested attributes</Comment>
+        </Properties>
+        <ChildObjects>
+          <Attribute uuid="32100000-0000-4000-8000-000000000001">
+            <Properties>
+              <Name>Quantity</Name>
+              <Synonym/>
+              <Comment/>
+              <Type>
+                <v8:Type>xs:decimal</v8:Type>
+                <v8:NumberQualifiers>
+                  <v8:Digits>15</v8:Digits>
+                  <v8:FractionDigits>3</v8:FractionDigits>
+                  <v8:AllowedSign>Nonnegative</v8:AllowedSign>
+                </v8:NumberQualifiers>
+              </Type>
+            </Properties>
+          </Attribute>
+          <Attribute uuid="32200000-0000-4000-8000-000000000001">
+            <Properties>
+              <Name>Note</Name>
+              <Synonym/>
+              <Comment/>
+              <Type>
+                <v8:Type>xs:string</v8:Type>
+                <v8:StringQualifiers>
+                  <v8:Length>80</v8:Length>
+                  <v8:AllowedLength>Variable</v8:AllowedLength>
+                </v8:StringQualifiers>
+              </Type>
+            </Properties>
+          </Attribute>
+        </ChildObjects>
+      </TabularSection>
+    </ChildObjects>
+  </Catalog>
+</MetaDataObject>

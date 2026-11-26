@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-task-number-allowed-length-data-lock-mode",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-24",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "Two minimal synthetic Task objects (no custom attributes, forms, addressing, or commands) added to the Web_Service skeleton's Configuration.xml, each changing exactly one of NumberAllowedLength/DataLockControlMode away from the other's default so the two properties can be told apart. Imported and re-exported by ibcmd 8.3.27.2214 itself -- the platform is the authority, not the seed generator."
+  },
+  "objects": [
+    {
+      "kind": "Task",
+      "name": "ЗадачаА",
+      "raw_entry": {
+        "path": "raw/task-a-variable-managed.txt",
+        "note": "NumberAllowedLength=Variable (flipped from default), DataLockControlMode=Managed (left at default)"
+      },
+      "native_outputs": [
+        {
+          "path": "native/Tasks/ЗадачаА.xml"
+        }
+      ]
+    },
+    {
+      "kind": "Task",
+      "name": "ЗадачаБ",
+      "raw_entry": {
+        "path": "raw/task-b-fixed-automatic.txt",
+        "note": "NumberAllowedLength=Fixed (left at default), DataLockControlMode=Automatic (flipped from default)"
+      },
+      "native_outputs": [
+        {
+          "path": "native/Tasks/ЗадачаБ.xml"
+        }
+      ]
+    }
+  ],
+  "proven_claims": [
+    "Task owner slot 43 (not slot 20) carries NumberAllowedLength: '0' decodes to Fixed, '1' decodes to Variable.",
+    "Task owner slot 33 (not slot 32) carries DataLockControlMode: '1' decodes to Managed, '0' decodes to Automatic.",
+    "Slots 20 and 32 stay '1' in both ЗадачаА and ЗадачаБ regardless of which property (if either) actually changed, so they are not the carriers the task-basic fixture's single sample suggested.",
+    "Combined with native UT 11.5.27.75 (Tasks/ЗадачаИсполнителя.xml: Fixed+Managed, slot43=0/slot33=1) and the pre-existing task-basic fixture (CorpusTask: Variable+Automatic, slot43=1/slot33=0), the five independent platform captures give an exact partition at both slots."
+  ],
+  "non_claims": [
+    "This diagnostic fixture does not satisfy release-grade real-database evidence on its own; it corroborates native UT 11.5.27.75, which is the release-grade sample.",
+    "Slots 33 and 43 are also read by parse_task_full_text_search_slot and parse_task_choice_history_on_input_slot for FullTextSearch/ChoiceHistoryOnInput; those functions map both '0' and '1' to a single constant output across all known samples, so this fixture neither confirms nor refutes their own field attribution."
+  ]
+}

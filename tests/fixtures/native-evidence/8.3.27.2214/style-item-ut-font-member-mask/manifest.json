@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-style-item-ut-font-member-mask",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "elements": [
+      {
+        "storage_element": "291539a3-256f-4a02-9408-826755ca0736",
+        "source_path": "StyleItems/ЗачеркнутыйШрифт.xml",
+        "native_export_size": 1371,
+        "native_export_sha256": "a52e554624a47f5f7ed2d36ef5563fe32964f484ad854955f1cb6042890f837f"
+      },
+      {
+        "storage_element": "4ae4403e-42a8-443c-8812-23292f10a5a6",
+        "source_path": "StyleItems/УвеличенныйЖирныйШрифтБЭД.xml",
+        "native_export_size": 1416,
+        "native_export_sha256": "6250f4b80ec02730204b41d84995184b38563463ceeaa2d50a5fe41120d4b374"
+      },
+      {
+        "storage_element": "fc68cd6a-9e07-4c7c-a37a-941053632c02",
+        "source_path": "StyleItems/ШрифтВопросаВыполнения.xml",
+        "native_export_size": 1393,
+        "native_export_sha256": "43a97a20f02ec0cc93cb2a1bec1bf9fe267db4c25b08ebd30cb854119b142385"
+      }
+    ],
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body.",
+    "expectation": "Member masks 32, 6 and 8 select strikeout, height+weight and italic respectively; the platform export writes strikeout=\"true\", height=\"12\" bold=\"true\" and italic=\"true\" and no other font flag."
+  },
+  "retained": {
+    "packed_body_strikeout": {
+      "size": 182,
+      "sha256": "b5d1e99eecf915b098ff20db59ebac3e42b314423af3fbb46d64a3f87c8446c3",
+      "unpacked_size": 273,
+      "unpacked_sha256": "76abff18685e58adabaf3734535ba0dafe8d7bebf712d44d3880f8ca170b30b6"
+    },
+    "packed_body_height_bold": {
+      "size": 208,
+      "sha256": "3564922688293e207818f9ae1fe207126bc17d6364fc8fa8c0960b601608f631",
+      "unpacked_size": 316,
+      "unpacked_sha256": "39962994264ad50a3c64335b62fadf4438f6507a1ec1a8538cad5e474f657a37"
+    },
+    "packed_body_italic": {
+      "size": 193,
+      "sha256": "27c6ecded3131f97a29cb3b3824464be9feb7362eeea14b06e56520cc33c6b4f",
+      "unpacked_size": 297,
+      "unpacked_sha256": "620493f1de0f1b9bc93f78fe346aed6c4d812412298485e0f6f8fe467cf06349"
+    }
+  }
+}

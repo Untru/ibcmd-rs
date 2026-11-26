@@ -1,0 +1,23 @@
+PASS actual worker acquire/finally known success captures bytes and releases exact lease
+PASS actual acquire/finally preexisting retains potential hold; release0
+PASS actual acquire/finally preexisting-LOAD retains potential hold; release0
+PASS actual acquire/finally preexisting-Load retains potential hold; release0
+PASS actual acquire/finally nonzero retains potential hold; release0
+PASS actual acquire/finally unknown retains potential hold; release0
+PASS actual acquire/finally replacement retains potential hold; release0
+PASS actual acquire/finally foreign-replacement retains potential hold; release0
+PASS exact heavy byte drift no release
+PASS exact native byte drift no release
+PASS actual finally native-nonzero serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS actual finally native-release-nonzero serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS actual finally native-lease-drift serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS actual finally heavy-nonzero serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS actual finally heavy-release-nonzero serialized child proof retains worker; unregister/stop/native release0 with liveChild=false
+PASS cross-child native acquired/released latest sequence and duplicate refusal
+PASS actual native lockTool/acquire callsite uses wrapper and serialized lease proof
+PASS actual native acquire/release both exact known path spellings retain lease/proof protocol
+PASS actual Run sticky cross-child resource marker with known nonzero and dead child
+PASS actual worker reader extra member refused before owner read/release
+PASS actual heavy reader extra member refused before owner read/release
+PASS actual native reader extra member refused before owner read/release
+ALL PASS actual new7 resource calls/finally; realStarts=realSignals=SQLcalls=registryWrites=acquires=releases=0

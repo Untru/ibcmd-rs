@@ -1,0 +1,15 @@
+{
+  "database": "ibcmd_rs_04_import_rem85_native",
+  "tree": "F:\\ibcmd\\lab\\04\\import\\tree\\b85rem",
+  "platform": "8.5",
+  "import_files": [
+    "Catalogs/Заметки.xml",
+    "DataProcessors/ЗаполнениеКалендарныхГрафиков.xml"
+  ],
+  "import": {
+    "Rows": 0,
+    "Exit": -1,
+    "Seconds": 2.5,
+    "Tail": "[INFO] Импорт файлов конфигурации из XML... | [ERROR] Импорт файлов конфигурации из XML завершен с ошибкой. Загрузка невозможна: редактирование объекта метаданных Catalog.Заметки запрещено!"
+  }
+}

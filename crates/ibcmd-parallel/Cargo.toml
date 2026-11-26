@@ -1,0 +1,14 @@
+[package]
+name = "ibcmd-parallel"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The process-wide worker pools (CPU, memory-bound and file-bound) and their sizing from command options and IBCMD_RS_WORKERS / IBCMD_RS_IO_WORKERS"
+
+[dependencies]
+anyhow = "1.0"
+rayon = "1.10"
+
+[lints.rust]
+unsafe_code = "forbid"

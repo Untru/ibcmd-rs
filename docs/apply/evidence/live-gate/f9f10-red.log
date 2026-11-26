@@ -1,0 +1,31 @@
+2026-09-30T14:26:10 == f9_f10 red with F:\ibcmd\lab\04\apply\bin\ibcmd-rs-408.exe on ibcmd_rs_05_apply_wlab1_20260930 (worker lab cluster 16caf1f1-147f-49bf-9106-842b0be60c8c)
+2026-09-30T14:26:11 tool: ibcmd-rs 0.3.0
+2026-09-30T14:26:11 ---- case chain
+2026-09-30T14:26:27 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=no probe_rows=0 versions=1E15F7BFA97DC63B
+2026-09-30T14:26:48 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=no probe_rows=0 versions=AF039DEDF8E1E163
+2026-09-30T14:26:48 exit 1 in 17.8 s; error: Error: SQL script F:\ibcmd\lab\05\live\out\red_chain.sql failed Caused by: 0: the script failed 1: SQL Server request failed 2: Token error: 'Инструкцию BACKUP LOG невозможно выполнить, так как не существует резервной копии текущей базы данных.' on server DESKTOP-SMI5N4O executing on line 74 (code: 4214, state: 1, class: 16)
+2026-09-30T14:26:48 PASS  F-9 chain: the promotion is committed although the tail-log backup cannot be taken (committed=True)
+2026-09-30T14:26:48 ---- case nodir
+2026-09-30T14:26:57 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=AF039DEDF8E1E163
+2026-09-30T14:27:10 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=2E736D4CEFC3F082
+2026-09-30T14:27:10 exit 1 in 11 s; error: Error: SQL script F:\ibcmd\lab\05\live\out\red_nodir.sql failed Caused by: 0: the script failed 1: SQL Server request failed 2: Token error: 'невозможно открыть устройство резервного копирования F:\ibcmd\lab\05\live\nodir_142610\red_nodir.trn. Ошибка операционной системы 3(Системе не удается найти указанный путь.).' on server DESKTOP-SMI5N4O executing on line 74 (code: 3201, state: 1, class: 16)
+2026-09-30T14:27:10 PASS  F-9 nodir: the promotion is committed although the tail directory does not exist (committed=True)
+2026-09-30T14:27:10 ---- case nowrite
+2026-09-30T14:27:14 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=2E736D4CEFC3F082
+2026-09-30T14:27:28 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=A967CF3E44ECDAEB
+2026-09-30T14:27:28 exit 1 in 10.4 s; error: Error: SQL script F:\ibcmd\lab\05\live\out\red_nowrite.sql failed Caused by: 0: the script failed 1: SQL Server request failed 2: Token error: 'невозможно открыть устройство резервного копирования C:\Windows\System32\config\red_nowrite.trn. Ошибка операционной системы 5(Отказано в доступе.).' on server DESKTOP-SMI5N4O executing on line 74 (code: 3201, state: 1, class: 16)
+2026-09-30T14:27:28 PASS  F-9 nowrite: the promotion is committed although the account cannot write to the directory (committed=True)
+2026-09-30T14:27:28 ---- case sessions
+2026-09-30T14:27:40 holder: READY session 65 holds an open transaction with one row in dbo.IbcmdRsLiveProbe
+2026-09-30T14:27:51 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=A967CF3E44ECDAEB
+2026-09-30T14:28:52 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=0DD55AE37A566C56
+2026-09-30T14:28:52 exit 1 in 44.1 s; error: Error: SQL script F:\ibcmd\lab\05\live\out\red_sessions.sql failed Caused by: 0: the script failed 1: SQL Server request failed 2: Token error: '1C SQL connections did not recover before the live activation deadline; database is online and the second recovery was not started' on server DESKTOP-SMI5N4O executing on line 79 (code: 57234, state: 1, class: 16)
+2026-09-30T14:28:53 the session: READY session 65 holds an open transaction with one row in dbo.IbcmdRsLiveProbe | LOST A transport-level error has occurred when sending the request to the server. (provider: Shared Memory Provider, error: 0 - С обоих концов канала отсутствуют процессы.)Исключение при вызове "Commit" с аргументами "0": "A transport-level error has occurred when sending the request to the server. (provider: Shared Memory Provider, error: 0 - С обоих концов канала отсутствуют процессы.)"
+2026-09-30T14:29:00 after the session ended: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=0DD55AE37A566C56
+2026-09-30T14:29:00 PASS  F-10: the switch went on, the session was cut off and its row is gone, with no warning (committed=True, held=READY session 65 holds an open transaction with one row in dbo.IbcmdRsLiveProbe | LOST A transport-level error has occurred when sending the request to the server. (provider: Shared Memory Provider, error: 0 - С обоих концов канала отсутствуют процессы.)Исключение при вызове "Commit" с аргументами "0": "A transport-level error has occurred when sending the request to the server. (provider: Shared Memory Provider, error: 0 - С обоих концов канала отсутствуют процессы.)")
+2026-09-30T14:29:00 ---- case clean
+2026-09-30T14:29:18 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=0DD55AE37A566C56
+2026-09-30T14:29:54 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=0 versions=A30365911DAC0EF2
+2026-09-30T14:29:54 exit 1 in 33.3 s; error: Error: SQL script F:\ibcmd\lab\05\live\out\red_clean.sql failed Caused by: 0: the script failed 1: SQL Server request failed 2: Token error: '1C SQL connections did not recover before the live activation deadline; database is online and the second recovery was not started' on server DESKTOP-SMI5N4O executing on line 79 (code: 57234, state: 1, class: 16)
+2026-09-30T14:29:54 PASS  clean: nothing wrong, the promotion is committed and the database is online (exit 1; tail backup sets: 1)
+2026-09-30T14:29:54 RESULT: all checks passed

@@ -1,0 +1,288 @@
+{
+  "format": 1,
+  "acquire_internal_minutes": 120,
+  "expected_head": "7aebba150e20c9b47b5956f4ca09e6cc62b28bef",
+  "gates_timeout_seconds": 7200,
+  "commands": [
+    {
+      "name": "git.exe",
+      "path": "C:\\Program Files\\Git\\cmd\\git.exe"
+    },
+    {
+      "name": "cargo.exe",
+      "path": "C:\\Users\\Pavel\\.cargo\\bin\\cargo.exe"
+    },
+    {
+      "name": "rustup.exe",
+      "path": "C:\\Users\\Pavel\\.cargo\\bin\\rustup.exe"
+    },
+    {
+      "name": "rustc.exe",
+      "path": "C:\\Users\\Pavel\\.cargo\\bin\\rustc.exe"
+    },
+    {
+      "name": "pwsh.exe",
+      "path": "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+    },
+    {
+      "name": "python.exe",
+      "path": "C:\\Program Files\\Python313\\python.exe"
+    },
+    {
+      "name": "cargo-clippy.exe",
+      "path": "C:\\Users\\Pavel\\.cargo\\bin\\cargo-clippy.exe"
+    }
+  ],
+  "acquire_child_timeout_seconds": 7230,
+  "files": [
+    {
+      "sha256": "748FA9D081C278397347B054B34BC9541EC55F7EE2DE965169CEB0754BB44740",
+      "bytes": 47008,
+      "path": "C:\\Program Files\\Git\\bin\\bash.exe"
+    },
+    {
+      "sha256": "DA240FE9BC24895B3E04150A4990B8A6FF329ECABCD8F19684C2CC310DA5EF3F",
+      "bytes": 46480,
+      "path": "C:\\Program Files\\Git\\cmd\\git.exe"
+    },
+    {
+      "sha256": "D09A1324132AA9DA4B4C2B14242DCAC893539A735FAB288136B101156434A55A",
+      "bytes": 4344208,
+      "path": "C:\\Program Files\\Git\\mingw64\\bin\\git.exe"
+    },
+    {
+      "sha256": "FC362AAE1F217D34D02237D99527839DD6CF85B37C7A0277109400BFA0FAA594",
+      "bytes": 2553064,
+      "path": "C:\\Program Files\\Git\\usr\\bin\\bash.exe"
+    },
+    {
+      "sha256": "FC362AAE1F217D34D02237D99527839DD6CF85B37C7A0277109400BFA0FAA594",
+      "bytes": 2553064,
+      "path": "C:\\Program Files\\Git\\usr\\bin\\sh.exe"
+    },
+    {
+      "sha256": "BFB46AF89433268872DDB43D1CA7A3F433452EE91ED356A9786940F90118E285",
+      "bytes": 301368,
+      "path": "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+    },
+    {
+      "sha256": "7D96A4ED35D6E596CD9DD8933FEAFC66349CC21F75BE3B15C89FD336E50140C1",
+      "bytes": 105840,
+      "path": "C:\\Program Files\\Python313\\python.exe"
+    },
+    {
+      "sha256": "6F4BEF66261261FCB43131BE8720BAB817D403A09EDEC7455C371974B90BDB7E",
+      "bytes": 12721664,
+      "path": "C:\\Users\\Pavel\\.cargo\\bin\\cargo-clippy.exe"
+    },
+    {
+      "sha256": "6F4BEF66261261FCB43131BE8720BAB817D403A09EDEC7455C371974B90BDB7E",
+      "bytes": 12721664,
+      "path": "C:\\Users\\Pavel\\.cargo\\bin\\cargo.exe"
+    },
+    {
+      "sha256": "6F4BEF66261261FCB43131BE8720BAB817D403A09EDEC7455C371974B90BDB7E",
+      "bytes": 12721664,
+      "path": "C:\\Users\\Pavel\\.cargo\\bin\\rustc.exe"
+    },
+    {
+      "sha256": "6F4BEF66261261FCB43131BE8720BAB817D403A09EDEC7455C371974B90BDB7E",
+      "bytes": 12721664,
+      "path": "C:\\Users\\Pavel\\.cargo\\bin\\rustup.exe"
+    },
+    {
+      "sha256": "AF11A5540001371324994ABAA9EA1E69D50FED1ACB1A87E4ABEF179E8816058F",
+      "bytes": 100,
+      "path": "C:\\Users\\Pavel\\.rustup\\settings.toml"
+    },
+    {
+      "sha256": "CB0F2B164B3F6E95BFED7EC4AE9FC48F8CE8D9FEF3649B5AE87961F75E1EF484",
+      "bytes": 1182208,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\1.98.1-x86_64-pc-windows-msvc\\bin\\cargo-clippy.exe"
+    },
+    {
+      "sha256": "FCD2D35D13DC1A487C755E234BF2AEE06F75B522C8A691CAC9EE5F0D6FC854A1",
+      "bytes": 1226240,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\1.98.1-x86_64-pc-windows-msvc\\bin\\cargo-fmt.exe"
+    },
+    {
+      "sha256": "C37545EC61D48D31BDEFCE53280ECAB61C4EA54EAACE372FAC6A0316C6E165D9",
+      "bytes": 31435776,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\1.98.1-x86_64-pc-windows-msvc\\bin\\cargo.exe"
+    },
+    {
+      "sha256": "00FD4EF2FE60E603571573746E52F42F109BBFE4B879E7CA7313614FDA0B367B",
+      "bytes": 12372992,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\1.98.1-x86_64-pc-windows-msvc\\bin\\clippy-driver.exe"
+    },
+    {
+      "sha256": "CA9988AF88B1463F6857FDFE909299FEE50A63260B3E5F7DBCB5B4D3318B27BC",
+      "bytes": 110592,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\1.98.1-x86_64-pc-windows-msvc\\bin\\rustc.exe"
+    },
+    {
+      "sha256": "9DAFF87CF4052BA3F97DECB39D2822E1A96B3ED444EDA86ED8DF74802679DD60",
+      "bytes": 11116544,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\1.98.1-x86_64-pc-windows-msvc\\bin\\rustdoc.exe"
+    },
+    {
+      "sha256": "AC9D781249BFFABBB1BEDB691A5EA6F63A818C1DDA73DD698D4DFF687AD4C24E",
+      "bytes": 4752896,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\1.98.1-x86_64-pc-windows-msvc\\bin\\rustfmt.exe"
+    },
+    {
+      "sha256": "9F292E31019763FE51CE5673509383ACBA4EA7AE89D18516E7AE0C4A07D6525A",
+      "bytes": 1152000,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo-clippy.exe"
+    },
+    {
+      "sha256": "DC2B659EBFCDA5DE84E7701C20580A23AF2E396261D0C0E2858D03B82AA0BE77",
+      "bytes": 1232384,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo-fmt.exe"
+    },
+    {
+      "sha256": "DC19C8E6D66802D120BF0696B1924B748BD90F3CA16F21391E54A290FF12B7C5",
+      "bytes": 30601728,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe"
+    },
+    {
+      "sha256": "42DE42B2FCC5AE9C1390E8E6272F3035CAC24FB09FA32DBEC67EC35BFB027D57",
+      "bytes": 12142080,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\clippy-driver.exe"
+    },
+    {
+      "sha256": "E3EBBD547EA7B73C034D588BA569602B379F3B05AD1A3B5F8DCFAB9D4478D74A",
+      "bytes": 111104,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustc.exe"
+    },
+    {
+      "sha256": "CAFB47CD842BF391EEA8A909DDEBFFA98F0A3B6387FD5997D289D52138EF041B",
+      "bytes": 11568640,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustdoc.exe"
+    },
+    {
+      "sha256": "0187AEC123FA82B1778AAD39A7288AE905960A07C77B3849D79AB7E2527F1390",
+      "bytes": 4771328,
+      "path": "C:\\Users\\Pavel\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\rustfmt.exe"
+    },
+    {
+      "sha256": "DD9A690377F72E764EB9E9DE43F3C2B16E5B0C1DC1957A32549F5A76B6B2924A",
+      "bytes": 2646,
+      "path": "F:\\ibcmd\\lab\\04\\tools\\gates.sh"
+    },
+    {
+      "sha256": "A4E35EF94EAED6B5636E1F0F441D15F1B143EFAB3720FCB0DAC8651DFEB8A7A3",
+      "bytes": 4794,
+      "path": "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1"
+    },
+    {
+      "sha256": "B26BB9566FB680105C9B783ECD1CDE9CF8718750FBA9F366355462B111F9DB14",
+      "bytes": 509,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-combined-v3-helper-provenance.json"
+    },
+    {
+      "sha256": "A61BD24B2248CA81ED265ADDFCA0CD8C45AA1FDC327670B4CE045680F6E3075C",
+      "bytes": 3299,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-combined-v3-powershell.ps1"
+    },
+    {
+      "sha256": "4115C58742C2F26146A4C709FAFD66660324216BABC8D952CDE1DB8EB8E0373F",
+      "bytes": 6730,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-combined-v3-process.ps1"
+    },
+    {
+      "sha256": "A866F685C391DD2DAB98DF14AF8A92860D9BE21457B1BACBC9E82F2121643B00",
+      "bytes": 2883,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\gates-final-combined-v3.sh"
+    },
+    {
+      "sha256": "5F865E9BD6F4694231CAF9C42501D9BBD2AEEDA7E603BB1B5860C179F13CDD11",
+      "bytes": 11656,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\run-final-combined-v3.ps1"
+    },
+    {
+      "sha256": "B42449842B0493802F51E80FBFD4C4E0D9279B4CB08F26981731D3DD9E9309DF",
+      "bytes": 1927,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\test-final-combined-v3-closure.ps1"
+    },
+    {
+      "sha256": "B610A407486DEEEC3A33CE326E8AD7AA989A044156AE120A89D08FCE0AB0DA5A",
+      "bytes": 6317,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\test-final-combined-v3-process.ps1"
+    },
+    {
+      "sha256": "50D6E9BC01FC12F3EE42568CC65DC923C3457A20F49AD8743E07D7F3EE6F3A5C",
+      "bytes": 5069,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\test-final-combined-v3-shim.ps1"
+    },
+    {
+      "sha256": "EC964F8F4364B5A3E2C0DD9C752C3EAAC7E163B10234000541F4214CDF8FF6DB",
+      "bytes": 11876,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\test-final-combined-v3.ps1"
+    },
+    {
+      "sha256": "FC9B9E49FD6496CDDDFC5681208D74BD649AC934818EAFDFD50A9571BDCB4861",
+      "bytes": 71435,
+      "path": "C:\\Program Files\\Git\\usr\\bin\\mkdir.exe"
+    },
+    {
+      "sha256": "5B956AC9D6BB6D457665709BBCF71326ECD66BB5111B280C124A68405CE5DA46",
+      "bytes": 38794,
+      "path": "C:\\Program Files\\Git\\usr\\bin\\tee.exe"
+    },
+    {
+      "sha256": "FA8079E8F49140FE2B32E84F904E9459B2FD4D94F5727D946BB2F8A0476F2716",
+      "bytes": 1849,
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\test-final-combined-v3-context.ps1"
+    }
+  ],
+  "selection_environment": [
+    {
+      "name": "RUSTUP_TOOLCHAIN",
+      "value": null
+    },
+    {
+      "name": "RUSTUP_HOME",
+      "value": null
+    },
+    {
+      "name": "CARGO_HOME",
+      "value": null
+    },
+    {
+      "name": "BASH_ENV",
+      "value": null
+    },
+    {
+      "name": "RUSTC",
+      "value": null
+    },
+    {
+      "name": "RUSTC_WRAPPER",
+      "value": null
+    },
+    {
+      "name": "RUSTC_WORKSPACE_WRAPPER",
+      "value": null
+    },
+    {
+      "name": "CARGO_BUILD_RUSTC",
+      "value": null
+    },
+    {
+      "name": "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER",
+      "value": null
+    },
+    {
+      "name": "CARGO_ENCODED_RUSTFLAGS",
+      "value": null
+    },
+    {
+      "name": "RUSTFLAGS",
+      "value": null
+    }
+  ],
+  "native_measurement": false,
+  "path_sha256": "E0FC1D752521924A29C1B0D32AB9F7E32E24A194B682CEAB1C377404290DF7C4",
+  "track": "coordinator-final-v3-bb3da9176ebd44ef8927906ef1b8f6c4"
+}

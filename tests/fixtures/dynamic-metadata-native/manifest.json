@@ -1,0 +1,828 @@
+{
+  "native_platform": "8.3.27.2214",
+  "state": "ordinary Config A established natively before dynamic B; exact raw-deflate rows",
+  "cases": [
+    {
+      "family": "modules",
+      "parent": "b4e1435c-482c-4e14-afee-045b1489fcd0",
+      "kind": "Catalog",
+      "owner": "b4e1435c-482c-4e14-afee-045b1489fcd0",
+      "row": "b4e1435c-482c-4e14-afee-045b1489fcd0.0",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "b4e1435c-482c-4e14-afee-045b1489fcd0",
+      "kind": "Catalog",
+      "owner": "b4e1435c-482c-4e14-afee-045b1489fcd0",
+      "row": "b4e1435c-482c-4e14-afee-045b1489fcd0.3",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2",
+      "kind": "Document",
+      "owner": "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2",
+      "row": "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2.0",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2",
+      "kind": "Document",
+      "owner": "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2",
+      "row": "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2.2",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "3de5f404-6b1f-48f0-8fb3-9d051d889643",
+      "kind": "Report",
+      "owner": "3de5f404-6b1f-48f0-8fb3-9d051d889643",
+      "row": "3de5f404-6b1f-48f0-8fb3-9d051d889643.0",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "3de5f404-6b1f-48f0-8fb3-9d051d889643",
+      "kind": "Report",
+      "owner": "3de5f404-6b1f-48f0-8fb3-9d051d889643",
+      "row": "3de5f404-6b1f-48f0-8fb3-9d051d889643.2",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "36810e6e-590a-46da-af1e-92a4fba75e74",
+      "kind": "DataProcessor",
+      "owner": "36810e6e-590a-46da-af1e-92a4fba75e74",
+      "row": "36810e6e-590a-46da-af1e-92a4fba75e74.0",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "36810e6e-590a-46da-af1e-92a4fba75e74",
+      "kind": "DataProcessor",
+      "owner": "36810e6e-590a-46da-af1e-92a4fba75e74",
+      "row": "36810e6e-590a-46da-af1e-92a4fba75e74.2",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "edee6a03-4672-469d-9f63-fad7acaae0cc",
+      "kind": "ExchangePlan",
+      "owner": "edee6a03-4672-469d-9f63-fad7acaae0cc",
+      "row": "edee6a03-4672-469d-9f63-fad7acaae0cc.2",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "edee6a03-4672-469d-9f63-fad7acaae0cc",
+      "kind": "ExchangePlan",
+      "owner": "edee6a03-4672-469d-9f63-fad7acaae0cc",
+      "row": "edee6a03-4672-469d-9f63-fad7acaae0cc.3",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
+      "kind": "Task",
+      "owner": "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
+      "row": "3ad08f4a-6202-4099-b6cc-bc116e6731a0.6",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
+      "kind": "Task",
+      "owner": "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
+      "row": "3ad08f4a-6202-4099-b6cc-bc116e6731a0.7",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "fd9d80b5-940c-4f9b-9374-81fbc5c535a3",
+      "kind": "BusinessProcess",
+      "owner": "fd9d80b5-940c-4f9b-9374-81fbc5c535a3",
+      "row": "fd9d80b5-940c-4f9b-9374-81fbc5c535a3.6",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "fd9d80b5-940c-4f9b-9374-81fbc5c535a3",
+      "kind": "BusinessProcess",
+      "owner": "fd9d80b5-940c-4f9b-9374-81fbc5c535a3",
+      "row": "fd9d80b5-940c-4f9b-9374-81fbc5c535a3.8",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "d52cf615-a846-44fb-9b13-61084d0a3c77",
+      "kind": "ChartOfAccounts",
+      "owner": "d52cf615-a846-44fb-9b13-61084d0a3c77",
+      "row": "d52cf615-a846-44fb-9b13-61084d0a3c77.14",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "d52cf615-a846-44fb-9b13-61084d0a3c77",
+      "kind": "ChartOfAccounts",
+      "owner": "d52cf615-a846-44fb-9b13-61084d0a3c77",
+      "row": "d52cf615-a846-44fb-9b13-61084d0a3c77.15",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9",
+      "kind": "ChartOfCalculationTypes",
+      "owner": "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9",
+      "row": "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.0",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9",
+      "kind": "ChartOfCalculationTypes",
+      "owner": "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9",
+      "row": "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.3",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "0e3d2750-bb4c-42b9-9829-60f1480ced9c",
+      "kind": "ChartOfCharacteristicTypes",
+      "owner": "0e3d2750-bb4c-42b9-9829-60f1480ced9c",
+      "row": "0e3d2750-bb4c-42b9-9829-60f1480ced9c.15",
+      "role": "ObjectModule"
+    },
+    {
+      "family": "modules",
+      "parent": "0e3d2750-bb4c-42b9-9829-60f1480ced9c",
+      "kind": "ChartOfCharacteristicTypes",
+      "owner": "0e3d2750-bb4c-42b9-9829-60f1480ced9c",
+      "row": "0e3d2750-bb4c-42b9-9829-60f1480ced9c.16",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "67e85b9a-a138-49ea-b474-04475f0f8c90",
+      "kind": "Enum",
+      "owner": "67e85b9a-a138-49ea-b474-04475f0f8c90",
+      "row": "67e85b9a-a138-49ea-b474-04475f0f8c90.0",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "af52cd7d-374a-4c46-a74c-305e154dc6f2",
+      "kind": "Constant",
+      "owner": "af52cd7d-374a-4c46-a74c-305e154dc6f2",
+      "row": "af52cd7d-374a-4c46-a74c-305e154dc6f2.1",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "14512818-58b0-44cc-b00d-d37913c57aad",
+      "kind": "SettingsStorage",
+      "owner": "14512818-58b0-44cc-b00d-d37913c57aad",
+      "row": "14512818-58b0-44cc-b00d-d37913c57aad.8",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "353b5b30-e2a1-48e3-af13-fe532642cfca",
+      "kind": "DocumentJournal",
+      "owner": "353b5b30-e2a1-48e3-af13-fe532642cfca",
+      "row": "353b5b30-e2a1-48e3-af13-fe532642cfca.1",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "9706f479-a13c-4fed-b046-9fa602b3a01e",
+      "kind": "InformationRegister",
+      "owner": "9706f479-a13c-4fed-b046-9fa602b3a01e",
+      "row": "9706f479-a13c-4fed-b046-9fa602b3a01e.2",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "modules",
+      "parent": "44947459-75aa-48e8-b40f-907177c2afb3",
+      "kind": "AccumulationRegister",
+      "owner": "44947459-75aa-48e8-b40f-907177c2afb3",
+      "row": "44947459-75aa-48e8-b40f-907177c2afb3.2",
+      "role": "ManagerModule"
+    },
+    {
+      "family": "forms",
+      "parent": "b2e942fe-d495-4c6a-b14c-ef9f1753118a",
+      "kind": "AccountingRegister",
+      "owner": "6e4c9861-b0b9-4105-bd63-259bddbf4f19",
+      "row": "6e4c9861-b0b9-4105-bd63-259bddbf4f19.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "6707f7f5-4a6c-4d8b-84cf-483768cb71b9",
+      "kind": "AccumulationRegister",
+      "owner": "caf762cb-5351-40f1-b5fd-cb2f26b7c559",
+      "row": "caf762cb-5351-40f1-b5fd-cb2f26b7c559.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "fd9d80b5-940c-4f9b-9374-81fbc5c535a3",
+      "kind": "BusinessProcess",
+      "owner": "e64f5430-3e32-4004-ad2e-20b34f938779",
+      "row": "e64f5430-3e32-4004-ad2e-20b34f938779.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "a6756af4-964f-400d-97d4-0bd3f5916693",
+      "kind": "CalculationRegister",
+      "owner": "9d8899bb-bf62-48ee-8c51-c461638c3db6",
+      "row": "9d8899bb-bf62-48ee-8c51-c461638c3db6.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "81d900be-ddc1-417f-ae2c-1aacf040de9a",
+      "kind": "Catalog",
+      "owner": "449060fd-4711-4b9e-93e0-11b35c314fb3",
+      "row": "449060fd-4711-4b9e-93e0-11b35c314fb3.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "d52cf615-a846-44fb-9b13-61084d0a3c77",
+      "kind": "ChartOfAccounts",
+      "owner": "76b4281d-6d9c-449d-be15-2c72eac4c336",
+      "row": "76b4281d-6d9c-449d-be15-2c72eac4c336.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9",
+      "kind": "ChartOfCalculationTypes",
+      "owner": "a640fcf3-ce4c-4e87-973b-6a1b576ecaaf",
+      "row": "a640fcf3-ce4c-4e87-973b-6a1b576ecaaf.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "b850d595-0fab-4f29-9eb2-334fe98c8adf",
+      "kind": "ChartOfCharacteristicTypes",
+      "owner": "a0b0545b-fc5f-4732-93f8-cb3ccc85af88",
+      "row": "a0b0545b-fc5f-4732-93f8-cb3ccc85af88.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "cbf6f37a-874a-434a-9c76-c357e6acf215",
+      "kind": "DataProcessor",
+      "owner": "fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f",
+      "row": "fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "353b5b30-e2a1-48e3-af13-fe532642cfca",
+      "kind": "DocumentJournal",
+      "owner": "88d5da3b-115f-4e85-beb2-8f564e148b3b",
+      "row": "88d5da3b-115f-4e85-beb2-8f564e148b3b.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "01914e00-3164-4c89-8c95-14b72786f20b",
+      "kind": "Document",
+      "owner": "4d4f5e5e-b32e-41a4-8583-0c641c498089",
+      "row": "4d4f5e5e-b32e-41a4-8583-0c641c498089.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "b5c14196-5850-49a2-8f8a-1153f5f81e31",
+      "kind": "ExchangePlan",
+      "owner": "3062cc6d-bc8d-4c16-b9a8-66d970495306",
+      "row": "3062cc6d-bc8d-4c16-b9a8-66d970495306.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "76e953c1-5aae-4f17-8b2f-98d1e53d19a0",
+      "kind": "InformationRegister",
+      "owner": "f39f9d39-b3b6-4301-a6fe-8a94f338bbf4",
+      "row": "f39f9d39-b3b6-4301-a6fe-8a94f338bbf4.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "95655b97-54d7-4ca3-a1c5-3d2df5223703",
+      "kind": "Report",
+      "owner": "56a08777-24c5-49ba-b24a-a00e0290c67e",
+      "row": "56a08777-24c5-49ba-b24a-a00e0290c67e.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "14512818-58b0-44cc-b00d-d37913c57aad",
+      "kind": "SettingsStorage",
+      "owner": "ff4d92a7-5fa3-4a46-a6f5-47c3952edb22",
+      "row": "ff4d92a7-5fa3-4a46-a6f5-47c3952edb22.0",
+      "role": "Form"
+    },
+    {
+      "family": "forms",
+      "parent": "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
+      "kind": "Task",
+      "owner": "856510ee-74f5-44e9-a3c0-1c60cfb7a787",
+      "row": "856510ee-74f5-44e9-a3c0-1c60cfb7a787.0",
+      "role": "Form"
+    },
+    {
+      "family": "templates",
+      "parent": "edee6a03-4672-469d-9f63-fad7acaae0cc",
+      "kind": "ExchangePlan",
+      "owner": "33f66222-3f4e-4535-8ce6-43eae5bed791",
+      "row": "33f66222-3f4e-4535-8ce6-43eae5bed791.0",
+      "role": "TextDocument"
+    },
+    {
+      "family": "templates",
+      "parent": "9f9936fc-54a0-4812-b12d-2f8f91551440",
+      "kind": "Report",
+      "owner": "2eeea138-481c-4fde-9e8a-709d751cc469",
+      "row": "2eeea138-481c-4fde-9e8a-709d751cc469.0",
+      "role": "SpreadsheetDocument"
+    },
+    {
+      "family": "templates",
+      "parent": "13b3c973-6be3-4898-89d5-20852cd14e46",
+      "kind": "DataProcessor",
+      "owner": "ae1192da-f17d-4527-b9cb-4f4cce810985",
+      "row": "ae1192da-f17d-4527-b9cb-4f4cce810985.0",
+      "role": "HTMLDocument"
+    }
+  ],
+  "files": {
+    "b4e1435c-482c-4e14-afee-045b1489fcd0.0.bin": {
+      "sha256": "a243d0db8e1ec3dff3fdd7b099601ae54d68044ad4697bb8f960cfe61b48ac1a",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--b4e1435c-482c-4e14-afee-045b1489fcd0.0--0.bin",
+      "bytes": 538
+    },
+    "b4e1435c-482c-4e14-afee-045b1489fcd0.bin": {
+      "sha256": "f8d41344a34b6423c7891f685062b2ab563b0eb5d8431f040f611f1e06fd4af0",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--b4e1435c-482c-4e14-afee-045b1489fcd0--0.bin",
+      "bytes": 4607
+    },
+    "b4e1435c-482c-4e14-afee-045b1489fcd0.3.bin": {
+      "sha256": "8faa78705ce37ddfc235884080b8293b4ecab965ef12c4e8c58f75acae5c7576",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--b4e1435c-482c-4e14-afee-045b1489fcd0.3--0.bin",
+      "bytes": 2484
+    },
+    "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2.0.bin": {
+      "sha256": "522a1461fac9ad570eab5b5c016cbd7b88c7242354b3afda3b9fce20d46ab1fa",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2.0--0.bin",
+      "bytes": 786
+    },
+    "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2.bin": {
+      "sha256": "636bfad6a3fb2358a4e6b869bdb99b8e5b45f1f90aec7df58fbe6320e726faa4",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2--0.bin",
+      "bytes": 3012
+    },
+    "6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2.2.bin": {
+      "sha256": "6d32374b486eee347903138ee83659704b974f107446968c03b1a09b8ea31976",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--6dea10e0-fc48-4ff0-83c2-b0e9b9751fe2.2--0.bin",
+      "bytes": 2059
+    },
+    "3de5f404-6b1f-48f0-8fb3-9d051d889643.bin": {
+      "sha256": "8877fcb700db4c9c567f36ab62613ee6d013ca07b5848f180fb9623e61cd33de",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--3de5f404-6b1f-48f0-8fb3-9d051d889643--0.bin",
+      "bytes": 614
+    },
+    "3de5f404-6b1f-48f0-8fb3-9d051d889643.0.bin": {
+      "sha256": "df76e12e0eb8a61adbad79477ed356facea486ceba2d67fb16b35cad130f0411",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--3de5f404-6b1f-48f0-8fb3-9d051d889643.0--0.bin",
+      "bytes": 1044
+    },
+    "3de5f404-6b1f-48f0-8fb3-9d051d889643.2.bin": {
+      "sha256": "aedefa56616200b9b107d9e009940c84dd1b261e772ee6e55a2ff743b80b7338",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--3de5f404-6b1f-48f0-8fb3-9d051d889643.2--0.bin",
+      "bytes": 1064
+    },
+    "36810e6e-590a-46da-af1e-92a4fba75e74.0.bin": {
+      "sha256": "fa8e0c8e5d97a6122afa32def61d464fb366e65313a646ecdfe34c11472a4cf3",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--36810e6e-590a-46da-af1e-92a4fba75e74.0--0.bin",
+      "bytes": 1166
+    },
+    "36810e6e-590a-46da-af1e-92a4fba75e74.bin": {
+      "sha256": "b8bcf8678fd097460b3a3fa92c803fb824e237a23edcf03bbbc946272fa43c0e",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--36810e6e-590a-46da-af1e-92a4fba75e74--0.bin",
+      "bytes": 408
+    },
+    "36810e6e-590a-46da-af1e-92a4fba75e74.2.bin": {
+      "sha256": "d1dc4d1e8017c4612e6f5d1a92a235cb5fedc0c0810926e246874738f54ae120",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--36810e6e-590a-46da-af1e-92a4fba75e74.2--0.bin",
+      "bytes": 1623
+    },
+    "edee6a03-4672-469d-9f63-fad7acaae0cc.2.bin": {
+      "sha256": "496bbbc5a04ca4fdde8a861a45c3489d69395e179ff3e4746495974c2e6435fb",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--edee6a03-4672-469d-9f63-fad7acaae0cc.2--0.bin",
+      "bytes": 1163
+    },
+    "edee6a03-4672-469d-9f63-fad7acaae0cc.bin": {
+      "sha256": "d343a4efad290193b40124743684a361b9f9ab0fe47282219054152ea1d9972e",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--edee6a03-4672-469d-9f63-fad7acaae0cc--0.bin",
+      "bytes": 2560
+    },
+    "edee6a03-4672-469d-9f63-fad7acaae0cc.3.bin": {
+      "sha256": "f6290008706efa1b77fe77ffcd4af94ce38a67b4e31ec9a82888d346a397d2d7",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--edee6a03-4672-469d-9f63-fad7acaae0cc.3--0.bin",
+      "bytes": 2064
+    },
+    "3ad08f4a-6202-4099-b6cc-bc116e6731a0.6.bin": {
+      "sha256": "195a61c8a4e45a700da09df13905a5dfd01e315753b7cdc981d3794c5c34fe15",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--3ad08f4a-6202-4099-b6cc-bc116e6731a0.6--0.bin",
+      "bytes": 2853
+    },
+    "3ad08f4a-6202-4099-b6cc-bc116e6731a0.bin": {
+      "sha256": "012c226c877cac00d2af500060c2b37f63f7a0113fb65df45e1027ac4a219f8f",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--3ad08f4a-6202-4099-b6cc-bc116e6731a0--0.bin",
+      "bytes": 4595
+    },
+    "3ad08f4a-6202-4099-b6cc-bc116e6731a0.7.bin": {
+      "sha256": "828b84e924e5361a16aef83d9a33a7e61c648b5b33f26d298dcfb989f838b9d0",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--3ad08f4a-6202-4099-b6cc-bc116e6731a0.7--0.bin",
+      "bytes": 2340
+    },
+    "fd9d80b5-940c-4f9b-9374-81fbc5c535a3.6.bin": {
+      "sha256": "8651c4d9ce60727c002d57ee820e973180e24bc2e24967b285ae4185f8666d01",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--fd9d80b5-940c-4f9b-9374-81fbc5c535a3.6--0.bin",
+      "bytes": 3932
+    },
+    "fd9d80b5-940c-4f9b-9374-81fbc5c535a3.bin": {
+      "sha256": "12c951dabb57ce0ff56ad8e3d77e6d600070de4eb3ebc23fb3f5013711c3f0c3",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--fd9d80b5-940c-4f9b-9374-81fbc5c535a3--0.bin",
+      "bytes": 4892
+    },
+    "fd9d80b5-940c-4f9b-9374-81fbc5c535a3.8.bin": {
+      "sha256": "146d19cbd5ec8eff1fff13d1f941e2d200783f20885203d51001cc73cf6e0771",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--fd9d80b5-940c-4f9b-9374-81fbc5c535a3.8--0.bin",
+      "bytes": 2697
+    },
+    "d52cf615-a846-44fb-9b13-61084d0a3c77.14.bin": {
+      "sha256": "26ea178e148937f243e070cc35fe8947deac9fc470b48d36c49dc20c9a828b42",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--d52cf615-a846-44fb-9b13-61084d0a3c77.14--0.bin",
+      "bytes": 822
+    },
+    "d52cf615-a846-44fb-9b13-61084d0a3c77.bin": {
+      "sha256": "b665381b2de13529e605592be3fd6d6c693e3fbdfcc0aaf6c8d113ce4d8d9f2c",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--d52cf615-a846-44fb-9b13-61084d0a3c77--0.bin",
+      "bytes": 2612
+    },
+    "d52cf615-a846-44fb-9b13-61084d0a3c77.15.bin": {
+      "sha256": "49ae5829bc865e8d9d0a8227a53d8f97ecaefe95180d722c3dd367a1932cf2da",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--d52cf615-a846-44fb-9b13-61084d0a3c77.15--0.bin",
+      "bytes": 2506
+    },
+    "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.0.bin": {
+      "sha256": "57301bb71e6006665ac2c83f2d4c292275d91d8ac67309ba526c98105e24623e",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.0--0.bin",
+      "bytes": 1351
+    },
+    "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.bin": {
+      "sha256": "2b3ecaae025e1192a43394c9fd7617bb7d524c0488d971aab915731f8f8144dd",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9--0.bin",
+      "bytes": 2365
+    },
+    "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.3.bin": {
+      "sha256": "3868facdc712ae9e2d3a1efbaf3f69d1533408a5913ab6dace9fa4eee1ca4e09",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.3--0.bin",
+      "bytes": 1610
+    },
+    "0e3d2750-bb4c-42b9-9829-60f1480ced9c.bin": {
+      "sha256": "cf5887076d8f238b8724bd8715b958d57dd29597d46d4ed7f796231f101d6784",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--0e3d2750-bb4c-42b9-9829-60f1480ced9c--0.bin",
+      "bytes": 2342
+    },
+    "0e3d2750-bb4c-42b9-9829-60f1480ced9c.15.bin": {
+      "sha256": "bd55af624f1d930ad05df66416e256b31df676f477b11f852d798443a53a82bb",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--0e3d2750-bb4c-42b9-9829-60f1480ced9c.15--0.bin",
+      "bytes": 590
+    },
+    "0e3d2750-bb4c-42b9-9829-60f1480ced9c.16.bin": {
+      "sha256": "a9d98fb568fabfa93de09edd3c5c07495b8f6729de265d322dc115f8d74d180a",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--0e3d2750-bb4c-42b9-9829-60f1480ced9c.16--0.bin",
+      "bytes": 2791
+    },
+    "67e85b9a-a138-49ea-b474-04475f0f8c90.0.bin": {
+      "sha256": "7242b06fa9c176c3a19fd566d7491f2cc2ff136aa776291b408f2affbce6ac02",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--67e85b9a-a138-49ea-b474-04475f0f8c90.0--0.bin",
+      "bytes": 1157
+    },
+    "67e85b9a-a138-49ea-b474-04475f0f8c90.bin": {
+      "sha256": "7f0567905e401da16d42aa7ffd525a4a2751d3294acc7332292bf2f218cb722c",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--67e85b9a-a138-49ea-b474-04475f0f8c90--0.bin",
+      "bytes": 1692
+    },
+    "af52cd7d-374a-4c46-a74c-305e154dc6f2.1.bin": {
+      "sha256": "19fac7c7464fd86327d9f5bd93087ebaaaaa048eb6730b77596216be141fd2fd",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--af52cd7d-374a-4c46-a74c-305e154dc6f2.1--0.bin",
+      "bytes": 1158
+    },
+    "af52cd7d-374a-4c46-a74c-305e154dc6f2.bin": {
+      "sha256": "a54322b1aa2763749f30c85efdf5db8afebda9bc20ec010d47d6a6e9acd21e6f",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--af52cd7d-374a-4c46-a74c-305e154dc6f2--0.bin",
+      "bytes": 426
+    },
+    "14512818-58b0-44cc-b00d-d37913c57aad.bin": {
+      "sha256": "a6f1d2cabd609e883b462bdf6e09ef57e490bc3856cc4172fb373f926533e7c6",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--14512818-58b0-44cc-b00d-d37913c57aad--0.bin",
+      "bytes": 547
+    },
+    "14512818-58b0-44cc-b00d-d37913c57aad.8.bin": {
+      "sha256": "75f5614f91c33625f397c52aaa83161ebb2f2db4e717866761a08d689950dcb3",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--14512818-58b0-44cc-b00d-d37913c57aad.8--0.bin",
+      "bytes": 4120
+    },
+    "353b5b30-e2a1-48e3-af13-fe532642cfca.1.bin": {
+      "sha256": "0afd68d63c692d8948f8c8cfd7e09a73faf8ac83b16c12ce092043b3035c5f4d",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--353b5b30-e2a1-48e3-af13-fe532642cfca.1--0.bin",
+      "bytes": 1160
+    },
+    "353b5b30-e2a1-48e3-af13-fe532642cfca.bin": {
+      "sha256": "0bc30be311412c572fee584450bc730e483922c31e9a6655843f2e217419b773",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--353b5b30-e2a1-48e3-af13-fe532642cfca--0.bin",
+      "bytes": 997
+    },
+    "9706f479-a13c-4fed-b046-9fa602b3a01e.2.bin": {
+      "sha256": "e82f347249e7b30485d3bd5e4bf6fc4d6f7901c7a23f09a874b97a8829d643aa",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--9706f479-a13c-4fed-b046-9fa602b3a01e.2--0.bin",
+      "bytes": 461
+    },
+    "9706f479-a13c-4fed-b046-9fa602b3a01e.bin": {
+      "sha256": "f7b196c1773b0ccd5dc23a325c883ae15125ce22c4b34abb70035ccb5f8af1f2",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--9706f479-a13c-4fed-b046-9fa602b3a01e--0.bin",
+      "bytes": 2207
+    },
+    "44947459-75aa-48e8-b40f-907177c2afb3.2.bin": {
+      "sha256": "15b334000f1c5552a076d97a2b3de6c679a44f2b8316c5bed71ccd39d2b3f46b",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--44947459-75aa-48e8-b40f-907177c2afb3.2--0.bin",
+      "bytes": 908
+    },
+    "44947459-75aa-48e8-b40f-907177c2afb3.bin": {
+      "sha256": "6ab679ff3235c80cbd2f47a24780237583ab1655dd909cc8034ccb3f46df94c5",
+      "raw_source": "snapshots/control_B3_stage_modules/Config--44947459-75aa-48e8-b40f-907177c2afb3--0.bin",
+      "bytes": 2162
+    },
+    "b2e942fe-d495-4c6a-b14c-ef9f1753118a.bin": {
+      "sha256": "c73df8eb5d9f46ef53e9852e061bd8866ee27f84e090b176084ca50c575cd3d7",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--b2e942fe-d495-4c6a-b14c-ef9f1753118a--0.bin",
+      "bytes": 2651
+    },
+    "6e4c9861-b0b9-4105-bd63-259bddbf4f19.0.bin": {
+      "sha256": "0036aaecf6576feb750dca7fa79bb36db835f10416456968960f748ca22afc37",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--6e4c9861-b0b9-4105-bd63-259bddbf4f19.0--0.bin",
+      "bytes": 7430
+    },
+    "6e4c9861-b0b9-4105-bd63-259bddbf4f19.bin": {
+      "sha256": "558ad8b350d5cf314cf16a8552907ee1b21b33b00e53edb19e10cd97d316fae6",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--6e4c9861-b0b9-4105-bd63-259bddbf4f19--0.bin",
+      "bytes": 168
+    },
+    "6707f7f5-4a6c-4d8b-84cf-483768cb71b9.bin": {
+      "sha256": "883d79aafcb7b15d715135f0851384e5552c89c81a389c170837b90d60fa2d17",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--6707f7f5-4a6c-4d8b-84cf-483768cb71b9--0.bin",
+      "bytes": 1830
+    },
+    "caf762cb-5351-40f1-b5fd-cb2f26b7c559.0.bin": {
+      "sha256": "05e93b46f9506c61db7618cee937f12ba05361d1d740d89a524c086d309ab43e",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--caf762cb-5351-40f1-b5fd-cb2f26b7c559.0--0.bin",
+      "bytes": 2922
+    },
+    "caf762cb-5351-40f1-b5fd-cb2f26b7c559.bin": {
+      "sha256": "7a5ea3e0a2e9c26b34f206ca1337aa8e3bbd51ff8fbb5912ae137ecf6f7ef3a9",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--caf762cb-5351-40f1-b5fd-cb2f26b7c559--0.bin",
+      "bytes": 170
+    },
+    "e64f5430-3e32-4004-ad2e-20b34f938779.bin": {
+      "sha256": "f20daceac958ab4644506132896c4c69dd7ca50d7fc684902bbc9b9be0b98935",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--e64f5430-3e32-4004-ad2e-20b34f938779--0.bin",
+      "bytes": 167
+    },
+    "e64f5430-3e32-4004-ad2e-20b34f938779.0.bin": {
+      "sha256": "eb517f29c073adf9930bc13a503e8d3412167572a35663f9f0c94ac2f446efc4",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--e64f5430-3e32-4004-ad2e-20b34f938779.0--0.bin",
+      "bytes": 6991
+    },
+    "a6756af4-964f-400d-97d4-0bd3f5916693.bin": {
+      "sha256": "11ebae1ed7baaa43230dc827eb7337694d838fedce90c8cb594f6003ca86f72f",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--a6756af4-964f-400d-97d4-0bd3f5916693--0.bin",
+      "bytes": 2281
+    },
+    "9d8899bb-bf62-48ee-8c51-c461638c3db6.bin": {
+      "sha256": "3267a9081e79102018fd1dd7a75d1964332f73b0cafba672ae8d58c5ad7c2387",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--9d8899bb-bf62-48ee-8c51-c461638c3db6--0.bin",
+      "bytes": 201
+    },
+    "9d8899bb-bf62-48ee-8c51-c461638c3db6.0.bin": {
+      "sha256": "2cbd6b75cf96c9d7b067ea29d0855ef95dcef73195484ca16a1f120d07490a8f",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--9d8899bb-bf62-48ee-8c51-c461638c3db6.0--0.bin",
+      "bytes": 4483
+    },
+    "449060fd-4711-4b9e-93e0-11b35c314fb3.bin": {
+      "sha256": "9f7997c93a8d5675eadb61c182d4b8f31802192c7d4d032fb99ad66de8d67044",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--449060fd-4711-4b9e-93e0-11b35c314fb3--0.bin",
+      "bytes": 178
+    },
+    "81d900be-ddc1-417f-ae2c-1aacf040de9a.bin": {
+      "sha256": "028c2a1d2b247af70cac63ad4c3d962763b1fee7942dd3d33b88cb34428063a4",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--81d900be-ddc1-417f-ae2c-1aacf040de9a--0.bin",
+      "bytes": 4792
+    },
+    "449060fd-4711-4b9e-93e0-11b35c314fb3.0.bin": {
+      "sha256": "8536bb1a1df102f40abcc07241b10fe351f558cb3cde902584cc8aeb769c7d41",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--449060fd-4711-4b9e-93e0-11b35c314fb3.0--0.bin",
+      "bytes": 3243
+    },
+    "76b4281d-6d9c-449d-be15-2c72eac4c336.0.bin": {
+      "sha256": "981a42ef9d399914d3aca04acf859e2424852d3aff174db8706ffcc22258b75e",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--76b4281d-6d9c-449d-be15-2c72eac4c336.0--0.bin",
+      "bytes": 3274
+    },
+    "76b4281d-6d9c-449d-be15-2c72eac4c336.bin": {
+      "sha256": "eae58b7c442a76b17750a9457398a2c96609b36827260a8d4360d4b01ec8b412",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--76b4281d-6d9c-449d-be15-2c72eac4c336--0.bin",
+      "bytes": 168
+    },
+    "a640fcf3-ce4c-4e87-973b-6a1b576ecaaf.0.bin": {
+      "sha256": "e898d296f5f1a01eafc67533d928bdbb2de0d4c80995f00b2a4740f27e8ca858",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--a640fcf3-ce4c-4e87-973b-6a1b576ecaaf.0--0.bin",
+      "bytes": 3350
+    },
+    "a640fcf3-ce4c-4e87-973b-6a1b576ecaaf.bin": {
+      "sha256": "c7ca3cd0ff5cd55dd969bd9dfdd09976d30f1d26399787f8284c6a91bee4825a",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--a640fcf3-ce4c-4e87-973b-6a1b576ecaaf--0.bin",
+      "bytes": 170
+    },
+    "a0b0545b-fc5f-4732-93f8-cb3ccc85af88.bin": {
+      "sha256": "cfe39eea63cf1332ad270f1f854e1770bab8e464eb1cc2f38398d4dcdac4750d",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--a0b0545b-fc5f-4732-93f8-cb3ccc85af88--0.bin",
+      "bytes": 171
+    },
+    "a0b0545b-fc5f-4732-93f8-cb3ccc85af88.0.bin": {
+      "sha256": "cad8e31afe2f1e8b37f0008210cbc12a2922e3dcc9949531507dccdf488bd114",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--a0b0545b-fc5f-4732-93f8-cb3ccc85af88.0--0.bin",
+      "bytes": 1734
+    },
+    "b850d595-0fab-4f29-9eb2-334fe98c8adf.bin": {
+      "sha256": "c953e3d8807fc438682e95481ec2477fc78f1dd41748990cfd1bc6cb9c5aea1b",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--b850d595-0fab-4f29-9eb2-334fe98c8adf--0.bin",
+      "bytes": 1977
+    },
+    "cbf6f37a-874a-434a-9c76-c357e6acf215.bin": {
+      "sha256": "6e50042a516e912dd3a78c3587d8b7dc89e79056be104a9eb1156bc3f2bb3cfa",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--cbf6f37a-874a-434a-9c76-c357e6acf215--0.bin",
+      "bytes": 606
+    },
+    "fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f.bin": {
+      "sha256": "aa39f4f4b94b83065ba0cfff319acff40fd2d2d1de92ecec35581f7a800084c4",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f--0.bin",
+      "bytes": 184
+    },
+    "fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f.0.bin": {
+      "sha256": "c519b64cd073e47143804a1baa094b488bdb39b33eaca9ba88400a6a3ad2a333",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--fc98b0f2-7cfb-4a04-8dca-f4a6bd08104f.0--0.bin",
+      "bytes": 650
+    },
+    "88d5da3b-115f-4e85-beb2-8f564e148b3b.0.bin": {
+      "sha256": "94286d2dc11e319ea913bc503b043b06608e461333e0eeb23d30304ef6e3f680",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--88d5da3b-115f-4e85-beb2-8f564e148b3b.0--0.bin",
+      "bytes": 3346
+    },
+    "88d5da3b-115f-4e85-beb2-8f564e148b3b.bin": {
+      "sha256": "9633a5caa87717627785071f4b9950aa475b2faae9bd084b55b9ea939227447c",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--88d5da3b-115f-4e85-beb2-8f564e148b3b--0.bin",
+      "bytes": 170
+    },
+    "4d4f5e5e-b32e-41a4-8583-0c641c498089.bin": {
+      "sha256": "d97c71c9bc0056fca8a44dd2a65c197664227ce75fd006e32899b26d4f0a5f47",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--4d4f5e5e-b32e-41a4-8583-0c641c498089--0.bin",
+      "bytes": 169
+    },
+    "4d4f5e5e-b32e-41a4-8583-0c641c498089.0.bin": {
+      "sha256": "40869b524a2a8fe3a088a0902b6ca2580fd1e639fde8771abf20881f5d5d533d",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--4d4f5e5e-b32e-41a4-8583-0c641c498089.0--0.bin",
+      "bytes": 3074
+    },
+    "01914e00-3164-4c89-8c95-14b72786f20b.bin": {
+      "sha256": "dd977a19ba91b184af28634f2954b424b17753b55b50e1d534c803d088abeb5c",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--01914e00-3164-4c89-8c95-14b72786f20b--0.bin",
+      "bytes": 5480
+    },
+    "3062cc6d-bc8d-4c16-b9a8-66d970495306.0.bin": {
+      "sha256": "73d909a82aebd2c52c3c5e0357c97d6bddb8fb596cdb7a374cad81105fd0e88f",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--3062cc6d-bc8d-4c16-b9a8-66d970495306.0--0.bin",
+      "bytes": 1323
+    },
+    "3062cc6d-bc8d-4c16-b9a8-66d970495306.bin": {
+      "sha256": "27d4b755ef06c9b8d66eb32cbacb194dacf8905332c96d456acf0fead0316982",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--3062cc6d-bc8d-4c16-b9a8-66d970495306--0.bin",
+      "bytes": 166
+    },
+    "b5c14196-5850-49a2-8f8a-1153f5f81e31.bin": {
+      "sha256": "dec3eccd44e5c55c5d1888261a5d13e1b5f080582d46fec77d0b305e4b18b977",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--b5c14196-5850-49a2-8f8a-1153f5f81e31--0.bin",
+      "bytes": 1915
+    },
+    "76e953c1-5aae-4f17-8b2f-98d1e53d19a0.bin": {
+      "sha256": "c59b4336280d2be3851c913be750be95bcc25cb5fe0e20294b3a0b0d41891d0e",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--76e953c1-5aae-4f17-8b2f-98d1e53d19a0--0.bin",
+      "bytes": 1856
+    },
+    "f39f9d39-b3b6-4301-a6fe-8a94f338bbf4.bin": {
+      "sha256": "eb6f670a238fa9a414ac8d2f05fe8aaaea903b3277e913b8d14ccdd165627949",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--f39f9d39-b3b6-4301-a6fe-8a94f338bbf4--0.bin",
+      "bytes": 169
+    },
+    "f39f9d39-b3b6-4301-a6fe-8a94f338bbf4.0.bin": {
+      "sha256": "66a96ac7523ff2eb8fea8e28241547f163bb860f03cda0f6e436dd9264d26628",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--f39f9d39-b3b6-4301-a6fe-8a94f338bbf4.0--0.bin",
+      "bytes": 1507
+    },
+    "56a08777-24c5-49ba-b24a-a00e0290c67e.bin": {
+      "sha256": "8867fc724dc9a6b985ab00ee34eaa7791c0179fccb3d6282f50c5a75498e4697",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--56a08777-24c5-49ba-b24a-a00e0290c67e--0.bin",
+      "bytes": 177
+    },
+    "56a08777-24c5-49ba-b24a-a00e0290c67e.0.bin": {
+      "sha256": "10a148f1b9c7f81b815b23453e4549e341a1553c0e3ff0b741f64ec234384577",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--56a08777-24c5-49ba-b24a-a00e0290c67e.0--0.bin",
+      "bytes": 1093
+    },
+    "95655b97-54d7-4ca3-a1c5-3d2df5223703.bin": {
+      "sha256": "43824c10dc0cf34700c6bdd07881fe09932669b431c3eb803272097fe890c5c6",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--95655b97-54d7-4ca3-a1c5-3d2df5223703--0.bin",
+      "bytes": 562
+    },
+    "ff4d92a7-5fa3-4a46-a6f5-47c3952edb22.bin": {
+      "sha256": "9a296ca12b901a4b858a9f03db1f3dbdc53f0bad9b687f08efc54708afd6dbc7",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--ff4d92a7-5fa3-4a46-a6f5-47c3952edb22--0.bin",
+      "bytes": 204
+    },
+    "ff4d92a7-5fa3-4a46-a6f5-47c3952edb22.0.bin": {
+      "sha256": "57814257b203257a641b0fc6de9682a7feed9d45dc2a3cbe83aaac8dc5b5df22",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--ff4d92a7-5fa3-4a46-a6f5-47c3952edb22.0--0.bin",
+      "bytes": 1813
+    },
+    "856510ee-74f5-44e9-a3c0-1c60cfb7a787.bin": {
+      "sha256": "cd64ca6946b27ab55001e1e0f5451c8c8b0e645f977f65a2152517a40bba3551",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--856510ee-74f5-44e9-a3c0-1c60cfb7a787--0.bin",
+      "bytes": 163
+    },
+    "856510ee-74f5-44e9-a3c0-1c60cfb7a787.0.bin": {
+      "sha256": "5e8f5a3ffbe582405ca00adf2d2ced2f9e7a80d83a37f20676eb664cb7624ff5",
+      "raw_source": "snapshots/control_B3_stage_forms/Config--856510ee-74f5-44e9-a3c0-1c60cfb7a787.0--0.bin",
+      "bytes": 3233
+    },
+    "33f66222-3f4e-4535-8ce6-43eae5bed791.bin": {
+      "sha256": "6e6b2a552639c04805548bd9b1f5d5fa96649e62801635abf27c292d684627c1",
+      "raw_source": "snapshots/control_B3_stage_templates/Config--33f66222-3f4e-4535-8ce6-43eae5bed791--0.bin",
+      "bytes": 130
+    },
+    "33f66222-3f4e-4535-8ce6-43eae5bed791.0.bin": {
+      "sha256": "382c2dfc9ecc60e96d4b6e6d5343b42bb6e2223f569798ef913a17ec78f52d70",
+      "raw_source": "snapshots/control_B3_stage_templates/Config--33f66222-3f4e-4535-8ce6-43eae5bed791.0--0.bin",
+      "bytes": 3178
+    },
+    "2eeea138-481c-4fde-9e8a-709d751cc469.0.bin": {
+      "sha256": "522f63a51c2df8994450ebb41175480e6aebde70fb131f5ec313801c92fcda47",
+      "raw_source": "snapshots/control_B3_stage_templates/Config--2eeea138-481c-4fde-9e8a-709d751cc469.0--0.bin",
+      "bytes": 4213
+    },
+    "2eeea138-481c-4fde-9e8a-709d751cc469.bin": {
+      "sha256": "c654927e0e8680ee1619994017a56a2797a9b17a503d13ad71c4b0ee4c5f3672",
+      "raw_source": "snapshots/control_B3_stage_templates/Config--2eeea138-481c-4fde-9e8a-709d751cc469--0.bin",
+      "bytes": 100
+    },
+    "9f9936fc-54a0-4812-b12d-2f8f91551440.bin": {
+      "sha256": "5c8529cfc5dcd0d7a8cc86f6d74abaaab3994422c45293f3f9825bb609bfde16",
+      "raw_source": "snapshots/control_B3_stage_templates/Config--9f9936fc-54a0-4812-b12d-2f8f91551440--0.bin",
+      "bytes": 455
+    },
+    "ae1192da-f17d-4527-b9cb-4f4cce810985.bin": {
+      "sha256": "a1906666d905b4f67a6b7466bbdaa9419042e1ff7ff1802897ee9b5f8fa34eff",
+      "raw_source": "snapshots/control_B3_stage_templates/Config--ae1192da-f17d-4527-b9cb-4f4cce810985--0.bin",
+      "bytes": 151
+    },
+    "ae1192da-f17d-4527-b9cb-4f4cce810985.0.bin": {
+      "sha256": "9717656df5baceec09aafe45b9a987cd0bd38124610b81a53c140b4034b4802c",
+      "raw_source": "snapshots/control_B3_stage_templates/Config--ae1192da-f17d-4527-b9cb-4f4cce810985.0--0.bin",
+      "bytes": 12149
+    },
+    "13b3c973-6be3-4898-89d5-20852cd14e46.bin": {
+      "sha256": "e9d0f46e4d9957a4034922e0c13b6e77aaccb7372a23abe92425a7380636717b",
+      "raw_source": "snapshots/control_B3_stage_templates/Config--13b3c973-6be3-4898-89d5-20852cd14e46--0.bin",
+      "bytes": 810
+    }
+  }
+}

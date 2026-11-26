@@ -1,0 +1,1515 @@
+//! Shared bounded codec for the textual native values used by bootstrap rows.
+
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+
+use ibcmd_cf::payload::{PayloadEncoding, decode_payload, encode_payload};
+use ibcmd_core::identity::ObjectUuid;
+use ibcmd_core::limits::ResourceLimits;
+
+const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
+/// Two ERP УХ common templates (the АТОЛ and Масса-К driver packages) decode
+/// to 82 783 124 and 77 529 860 plain bytes, and the platform stores and
+/// exports both; 64 MiB refused them. The global default decode ceiling is
+/// 512 MiB.
+const MAX_PLAIN_BYTES: usize = 256 * 1_048_576;
+const MAX_NATIVE_DEPTH: usize = 64;
+/// The node bound a plaintext proves about itself.
+///
+/// Every node this parser creates owns a byte of the input no other node
+/// owns: a list owns its `{`, a text its opening `"`, a token its first
+/// byte, and the one empty-token form owns the `,` that delimits it (the
+/// `{,1}` / `{1,,2}` shapes `list` handles explicitly). No node is created
+/// without one, so the plaintext's own length is an upper bound on the node
+/// count, and one byte of slack keeps the comparison inclusive.
+///
+/// This replaces a flat 2,500,000. That constant was arrived at by taking the
+/// largest node count anyone had measured and multiplying by ~1.8, which is
+/// not a fact about the platform: nothing in the format caps a document's
+/// node count, and four ERP УХ 3.2.12.6 templates exceed it -
+/// `РегламентированныйОтчетСтатистикаФорма1{ЦеныПроизв,ТОРГ,Услуги}` and
+/// `.../Списки20{21,23}Кв1`, whose bodies measure 22,767,481 / 30,902,115 /
+/// 17,824,329 / 36,849,823 inflated bytes and 2,930,764 / 5,523,231 /
+/// 2,695,201 / 5,514,558 nodes. The platform exports all four; we refused
+/// them with `native value exceeds its node bound` and wrote no file at all.
+/// The independent 64 MiB plaintext bound and the depth bound continue to cap
+/// resources, and they are the bounds that actually cap them - across all
+/// eight stand corpora the node count runs at 0.13-0.18 nodes per plaintext
+/// byte, so a payload that passes `MAX_PLAIN_BYTES` can never approach this
+/// one.
+fn node_bound(input: &[u8]) -> usize {
+    input.len().saturating_add(1)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NativeValue {
+    Token(String),
+    Text(String),
+    List {
+        values: Vec<NativeValue>,
+        leading_break: bool,
+        line_breaks: Vec<usize>,
+        trailing_break: bool,
+    },
+}
+
+impl NativeValue {
+    pub fn as_token(&self) -> Option<&str> {
+        match self {
+            Self::Token(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&[NativeValue]> {
+        match self {
+            Self::List { values, .. } => Some(values),
+            _ => None,
+        }
+    }
+}
+
+pub fn token(value: impl Into<String>) -> NativeValue {
+    NativeValue::Token(value.into())
+}
+
+pub fn text(value: impl Into<String>) -> NativeValue {
+    NativeValue::Text(value.into())
+}
+
+#[cfg(test)]
+pub fn list(values: Vec<NativeValue>) -> NativeValue {
+    let line_breaks = (1..values.len()).collect();
+    NativeValue::List {
+        values,
+        leading_break: false,
+        line_breaks,
+        trailing_break: false,
+    }
+}
+
+pub fn inline_list(values: Vec<NativeValue>) -> NativeValue {
+    NativeValue::List {
+        values,
+        leading_break: false,
+        line_breaks: Vec::new(),
+        trailing_break: false,
+    }
+}
+
+pub fn styled_list(values: Vec<NativeValue>, line_breaks: Vec<usize>) -> NativeValue {
+    NativeValue::List {
+        values,
+        leading_break: false,
+        line_breaks,
+        trailing_break: false,
+    }
+}
+
+pub fn styled_list_with_tail(values: Vec<NativeValue>, line_breaks: Vec<usize>) -> NativeValue {
+    NativeValue::List {
+        values,
+        leading_break: false,
+        line_breaks,
+        trailing_break: true,
+    }
+}
+
+/// A list laid out the way the platform lays out its own plain text: a line
+/// break before every nested list that is not the list's first value, and one
+/// before the closing brace when the list ends with a nested list.
+///
+/// Read off the stored command-interface, home-page, client-interface and
+/// standalone-content rows of БСП and ERP УХ, where it holds for every list.
+pub fn platform_list(values: Vec<NativeValue>) -> NativeValue {
+    let line_breaks = values
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, value)| matches!(value, NativeValue::List { .. }))
+        .map(|(index, _)| index)
+        .collect();
+    let trailing_break = matches!(values.last(), Some(NativeValue::List { .. }));
+    NativeValue::List {
+        values,
+        leading_break: false,
+        line_breaks,
+        trailing_break,
+    }
+}
+
+pub fn formatted_list(
+    values: Vec<NativeValue>,
+    leading_break: bool,
+    line_breaks: Vec<usize>,
+    trailing_break: bool,
+) -> NativeValue {
+    NativeValue::List {
+        values,
+        leading_break,
+        line_breaks,
+        trailing_break,
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeMetadataHeader {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<(String, String)>,
+    pub comment: String,
+}
+
+pub fn metadata_header(value: &NativeMetadataHeader) -> NativeValue {
+    styled_list(
+        vec![
+            token("3"),
+            inline_list(vec![token("1"), token("0"), token(value.uuid.to_string())]),
+            text(&value.name),
+            localized(&value.synonyms),
+            text(&value.comment),
+            token("0"),
+            token("0"),
+            token("00000000-0000-0000-0000-000000000000"),
+            token("0"),
+        ],
+        vec![1, 3],
+    )
+}
+
+pub fn localized(values: &[(String, String)]) -> NativeValue {
+    let mut fields = Vec::with_capacity(values.len() * 2 + 1);
+    fields.push(token(values.len().to_string()));
+    for (language, content) in values {
+        fields.push(text(language));
+        fields.push(text(content));
+    }
+    inline_list(fields)
+}
+
+pub fn parse_metadata_header(value: &NativeValue) -> Result<NativeMetadataHeader, NativeError> {
+    let fields = exact_list(value, 9, "metadata header")?;
+    exact_token(&fields[0], "3", "metadata header marker")?;
+    let identity = exact_list(&fields[1], 3, "metadata identity")?;
+    exact_token(&identity[0], "1", "metadata identity marker")?;
+    exact_token(&identity[1], "0", "metadata identity kind")?;
+    let uuid_text = required_token(&identity[2], "metadata UUID")?;
+    let uuid = ObjectUuid::parse(uuid_text).map_err(|_| NativeError::Shape {
+        field: "metadata UUID",
+    })?;
+    for (index, expected) in [(5, "0"), (6, "0"), (8, "0")] {
+        exact_token(&fields[index], expected, "metadata header reserved field")?;
+    }
+    exact_token(
+        &fields[7],
+        "00000000-0000-0000-0000-000000000000",
+        "metadata header reserved UUID",
+    )?;
+    Ok(NativeMetadataHeader {
+        uuid,
+        name: required_text(&fields[2], "metadata name")?.to_owned(),
+        synonyms: parse_localized(&fields[3])?,
+        comment: required_text(&fields[4], "metadata comment")?.to_owned(),
+    })
+}
+
+pub fn parse_localized(value: &NativeValue) -> Result<Vec<(String, String)>, NativeError> {
+    let fields = required_list(value, "localized value")?;
+    let count = required_token(
+        fields.first().ok_or(NativeError::Shape {
+            field: "localized count",
+        })?,
+        "localized count",
+    )?
+    .parse::<usize>()
+    .map_err(|_| NativeError::Shape {
+        field: "localized count",
+    })?;
+    let expected = count
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(NativeError::NodeOverflow)?;
+    if fields.len() != expected {
+        return Err(NativeError::Shape {
+            field: "localized item count",
+        });
+    }
+    let mut values = Vec::with_capacity(count);
+    for pair in fields[1..].chunks_exact(2) {
+        values.push((
+            required_text(&pair[0], "localized language")?.to_owned(),
+            required_text(&pair[1], "localized content")?.to_owned(),
+        ));
+    }
+    Ok(values)
+}
+
+pub fn required_list<'a>(
+    value: &'a NativeValue,
+    field: &'static str,
+) -> Result<&'a [NativeValue], NativeError> {
+    value.as_list().ok_or(NativeError::Shape { field })
+}
+
+pub fn exact_list<'a>(
+    value: &'a NativeValue,
+    length: usize,
+    field: &'static str,
+) -> Result<&'a [NativeValue], NativeError> {
+    let values = required_list(value, field)?;
+    if values.len() != length {
+        return Err(NativeError::Shape { field });
+    }
+    Ok(values)
+}
+
+pub fn required_token<'a>(
+    value: &'a NativeValue,
+    field: &'static str,
+) -> Result<&'a str, NativeError> {
+    value.as_token().ok_or(NativeError::Shape { field })
+}
+
+pub fn required_text<'a>(
+    value: &'a NativeValue,
+    field: &'static str,
+) -> Result<&'a str, NativeError> {
+    value.as_text().ok_or(NativeError::Shape { field })
+}
+
+pub fn exact_token(
+    value: &NativeValue,
+    expected: &str,
+    field: &'static str,
+) -> Result<(), NativeError> {
+    if required_token(value, field)? != expected {
+        return Err(NativeError::Shape { field });
+    }
+    Ok(())
+}
+
+pub fn parse_bool_token(value: &NativeValue, field: &'static str) -> Result<bool, NativeError> {
+    match required_token(value, field)? {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(NativeError::Shape { field }),
+    }
+}
+
+pub fn serialize(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
+    let mut output = Vec::new();
+    output.extend_from_slice(UTF8_BOM);
+    write_value(value, &mut output, 0)?;
+    Ok(output)
+}
+
+pub fn serialize_without_bom(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
+    let bytes = serialize(value)?;
+    Ok(bytes[UTF8_BOM.len()..].to_vec())
+}
+
+pub fn parse(input: &[u8]) -> Result<NativeValue, NativeError> {
+    NativeParser::new(input).parse()
+}
+
+/// A body the platform may store with or without the UTF-8 BOM (HTML
+/// templates carry it, as help rows do).
+pub fn parse_optional_bom(input: &[u8]) -> Result<NativeValue, NativeError> {
+    if input.starts_with(UTF8_BOM) {
+        parse(input)
+    } else {
+        parse_without_bom(input)
+    }
+}
+
+/// Validate a complete source row against a family-proved nesting shape before
+/// materializing its tree. Uses the canonical lexical scanner, retains no body,
+/// and imposes no plaintext-byte ceiling. Default/cohort APIs stay unchanged.
+pub fn validate_descriptor_layout(
+    input: &[u8],
+    maximum_value_depth: usize,
+) -> Result<(), NativeError> {
+    let mut parser = NativeParser::new(input);
+    parser.max_depth = maximum_value_depth;
+    parser.offset = if input.starts_with(UTF8_BOM) {
+        UTF8_BOM.len()
+    } else {
+        0
+    };
+    parser.whitespace();
+    if parser.input.get(parser.offset) != Some(&b'{') {
+        return Err(NativeError::InvalidToken);
+    }
+    parser.skip_value(0)?;
+    parser.whitespace();
+    if parser.offset != input.len() {
+        return Err(NativeError::TrailingBytes);
+    }
+    Ok(())
+}
+
+/// Validate a complete descriptor using the canonical lexical scanner while
+/// borrowing only its own metadata UUID. Ordinary storage comparisons need no
+/// syntax tree or format-independent size/depth ceiling. The explicit stack
+/// retains three field shapes per open list; every frame/node owns an input
+/// byte, so the input itself bounds work and retained structural state.
+/// Existing cohort parsers and their resource limits are unchanged.
+pub fn descriptor_own_uuid(input: &[u8]) -> Result<Option<&str>, NativeError> {
+    #[derive(Clone, Copy)]
+    enum Field<'a> {
+        Token(&'a str),
+        Text,
+        Identity(Option<&'a str>),
+        Other,
+    }
+    struct Frame<'a> {
+        start: usize,
+        len: usize,
+        head: [Field<'a>; 3],
+        need_value: bool,
+    }
+    impl<'a> Frame<'a> {
+        fn add(&mut self, field: Field<'a>) -> Result<(), NativeError> {
+            if self.len < self.head.len() {
+                self.head[self.len] = field;
+            }
+            self.len = self.len.checked_add(1).ok_or(NativeError::NodeOverflow)?;
+            self.need_value = false;
+            Ok(())
+        }
+        fn identity(&self) -> Option<&'a str> {
+            if self.len == 3
+                && matches!(self.head[1], Field::Token("0"))
+                && let Field::Token(uuid) = self.head[2]
+            {
+                Some(uuid)
+            } else {
+                None
+            }
+        }
+        fn own_uuid(&self) -> Option<&'a str> {
+            if self.len == 9
+                && matches!(self.head[0], Field::Token("3"))
+                && matches!(self.head[2], Field::Text)
+                && let Field::Identity(uuid) = self.head[1]
+            {
+                uuid
+            } else {
+                None
+            }
+        }
+    }
+    let mut parser = NativeParser::new(input);
+    parser.offset = if input.starts_with(UTF8_BOM) {
+        UTF8_BOM.len()
+    } else {
+        0
+    };
+    let mut frames: Vec<Frame<'_>> = Vec::new();
+    let mut own: Option<(usize, &str)> = None;
+    let mut root_complete = false;
+    loop {
+        parser.whitespace();
+        if root_complete {
+            return if parser.offset == input.len() {
+                Ok(own.map(|(_, uuid)| uuid))
+            } else {
+                Err(NativeError::TrailingBytes)
+            };
+        }
+        let need_value = frames.last().is_none_or(|frame| frame.need_value);
+        if need_value {
+            let byte = *input.get(parser.offset).ok_or(NativeError::UnexpectedEnd)?;
+            // The canonical list grammar permits an empty list, and empty
+            // tokens after the first delimiter, but forbids a trailing comma.
+            if byte == b'}' && frames.last().is_some_and(|frame| frame.len == 0) {
+                parser.offset += 1;
+                let frame = frames.pop().expect("an open empty list");
+                if let Some(parent) = frames.last_mut() {
+                    parent.add(Field::Identity(frame.identity()))?;
+                } else {
+                    root_complete = true;
+                }
+                continue;
+            }
+            if byte == b'}' && !frames.is_empty() {
+                return Err(NativeError::TrailingComma);
+            }
+            parser.bump_node(0)?; // Input-derived node count, no recursive depth.
+            let field = if byte == b'{' {
+                frames
+                    .try_reserve(1)
+                    .map_err(|error| NativeError::Payload(error.to_string()))?;
+                frames.push(Frame {
+                    start: parser.offset,
+                    len: 0,
+                    head: [Field::Other; 3],
+                    need_value: true,
+                });
+                parser.offset += 1;
+                continue;
+            } else if byte == b',' && frames.last().is_some_and(|frame| frame.len > 0) {
+                Field::Token("")
+            } else if byte == b'"' {
+                parser.skip_text()?;
+                Field::Text
+            } else {
+                let start = parser.offset;
+                parser.skip_token()?;
+                Field::Token(
+                    std::str::from_utf8(&input[start..parser.offset])
+                        .map_err(|_| NativeError::InvalidUtf8)?,
+                )
+            };
+            if let Some(frame) = frames.last_mut() {
+                frame.add(field)?;
+            } else {
+                root_complete = true;
+            }
+        } else {
+            match input.get(parser.offset) {
+                Some(b',') => {
+                    parser.offset += 1;
+                    frames.last_mut().expect("an open list").need_value = true;
+                }
+                Some(b'}') => {
+                    parser.offset += 1;
+                    let frame = frames.pop().expect("an open list");
+                    if let Some(uuid) = frame.own_uuid()
+                        && own.is_none_or(|(start, _)| frame.start < start)
+                    {
+                        own = Some((frame.start, uuid));
+                    }
+                    if let Some(parent) = frames.last_mut() {
+                        parent.add(Field::Identity(frame.identity()))?;
+                    } else {
+                        root_complete = true;
+                    }
+                }
+                Some(_) => return Err(NativeError::ExpectedDelimiter),
+                None => return Err(NativeError::UnexpectedEnd),
+            }
+        }
+    }
+}
+
+pub fn parse_without_bom(input: &[u8]) -> Result<NativeValue, NativeError> {
+    let total =
+        input
+            .len()
+            .checked_add(UTF8_BOM.len())
+            .ok_or(NativeError::PlainPayloadTooLarge {
+                maximum: MAX_PLAIN_BYTES,
+                actual: usize::MAX,
+            })?;
+    if total > MAX_PLAIN_BYTES {
+        return Err(NativeError::PlainPayloadTooLarge {
+            maximum: MAX_PLAIN_BYTES,
+            actual: total,
+        });
+    }
+    let mut bytes = Vec::with_capacity(total);
+    bytes.extend_from_slice(UTF8_BOM);
+    bytes.extend_from_slice(input);
+    parse(&bytes)
+}
+
+pub fn raw_deflate(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
+    let plain = serialize(value)?;
+    encode_payload(PayloadEncoding::RawDeflate, &plain, payload_limits())
+        .map_err(|error| NativeError::Payload(error.to_string()))
+}
+
+pub fn inflate_and_parse(blob: &[u8]) -> Result<NativeValue, NativeError> {
+    let plain = decode_payload(PayloadEncoding::RawDeflate, blob, payload_limits())
+        .map_err(|error| NativeError::Payload(error.to_string()))?;
+    parse(plain.bytes())
+}
+
+pub fn inflate(blob: &[u8]) -> Result<Vec<u8>, NativeError> {
+    decode_payload(PayloadEncoding::RawDeflate, blob, payload_limits())
+        .map(|payload| payload.into_bytes())
+        .map_err(|error| NativeError::Payload(error.to_string()))
+}
+
+pub fn deflate_bytes(bytes: &[u8]) -> Result<Vec<u8>, NativeError> {
+    encode_payload(PayloadEncoding::RawDeflate, bytes, payload_limits())
+        .map_err(|error| NativeError::Payload(error.to_string()))
+}
+
+fn payload_limits() -> ResourceLimits {
+    ResourceLimits::new(
+        MAX_NATIVE_DEPTH,
+        1,
+        MAX_PLAIN_BYTES as u64,
+        MAX_PLAIN_BYTES as u64,
+        200,
+    )
+    .expect("native payload limits are non-zero")
+}
+
+fn write_value(value: &NativeValue, output: &mut Vec<u8>, depth: usize) -> Result<(), NativeError> {
+    ensure_write_depth(depth)?;
+    match value {
+        NativeValue::Token(value) => {
+            if is_line_wrapped_base64_token(value.as_bytes()) {
+                append_output(output, value.as_bytes())?;
+            } else if value.is_empty()
+                || !value.is_ascii()
+                || value.bytes().any(|byte| {
+                    byte.is_ascii_whitespace() || matches!(byte, b'{' | b'}' | b',' | b'"')
+                })
+            {
+                return Err(NativeError::InvalidToken);
+            } else {
+                append_output(output, value.as_bytes())?;
+            }
+        }
+        NativeValue::Text(value) => {
+            let escaped_length = value
+                .as_bytes()
+                .iter()
+                .filter(|byte| **byte == b'"')
+                .count();
+            let additional = value
+                .len()
+                .checked_add(escaped_length)
+                .and_then(|length| length.checked_add(2))
+                .ok_or(NativeError::PlainPayloadTooLarge {
+                    maximum: MAX_PLAIN_BYTES,
+                    actual: usize::MAX,
+                })?;
+            checked_output_length(output.len(), additional)?;
+            output.push(b'"');
+            for byte in value.as_bytes() {
+                output.push(*byte);
+                if *byte == b'"' {
+                    output.push(b'"');
+                }
+            }
+            output.push(b'"');
+        }
+        NativeValue::List {
+            values,
+            leading_break,
+            line_breaks,
+            trailing_break,
+        } => {
+            append_output(output, b"{")?;
+            if *leading_break && !values.is_empty() {
+                append_output(output, b"\r\n")?;
+            }
+            for (index, child) in values.iter().enumerate() {
+                if index != 0 {
+                    append_output(output, b",")?;
+                    if line_breaks.binary_search(&index).is_ok() {
+                        append_output(output, b"\r\n")?;
+                    }
+                }
+                if matches!(child, NativeValue::Token(value) if value.is_empty()) {
+                    write_empty_list_atom(output, depth + 1, index, values.len())?;
+                } else {
+                    write_value(child, output, depth + 1)?;
+                }
+            }
+            if *trailing_break && !values.is_empty() {
+                append_output(output, b"\r\n")?;
+            }
+            append_output(output, b"}")?;
+        }
+    }
+    Ok(())
+}
+
+fn write_empty_list_atom(
+    output: &mut [u8],
+    depth: usize,
+    index: usize,
+    list_length: usize,
+) -> Result<(), NativeError> {
+    ensure_write_depth(depth)?;
+    if index == 0 || index + 1 == list_length {
+        return Err(NativeError::InvalidToken);
+    }
+    checked_output_length(output.len(), 0)?;
+    Ok(())
+}
+
+fn ensure_write_depth(depth: usize) -> Result<(), NativeError> {
+    if depth > MAX_NATIVE_DEPTH {
+        return Err(NativeError::DepthExceeded);
+    }
+    Ok(())
+}
+
+fn append_output(output: &mut Vec<u8>, bytes: &[u8]) -> Result<(), NativeError> {
+    checked_output_length(output.len(), bytes.len())?;
+    output.extend_from_slice(bytes);
+    Ok(())
+}
+
+fn checked_output_length(current: usize, additional: usize) -> Result<usize, NativeError> {
+    let actual = current
+        .checked_add(additional)
+        .ok_or(NativeError::PlainPayloadTooLarge {
+            maximum: MAX_PLAIN_BYTES,
+            actual: usize::MAX,
+        })?;
+    if actual > MAX_PLAIN_BYTES {
+        return Err(NativeError::PlainPayloadTooLarge {
+            maximum: MAX_PLAIN_BYTES,
+            actual,
+        });
+    }
+    Ok(actual)
+}
+
+struct NativeParser<'a> {
+    input: &'a [u8],
+    offset: usize,
+    nodes: usize,
+    max_nodes: usize,
+    max_depth: usize,
+}
+
+impl<'a> NativeParser<'a> {
+    fn new(input: &'a [u8]) -> Self {
+        Self {
+            input,
+            offset: 0,
+            nodes: 0,
+            max_nodes: node_bound(input),
+            max_depth: MAX_NATIVE_DEPTH,
+        }
+    }
+
+    fn parse(mut self) -> Result<NativeValue, NativeError> {
+        if self.input.len() > MAX_PLAIN_BYTES {
+            return Err(NativeError::PlainPayloadTooLarge {
+                maximum: MAX_PLAIN_BYTES,
+                actual: self.input.len(),
+            });
+        }
+        if !self.input.starts_with(UTF8_BOM) {
+            return Err(NativeError::MissingBom);
+        }
+        self.offset = UTF8_BOM.len();
+        let value = self.value(0)?;
+        self.whitespace();
+        if self.offset != self.input.len() {
+            return Err(NativeError::TrailingBytes);
+        }
+        Ok(value)
+    }
+
+    fn value(&mut self, depth: usize) -> Result<NativeValue, NativeError> {
+        self.bump_node(depth)?;
+        self.whitespace();
+        match self.input.get(self.offset) {
+            Some(b'{') => self.list(depth),
+            Some(b'"') => self.text(),
+            Some(_) => self.token(),
+            None => Err(NativeError::UnexpectedEnd),
+        }
+    }
+
+    fn bump_node(&mut self, depth: usize) -> Result<(), NativeError> {
+        if depth > self.max_depth {
+            return Err(NativeError::DepthExceeded);
+        }
+        self.nodes = self.nodes.checked_add(1).ok_or(NativeError::NodeOverflow)?;
+        if self.nodes > self.max_nodes {
+            return Err(NativeError::TooManyNodes);
+        }
+        Ok(())
+    }
+
+    fn list(&mut self, depth: usize) -> Result<NativeValue, NativeError> {
+        self.offset += 1;
+        let whitespace_start = self.offset;
+        self.whitespace();
+        let leading_break = self.input[whitespace_start..self.offset]
+            .iter()
+            .any(|byte| matches!(byte, b'\r' | b'\n'));
+        let mut values = Vec::new();
+        if self.input.get(self.offset) == Some(&b'}') {
+            self.offset += 1;
+            return Ok(NativeValue::List {
+                values,
+                leading_break: false,
+                line_breaks: Vec::new(),
+                trailing_break: false,
+            });
+        }
+        let mut line_breaks = Vec::new();
+        loop {
+            if !values.is_empty() && self.input.get(self.offset) == Some(&b',') {
+                self.bump_node(depth + 1)?;
+                values.push(NativeValue::Token(String::new()));
+            } else {
+                values.push(self.value(depth + 1)?);
+            }
+            let whitespace_start = self.offset;
+            self.whitespace();
+            let trailing_break = self.input[whitespace_start..self.offset]
+                .iter()
+                .any(|byte| matches!(byte, b'\r' | b'\n'));
+            match self.input.get(self.offset) {
+                Some(b',') => {
+                    self.offset += 1;
+                    let whitespace_start = self.offset;
+                    self.whitespace();
+                    if self.input[whitespace_start..self.offset]
+                        .iter()
+                        .any(|byte| matches!(byte, b'\r' | b'\n'))
+                    {
+                        line_breaks.push(values.len());
+                    }
+                    if self.input.get(self.offset) == Some(&b'}') {
+                        return Err(NativeError::TrailingComma);
+                    }
+                }
+                Some(b'}') => {
+                    self.offset += 1;
+                    return Ok(NativeValue::List {
+                        values,
+                        leading_break,
+                        line_breaks,
+                        trailing_break,
+                    });
+                }
+                Some(_) => return Err(NativeError::ExpectedDelimiter),
+                None => return Err(NativeError::UnexpectedEnd),
+            }
+        }
+    }
+
+    fn text(&mut self) -> Result<NativeValue, NativeError> {
+        self.offset += 1;
+        let mut output = Vec::new();
+        loop {
+            let Some(byte) = self.input.get(self.offset).copied() else {
+                return Err(NativeError::UnexpectedEnd);
+            };
+            self.offset += 1;
+            if byte != b'"' {
+                output.push(byte);
+                continue;
+            }
+            if self.input.get(self.offset) == Some(&b'"') {
+                output.push(b'"');
+                self.offset += 1;
+                continue;
+            }
+            return String::from_utf8(output)
+                .map(NativeValue::Text)
+                .map_err(|_| NativeError::InvalidUtf8);
+        }
+    }
+
+    fn token(&mut self) -> Result<NativeValue, NativeError> {
+        if self.input[self.offset..].starts_with(b"#base64:") {
+            return self.line_wrapped_base64_token();
+        }
+        let start = self.offset;
+        while let Some(byte) = self.input.get(self.offset) {
+            if byte.is_ascii_whitespace() || matches!(byte, b',' | b'}') {
+                break;
+            }
+            if matches!(byte, b'{' | b'"') || !byte.is_ascii() {
+                return Err(NativeError::InvalidToken);
+            }
+            self.offset += 1;
+        }
+        if self.offset == start {
+            return Err(NativeError::InvalidToken);
+        }
+        let value = std::str::from_utf8(&self.input[start..self.offset])
+            .map_err(|_| NativeError::InvalidUtf8)?;
+        Ok(NativeValue::Token(value.to_owned()))
+    }
+
+    fn line_wrapped_base64_token(&mut self) -> Result<NativeValue, NativeError> {
+        let start = self.offset;
+        self.offset += b"#base64:".len();
+        let mut payload_len = 0usize;
+        let mut padding_len = 0usize;
+        while let Some(byte) = self.input.get(self.offset).copied() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' if padding_len == 0 => {
+                    payload_len += 1;
+                    self.offset += 1;
+                }
+                b'=' => {
+                    padding_len += 1;
+                    if padding_len > 2 {
+                        return Err(NativeError::InvalidToken);
+                    }
+                    self.offset += 1;
+                }
+                _ if byte.is_ascii_whitespace() => self.offset += 1,
+                b',' | b'}' => break,
+                _ => return Err(NativeError::InvalidToken),
+            }
+        }
+        if payload_len == 0 || !(payload_len + padding_len).is_multiple_of(4) {
+            return Err(NativeError::InvalidToken);
+        }
+        let value = std::str::from_utf8(&self.input[start..self.offset])
+            .map_err(|_| NativeError::InvalidUtf8)?;
+        Ok(NativeValue::Token(value.to_owned()))
+    }
+
+    fn whitespace(&mut self) {
+        while self
+            .input
+            .get(self.offset)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            self.offset += 1;
+        }
+    }
+}
+
+/// The root of a native document, read with every check [`parse`] makes but
+/// without building the tree: only the root list's length and its first and
+/// last few values are kept.
+///
+/// A reader that only inspects a handful of root fields paid for the whole
+/// tree before: a spreadsheet body of ERP УХ 3.2.12.6 holds millions of
+/// nodes, and allocating and freeing them was a quarter of the time its
+/// conversion to XML took.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeRootOutline {
+    /// The number of values of the root list; `None` when the root is not a
+    /// list.
+    pub len: Option<usize>,
+    /// The root list's leading values, at most as many as were asked for.
+    pub head: Vec<NativeValue>,
+    /// The root list's trailing values in order, at most as many as were
+    /// asked for.
+    pub tail: Vec<NativeValue>,
+}
+
+/// [`parse`]'s outline: the same acceptance and the same errors.
+pub fn outline(input: &[u8], head: usize, tail: usize) -> Result<NativeRootOutline, NativeError> {
+    if input.len() > MAX_PLAIN_BYTES {
+        return Err(NativeError::PlainPayloadTooLarge {
+            maximum: MAX_PLAIN_BYTES,
+            actual: input.len(),
+        });
+    }
+    if !input.starts_with(UTF8_BOM) {
+        return Err(NativeError::MissingBom);
+    }
+    let mut parser = NativeParser::new(input);
+    parser.offset = UTF8_BOM.len();
+    parser.outline_document(head, tail)
+}
+
+/// [`parse_without_bom`]'s outline. The body is read in place: the parser
+/// never looks back at the BOM that version prepends, so only the node bound
+/// has to count it.
+pub fn outline_without_bom(
+    input: &[u8],
+    head: usize,
+    tail: usize,
+) -> Result<NativeRootOutline, NativeError> {
+    let total =
+        input
+            .len()
+            .checked_add(UTF8_BOM.len())
+            .ok_or(NativeError::PlainPayloadTooLarge {
+                maximum: MAX_PLAIN_BYTES,
+                actual: usize::MAX,
+            })?;
+    if total > MAX_PLAIN_BYTES {
+        return Err(NativeError::PlainPayloadTooLarge {
+            maximum: MAX_PLAIN_BYTES,
+            actual: total,
+        });
+    }
+    let mut parser = NativeParser::new(input);
+    parser.max_nodes = total.saturating_add(1);
+    parser.outline_document(head, tail)
+}
+
+impl NativeParser<'_> {
+    /// `parse` after its BOM check, keeping the outline instead of the tree.
+    fn outline_document(
+        &mut self,
+        head: usize,
+        tail: usize,
+    ) -> Result<NativeRootOutline, NativeError> {
+        self.bump_node(0)?;
+        self.whitespace();
+        let outline = match self.input.get(self.offset) {
+            Some(b'{') => self.outline_list(head, tail)?,
+            Some(b'"') => {
+                self.text()?;
+                NativeRootOutline {
+                    len: None,
+                    head: Vec::new(),
+                    tail: Vec::new(),
+                }
+            }
+            Some(_) => {
+                self.token()?;
+                NativeRootOutline {
+                    len: None,
+                    head: Vec::new(),
+                    tail: Vec::new(),
+                }
+            }
+            None => return Err(NativeError::UnexpectedEnd),
+        };
+        self.whitespace();
+        if self.offset != self.input.len() {
+            return Err(NativeError::TrailingBytes);
+        }
+        Ok(outline)
+    }
+
+    /// `list` at the root: the leading values are built as `list` builds
+    /// them, the others are only checked, and the trailing ones are built
+    /// again from where they start once the list has closed.
+    fn outline_list(&mut self, head: usize, tail: usize) -> Result<NativeRootOutline, NativeError> {
+        self.offset += 1;
+        self.whitespace();
+        let mut outline = NativeRootOutline {
+            len: Some(0),
+            head: Vec::new(),
+            tail: Vec::new(),
+        };
+        if self.input.get(self.offset) == Some(&b'}') {
+            self.offset += 1;
+            return Ok(outline);
+        }
+        // Where each trailing value starts; `None` is the empty token.
+        let mut trailing = std::collections::VecDeque::with_capacity(tail + 1);
+        let mut len = 0usize;
+        loop {
+            let start = if len != 0 && self.input.get(self.offset) == Some(&b',') {
+                self.bump_node(1)?;
+                if len < head {
+                    outline.head.push(NativeValue::Token(String::new()));
+                }
+                None
+            } else {
+                let start = self.offset;
+                if len < head {
+                    let value = self.value(1)?;
+                    outline.head.push(value);
+                } else {
+                    self.skip_value(1)?;
+                }
+                Some(start)
+            };
+            len += 1;
+            if tail > 0 {
+                if trailing.len() == tail {
+                    trailing.pop_front();
+                }
+                trailing.push_back(start);
+            }
+            self.whitespace();
+            match self.input.get(self.offset) {
+                Some(b',') => {
+                    self.offset += 1;
+                    self.whitespace();
+                    if self.input.get(self.offset) == Some(&b'}') {
+                        return Err(NativeError::TrailingComma);
+                    }
+                }
+                Some(b'}') => {
+                    self.offset += 1;
+                    break;
+                }
+                Some(_) => return Err(NativeError::ExpectedDelimiter),
+                None => return Err(NativeError::UnexpectedEnd),
+            }
+        }
+        outline.len = Some(len);
+        for start in trailing {
+            let value = match start {
+                None => NativeValue::Token(String::new()),
+                Some(start) => {
+                    // Already accepted above at this very depth, so no bound
+                    // can refuse it the second time.
+                    let mut again = NativeParser::new(self.input);
+                    again.offset = start;
+                    again.max_nodes = usize::MAX;
+                    again.value(1)?
+                }
+            };
+            outline.tail.push(value);
+        }
+        Ok(outline)
+    }
+
+    /// `value` without the value.
+    fn skip_value(&mut self, depth: usize) -> Result<(), NativeError> {
+        self.bump_node(depth)?;
+        self.whitespace();
+        match self.input.get(self.offset) {
+            Some(b'{') => self.skip_list(depth),
+            Some(b'"') => self.skip_text(),
+            Some(_) => self.skip_token(),
+            None => Err(NativeError::UnexpectedEnd),
+        }
+    }
+
+    /// `list` without the list.
+    fn skip_list(&mut self, depth: usize) -> Result<(), NativeError> {
+        self.offset += 1;
+        self.whitespace();
+        if self.input.get(self.offset) == Some(&b'}') {
+            self.offset += 1;
+            return Ok(());
+        }
+        let mut first = true;
+        loop {
+            if !first && self.input.get(self.offset) == Some(&b',') {
+                self.bump_node(depth + 1)?;
+            } else {
+                self.skip_value(depth + 1)?;
+            }
+            first = false;
+            self.whitespace();
+            match self.input.get(self.offset) {
+                Some(b',') => {
+                    self.offset += 1;
+                    self.whitespace();
+                    if self.input.get(self.offset) == Some(&b'}') {
+                        return Err(NativeError::TrailingComma);
+                    }
+                }
+                Some(b'}') => {
+                    self.offset += 1;
+                    return Ok(());
+                }
+                Some(_) => return Err(NativeError::ExpectedDelimiter),
+                None => return Err(NativeError::UnexpectedEnd),
+            }
+        }
+    }
+
+    /// `text` without the text. Its content is valid UTF-8 exactly when the
+    /// stored bytes between the quotes are: a doubled quote only loses one
+    /// ASCII byte next to its twin.
+    fn skip_text(&mut self) -> Result<(), NativeError> {
+        self.offset += 1;
+        let start = self.offset;
+        loop {
+            let Some(quote) = find_byte(self.input, self.offset, b'"') else {
+                return Err(NativeError::UnexpectedEnd);
+            };
+            self.offset = quote + 1;
+            if self.input.get(self.offset) == Some(&b'"') {
+                self.offset += 1;
+                continue;
+            }
+            return std::str::from_utf8(&self.input[start..self.offset - 1])
+                .map(|_| ())
+                .map_err(|_| NativeError::InvalidUtf8);
+        }
+    }
+
+    /// `token` without the token: its bytes are ASCII, so they are UTF-8.
+    fn skip_token(&mut self) -> Result<(), NativeError> {
+        if self.input[self.offset..].starts_with(b"#base64:") {
+            return self.line_wrapped_base64_token().map(|_| ());
+        }
+        let start = self.offset;
+        while let Some(byte) = self.input.get(self.offset) {
+            if byte.is_ascii_whitespace() || matches!(byte, b',' | b'}') {
+                break;
+            }
+            if matches!(byte, b'{' | b'"') || !byte.is_ascii() {
+                return Err(NativeError::InvalidToken);
+            }
+            self.offset += 1;
+        }
+        if self.offset == start {
+            return Err(NativeError::InvalidToken);
+        }
+        Ok(())
+    }
+}
+
+/// Where the first `needle` at or after `from` sits, found eight bytes at a
+/// time: the lowest byte the zero-byte test flags is always a true match.
+fn find_byte(bytes: &[u8], from: usize, needle: u8) -> Option<usize> {
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    const HIGHS: u64 = 0x8080_8080_8080_8080;
+    let pattern = ONES * u64::from(needle);
+    let mut index = from;
+    while let Some(chunk) = bytes.get(index..index + 8) {
+        let mut word = [0u8; 8];
+        word.copy_from_slice(chunk);
+        let word = u64::from_le_bytes(word) ^ pattern;
+        let found = word.wrapping_sub(ONES) & !word & HIGHS;
+        if found != 0 {
+            return Some(index + (found.trailing_zeros() / 8) as usize);
+        }
+        index += 8;
+    }
+    bytes
+        .get(index..)?
+        .iter()
+        .position(|byte| *byte == needle)
+        .map(|offset| index + offset)
+}
+
+fn is_line_wrapped_base64_token(value: &[u8]) -> bool {
+    let Some(payload) = value.strip_prefix(b"#base64:") else {
+        return false;
+    };
+    let mut payload_len = 0usize;
+    let mut padding_len = 0usize;
+    for byte in payload {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' if padding_len == 0 => {
+                payload_len += 1;
+            }
+            b'=' => {
+                padding_len += 1;
+                if padding_len > 2 {
+                    return false;
+                }
+            }
+            _ if byte.is_ascii_whitespace() => {}
+            _ => return false,
+        }
+    }
+    payload_len > 0 && (payload_len + padding_len).is_multiple_of(4)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NativeError {
+    MissingBom,
+    UnexpectedEnd,
+    TrailingBytes,
+    TrailingComma,
+    ExpectedDelimiter,
+    InvalidToken,
+    InvalidUtf8,
+    DepthExceeded,
+    NodeOverflow,
+    TooManyNodes,
+    PlainPayloadTooLarge { maximum: usize, actual: usize },
+    Payload(String),
+    Shape { field: &'static str },
+}
+
+impl Display for NativeError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingBom => formatter.write_str("native value has no UTF-8 BOM"),
+            Self::UnexpectedEnd => formatter.write_str("native value ended unexpectedly"),
+            Self::TrailingBytes => formatter.write_str("native value has trailing bytes"),
+            Self::TrailingComma => formatter.write_str("native list has a trailing comma"),
+            Self::ExpectedDelimiter => {
+                formatter.write_str("native list expected comma or closing brace")
+            }
+            Self::InvalidToken => formatter.write_str("native token contains a reserved byte"),
+            Self::InvalidUtf8 => formatter.write_str("native text is not valid UTF-8"),
+            Self::DepthExceeded => formatter.write_str("native value exceeds its depth bound"),
+            Self::NodeOverflow => formatter.write_str("native node counter overflow"),
+            Self::TooManyNodes => formatter.write_str("native value exceeds its node bound"),
+            Self::PlainPayloadTooLarge { maximum, actual } => write!(
+                formatter,
+                "native plaintext has {actual} bytes, exceeding {maximum}"
+            ),
+            Self::Payload(reason) => {
+                write!(formatter, "native payload codec rejected data: {reason}")
+            }
+            Self::Shape { field } => write!(formatter, "native value has invalid {field} shape"),
+        }
+    }
+}
+
+impl Error for NativeError {}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn borrowed_descriptor_scanner_keeps_canonical_grammar_and_ancestor_header_order() {
+        for text in [
+            "{}",
+            "{1,,2}",
+            "{\"a\"\"b\",{0},#base64:QUJD\r\nRA==}",
+            "{,1}",
+            "{1,}",
+            "{1,,}",
+            "{1 2}",
+            "{1}tail",
+            "{\"unterminated}",
+            "{#base64:Q===}",
+            "{#base64:QUJD R===}",
+            "{#base64:QUJD\r\nRA==,1}",
+        ] {
+            assert_eq!(
+                super::descriptor_own_uuid(text.as_bytes()).is_ok(),
+                super::parse_optional_bom(text.as_bytes()).is_ok(),
+                "{text}"
+            );
+        }
+        let outer = "16b3681c-426d-4d6f-9ffe-588a23974222";
+        let inner = "26b3681c-426d-4d6f-9ffe-588a23974222";
+        let child = format!("{{3,{{1,0,{inner}}},\"Inner\",{{0}},\"\",0,0,0,0}}");
+        let text = format!("{{3,{{1,0,{outer}}},\"Outer\",{child},\"\",0,0,0,0}}");
+        assert_eq!(
+            super::descriptor_own_uuid(text.as_bytes()).unwrap(),
+            Some(outer)
+        );
+        let deep = format!("{}{text}{}", "{".repeat(2048), "}".repeat(2048));
+        assert_eq!(
+            super::descriptor_own_uuid(deep.as_bytes()).unwrap(),
+            Some(outer)
+        );
+        assert!(super::parse_optional_bom(deep.as_bytes()).is_err());
+        assert!(super::descriptor_own_uuid(b"{\"bad\xff\"}").is_err());
+    }
+    use super::*;
+
+    #[test]
+    fn textual_value_and_raw_deflate_roundtrip() {
+        let value = list(vec![
+            token("1"),
+            text("Текст \"в кавычках\""),
+            list(vec![token("0")]),
+        ]);
+        let plain = serialize(&value).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
+        assert!(plain.windows(2).any(|bytes| bytes == b"\r\n"));
+        assert_eq!(parse(&plain).unwrap(), value);
+        assert_eq!(
+            inflate_and_parse(&raw_deflate(&value).unwrap()).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn parser_rejects_missing_bom_and_trailing_data() {
+        assert_eq!(parse(b"{1}"), Err(NativeError::MissingBom));
+        let mut input = UTF8_BOM.to_vec();
+        input.extend_from_slice(b"{1}x");
+        assert_eq!(parse(&input), Err(NativeError::TrailingBytes));
+    }
+
+    #[test]
+    fn parser_preserves_line_wrapped_base64_atom() {
+        let input = b"\xef\xbb\xbf{#base64:QUJD\r\nRA==}";
+        let value = parse(input).unwrap();
+        assert_eq!(
+            value,
+            NativeValue::List {
+                values: vec![NativeValue::Token("#base64:QUJD\r\nRA==".to_string())],
+                leading_break: false,
+                line_breaks: Vec::new(),
+                trailing_break: false,
+            }
+        );
+        assert_eq!(serialize(&value).unwrap(), input);
+    }
+
+    #[test]
+    fn parser_rejects_malformed_line_wrapped_base64_and_generic_wrapped_tokens() {
+        for input in [
+            b"\xef\xbb\xbf{#base64:QU?D}".as_slice(),
+            b"\xef\xbb\xbf{#base64:QUJD=}".as_slice(),
+            b"\xef\xbb\xbf{#base64:QUJD=AAA}".as_slice(),
+            b"\xef\xbb\xbf{ordinary\r\ntoken}".as_slice(),
+        ] {
+            assert!(matches!(
+                parse(input),
+                Err(NativeError::InvalidToken | NativeError::ExpectedDelimiter)
+            ));
+        }
+    }
+
+    #[test]
+    fn parser_roundtrips_interior_empty_list_atoms() {
+        for input in [
+            b"\xef\xbb\xbf{1,,60}".as_slice(),
+            b"\xef\xbb\xbf{1,,,60}".as_slice(),
+            b"\xef\xbb\xbf{1,\r\n,\r\n60}".as_slice(),
+        ] {
+            let value = parse(input).unwrap();
+            assert_eq!(serialize(&value).unwrap(), input);
+        }
+
+        let value = parse(b"\xef\xbb\xbf{1,,,60}").unwrap();
+        let values = value.as_list().unwrap();
+        assert_eq!(values.len(), 4);
+        assert!(matches!(&values[1], NativeValue::Token(value) if value.is_empty()));
+        assert!(matches!(&values[2], NativeValue::Token(value) if value.is_empty()));
+
+        let constructed = inline_list(vec![token("1"), token(""), token(""), token("60")]);
+        assert_eq!(serialize(&constructed).unwrap(), b"\xef\xbb\xbf{1,,,60}");
+    }
+
+    #[test]
+    fn parser_rejects_empty_atoms_outside_list_interior() {
+        assert_eq!(parse(b"\xef\xbb\xbf{,1}"), Err(NativeError::InvalidToken));
+        assert_eq!(parse(b"\xef\xbb\xbf{1,}"), Err(NativeError::TrailingComma));
+        assert_eq!(parse(b"\xef\xbb\xbf{1,,}"), Err(NativeError::TrailingComma));
+        assert_eq!(parse(UTF8_BOM), Err(NativeError::UnexpectedEnd));
+
+        assert_eq!(serialize(&token("")), Err(NativeError::InvalidToken));
+        assert_eq!(
+            serialize(&inline_list(vec![token(""), token("1")])),
+            Err(NativeError::InvalidToken)
+        );
+        assert_eq!(
+            serialize(&inline_list(vec![token("1"), token("")])),
+            Err(NativeError::InvalidToken)
+        );
+    }
+
+    #[test]
+    fn empty_atom_writer_obeys_depth_and_output_limits() {
+        let mut output = Vec::new();
+        assert_eq!(
+            write_empty_list_atom(&mut output, MAX_NATIVE_DEPTH + 1, 1, 3),
+            Err(NativeError::DepthExceeded)
+        );
+        assert_eq!(
+            checked_output_length(MAX_PLAIN_BYTES, 1),
+            Err(NativeError::PlainPayloadTooLarge {
+                maximum: MAX_PLAIN_BYTES,
+                actual: MAX_PLAIN_BYTES + 1,
+            })
+        );
+        assert_eq!(
+            checked_output_length(usize::MAX, 1),
+            Err(NativeError::PlainPayloadTooLarge {
+                maximum: MAX_PLAIN_BYTES,
+                actual: usize::MAX,
+            })
+        );
+    }
+
+    #[test]
+    fn parser_accepts_evidenced_large_mxl_resource_envelope() {
+        const EVIDENCED_PLAIN_BYTES: usize = 2_274_086;
+        const EVIDENCED_NATIVE_DEPTH: usize = 4;
+        const EVIDENCED_NATIVE_NODES: usize = 564_948;
+
+        const {
+            assert!(EVIDENCED_PLAIN_BYTES <= MAX_PLAIN_BYTES);
+            assert!(EVIDENCED_NATIVE_DEPTH <= MAX_NATIVE_DEPTH);
+        }
+        assert!(EVIDENCED_NATIVE_NODES <= node_bound(&vec![0u8; EVIDENCED_PLAIN_BYTES]));
+
+        let mut parser = NativeParser::new(b"\xef\xbb\xbf0");
+        parser.offset = UTF8_BOM.len();
+        parser.max_nodes = EVIDENCED_NATIVE_NODES;
+        parser.nodes = EVIDENCED_NATIVE_NODES - 1;
+        assert_eq!(
+            parser.value(EVIDENCED_NATIVE_DEPTH),
+            Ok(token("0")),
+            "the evidenced MXL node count must remain accepted"
+        );
+        assert_eq!(parser.nodes, EVIDENCED_NATIVE_NODES);
+    }
+
+    #[test]
+    fn parser_accepts_evidenced_large_role_rights_node_count() {
+        // `Roles/БазовыеПраваБПУХ`'s Rights payload on ERP УХ 3.2.12.6:
+        // 16,198,940 inflated bytes, 1,355,230 scalar/list nodes -- the
+        // largest role Rights payload on the stand, and the one that used to
+        // trip the old 1,000,000 bound.
+        const EVIDENCED_ROLE_RIGHTS_BYTES: usize = 16_198_940;
+        const EVIDENCED_ROLE_RIGHTS_NODES: usize = 1_355_230;
+
+        assert!(EVIDENCED_ROLE_RIGHTS_NODES <= node_bound(&vec![0u8; EVIDENCED_ROLE_RIGHTS_BYTES]));
+
+        let mut parser = NativeParser::new(b"\xef\xbb\xbf0");
+        parser.offset = UTF8_BOM.len();
+        parser.max_nodes = EVIDENCED_ROLE_RIGHTS_NODES;
+        parser.nodes = EVIDENCED_ROLE_RIGHTS_NODES - 1;
+        assert_eq!(parser.value(0), Ok(token("0")));
+        assert_eq!(parser.nodes, EVIDENCED_ROLE_RIGHTS_NODES);
+    }
+
+    /// The four ERP УХ 3.2.12.6 template bodies the flat 2,500,000 bound
+    /// refused outright -- `РегламентированныйОтчетСтатистикаФорма1ЦеныПроизв`,
+    /// `...ТОРГ` and `...Услуги`'s `Списки2021Кв1`/`Списки2023Кв1` -- measured
+    /// straight off `cf extract`'s `unpacked.bin`.
+    #[test]
+    fn the_node_bound_admits_the_largest_measured_template_bodies() {
+        for (bytes, nodes) in [
+            (22_767_481usize, 2_930_764usize),
+            (30_902_115, 5_523_231),
+            (17_824_329, 2_695_201),
+            (36_849_823, 5_514_558),
+        ] {
+            assert!(bytes <= MAX_PLAIN_BYTES);
+            assert!(
+                nodes <= node_bound(&vec![0u8; bytes]),
+                "{nodes} nodes must fit the bound {bytes} bytes prove"
+            );
+        }
+    }
+
+    #[test]
+    fn parser_node_bound_is_inclusive_and_rejects_the_next_node() {
+        // `{,}` is the densest shape the grammar admits: three bytes, and the
+        // bound is the byte count plus one.
+        let input = b"\xef\xbb\xbf0";
+        let bound = node_bound(input);
+
+        let mut accepted = NativeParser::new(input);
+        accepted.offset = UTF8_BOM.len();
+        accepted.nodes = bound - 1;
+        assert_eq!(accepted.value(0), Ok(token("0")));
+        assert_eq!(accepted.nodes, bound);
+
+        let mut rejected = NativeParser::new(input);
+        rejected.offset = UTF8_BOM.len();
+        rejected.nodes = bound;
+        assert_eq!(rejected.value(0), Err(NativeError::TooManyNodes));
+    }
+
+    /// The bound must hold for the shapes that pack the most nodes per byte:
+    /// the empty-token forms, which create a node per delimiter.
+    #[test]
+    fn the_node_bound_holds_for_the_densest_grammar_shapes() {
+        for body in [
+            "0",
+            "{}",
+            "{0}",
+            "{,0}",
+            "{0,,0}",
+            "{0,,,0}",
+            "{{,0},{0,,0},{}}",
+            "{0,{,0},{,,0}}",
+        ] {
+            let mut input = UTF8_BOM.to_vec();
+            input.extend_from_slice(body.as_bytes());
+            let mut counting = NativeParser::new(&input);
+            let bound = counting.max_nodes;
+            counting.offset = UTF8_BOM.len();
+            let outcome = counting.value(0);
+            assert_ne!(
+                outcome.as_ref().err(),
+                Some(&NativeError::TooManyNodes),
+                "{body} must never be refused by the bound its own bytes prove"
+            );
+            assert!(
+                counting.nodes <= bound,
+                "{body} produced {} nodes against a bound of {bound}",
+                counting.nodes
+            );
+        }
+    }
+}

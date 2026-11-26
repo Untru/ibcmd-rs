@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-query-union-link-typeid",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "CHIPS-BATCH-SPEC.md Block G, G1: transplant the exact evidenced TypeId construction from dcs-typeid-reference's own seed/Template.xml (a DataSetFieldField valueType referencing CatalogRef.FilterProbe via the current-config namespace) into dcs-query-union-link's QueryRows DataSetQuery field list, adding a new field 'Owner'. Nothing invented -- byte-for-byte reuse of an already-proven construction in a new dataSet-type context (DataSetQuery instead of DataSetObject).",
+    "path": "seed/Template.xml",
+    "size": 2750,
+    "sha256": "5ce6f74897ce0428f2898fcf54ed542dcd23af6aafdbd0f331a0fde1e18bb3be"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "fa948ff345677420753cfc127f3008006995a48390d67eebed9559fdbad60ad1",
+    "round_2_cf_sha256": "527ad16cfcf10a9703590504b141f712a3149dad2bdc42842e3a8d8dc4b3abaa",
+    "native_template_sha256": "5ce6f74897ce0428f2898fcf54ed542dcd23af6aafdbd0f331a0fde1e18bb3be",
+    "packed_body_sha256": "f51f756a382994936bcf748a62d665cf9a53cfc05153e75401d3df6e8b4ee3ca",
+    "unpacked_body_sha256": "82a05801479c413d58377a6b2436b66c0e679ec94b211bbf3c8746cfd9469e44",
+    "native_template_equal": true,
+    "native_template_equal_seed": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2,
+    "import_attempts_used": 1,
+    "import_attempts_allowed": 3
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 87139,
+      "sha256": "527ad16cfcf10a9703590504b141f712a3149dad2bdc42842e3a8d8dc4b3abaa"
+    },
+    "native_template": {
+      "path": "native-template.xml.b64",
+      "decoded_size": 2750,
+      "sha256": "5ce6f74897ce0428f2898fcf54ed542dcd23af6aafdbd0f331a0fde1e18bb3be"
+    },
+    "packed_body": {
+      "path": "raw-packed.bin.b64",
+      "decoded_size": 833,
+      "sha256": "f51f756a382994936bcf748a62d665cf9a53cfc05153e75401d3df6e8b4ee3ca"
+    },
+    "unpacked_body": {
+      "path": "raw-unpacked.bin.b64",
+      "decoded_size": 3152,
+      "sha256": "82a05801479c413d58377a6b2436b66c0e679ec94b211bbf3c8746cfd9469e44"
+    }
+  },
+  "cohort": {
+    "new_field_name": "Owner",
+    "container_data_set": "QueryRows (DataSetQuery)",
+    "value_type_reference": "CatalogRef.FilterProbe",
+    "native_prefix": "d5p1",
+    "cf_export_still_fails_on_this_corpus": true,
+    "cf_export_error": "entry_export_failed: 1 CF storage entries could not be exported"
+  },
+  "negative_observations": [
+    "The offline ibcmd-rs cf export tool still fails to normalize this Template.xml even with the TypeId/type_index field populated, matching the same failure class already observed on the unmodified base corpus -- the export gate is not resolved merely by having a non-empty type_index."
+  ],
+  "non_claims": [
+    "No claim about the root cause of the cf export normalization failure (the DataSetUnion construct is the more likely culprit, not re-diagnosed here).",
+    "No claim about TypeId references in any dataSet context other than DataSetQuery (DataSetUnion's own item, or the top-level dataSetLink, were not modified).",
+    "compiler_acceptance is intentionally omitted from this probe; not part of this probe session.",
+    "Provenance: produced in a chip-fix probe session (scratchpad/evidence-batch/CHIPS-BATCH-SPEC.md), not yet reviewed or integrated."
+  ]
+}

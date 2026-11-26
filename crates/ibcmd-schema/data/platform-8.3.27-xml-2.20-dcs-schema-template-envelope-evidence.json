@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "contract": "8.3.27-xml-2.20-dcs-schema-template-envelope-v1",
+  "source": {
+    "product": "1C:Enterprise Platform",
+    "release": "8.3.27 / XML 2.20",
+    "derivation": "bounded schema-template envelope policy synthesized from the immutable one-variant dcs-core baseline and exact two-variant platform evidence on 8.3.27.2214; no other patch build is inferred"
+  },
+  "fixture": {
+    "fixtureId": "8.3.27.2214-xml-2.20-dcs-multi-variant-envelope",
+    "platformLine": "8.3.27",
+    "platformVersion": "8.3.27.2214",
+    "sourceVersion": "2.20",
+    "ibcmdSha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "extractorIdentity": "ibcmd-rs cf extract retained lab build",
+    "extractorSha256": "5ec1be63f1a850c2673ee8ce7b896fb98934f363d86fff4e9d581b57cfcab722",
+    "seedSha256": "d32bf50308d0af77243ac4a5b2b9d090ef9c32ddf5575e9583b679dbb785e881",
+    "round1CfSha256": "de78c33dc31f49112f26bc9e880a079f3a8a122275ddea7e00f64a348c0807e6",
+    "round2CfSha256": "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4",
+    "round1TemplateSha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+    "round2TemplateSha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+    "round1PackedSha256": "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c",
+    "round2PackedSha256": "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c",
+    "round1UnpackedSha256": "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87",
+    "round2UnpackedSha256": "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87",
+    "configurationEncodedSha256": "bc5a9f7823b061fdf285de591dec24696016c751afa0f88751967fb4604040e0",
+    "configurationDecodedSha256": "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4",
+    "rawPackedEncodedSha256": "e618568d9979a1b8bd380488dd378029a6f157b691f023971d87208befa0eaff",
+    "rawPackedDecodedSha256": "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c",
+    "rawUnpackedEncodedSha256": "3ca3e131a41d7cac6cf3e4d0d60acc8acc4e5e1922cd394e44eef0a4687f0914",
+    "rawUnpackedDecodedSha256": "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87",
+    "nativeXmlEncodedSha256": "94a3fe8358475179213c176c49f3615a16d195166174927961b21334cdb62020",
+    "nativeXmlDecodedSha256": "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680",
+    "roundTrips": 2
+  },
+  "policy": {
+    "schemaNamespace": "http://v8.1c.ru/8.1/data-composition-system/schema",
+    "settingsNamespace": "http://v8.1c.ru/8.1/data-composition-system/settings",
+    "sourceRootQname": "{http://v8.1c.ru/8.1/data-composition-system/schema}DataCompositionSchema",
+    "sourceSettingsVariantQname": "{http://v8.1c.ru/8.1/data-composition-system/schema}settingsVariant",
+    "sourceInlineSettingsQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}settings",
+    "nativeSchemaFileQname": "{}SchemaFile",
+    "nativeSchemaQname": "{http://v8.1c.ru/8.1/data-composition-system/schema}dataCompositionSchema",
+    "nativeSettingsQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}Settings",
+    "headerMarker": 0,
+    "settingsCountOffsetBytes": 4,
+    "settingsCountEncoding": "little-endian-u32",
+    "storedLengthsOffsetBytes": 8,
+    "storedLengthWidthBytes": 8,
+    "storedLengthEncoding": "little-endian-u64",
+    "storedLengthRoles": ["PrimarySchemaFile", "Settings[*]"],
+    "documentRoles": ["PrimarySchemaFile", "Settings[*]", "TerminalSchemaFile"],
+    "minimumAttestedSettingsVariants": 1,
+    "maximumAttestedSettingsVariants": 2,
+    "storedLengthsCover": "primary-schema-file-and-each-settings-document",
+    "terminalDocumentFraming": "remaining-bytes",
+    "documentEncoding": "utf-8-with-bom",
+    "settingsBinding": "direct-settings-variant-order",
+    "sourceVariantPlacement": "direct-root-child",
+    "terminalSchemaFileShape": "empty-data-composition-schema"
+  },
+  "twoVariantShape": {
+    "settingsDocumentCount": 2,
+    "headerBytes": 32,
+    "storedDocumentLengths": [3467, 1142, 826],
+    "trailingDocumentLength": 263,
+    "documentRoles": [
+      "PrimarySchemaFile",
+      "Settings[0]",
+      "Settings[1]",
+      "TerminalSchemaFile"
+    ],
+    "documentSha256": [
+      "d66470fbd49885773af38530faf2bc584136ca5ccfd4830c4520464fc40e06fa",
+      "191d0d0ea288a68188789d4df1ea79f0655768f63025f961b9ab1be746038fa4",
+      "5447b605113dad84ded4b1ad6159428e5d769daea542db87d181041c5c04cae1",
+      "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81"
+    ],
+    "variantNames": ["Main", "Secondary Secondary"],
+    "sourceVariantOrderMatchesExternalSettingsOrder": true,
+    "terminalSchemaFileIsEmpty": true
+  },
+  "provenClaims": [
+    "The second little-endian u32 header field is the external Settings document count: it changed from one to two when a second direct settingsVariant was added.",
+    "For the attested one- and two-variant shapes, the header stores settings_count + 1 little-endian u64 lengths for PrimarySchemaFile and every external Settings document; TerminalSchemaFile consumes the remaining bytes.",
+    "Two external standalone Settings documents bind positionally to two direct root settingsVariant nodes and materialize as direct inline settings children in source order.",
+    "The native selected tree and packed and unpacked template body are byte-identical across two fresh ru_RU platform rounds.",
+    "The terminal empty SchemaFile is unchanged from dcs-core while the primary SchemaFile expands only for the second metadata shell."
+  ],
+  "nonClaims": [
+    "No absent Settings document, duplicate variant name, empty name or presentation, defaultSettings, nested variant, or alternate positional binding is inferred; the variant count itself is read from the header rather than enumerated, and only the count-independent framing formula above is applied to it.",
+    "No AreaTemplate, additional nonterminal SchemaFile, appearance side-table, appIndex, current-configuration reference, or reverse AreaTemplate writer is inferred.",
+    "No full typed DataCompositionSchema semantic model is inferred; the schema shell remains source-owned and only the evidenced envelope and Settings delegation are owned.",
+    "No arbitrary unknown schema child, cross-profile replay, EDT source roundtrip, or whole-profile 8.3.27 alias is inferred.",
+    "Unica generated only the hypothesis seed; pinned 8.3.27.2214 output is the authority."
+  ]
+}

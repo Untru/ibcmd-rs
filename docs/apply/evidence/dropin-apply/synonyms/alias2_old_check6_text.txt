@@ -1,0 +1,10 @@
+== ibcmd_rs_04_rcheck_dn_alias2_nat20261001/after  ->  ibcmd_rs_04_rcheck_dn_alias2_ownold20261001/after
+-- 1a621f0f-5568-4183-bd9f-f6ef670e7090.si: raw 447544 -> 447558 bytes, text 1613134 -> 1613156 chars, sha256 272c4386dcc0 -> 9b1b33c18c77
+  diff lines: 6
+  --- before
+  +++ after
+  -{"ru","Валюты"}
+  +{"ru","Валюты (проверка)"}
+  -{"ru","Демо: Заказ покупателя"}
+  +{"ru","Демо: Заказ покупателя (проверка)"}
+15 of 16 `.si` rows have the same text (compared after inflate)

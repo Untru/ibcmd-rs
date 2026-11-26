@@ -1,0 +1,14 @@
+{
+  "started_utc": "2026-10-01T22:23:30.3251381Z",
+  "executable": "sqlcmd",
+  "deadline_seconds": 90,
+  "arguments": [
+    "-S",
+    "localhost",
+    "-E",
+    "-C",
+    "-b",
+    "-Q",
+    "BACKUP DATABASE [ibcmd_rs_05_p85_w3_ext_version_native_20261001] TO DISK=N'F:\\ibcmd\\lab\\05\\wave3\\platform85\\baselines\\extension-settled-A-20261002.bak' WITH COPY_ONLY,CHECKSUM,COMPRESSION,BUFFERCOUNT=4,MAXTRANSFERSIZE=65536;"
+  ]
+}

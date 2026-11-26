@@ -1,0 +1,11 @@
+{
+  "equal": [
+    "Configuration.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+    "Roles/CovNestedSubsystemRights.xml",
+    "Roles/CovNestedSubsystemRights/Ext/Rights.xml",
+    "Subsystems/CovRightsTree.xml",
+    "Subsystems/CovRightsTree/Subsystems/CovChildA.xml",
+    "Subsystems/CovRightsTree/Subsystems/CovChildB.xml"
+  ]
+}

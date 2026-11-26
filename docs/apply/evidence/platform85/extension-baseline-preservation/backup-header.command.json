@@ -1,0 +1,10 @@
+{
+  "started_utc": "2026-10-01T22:23:45.1038353Z",
+  "executable": "python",
+  "deadline_seconds": 30,
+  "arguments": [
+    "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\verify_extension_backup_header.py",
+    "F:\\ibcmd\\lab\\05\\wave3\\platform85\\baselines\\extension-settled-A-20261002.bak",
+    "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-baseline-preservation-v5\\backup-header.json"
+  ]
+}

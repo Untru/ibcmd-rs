@@ -1,0 +1,200 @@
+{
+  "operation": "infobase config apply",
+  "ok": true,
+  "nothing_to_apply": false,
+  "apply": {
+    "schema_version": 1,
+    "database": "ibcmd_rs_04_rcheck_dn_mix2_ownnew20261001",
+    "platform_profile": "platform-8.3.27.2214",
+    "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+    "dry_run": false,
+    "rehearsal": false,
+    "executed": true,
+    "nothing_to_apply": false,
+    "exclusivity": "sql_sessions",
+    "active_generation": "06cb0442-0c47-4fad-986a-f08f28287c1b",
+    "new_generation": "c319f154-4520-4d53-8221-a95c428669fd",
+    "stage": {
+      "rows": 13,
+      "bytes": 369378,
+      "descriptors": 9,
+      "bodies": 0,
+      "service_rows": 3,
+      "new_rows": 0,
+      "identical_rows": 2,
+      "replaced_rows": 12,
+      "replaced_parts_dropped": 0,
+      "consumed_rows": 1
+    },
+    "dynamic": {
+      "generations": [
+        "06cb0442-0c47-4fad-986a-f08f28287c1b"
+      ],
+      "alias_rows": 4
+    },
+    "gate": {
+      "restructuring_required": false,
+      "blockers": [],
+      "blockers_omitted": 0,
+      "stats": {
+        "rows_identical": 0,
+        "descriptors_layout_only": 0,
+        "service_rows": 3,
+        "extra_parts": 0,
+        "new_objects": 0,
+        "bodies_by_role": {}
+      },
+      "gate": "s1 (the conservative rule and the S1 restructurings)"
+    },
+    "structure": {
+      "consumed_staged_rows": 1,
+      "tables": [
+        "_Reference23",
+        "_Reference2565",
+        "_Reference2598",
+        "_Reference7444",
+        "_Reference3408",
+        "_Document1564",
+        "_Document1564_VT1962",
+        "_Document1564_VT2440"
+      ],
+      "objects": [
+        "catalog _ДемоСтавкиНДС (Reference23): new attributes Fld11034 = СтавкаНовая; removed attributes Fld181 = Ставка",
+        "catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет, Fld7060 = МеждународноеНаименование, Fld9935 = КодСтраны",
+        "catalog КлючевыеОперации (Reference2598): removed attributes Fld2646 = ЦелевоеВремя, Fld5283 = ИмяХеш, Fld6495 = Длительная",
+        "catalog ПоставщикиУслугСервиса (Reference7444): removed attributes Fld7690 = Идентификатор",
+        "catalog ШаблоныЗаданийОчереди (Reference3408): new attributes Fld11035 = КлючНовый; removed attributes Fld3520 = Ключ",
+        "document ТелефонныйЗвонок (Document1564): removed attributes Fld1951 = АбонентКакСвязаться, Fld2880 = Комментарий"
+      ],
+      "caches": [
+        "Params.ea13a2c9-0c2f-40fa-b855-710387e3271d.si: 13 property line(s) added or removed in the XDTO model",
+        "Params.1a621f0f-5568-4183-bd9f-f6ef670e7090.si: 2 record(s) of attributes added, 11 removed in the object registry",
+        "Params.siVersions: new versions of 2 cache row(s)"
+      ],
+      "created": [],
+      "size_check": {
+        "estimated_log_bytes": 9101312,
+        "largest": {
+          "rebuild_bytes": 6807552,
+          "rows": 4840,
+          "table": "_Reference2565"
+        },
+        "limit": {
+          "bytes": 2147483648,
+          "bytes_from": "the default",
+          "rows": 10000000,
+          "rows_from": "the default"
+        },
+        "rebuilt": {
+          "bytes": 6201344,
+          "data_bytes": 2072576,
+          "index_bytes": 4128768,
+          "rebuild_bytes": 8273920,
+          "rows": 5561,
+          "tables": 8
+        },
+        "tables": {
+          "_Document1564": {
+            "data_bytes": 16384,
+            "index_bytes": 81920,
+            "rows": 1
+          },
+          "_Document1564_VT1962": {
+            "data_bytes": 16384,
+            "index_bytes": 0,
+            "rows": 1
+          },
+          "_Document1564_VT2440": {
+            "data_bytes": 16384,
+            "index_bytes": 0,
+            "rows": 1
+          },
+          "_Reference23": {
+            "data_bytes": 16384,
+            "index_bytes": 49152,
+            "rows": 2
+          },
+          "_Reference2565": {
+            "data_bytes": 1638400,
+            "index_bytes": 3530752,
+            "rows": 4840
+          },
+          "_Reference2598": {
+            "data_bytes": 368640,
+            "index_bytes": 466944,
+            "rows": 716
+          },
+          "_Reference3408": {
+            "data_bytes": 0,
+            "index_bytes": 0,
+            "rows": 0
+          },
+          "_Reference7444": {
+            "data_bytes": 0,
+            "index_bytes": 0,
+            "rows": 0
+          }
+        },
+        "within_limit": true
+      }
+    },
+    "backup": {
+      "kind": "file",
+      "path": "F:\\ibcmd\\lab\\04\\restructure-check\\dn\\bak\\mix2_new20261001_before_apply.bak",
+      "seconds": 1.17
+    },
+    "registrations": {
+      "nodes": 3,
+      "changed_objects": 9,
+      "rows_added": 0,
+      "file_rows_added": 0,
+      "objects_of_dropped_rows": 0
+    },
+    "new_objects": null,
+    "removals": null,
+    "synonym_records": 3,
+    "tables_touched": [
+      "Config",
+      "ConfigSave",
+      "Params",
+      "_ConfigChngR",
+      "Files",
+      "SchemaStorage",
+      "DBSchema",
+      "_Reference23",
+      "_Reference2565",
+      "_Reference2598",
+      "_Reference7444",
+      "_Reference3408",
+      "_Document1564",
+      "_Document1564_VT1962",
+      "_Document1564_VT2440"
+    ],
+    "not_written": [
+      "Params .ui rows (the platform's configuration-licensing records, track ui #340): never written; the native apply re-encrypts two of them on every apply",
+      "the pre-image of the rebuilt tables: the old tables are dropped inside the transaction, so a committed restructuring is taken back from a SQL Server backup (the recovery artifact keeps the Config rows and the cache rows only)",
+      "Params .si service-information rows and siVersions, except the main row, the properties row and their versions when a new or removed form or template changes the records, a restructuring changes a cache, or a synonym changes (the native apply re-encodes every .si row with a new version; the content is unchanged otherwise)",
+      "the help/search index in Files (userDocs_ru*, userPostings_ru*, userVocabulary_ru*)",
+      "the extension CAS garbage collection (ConfigCAS, Files CAS_GC_Info, extd_props_cached/gc.mrk)",
+      "scratch rows of the extension restructure (_ExtensionsRestructNGS)"
+    ],
+    "warnings": [
+      "the stage's `deleted` list is answered by this apply (11 row name(s), 0 of them rows of a dynamic update and 11 others, the first of them 03bd775a-e0a1-4205-82ce-6068e73ad134; the gate judges the rest); the row is consumed, not moved into Config, as the native apply does"
+    ],
+    "script_sha256": "455c67a1797ede3e3e88831571442ffb7510a165e134c290026cb4c8657af02d",
+    "script_path": null,
+    "recovery_dir": "C:\\Users\\Pavel\\AppData\\Local\\Temp\\ibcmd-rs\\config-apply-recovery\\ibcmd_rs_04_rcheck_dn_mix2_ownnew20261001-455c67a1797ede3e",
+    "recovery_token": "455c67a1797ede3e",
+    "timings": {
+      "storage_check_ms": 146,
+      "inventory_ms": 259,
+      "gate_ms": 3731,
+      "synonyms_ms": 141,
+      "fingerprints_ms": 83,
+      "recovery_ms": 189,
+      "backup_ms": 1170,
+      "sql_ms": 4353,
+      "total_ms": 10461
+    }
+  }
+}

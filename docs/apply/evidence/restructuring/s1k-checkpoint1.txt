@@ -1,0 +1,199 @@
+# S1-K checkpoint 1: what OUR ibcmd infobase config import does today (feat/0.4 847f581a, the guard of #388 as merged). БСП 8.3.27 clone after a native baseline apply; the tree is a copy of the reference native export with the case's edit over it; the import runs in its default mode (no --base-free, no --no-verify).
+
+==============================================================================
+== case a1 (operation A, built): add attributes of every primitive type (objects no extension adopts)
+== edited files:
+     Catalogs/КлючевыеОперации.xml
+     Catalogs/Удалить_ДемоОбщиеСведения.xml
+     Documents/_ДемоЗаказПокупателя.xml
+== import exit -1 in 13,5 s
+== import output (the model export's progress lines left out):
+   [INFO] Импорт конфигурации из XML...
+   [ERROR] Загрузка отменена: конфигурация базы после неё не совпала бы с деревом F:\ibcmd\lab\05\ext\s1k\tree (файлов с расхождениями: 3 из 12197). В ConfigSave ничего не записано.
+   [ERROR]   Catalogs/КлючевыеОперации.xml:
+   [ERROR]     - в дереве есть элемент MetaDataObject/Catalog/ChildObjects/Attribute[10] («ДемоТ1СтрокаФикс»), в собранной конфигурации его нет
+   [ERROR]     - в дереве есть элемент MetaDataObject/Catalog/ChildObjects/Attribute[11] («ДемоТ1СтрокаНеогр»), в собранной конфигурации его нет
+   [ERROR]     - в дереве есть элемент MetaDataObject/Catalog/ChildObjects/Attribute[12] («ДемоТ1ЧислоЦелое»), в собранной конфигурации его нет
+   [ERROR]     - и ещё различий: 6
+   [ERROR]   Catalogs/Удалить_ДемоОбщиеСведения.xml:
+   [ERROR]     - в собранной конфигурации есть MetaDataObject/Catalog/ChildObjects = «», в дереве его нет
+   [ERROR]     - в дереве есть элемент MetaDataObject/Catalog/ChildObjects/Attribute («ДемоТ1Первый»), в собранной конфигурации его нет
+   [ERROR]   Documents/_ДемоЗаказПокупателя.xml:
+   [ERROR]     - MetaDataObject/Document/ChildObjects/Attribute[10]/@uuid: в дереве «f490129d-930a-4e4e-84a9-af4316008068», в собранной конфигурации «05096505-242c-4586-ac6f-b152277b4581»
+   [ERROR]     - в дереве есть MetaDataObject/Document/ChildObjects/Attribute[10]/Properties/ChoiceParameterLinks = «», в собранной конфигурации его нет
+   [ERROR]     - в собранной конфигурации есть элемент MetaDataObject/Document/ChildObjects/Attribute[10]/Properties/ChoiceParameterLinks/Link («Отбор.Партнер»), в дереве его нет
+   [ERROR]     - и ещё различий: 149
+   [ERROR] Загрузка в базу, где конфигурация уже есть, переносит из дерева имя, синоним и комментарий объектов, модули, формы, макеты, права ролей и командные интерфейсы; реквизиты, табличные части, значения перечислений, свойства объектов, состав подсистем и свойства конфигурации, новые и удалённые объекты в базе остаются прежними.
+   [ERROR] Что делать: загрузите эту конфигурацию штатным ibcmd (или Конфигуратором), либо в пустую базу. Ключ --base-free в базу с конфигурацией собирает все строки из дерева заново и теряет то, чего в XML нет (счётчики схем бизнес-процессов, признак «использовать всегда» у констант): применяйте его только к базе, где это допустимо.
+   [ERROR] Чтобы всё равно загрузить остальное, добавьте --no-verify (перечисленное выше в базу не попадёт).
+   [ERROR] Импорт конфигурации из XML завершен с ошибкой
+== what it left in ConfigSave: 0 rows; edited objects staged 0 of 3; other rows differing from Config 0
+== our apply, dry run over that stage:
+   apply dry-run exit 0
+   "nothing_to_apply": true,
+   "structure": null,
+
+==============================================================================
+== case b1 (operation B, built): delete attributes (middle, last, first, indexed, only, hierarchical, document, delete + add)
+== edited files:
+     Catalogs/_ДемоСтавкиНДС.xml
+     Catalogs/КлассификаторБанков.xml
+     Catalogs/КлючевыеОперации.xml
+     Catalogs/ПоставщикиУслугСервиса.xml
+     Catalogs/ШаблоныЗаданийОчереди.xml
+     Documents/ТелефонныйЗвонок.xml
+== import exit -1 in 14,5 s
+== import output (the model export's progress lines left out):
+   [INFO] Импорт конфигурации из XML...
+   [ERROR] failed to pack Form body \\?\F:\ibcmd\lab\05\ext\s1k\tree\Catalogs\_ДемоСтавкиНДС\Forms\ФормаЭлемента\Ext\Form.xml: failed to patch Form layout properties: cannot patch Form UseForFoldersAndItems without an existing property bag
+   [ERROR] Импорт конфигурации из XML завершен с ошибкой
+== what it left in ConfigSave: 0 rows; edited objects staged 0 of 6; other rows differing from Config 0
+== our apply, dry run over that stage:
+   apply dry-run exit 0
+   "nothing_to_apply": true,
+   "structure": null,
+
+==============================================================================
+== case b2 (operation B, built): delete an attribute with the additional-order index (catalog, document)
+== edited files:
+     Catalogs/_ДемоПроекты.xml
+     Documents/_ДемоНачислениеЗарплаты.xml
+== import exit -1 in 8,4 s
+== import output (the model export's progress lines left out):
+   [INFO] Импорт конфигурации из XML...
+   [ERROR] Загрузка отменена: конфигурация базы после неё не совпала бы с деревом F:\ibcmd\lab\05\ext\s1k\tree (файлов с расхождениями: 2 из 12197). В ConfigSave ничего не записано.
+   [ERROR]   Catalogs/_ДемоПроекты.xml:
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute/@uuid: в дереве «0a9ecb60-1cca-4df7-a5d6-88f849414d56», в собранной конфигурации «66de4b32-5ecf-4881-869f-b64aa63173ef»
+   [ERROR]     - в собранной конфигурации есть MetaDataObject/Catalog/ChildObjects/Attribute/Properties/ChoiceParameterLinks = «», в дереве его нет
+   [ERROR]     - в дереве есть элемент MetaDataObject/Catalog/ChildObjects/Attribute/Properties/ChoiceParameterLinks/Link («Отбор.Владелец»), в собранной конфигурации его нет
+   [ERROR]     - и ещё различий: 32
+   [ERROR]   Documents/_ДемоНачислениеЗарплаты.xml:
+   [ERROR]     - MetaDataObject/Document/ChildObjects/Attribute[2]/@uuid: в дереве «e1340e50-909c-475a-9e79-2e6d44d06aea», в собранной конфигурации «57c5e2bf-2d86-4dfd-a313-cce6c45517ac»
+   [ERROR]     - MetaDataObject/Document/ChildObjects/Attribute[2]/Properties/FillChecking: в дереве «DontCheck», в собранной конфигурации «ShowError»
+   [ERROR]     - MetaDataObject/Document/ChildObjects/Attribute[2]/Properties/Indexing: в дереве «DontIndex», в собранной конфигурации «IndexWithAdditionalOrder»
+   [ERROR]     - и ещё различий: 12
+   [ERROR] Загрузка в базу, где конфигурация уже есть, переносит из дерева имя, синоним и комментарий объектов, модули, формы, макеты, права ролей и командные интерфейсы; реквизиты, табличные части, значения перечислений, свойства объектов, состав подсистем и свойства конфигурации, новые и удалённые объекты в базе остаются прежними.
+   [ERROR] Что делать: загрузите эту конфигурацию штатным ibcmd (или Конфигуратором), либо в пустую базу. Ключ --base-free в базу с конфигурацией собирает все строки из дерева заново и теряет то, чего в XML нет (счётчики схем бизнес-процессов, признак «использовать всегда» у констант): применяйте его только к базе, где это допустимо.
+   [ERROR] Чтобы всё равно загрузить остальное, добавьте --no-verify (перечисленное выше в базу не попадёт).
+   [ERROR] Импорт конфигурации из XML завершен с ошибкой
+== what it left in ConfigSave: 0 rows; edited objects staged 0 of 2; other rows differing from Config 0
+== our apply, dry run over that stage:
+   apply dry-run exit 0
+   "nothing_to_apply": true,
+   "structure": null,
+
+==============================================================================
+== case c1 (operation C, built): widen variable strings (catalog, hierarchical, document, indexed, up to 1024)
+== edited files:
+     Catalogs/КлассификаторБанков.xml
+     Catalogs/КлючевыеОперации.xml
+     Catalogs/ШаблоныЗаданийОчереди.xml
+     Documents/_ДемоЗаказПокупателя.xml
+     Documents/ТелефонныйЗвонок.xml
+== import exit -1 in 8,3 s
+== import output (the model export's progress lines left out):
+   [INFO] Импорт конфигурации из XML...
+   [ERROR] Загрузка отменена: конфигурация базы после неё не совпала бы с деревом F:\ibcmd\lab\05\ext\s1k\tree (файлов с расхождениями: 5 из 12197). В ConfigSave ничего не записано.
+   [ERROR]   Catalogs/КлассификаторБанков.xml:
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[2]/Properties/Type/StringQualifiers/Length: в дереве «200», в собранной конфигурации «50»
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[7]/Properties/Type/StringQualifiers/Length: в дереве «20», в собранной конфигурации «12»
+   [ERROR]   Catalogs/КлючевыеОперации.xml: MetaDataObject/Catalog/ChildObjects/Attribute[5]/Properties/Type/StringQualifiers/Length: в дереве «100», в собранной конфигурации «40»
+   [ERROR]   Catalogs/ШаблоныЗаданийОчереди.xml: MetaDataObject/Catalog/ChildObjects/Attribute[2]/Properties/Type/StringQualifiers/Length: в дереве «1024», в собранной конфигурации «255»
+   [ERROR]   Documents/_ДемоЗаказПокупателя.xml: MetaDataObject/Document/ChildObjects/Attribute[4]/Properties/Type/StringQualifiers/Length: в дереве «51», в собранной конфигурации «50»
+   [ERROR]   Documents/ТелефонныйЗвонок.xml: MetaDataObject/Document/ChildObjects/Attribute/Properties/Type/StringQualifiers/Length: в дереве «300», в собранной конфигурации «100»
+   [ERROR] Загрузка в базу, где конфигурация уже есть, переносит из дерева имя, синоним и комментарий объектов, модули, формы, макеты, права ролей и командные интерфейсы; реквизиты, табличные части, значения перечислений, свойства объектов, состав подсистем и свойства конфигурации, новые и удалённые объекты в базе остаются прежними.
+   [ERROR] Что делать: загрузите эту конфигурацию штатным ibcmd (или Конфигуратором), либо в пустую базу. Ключ --base-free в базу с конфигурацией собирает все строки из дерева заново и теряет то, чего в XML нет (счётчики схем бизнес-процессов, признак «использовать всегда» у констант): применяйте его только к базе, где это допустимо.
+   [ERROR] Чтобы всё равно загрузить остальное, добавьте --no-verify (перечисленное выше в базу не попадёт).
+   [ERROR] Импорт конфигурации из XML завершен с ошибкой
+== what it left in ConfigSave: 0 rows; edited objects staged 0 of 5; other rows differing from Config 0
+== our apply, dry run over that stage:
+   apply dry-run exit 0
+   "nothing_to_apply": true,
+   "structure": null,
+
+==============================================================================
+== case d0 (operation D, built): the index flag: one alone
+== edited files:
+     Catalogs/КлючевыеОперации.xml
+== import exit -1 in 8,9 s
+== import output (the model export's progress lines left out):
+   [INFO] Импорт конфигурации из XML...
+   [ERROR] Загрузка отменена: конфигурация базы после неё не совпала бы с деревом F:\ibcmd\lab\05\ext\s1k\tree (файлов с расхождениями: 1 из 12197). В ConfigSave ничего не записано.
+   [ERROR]   Catalogs/КлючевыеОперации.xml: MetaDataObject/Catalog/ChildObjects/Attribute[4]/Properties/Indexing: в дереве «Index», в собранной конфигурации «DontIndex»
+   [ERROR] Загрузка в базу, где конфигурация уже есть, переносит из дерева имя, синоним и комментарий объектов, модули, формы, макеты, права ролей и командные интерфейсы; реквизиты, табличные части, значения перечислений, свойства объектов, состав подсистем и свойства конфигурации, новые и удалённые объекты в базе остаются прежними.
+   [ERROR] Что делать: загрузите эту конфигурацию штатным ibcmd (или Конфигуратором), либо в пустую базу. Ключ --base-free в базу с конфигурацией собирает все строки из дерева заново и теряет то, чего в XML нет (счётчики схем бизнес-процессов, признак «использовать всегда» у констант): применяйте его только к базе, где это допустимо.
+   [ERROR] Чтобы всё равно загрузить остальное, добавьте --no-verify (перечисленное выше в базу не попадёт).
+   [ERROR] Импорт конфигурации из XML завершен с ошибкой
+== what it left in ConfigSave: 0 rows; edited objects staged 0 of 1; other rows differing from Config 0
+== our apply, dry run over that stage:
+   apply dry-run exit 0
+   "nothing_to_apply": true,
+   "structure": null,
+
+==============================================================================
+== case d1 (operation D, built): the index flag on and off, additional order
+== edited files:
+     Catalogs/_ДемоПроекты.xml
+     Catalogs/КлассификаторБанков.xml
+     Catalogs/КлючевыеОперации.xml
+     Catalogs/ТомаХраненияФайлов.xml
+     Documents/_ДемоЗаказПокупателя.xml
+     Documents/_ДемоНачислениеЗарплаты.xml
+== import exit -1 in 11,0 s
+== import output (the model export's progress lines left out):
+   [INFO] Импорт конфигурации из XML...
+   [ERROR] Загрузка отменена: конфигурация базы после неё не совпала бы с деревом F:\ibcmd\lab\05\ext\s1k\tree (файлов с расхождениями: 6 из 12197). В ConfigSave ничего не записано.
+   [ERROR]   Catalogs/_ДемоПроекты.xml: MetaDataObject/Catalog/ChildObjects/Attribute/Properties/Indexing: в дереве «DontIndex», в собранной конфигурации «IndexWithAdditionalOrder»
+   [ERROR]   Catalogs/КлассификаторБанков.xml:
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[2]/Properties/Indexing: в дереве «Index», в собранной конфигурации «DontIndex»
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[4]/Properties/Indexing: в дереве «IndexWithAdditionalOrder», в собранной конфигурации «DontIndex»
+   [ERROR]   Catalogs/КлючевыеОперации.xml:
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[3]/Properties/Indexing: в дереве «DontIndex», в собранной конфигурации «Index»
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[4]/Properties/Indexing: в дереве «Index», в собранной конфигурации «DontIndex»
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[6]/Properties/Indexing: в дереве «DontIndex», в собранной конфигурации «Index»
+   [ERROR]   Catalogs/ТомаХраненияФайлов.xml:
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[2]/Properties/Indexing: в дереве «Index», в собранной конфигурации «DontIndex»
+   [ERROR]     - MetaDataObject/Catalog/ChildObjects/Attribute[5]/Properties/Indexing: в дереве «DontIndex», в собранной конфигурации «Index»
+   [ERROR]   Documents/_ДемоЗаказПокупателя.xml:
+   [ERROR]     - MetaDataObject/Document/ChildObjects/Attribute[14]/Properties/Indexing: в дереве «Index», в собранной конфигурации «DontIndex»
+   [ERROR]     - MetaDataObject/Document/ChildObjects/Attribute[15]/Properties/Indexing: в дереве «DontIndex», в собранной конфигурации «Index»
+   [ERROR]     - MetaDataObject/Document/ChildObjects/Attribute[5]/Properties/Indexing: в дереве «IndexWithAdditionalOrder», в собранной конфигурации «DontIndex»
+   [ERROR]   Documents/_ДемоНачислениеЗарплаты.xml: MetaDataObject/Document/ChildObjects/Attribute[2]/Properties/Indexing: в дереве «DontIndex», в собранной конфигурации «IndexWithAdditionalOrder»
+   [ERROR] Загрузка в базу, где конфигурация уже есть, переносит из дерева имя, синоним и комментарий объектов, модули, формы, макеты, права ролей и командные интерфейсы; реквизиты, табличные части, значения перечислений, свойства объектов, состав подсистем и свойства конфигурации, новые и удалённые объекты в базе остаются прежними.
+   [ERROR] Что делать: загрузите эту конфигурацию штатным ibcmd (или Конфигуратором), либо в пустую базу. Ключ --base-free в базу с конфигурацией собирает все строки из дерева заново и теряет то, чего в XML нет (счётчики схем бизнес-процессов, признак «использовать всегда» у констант): применяйте его только к базе, где это допустимо.
+   [ERROR] Чтобы всё равно загрузить остальное, добавьте --no-verify (перечисленное выше в базу не попадёт).
+   [ERROR] Импорт конфигурации из XML завершен с ошибкой
+== what it left in ConfigSave: 0 rows; edited objects staged 0 of 6; other rows differing from Config 0
+== our apply, dry run over that stage:
+   apply dry-run exit 0
+   "nothing_to_apply": true,
+   "structure": null,
+
+==============================================================================
+== case i1 (operation I, built): an attribute on adopted objects (refused by S1-I)
+== edited files:
+     Catalogs/_ДемоНоменклатура.xml
+     Catalogs/_ДемоПартнеры.xml
+== import exit -1 in 19,7 s
+== import output (the model export's progress lines left out):
+   [INFO] Импорт конфигурации из XML...
+   [ERROR] Загрузка отменена: конфигурация базы после неё не совпала бы с деревом F:\ibcmd\lab\05\ext\s1k\tree (файлов с расхождениями: 2 из 12197). В ConfigSave ничего не записано.
+   [ERROR]   Catalogs/_ДемоНоменклатура.xml: в дереве есть элемент MetaDataObject/Catalog/ChildObjects/Attribute[14] («ДемоНовыйРеквизитСИ»), в собранной конфигурации его нет
+   [ERROR]   Catalogs/_ДемоПартнеры.xml: в дереве есть элемент MetaDataObject/Catalog/ChildObjects/Attribute[7] («ДемоНовыйРеквизитСИ»), в собранной конфигурации его нет
+   [ERROR] Загрузка в базу, где конфигурация уже есть, переносит из дерева имя, синоним и комментарий объектов, модули, формы, макеты, права ролей и командные интерфейсы; реквизиты, табличные части, значения перечислений, свойства объектов, состав подсистем и свойства конфигурации, новые и удалённые объекты в базе остаются прежними.
+   [ERROR] Что делать: загрузите эту конфигурацию штатным ibcmd (или Конфигуратором), либо в пустую базу. Ключ --base-free в базу с конфигурацией собирает все строки из дерева заново и теряет то, чего в XML нет (счётчики схем бизнес-процессов, признак «использовать всегда» у констант): применяйте его только к базе, где это допустимо.
+   [ERROR] Чтобы всё равно загрузить остальное, добавьте --no-verify (перечисленное выше в базу не попадёт).
+   [ERROR] Импорт конфигурации из XML завершен с ошибкой
+== what it left in ConfigSave: 0 rows; edited objects staged 0 of 2; other rows differing from Config 0
+== our apply, dry run over that stage:
+   apply dry-run exit 0
+   "nothing_to_apply": true,
+   "structure": null,
+
+==============================================================================
+== case e1 (operation E, pending): add a tabular section (not built)
+   not run (the operation is not built in the gate yet)
+
+==============================================================================
+== case f1 (operation F, pending): add a catalog / a document (not built)
+   not run (the operation is not built in the gate yet)

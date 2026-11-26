@@ -1,0 +1,13 @@
+{
+  "worker_release_attempted": false,
+  "native_hold_held_or_unconfirmed": false,
+  "native_running_unresolved": false,
+  "registration_attempted": true,
+  "extension_CFE_built": false,
+  "started": true,
+  "extension_profile_supported": false,
+  "guarded_stop_clean": false,
+  "worker_held_or_unconfirmed": true,
+  "registered": true,
+  "uncertain_child": false
+}

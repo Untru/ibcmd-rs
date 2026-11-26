@@ -1,0 +1,5 @@
+Exception: F:\ibcmd\lab\05\wave3\load\compact8-runtime-v1\compact8_lifetime_v2.ps1:30
+Line |
+  30 |  : iteralPath $path;if($r.ExitCode){throw "bounded $name failed"};return :
+     |                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | bounded compact8-lifetime-prior-case5-readonly failed

@@ -1,0 +1,146 @@
+#408 step 2 -- the F-4 repro on the merged step-2 build (scripts/apply-lab/f4_repro.ps1, 2026-09-30). GREEN.
+Clones of the БСП 8.3.27 corpus (it carries a native online generation: 1 marker row per table, 5 alias rows + the versions row):
+  g4a  our online generation (G2MARK), then ROUTE 2: mssql-apply-source-change --mode exclusive (module РаботаСКлассификаторамиКлиентСервер)
+  g4c  a byte-equal copy of g4a after the online generation; ROUTE 1: mssql-stage-source-objects + mssql-activate-staged-main --mode exclusive
+  g4d  the NATIVE TWIN: a copy of g4c with the stage in ConfigSave; the platform's `config apply --force --dynamic=disable`
+The run was made in four passes of the same script (-Steps): base+route1stage; route2+route1 (the first attempt of route 2 was refused before any
+write: a "JobScheduler" connection of the working process, left for a moment by the session check; the script now waits until the cluster lists no client);
+twin+exports+reapply+snap; exports again (with the ConfigDumpInfo.xml line check added). Lines are cut at 400 characters.
+
+What the two independent stages differ in: the stager draws a new random id per changed object into `versions` (module_blob.rs, Uuid::new_v4), so the
+`versions` row of g4a differs from g4c/g4d, and ConfigDumpInfo.xml of g4a differs from theirs in exactly the two lines of the changed module (configVersion).
+g4c and g4d (one stage) are equal in every file of the native export, ConfigDumpInfo.xml included.
+snapdiff (native g4d -> ours g4c): Config equal; Files: MobileVersions.dat (a new random head); Params: the two .ui rows (never written by this apply,
+documented in `not_written`) and DynamicallyUpdated (native LEFT the Params marker for this stage, the apply deleted it: see the report of #408).
+------------------------------------------------------------------------------------------------------------------------------------------------
+2026-09-30T11:41:24 restore ibcmd_rs_04_apply_g4a_20260930
+2026-09-30T11:41:38 ready: ibcmd_rs_04_apply_g4a_20260930 (from F:\ibcmd\lab\dbbak\bsp_native_20260923.bak)
+2026-09-30T11:41:47 registered: ibcmd_rs_04_apply_g4a_20260930 in the 8.3.27 cluster; connect with Srvr="localhost:2541";Ref="ibcmd_rs_04_apply_g4a_20260930"
+2026-09-30T11:41:47 trees written to F:\ibcmd\lab\04\apply\src
+2026-09-30T11:41:48 PASS  the base carries a native online generation (marker rows 1, alias rows 5)
+2026-09-30T11:41:57 PASS  the online generation is applied (exit 0)
+2026-09-30T11:42:14 PASS  a new session sees the online change (telegram=G2MARK probe=error:Unknown name. (Exception from HRESULT: 0x80020006 (DISP_E_UNKNOWNNAME)))
+2026-09-30T11:42:18 BACKUP DATABASE успешно обработал 97954 страниц за 3.179 секунд (240.724 MБ/сек).
+2026-09-30T11:42:18 restore ibcmd_rs_04_apply_g4c_20260930
+2026-09-30T11:42:25 ready: ibcmd_rs_04_apply_g4c_20260930 (from F:\ibcmd\lab\04\apply\bak\f4_g4_base.bak)
+2026-09-30T11:42:39 registered: ibcmd_rs_04_apply_g4c_20260930 in the 8.3.27 cluster; connect with Srvr="localhost:2541";Ref="ibcmd_rs_04_apply_g4c_20260930"
+2026-09-30T11:42:41 PASS  route 1: the module is staged (exit 0; )
+2026-09-30T11:42:41 staged rows on C: 5
+2026-09-30T11:42:45 BACKUP DATABASE успешно обработал 98002 страниц за 3.319 секунд (230.682 MБ/сек).
+2026-09-30T11:42:45 restore ibcmd_rs_04_apply_g4d_20260930
+2026-09-30T11:42:52 ready: ibcmd_rs_04_apply_g4d_20260930 (from F:\ibcmd\lab\04\apply\bak\f4_g4_staged.bak)
+2026-09-30T11:42:52 alias rows before the promotion on A: 6
+2026-09-30T11:42:58 FAIL  route 2: the exclusive promotion (apply-source-change) succeeds (exit 1, 6 s; Error: exclusive activation refused before any write: the cluster reports 1 client connection(s) or session(s) on the infobase (connection 0 of application "JobScheduler" on DESKTOP-SMI5N4O); end them, or activate `online` )
+2026-09-30T11:42:58 RED: 1 check(s) failed: route 2: the exclusive promotion (apply-source-change) succeeds
+2026-09-30T11:45:14 alias rows before the promotion on A: 6
+2026-09-30T11:45:18 the cluster lists no client connection of ibcmd_rs_04_apply_g4a_20260930
+2026-09-30T11:45:56 PASS  route 2: the exclusive promotion (apply-source-change) succeeds (exit 0, 38.4 s; )
+2026-09-30T11:45:57 PASS  route 2: no marker is left 
+2026-09-30T11:45:57 PASS  route 2: no _dynupdate_ row is left 
+2026-09-30T11:45:58 PASS  route 2: ConfigSave is empty 
+2026-09-30T11:46:01 PASS  route 2: the ordinary rows hold what the aliases held (0 of 6 differ; 0 replaced by the stage itself)
+2026-09-30T11:46:25 PASS  route 2: a new session still sees the online change (telegram=G2MARK probe=F4)
+2026-09-30T11:46:25 PASS  route 2: a new session sees the promoted change (telegram=G2MARK probe=F4)
+2026-09-30T11:46:28 alias rows before the promotion on C: 6
+2026-09-30T11:46:30 the cluster lists no client connection of ibcmd_rs_04_apply_g4c_20260930
+2026-09-30T11:46:43 PASS  route 1: the exclusive promotion (activate-staged-main) succeeds (exit 0, 12.7 s; )
+2026-09-30T11:46:43 PASS  route 1: no marker is left 
+2026-09-30T11:46:43 PASS  route 1: no _dynupdate_ row is left 
+2026-09-30T11:46:45 PASS  route 1: ConfigSave is empty 
+2026-09-30T11:47:02 PASS  route 1: the ordinary rows hold what the aliases held (0 of 6 differ; 0 replaced by the stage itself)
+2026-09-30T11:47:28 PASS  route 1: a new session still sees the online change (telegram=G2MARK probe=F4)
+2026-09-30T11:47:28 PASS  route 1: a new session sees the promoted change (telegram=G2MARK probe=F4)
+2026-09-30T11:47:28 GREEN
+2026-09-30T11:54:31 PASS  the native apply of the same stage succeeds (exit=0 elapsed=75.3 s)
+2026-09-30T11:54:33 PASS  no marker and no _dynupdate_ row is left on the twin 
+2026-09-30T11:56:12 native export of ibcmd_rs_04_apply_g4a_20260930: exit=0 elapsed=94.8 s
+2026-09-30T11:56:12 PASS  the native export of a holds the online change 
+2026-09-30T11:56:12 PASS  the native export of a holds the promoted change 
+2026-09-30T11:57:40 native export of ibcmd_rs_04_apply_g4c_20260930: exit=0 elapsed=84.7 s
+2026-09-30T11:57:40 PASS  the native export of c holds the online change 
+2026-09-30T11:57:40 PASS  the native export of c holds the promoted change 
+2026-09-30T11:59:55 native export of ibcmd_rs_04_apply_g4d_20260930: exit=0 elapsed=132 s
+2026-09-30T11:59:55 PASS  the native export of d holds the online change 
+2026-09-30T11:59:55 PASS  the native export of d holds the promoted change 
+2026-09-30T12:00:18 export a against d: left_only 0, right_only 0, different 1 (ConfigDumpInfo.xml aside: 0 ), unchanged 12197
+2026-09-30T12:00:18 PASS  the native exports of a and d are equal 
+2026-09-30T12:00:35 export c against d: left_only 0, right_only 0, different 0 (ConfigDumpInfo.xml aside: 0 ), unchanged 12198
+2026-09-30T12:00:36 PASS  the native exports of c and d are equal 
+2026-09-30T12:00:39 export a against c: left_only 0, right_only 0, different 1 (ConfigDumpInfo.xml aside: 0 ), unchanged 12197
+2026-09-30T12:00:39 PASS  the native exports of a and c are equal 
+2026-09-30T12:01:33 PASS  a native apply after ours on a says it is not needed ([INFO] Обновление конфигурации базы данных... | [INFO] Проверка корректности метаданных... | [INFO] Обновление конфигурации базы данных не требуется)
+2026-09-30T12:02:10 PASS  a native apply after ours on c says it is not needed ([INFO] Обновление конфигурации базы данных... | [INFO] Проверка корректности метаданных... | [INFO] Обновление конфигурации базы данных не требуется)
+2026-09-30T12:04:43 snapshot ibcmd_rs_04_apply_g4c_20260930/own_after: 2234 tables, Config=9841 ConfigSave=0 Params=38
+2026-09-30T12:06:12 snapshot ibcmd_rs_04_apply_g4a_20260930/own_after: 2234 tables, Config=9841 ConfigSave=0 Params=38
+2026-09-30T12:06:25 snapshot ibcmd_rs_04_apply_g4d_20260930/nat_after: 2234 tables, Config=9841 ConfigSave=0 Params=39
+2026-09-30T12:06:25 snapdiff native (ibcmd_rs_04_apply_g4d_20260930) -> ours (ibcmd_rs_04_apply_g4c_20260930):
+2026-09-30T12:06:25 == schema: tables added / removed / changed
+2026-09-30T12:06:26 added (0): 
+2026-09-30T12:06:26 removed (0): 
+2026-09-30T12:06:26 changed (0):
+2026-09-30T12:06:26 == data: tables whose rowcount/checksum changed
+2026-09-30T12:06:26 (2)
+2026-09-30T12:06:26   Files: (353, '20963594') -> (353, '860107494')
+2026-09-30T12:06:26   Params: (39, '1134516661') -> (38, '-430505198')
+2026-09-30T12:06:26 == service blobs
+2026-09-30T12:06:26 DBSchema same: True ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef']
+2026-09-30T12:06:26 Params: rows 39 -> 38; added 0 removed 1 changed 2 meta-only 1
+2026-09-30T12:06:26     ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  5dc85660 -> 8732478b
+2026-09-30T12:06:26     ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  bb5b83be -> dd001d83
+2026-09-30T12:06:26 Config: rows 9841 -> 9841; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T12:06:26 ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T12:06:26 ConfigCAS: rows 12797 -> 12797; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T12:06:26 ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T12:06:26     ~ MobileVersions.dat [0] 37009 -> 37009 bytes  d24dfa3a -> f2527aae
+2026-09-30T12:06:26 snapdiff native (ibcmd_rs_04_apply_g4d_20260930) -> ours (ibcmd_rs_04_apply_g4a_20260930):
+2026-09-30T12:06:27 == schema: tables added / removed / changed
+2026-09-30T12:06:27 added (0): 
+2026-09-30T12:06:27 removed (0): 
+2026-09-30T12:06:27 changed (0):
+2026-09-30T12:06:27 == data: tables whose rowcount/checksum changed
+2026-09-30T12:06:27 (3)
+2026-09-30T12:06:27   Config: (9841, '2062872660') -> (9841, '1139935102')
+2026-09-30T12:06:27   Files: (353, '20963594') -> (353, '1818117732')
+2026-09-30T12:06:27   Params: (39, '1134516661') -> (38, '-430505198')
+2026-09-30T12:06:27 == service blobs
+2026-09-30T12:06:27 DBSchema same: True ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef']
+2026-09-30T12:06:27 Params: rows 39 -> 38; added 0 removed 1 changed 2 meta-only 1
+2026-09-30T12:06:27     ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  5dc85660 -> 8732478b
+2026-09-30T12:06:27     ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  bb5b83be -> dd001d83
+2026-09-30T12:06:27 Config: rows 9841 -> 9841; added 0 removed 0 changed 1 meta-only 4
+2026-09-30T12:06:27     ~ versions [0] 344224 -> 344222 bytes  064b5443 -> ad673f9b
+2026-09-30T12:06:27 ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T12:06:27 ConfigCAS: rows 12797 -> 12797; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T12:06:27 ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T12:06:27     ~ MobileVersions.dat [0] 37009 -> 37009 bytes  d24dfa3a -> 94585e5b
+2026-09-30T12:06:27 GREEN
+2026-09-30T12:08:42 PASS  the native export of a holds the online change 
+2026-09-30T12:08:42 PASS  the native export of a holds the promoted change 
+2026-09-30T12:08:42 PASS  the native export of c holds the online change 
+2026-09-30T12:08:42 PASS  the native export of c holds the promoted change 
+2026-09-30T12:08:42 PASS  the native export of d holds the online change 
+2026-09-30T12:08:42 PASS  the native export of d holds the promoted change 
+2026-09-30T12:09:25 export a against d: left_only 0, right_only 0, different 1 (ConfigDumpInfo.xml aside: 0 ), unchanged 12197
+2026-09-30T12:09:25 PASS  the native exports of a and d are equal 
+2026-09-30T12:09:26 FAIL  ConfigDumpInfo.xml of a and d differs only in the generation ids of the changed module (0 line(s) of the module, 2 elsewhere)
+2026-09-30T12:09:45 export c against d: left_only 0, right_only 0, different 0 (ConfigDumpInfo.xml aside: 0 ), unchanged 12198
+2026-09-30T12:09:45 PASS  the native exports of c and d are equal 
+2026-09-30T12:09:50 export a against c: left_only 0, right_only 0, different 1 (ConfigDumpInfo.xml aside: 0 ), unchanged 12197
+2026-09-30T12:09:50 PASS  the native exports of a and c are equal 
+2026-09-30T12:09:50 FAIL  ConfigDumpInfo.xml of a and c differs only in the generation ids of the changed module (0 line(s) of the module, 2 elsewhere)
+2026-09-30T12:09:50 RED: 2 check(s) failed: ConfigDumpInfo.xml of a and d differs only in the generation ids of the changed module; ConfigDumpInfo.xml of a and c differs only in the generation ids of the changed module
+2026-09-30T12:10:29 PASS  the native export of a holds the online change 
+2026-09-30T12:10:29 PASS  the native export of a holds the promoted change 
+2026-09-30T12:10:29 PASS  the native export of c holds the online change 
+2026-09-30T12:10:29 PASS  the native export of c holds the promoted change 
+2026-09-30T12:10:29 PASS  the native export of d holds the online change 
+2026-09-30T12:10:29 PASS  the native export of d holds the promoted change 
+2026-09-30T12:10:34 export a against d: left_only 0, right_only 0, different 1 (ConfigDumpInfo.xml aside: 0 ), unchanged 12197
+2026-09-30T12:10:34 PASS  the native exports of a and d are equal 
+2026-09-30T12:10:34 PASS  ConfigDumpInfo.xml of a and d differs only in the generation ids of the changed module (2 line(s) of the module, 0 elsewhere)
+2026-09-30T12:10:38 export c against d: left_only 0, right_only 0, different 0 (ConfigDumpInfo.xml aside: 0 ), unchanged 12198
+2026-09-30T12:10:38 PASS  the native exports of c and d are equal 
+2026-09-30T12:10:41 export a against c: left_only 0, right_only 0, different 1 (ConfigDumpInfo.xml aside: 0 ), unchanged 12197
+2026-09-30T12:10:41 PASS  the native exports of a and c are equal 
+2026-09-30T12:10:42 PASS  ConfigDumpInfo.xml of a and c differs only in the generation ids of the changed module (2 line(s) of the module, 0 elsewhere)
+2026-09-30T12:10:42 GREEN

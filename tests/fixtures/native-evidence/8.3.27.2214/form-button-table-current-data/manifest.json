@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-button-table-current-data",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_written",
+    "created_on": "2026-09-27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "note": "Config table rows of the BSP demo lab database ibcmd_rs_bsp_8327_native_20260919 (stored by platform 8.3.27.2214), read offline from the lab row cache; each `proves` property is what the native ibcmd 8.3.27.2214 export of that database writes for the form. They replace hand-made fixtures of the mssql_dump unit tests in layouts no platform writes."
+  },
+  "objects": [
+    {
+      "kind": "Form body (managed form, root layout 50)",
+      "form": "Catalogs/_ДемоПроекты/Forms/ФормаСписка",
+      "form_uuid": "b9b7a7e7-3e39-49cd-899d-c23839ab519c",
+      "proves": "button 39 binding {2,{1,02023637-7868-4a5f-8576-835a76e0c9ba},{16}} over table Список (id 1): <DataPath>Items.Список.CurrentData.Ref</DataPath>",
+      "raw_entry": {
+        "path": "raw/b9b7a7e7-3e39-49cd-899d-c23839ab519c.deflate",
+        "compression": "raw-deflate",
+        "size": 4935,
+        "sha256": "07a294c88515ecc008c94feaf920b4b5f56493e6d4aadd80c01c8aa6620efddd"
+      }
+    }
+  ]
+}

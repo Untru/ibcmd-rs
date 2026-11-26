@@ -1,0 +1,19 @@
+PASS actual runtime closure normal exact script/executable lengths/hash/PATH/resolution/retained evidence
+PASS actual runtime closure digest drift refuses before dispatch
+PASS actual runtime closure length drift refuses before dispatch
+PASS actual runtime closure resolution drift refuses before dispatch
+PASS actual runtime closure retained drift refuses before dispatch
+PASS actual runtime closure reparse drift refuses before dispatch
+PASS actual runtime closure PATH drift refuses before dispatch
+PASS actual runtime closure relative drift refuses before dispatch
+PASS actual runtime closure duplicate drift refuses before dispatch
+PASS actual final bounded-dispatch digest refusal rawCalls0
+PASS actual final bounded-dispatch length refusal rawCalls0
+PASS actual final bounded-dispatch resolution refusal rawCalls0
+PASS actual final bounded-dispatch reparse refusal rawCalls0
+PASS actual ragent/RAS/thin-client direct spawn guards refuse before Start-Process; realStarts0
+PASS actual native/helper Process.Start direct guards refuse before start
+PASS actual worker post-grant retained closure check before next mutation
+PASS actual heavy post-grant retained closure check before next mutation
+PASS entry before first runtime directory mutation; deep final retained closure check
+ALL PASS actual runtime-only closure additions; realStarts=Signals=SQL=FIFOacquires=Releases=Moves=Deletes=0

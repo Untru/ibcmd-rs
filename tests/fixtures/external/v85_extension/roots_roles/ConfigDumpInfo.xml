@@ -1,0 +1,11 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.21">
+	<ConfigVersions>
+		<Metadata name="CommonModule.ТестРасширение_Модуль" id="554f39c6-e029-4ee0-8535-8c15291a6a3f" configVersion="8eaf4bb8e9072aa39be4a2483c4b08c2988f2bef"/>
+		<Metadata name="CommonModule.ТестРасширение_Модуль.Module" id="554f39c6-e029-4ee0-8535-8c15291a6a3f.0" configVersion="ab25d382ff05883f1967b0e9915fc2daa5783eb2"/>
+		<Metadata name="Configuration.ТестРасширение" id="00000000-0000-0000-0000-000000000014" configVersion="a078795ffdc8beb07c810700994d0e86a6fbbdd6"/>
+		<Metadata name="Language.Русский" id="00000000-0000-0000-0000-000000000015" configVersion="7ba3d3d7125ad490e7c48903e032d0697d704b3c"/>
+		<Metadata name="Role.ТестРасширение_Роль" id="7d3c2b1a-0f1e-4d2c-9b8a-112233445566" configVersion="aa6c1822c947ae8c4f126d57d5a927fa0e504d42"/>
+		<Metadata name="Role.ТестРасширение_Роль.Rights" id="7d3c2b1a-0f1e-4d2c-9b8a-112233445566.0" configVersion="3d2f2138a8364a6e3c076124423e01e6a35bbf6a"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

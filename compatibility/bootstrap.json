@@ -1,0 +1,458 @@
+{
+  "schema_version": 1,
+  "routes": [
+    {
+      "source_kind": "configuration_root",
+      "expected_entries": [
+        "metadata:{configuration_uuid}",
+        "root",
+        "version",
+        "versions",
+        "generated_types"
+      ],
+      "codec": "bootstrap.configuration_root",
+      "outcome": "needs_base",
+      "blocker": "configuration metadata and special-entry codecs are not base-free yet",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{configuration_uuid}",
+          "purpose": "legacy configuration metadata overlay"
+        },
+        {
+          "mode": "required",
+          "key": "versions",
+          "purpose": "legacy versions-row patching"
+        }
+      ]
+    },
+    {
+      "source_kind": "metadata_xml",
+      "expected_entries": [
+        "metadata:{owner_uuid}",
+        "zero_or_more_family_body_entries"
+      ],
+      "codec": "bootstrap.metadata_family_dispatch",
+      "outcome": "needs_base",
+      "blocker": "owner metadata and several family bodies still require overlay or a registered family codec",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{owner_uuid}",
+          "purpose": "legacy owner metadata overlay"
+        },
+        {
+          "mode": "required",
+          "key": "versions",
+          "purpose": "legacy source-staging versions update"
+        }
+      ]
+    },
+    {
+      "source_kind": "module",
+      "expected_entries": [
+        "owner_resolved_module_entry_or_contribution"
+      ],
+      "codec": "bootstrap.module_dispatch",
+      "outcome": "unsupported",
+      "blocker": "module bytes can compile, but owner/suffix resolution and Form module contribution coverage are not complete",
+      "base_reads": []
+    },
+    {
+      "source_kind": "form",
+      "expected_entries": [
+        "form:{form_uuid}.0"
+      ],
+      "codec": "bootstrap.form_body",
+      "outcome": "needs_base",
+      "blocker": "managed Form.xml, its module and item assets are still encoded by a base-dependent aggregate codec",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{form_uuid}.0",
+          "purpose": "legacy form-body overlay"
+        }
+      ]
+    },
+    {
+      "source_kind": "template",
+      "expected_entries": [
+        "template:{template_uuid}.0_or_contribution"
+      ],
+      "codec": "bootstrap.template_dispatch",
+      "outcome": "unsupported",
+      "blocker": "template subtype, owner identity and lossless family codec must be resolved before bootstrap",
+      "base_reads": [
+        {
+          "mode": "optional_hint",
+          "key": "{template_uuid}.0",
+          "purpose": "legacy SpreadsheetDocument passthrough or number-format hint"
+        }
+      ]
+    },
+    {
+      "source_kind": "binary",
+      "expected_entries": [
+        "owner_resolved_binary_entry_or_contribution"
+      ],
+      "codec": "bootstrap.binary_asset_dispatch",
+      "outcome": "unsupported",
+      "blocker": "binary source ownership and emits-versus-contributes relationship are not resolved by SourceKind alone",
+      "base_reads": []
+    },
+    {
+      "source_kind": "other_xml",
+      "expected_entries": [
+        "owner_resolved_xml_entry_or_contribution"
+      ],
+      "codec": "bootstrap.other_xml_dispatch",
+      "outcome": "unsupported",
+      "blocker": "unclassified XML must not be omitted or assigned a storage target by guesswork",
+      "base_reads": []
+    },
+    {
+      "source_kind": "other",
+      "expected_entries": [
+        "owner_resolved_entry_or_contribution"
+      ],
+      "codec": "bootstrap.unregistered_source",
+      "outcome": "unsupported",
+      "blocker": "unregistered source files require an explicit codec or contributor relationship",
+      "base_reads": []
+    }
+  ],
+  "legacy_inventory": [
+    {
+      "id": "owner_metadata",
+      "source_kinds": ["configuration_root", "metadata_xml"],
+      "selector": "Configuration.xml or non-CommonModule owner MetaDataObject XML",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}"],
+      "codec": "pack_simple_metadata_blob_from_xml_with_source",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "legacy metadata packer overlays an active Config row",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{owner_uuid}",
+          "purpose": "metadata overlay"
+        }
+      ]
+    },
+    {
+      "id": "common_module_metadata",
+      "source_kinds": ["metadata_xml"],
+      "selector": "CommonModules/*.xml owner MetaDataObject",
+      "relationship": "emits",
+      "expected_entries": ["{common_module_uuid}"],
+      "codec": "pack_common_module_metadata_blob_from_xml",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "legacy CommonModule metadata packer overlays an active Config row",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{common_module_uuid}",
+          "purpose": "CommonModule metadata overlay"
+        }
+      ]
+    },
+    {
+      "id": "versions",
+      "source_kinds": ["configuration_root", "metadata_xml"],
+      "selector": "synthetic once-per-source-set entry",
+      "relationship": "emits",
+      "expected_entries": ["versions"],
+      "codec": "patch_versions_blob_bytes",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "the legacy versions codec patches the active versions row",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "versions",
+          "purpose": "versions overlay"
+        }
+      ]
+    },
+    {
+      "id": "module_body",
+      "source_kinds": ["module", "binary"],
+      "selector": "known object/common/nested-command module path and suffix",
+      "relationship": "emits",
+      "expected_entries": ["{resolved_owner_uuid}.{module_suffix}"],
+      "codec": "compiler.ModuleText_or_ModuleContainer",
+      "codec_capability": "compiled",
+      "outcome": "compiled",
+      "base_reads": []
+    },
+    {
+      "id": "form_module_contributor",
+      "source_kinds": ["module"],
+      "selector": "*/Forms/*/Ext/Form/Module.bsl",
+      "relationship": "contributes_to",
+      "expected_entries": ["{form_uuid}.0"],
+      "codec": "pack_form_body_blob_from_form_xml_with_source_and_assets",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "a Form module is part of the base-dependent aggregate Form body",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{form_uuid}.0",
+          "purpose": "form-body overlay"
+        }
+      ]
+    },
+    {
+      "id": "raw_deflated_body",
+      "source_kinds": ["metadata_xml", "template", "binary", "other"],
+      "selector": "registered raw body/template/configuration asset path",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.{registered_suffix}"],
+      "codec": "compiler.RawDeflated",
+      "codec_capability": "compiled",
+      "outcome": "compiled",
+      "base_reads": []
+    },
+    {
+      "id": "command_interface_raw",
+      "source_kinds": ["metadata_xml"],
+      "selector": "registered CommandInterface.xml containing only raw command references",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.{command_interface_suffix}"],
+      "codec": "compiler.CommandInterfaceXml",
+      "codec_capability": "compiled",
+      "outcome": "compiled",
+      "base_reads": []
+    },
+    {
+      "id": "command_interface_readable",
+      "source_kinds": ["metadata_xml"],
+      "selector": "registered CommandInterface.xml containing readable command references",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.{command_interface_suffix}"],
+      "codec": "compiler.CommandInterfaceXml",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "readable command references must be resolved against the same active body entry",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{owner_uuid}.{command_interface_suffix}",
+          "purpose": "readable command reference resolution"
+        }
+      ]
+    },
+    {
+      "id": "additional_indexes_mapped",
+      "source_kinds": ["metadata_xml"],
+      "selector": "Document .3 or AccumulationRegister .4 AdditionalIndexes.xml",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.{mapped_suffix}"],
+      "codec": "compiler.AdditionalIndexes_confirmed",
+      "codec_capability": "compiled",
+      "outcome": "compiled",
+      "base_reads": []
+    },
+    {
+      "id": "additional_indexes_unmapped",
+      "source_kinds": ["metadata_xml"],
+      "selector": "AdditionalIndexes.xml for any owner without an evidence-backed suffix",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.<unknown>"],
+      "codec": "compiler.AdditionalIndexes_unmapped",
+      "codec_capability": "unsupported",
+      "outcome": "unsupported",
+      "blocker": "native target suffix is not mapped and must not be guessed",
+      "base_reads": []
+    },
+    {
+      "id": "predefined_data",
+      "source_kinds": ["metadata_xml"],
+      "selector": "Catalog .1c or ChartOfCharacteristicTypes .7 Predefined.xml",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.{predefined_suffix}"],
+      "codec": "pack_predefined_data_blob_from_xml",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "predefined data codec still overlays the same active body entry",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{owner_uuid}.{predefined_suffix}",
+          "purpose": "predefined-data overlay"
+        }
+      ]
+    },
+    {
+      "id": "business_process_flowchart",
+      "source_kinds": ["metadata_xml"],
+      "selector": "BusinessProcesses/*/Ext/Flowchart.xml",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.7"],
+      "codec": "pack_business_process_flowchart_blob_from_xml",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "flowchart codec still overlays the same active body entry",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{owner_uuid}.7",
+          "purpose": "flowchart overlay"
+        }
+      ]
+    },
+    {
+      "id": "form_body",
+      "source_kinds": ["form", "module", "binary", "other_xml", "other"],
+      "selector": "Form.xml plus Ext/Form/Module.bsl and Ext/Form/Items contributors",
+      "relationship": "emits",
+      "expected_entries": ["{form_uuid}.0"],
+      "codec": "pack_form_body_blob_from_form_xml_with_source_and_assets",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "managed Form aggregate codec requires the active Form body",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{form_uuid}.0",
+          "purpose": "form-body overlay"
+        }
+      ]
+    },
+    {
+      "id": "role_rights",
+      "source_kinds": ["metadata_xml"],
+      "selector": "Roles/*/Ext/Rights.xml",
+      "relationship": "emits",
+      "expected_entries": ["{role_uuid}.0"],
+      "codec": "pack_role_rights_blob_from_xml_with_source",
+      "codec_capability": "needs_base",
+      "outcome": "needs_base",
+      "blocker": "role rights codec still overlays the active rights body",
+      "base_reads": [
+        {
+          "mode": "required",
+          "key": "{role_uuid}.0",
+          "purpose": "role-rights overlay"
+        }
+      ]
+    },
+    {
+      "id": "style_body_bypass",
+      "source_kinds": ["metadata_xml"],
+      "selector": "Styles/*/Ext/Style.xml",
+      "relationship": "emits",
+      "expected_entries": ["{style_uuid}.0"],
+      "codec": "pack_style_body_blob_from_xml",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "base-free legacy packer is not registered in the pure compiler and unknown style shapes are not fail-closed",
+      "base_reads": []
+    },
+    {
+      "id": "scheduled_job_schedule_bypass",
+      "source_kinds": ["metadata_xml"],
+      "selector": "ScheduledJobs/*/Ext/Schedule.xml",
+      "relationship": "emits",
+      "expected_entries": ["{job_uuid}.0"],
+      "codec": "pack_schedule_blob_from_xml",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "base-free legacy packer is not registered in the pure compiler",
+      "base_reads": []
+    },
+    {
+      "id": "binary_template_bypass",
+      "source_kinds": ["template", "binary"],
+      "selector": "AddIn or BinaryData Template.bin",
+      "relationship": "emits",
+      "expected_entries": ["{template_uuid}.0"],
+      "codec": "pack_base64_payload_blob_from_bytes",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "base-free legacy packer is not registered in the pure compiler and AddIn fixtures are missing",
+      "base_reads": []
+    },
+    {
+      "id": "ext_picture_bypass",
+      "source_kinds": ["metadata_xml", "binary"],
+      "selector": "CommonPicture or Configuration Splash/MainSectionPicture XML plus referenced image",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.{picture_suffix}"],
+      "codec": "pack_ext_picture_blob_from_bytes",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "base-free legacy packer and its referenced binary contributor are not registered in the pure compiler",
+      "base_reads": []
+    },
+    {
+      "id": "help_and_html_bypass",
+      "source_kinds": ["metadata_xml", "template", "binary", "other"],
+      "selector": "Ext/Help.xml or HTMLDocument Template.xml plus pages and _files contributors",
+      "relationship": "emits",
+      "expected_entries": ["{owner_uuid}.{profile_dependent_help_suffix_or_zero}"],
+      "codec": "pack_help_blob_from_parts",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "legacy packer, contributor coverage and profile-dependent Help suffix are not resolved by the pure compiler",
+      "base_reads": []
+    },
+    {
+      "id": "exchange_plan_content_bypass",
+      "source_kinds": ["metadata_xml"],
+      "selector": "ExchangePlans/*/Ext/Content.xml",
+      "relationship": "emits",
+      "expected_entries": ["{exchange_plan_uuid}.1"],
+      "codec": "pack_exchange_plan_content_blob_from_xml",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "base-free legacy packer and metadata-reference resolution are not registered in the pure compiler",
+      "base_reads": []
+    },
+    {
+      "id": "spreadsheet_document_bypass",
+      "source_kinds": ["template"],
+      "selector": "SpreadsheetDocument Template.xml",
+      "relationship": "emits",
+      "expected_entries": ["{template_uuid}.0"],
+      "codec": "pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "base-free mode is not registered in the pure compiler; legacy staging may also return base-derived passthrough bytes",
+      "base_reads": [
+        {
+          "mode": "optional_hint",
+          "key": "{template_uuid}.0",
+          "purpose": "legacy native passthrough or accepted number-format hint"
+        }
+      ]
+    },
+    {
+      "id": "picture_asset_contributor",
+      "source_kinds": ["binary"],
+      "selector": "image referenced by Picture.xml",
+      "relationship": "contributes_to",
+      "expected_entries": ["{owner_uuid}.{picture_suffix}"],
+      "codec": "pack_ext_picture_blob_from_bytes",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "contributor ownership and target coverage are not resolved by the readiness gate",
+      "base_reads": []
+    },
+    {
+      "id": "help_asset_contributor",
+      "source_kinds": ["binary", "other"],
+      "selector": "Help/HTML page or _files payload referenced by its owner XML",
+      "relationship": "contributes_to",
+      "expected_entries": ["{owner_uuid}.{help_or_template_suffix}"],
+      "codec": "pack_help_blob_from_parts",
+      "codec_capability": "compiled",
+      "outcome": "unsupported",
+      "blocker": "contributor ownership, profile-specific target and complete consumption are not resolved by the readiness gate",
+      "base_reads": []
+    }
+  ]
+}

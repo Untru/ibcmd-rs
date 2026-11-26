@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovChartField",
+    "CovEmbeddedSpreadsheetCells",
+    "CovFormEventOnOpen",
+    "CovManagedFormTemplate",
+    "CovPlannerField",
+    "configuration"
+  ]
+}

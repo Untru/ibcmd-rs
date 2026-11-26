@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-ut-multi-variant-settings",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "storage_element": "542a53f5-56c5-4ca9-90d1-d689532c69fd.0",
+    "source_path": "Reports/ПродлениеСрокаДействияЭлектронныхПодписей/Templates/Макет/Ext/Template.xml",
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body."
+  },
+  "retained": {
+    "packed_body": {
+      "size": 1306,
+      "sha256": "90db75a46813f9f36e8abcc32499cf8bf5591af8b7c09770a11456569428e11f"
+    },
+    "unpacked_body": {
+      "size": 13281,
+      "sha256": "90cc566b165c815947dd0c33d1247cbd78a2ea21c75f438cc3e514af88925522"
+    },
+    "native_template": {
+      "size": 12681,
+      "sha256": "afaa6a8bc76bb34a3d5bf4650c60b0a7e740625fd690ec8da039675578eecbc5"
+    }
+  }
+}

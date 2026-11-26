@@ -1,0 +1,10 @@
+run=online
+tag=baseline-exclusive
+mode=exclusive
+dry_run=False
+database=ibcmd_rs_05_online_a1
+src=o1
+start_utc=2026-09-29T15:53:58.249Z
+end_utc=2026-09-29T15:54:14.580Z
+wall_ms=16321
+exit=1

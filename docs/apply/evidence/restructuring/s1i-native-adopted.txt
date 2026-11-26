@@ -1,0 +1,109 @@
+# S1-I: what a NATIVE apply does with the extensions when an adopted catalog gets an attribute (twins a_nat / c_nat of the БСП 8.3.27 clone, baseline-applied)
+
+## case a: before -> native after
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (4):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C4F2762179 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C43280516F CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     + C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     + C _UpdateId binary(16) NULL
+     + C _LastUpdateResult numeric(2,0) NULL
+     + C _LastUpdateError varbinary(max) NULL
+  T _Reference20
+     + C _Fld11034 nvarchar(50) NULL COLLATE Cyrillic_General_CI_AS
+== data: tables whose rowcount/checksum changed
+(9)
+  Config: (9841, '-1231797199') -> (9841, '582555431')
+  ConfigSave: (4, '-1803513622') -> (0, 'None')
+  DBSchema: (1, '-1619277553') -> (1, '1599274845')
+  Files: (44, '-496982297') -> (44, '1216521333')
+  Params: (38, '25617645') -> (38, '1215014580')
+  SchemaStorage: (2, '448743385') -> (2, '864621849')
+  _ConfigChngR: (20685, '-1860742680') -> (20685, '-1860948031')
+  _ConfigChngR_ExtProps: (21357, '-1669447419') -> (21357, '-1389959419')
+  _Reference20: (14, '998160365') -> (14, '1444184356')
+== service blobs
+DBSchema same: False ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['02ac4540dff6bbfe2383bc81f42957d68d6e7cf1d370a718c39e812b6d8dc316']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 7 meta-only 15
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 447544 -> 447588 bytes  f362a522 -> 63aa411a
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  b9b7f2cb -> 830d1ee3
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  8b522a9c -> fb478edf
+    ~ DBNames [0] 143619 -> 143646 bytes  e1d48608 -> bb8791ae
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  ac10b5b7 -> 311a875b
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2996649 -> 2996890 bytes  b1697b60 -> b73f0071
+    ~ siVersions [0] 1273 -> 1273 bytes  7d2660fa -> edcb102e
+Config: rows 9841 -> 9841; added 0 removed 0 changed 2 meta-only 2
+    ~ 5eab8a1b-070f-4dcf-bdcc-a259c62c3693 [0] 4645 -> 4797 bytes  27a57932 -> 0c7bd092
+    ~ versions [0] 340597 -> 340601 bytes  044feaf1 -> 6e9d83f9
+ConfigSave: rows 4 -> 0; added 0 removed 4 changed 0 meta-only 0
+    - 5eab8a1b-070f-4dcf-bdcc-a259c62c3693 [0] 4797 bytes
+    - root [0] 45 bytes
+    - version [0] 28 bytes
+    - versions [0] 340605 bytes
+ConfigCAS: rows 636 -> 636; added 0 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 44; added 0 removed 0 changed 2 meta-only 0
+
+## case c: before -> native after
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (5):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C4F2762179 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C411B30640 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     + C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     + C _UpdateId binary(16) NULL
+     + C _LastUpdateResult numeric(2,0) NULL
+     + C _LastUpdateError varbinary(max) NULL
+  T _Reference18
+     + C _Fld11034 nvarchar(50) NULL COLLATE Cyrillic_General_CI_AS
+  T _Reference18X1
+     + C _Fld11034 nvarchar(50) NULL COLLATE Cyrillic_General_CI_AS
+== data: tables whose rowcount/checksum changed
+(9)
+  Config: (9841, '-1231797199') -> (9841, '26328076')
+  ConfigSave: (4, '-672600416') -> (0, 'None')
+  DBSchema: (1, '-1619277553') -> (1, '831189411')
+  Files: (44, '-496982297') -> (44, '843593499')
+  Params: (38, '25617645') -> (38, '647355255')
+  SchemaStorage: (2, '448743385') -> (2, '871508839')
+  _ConfigChngR: (20685, '-1860742680') -> (20685, '-1354658004')
+  _ConfigChngR_ExtProps: (21357, '-1669447419') -> (21357, '-1366600187')
+  _Reference18X1: (46, '-1513993639') -> (46, '-1546450843')
+== service blobs
+DBSchema same: False ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['249c3373d41483fd236d7b310b5234660b24687aeb513eb760a6cd0b1b474938']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 7 meta-only 15
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 447544 -> 447586 bytes  f362a522 -> 59c8c3ee
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  b9b7f2cb -> d7b7a12e
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  8b522a9c -> dc869735
+    ~ DBNames [0] 143619 -> 143646 bytes  e1d48608 -> d831e35b
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  ac10b5b7 -> 01e1e1e9
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2996649 -> 2996820 bytes  b1697b60 -> 354cbe5c
+    ~ siVersions [0] 1273 -> 1273 bytes  7d2660fa -> cedf8eab
+Config: rows 9841 -> 9841; added 0 removed 0 changed 2 meta-only 2
+    ~ bb3d8c09-0a16-47ae-a113-d33038c15948 [0] 4861 -> 5003 bytes  e8af20ef -> 7e59f67c
+    ~ versions [0] 340597 -> 340598 bytes  044feaf1 -> 80adda48
+ConfigSave: rows 4 -> 0; added 0 removed 4 changed 0 meta-only 0
+    - bb3d8c09-0a16-47ae-a113-d33038c15948 [0] 5003 bytes
+    - root [0] 45 bytes
+    - version [0] 28 bytes
+    - versions [0] 340597 bytes
+ConfigCAS: rows 636 -> 636; added 0 removed 0 changed 0 meta-only 0
+
+## where Fld11034 sits after the native apply of case c (SchemaStorage 0 = main, 1 = extensions)
+schema 0 at 973716 table entry:  {"Fld11034",1, {1, {"S",2147483698,0,"",0} },"",0}, {"Fld7860",0, {1, {"S",21474836
+schema 1 at 174864 table entry:  {"Fld11034",1, {1, {"S",2147483698,0,"",0} },"",0}, {"Fld7840",1, {1, {"S",21474836

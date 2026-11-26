@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-gantt-chart-uh",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-09-23",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "authority": "ERP UH native export (E:/ibcmd_lab/parity/ibcmd_rs_uha_8327_native_20260919_20260919_uha_8327_85head/native) paired with its stored form record (F:/ibcmd/lab/form_bodies/Config_inflated), member 14 of the attribute record"
+  },
+  "objects": [
+    {
+      "kind": "FormAttributeGanttChartSettings",
+      "owner": "DataProcessor.ДиспетчированиеПроизводстваПооперационное",
+      "form": "ДиспетчированиеПроизводства",
+      "attribute": "ДиаграммаГанта",
+      "variant": "Palette32, explicit series colour and marker, a Single chart border (nil style uuid), UseCoordinates plot area, legend and title area None",
+      "raw_entry": { "path": "raw/palette32-single-border.txt" },
+      "native_outputs": [{ "path": "native/palette32-single-border-settings.xml" }]
+    },
+    {
+      "kind": "FormAttributeGanttChartSettings",
+      "owner": "Report.МониторБюджетныхПроцессов",
+      "form": "ФормаОтчета",
+      "attribute": "Результат",
+      "variant": "direct RGB chart and time-scale colours, textPlacement Cut, showPointsText Show",
+      "raw_entry": { "path": "raw/hex-scale-colors.txt" },
+      "native_outputs": [{ "path": "native/hex-scale-colors-settings.xml" }]
+    }
+  ],
+  "proven_claims": [
+    "compiler::bodies::form_chart rebuilds both stored records byte for byte (line breaks aside) from the native <Settings> element, and the exporter reads the rebuilt record back to that element."
+  ]
+}

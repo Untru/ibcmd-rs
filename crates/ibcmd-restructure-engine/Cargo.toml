@@ -1,0 +1,21 @@
+[package]
+name = "ibcmd-restructure-engine"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Native database restructuring plans and execution"
+
+[dependencies]
+anyhow = "1.0"
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-compiler-families = { path = "../ibcmd-compiler-families" }
+ibcmd-restructure = { path = "../ibcmd-restructure" }
+ibcmd-sql = { path = "../ibcmd-sql" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+uuid = { version = "1.19", features = ["v4"] }
+
+[lints.rust]
+unsafe_code = "forbid"

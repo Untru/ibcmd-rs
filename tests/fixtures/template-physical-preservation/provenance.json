@@ -1,0 +1,85 @@
+{
+  "scope": "Actual native/OWN stage refusal before apply; retained raw rows, no normalization",
+  "checkpoint_sha256": "4B65E708EF14D8342CF88B161CB6F033367E33A99790EADDFAC7A313D720457C",
+  "forensics_sha256": "09DCD476C8B72A42671528CACA35E8007BAA9B46829DB4CF8B0311A726663F0F",
+  "files": [
+    {
+      "fixture": "2eeea138-481c-4fde-9e8a-709d751cc469.baseline.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\2eeea138-481c-4fde-9e8a-709d751cc469.baseline.raw.bin",
+      "bytes": 100,
+      "sha256": "c654927e0e8680ee1619994017a56a2797a9b17a503d13ad71c4b0ee4c5f3672"
+    },
+    {
+      "fixture": "2eeea138-481c-4fde-9e8a-709d751cc469.OWN.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\2eeea138-481c-4fde-9e8a-709d751cc469.OWN.raw.bin",
+      "bytes": 112,
+      "sha256": "f764bd9759b67f48d163e27b1a9fee749e6909b8c7dc50fc38a768e37bd6ae23"
+    },
+    {
+      "fixture": "2eeea138-481c-4fde-9e8a-709d751cc469.xml",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\fixtures\\templates-D2-from-own-D1\\Reports\\ПраваДоступа\\Templates\\Макет.xml",
+      "bytes": 1260,
+      "sha256": "d33c758fe7a283db110fc3093383de1d8a24039483fc9cb49ae360932a29757b"
+    },
+    {
+      "fixture": "33f66222-3f4e-4535-8ce6-43eae5bed791.baseline.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\33f66222-3f4e-4535-8ce6-43eae5bed791.baseline.raw.bin",
+      "bytes": 130,
+      "sha256": "6e6b2a552639c04805548bd9b1f5d5fa96649e62801635abf27c292d684627c1"
+    },
+    {
+      "fixture": "33f66222-3f4e-4535-8ce6-43eae5bed791.OWN.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\33f66222-3f4e-4535-8ce6-43eae5bed791.OWN.raw.bin",
+      "bytes": 138,
+      "sha256": "3edc720844175bd9afed6219b3ba6a3b02ce5cd67042d6d15afb56b4ea8cc1d3"
+    },
+    {
+      "fixture": "33f66222-3f4e-4535-8ce6-43eae5bed791.xml",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\fixtures\\templates-D2-from-own-D1\\ExchangePlans\\_ДемоАвтономнаяРабота\\Templates\\ПравилаРегистрации.xml",
+      "bytes": 1306,
+      "sha256": "ab4aa299c4f5ae6b8f4b52d0ad8f72f83c5f86bd20d1b2af90e9710828af781c"
+    },
+    {
+      "fixture": "ae1192da-f17d-4527-b9cb-4f4cce810985.baseline.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\ae1192da-f17d-4527-b9cb-4f4cce810985.baseline.raw.bin",
+      "bytes": 151,
+      "sha256": "a1906666d905b4f67a6b7466bbdaa9419042e1ff7ff1802897ee9b5f8fa34eff"
+    },
+    {
+      "fixture": "ae1192da-f17d-4527-b9cb-4f4cce810985.OWN.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\ae1192da-f17d-4527-b9cb-4f4cce810985.OWN.raw.bin",
+      "bytes": 157,
+      "sha256": "f75ca5907690d251127fa414cb49efe56b86962a61eb3853918c558dc73623ff"
+    },
+    {
+      "fixture": "ae1192da-f17d-4527-b9cb-4f4cce810985.xml",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\fixtures\\templates-D2-from-own-D1\\DataProcessors\\ПодключениеОбсуждений\\Templates\\МакетОтображенияВебЧата.xml",
+      "bytes": 1328,
+      "sha256": "bdf14033b5a412d15373f28f3871d9d035e87c1cb8a80c98e9ebeb8a1f9eae77"
+    },
+    {
+      "fixture": "spreadsheet.baseline.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\2eeea138-481c-4fde-9e8a-709d751cc469.0.baseline.raw.bin",
+      "bytes": 4213,
+      "sha256": "522f63a51c2df8994450ebb41175480e6aebde70fb131f5ec313801c92fcda47"
+    },
+    {
+      "fixture": "spreadsheet.OWN.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\2eeea138-481c-4fde-9e8a-709d751cc469.0.OWN.raw.bin",
+      "bytes": 4215,
+      "sha256": "e97acdbc9c3a04a80732b252d2e32597e525bab2c8b01dd2084a9aaff78db3f1"
+    },
+    {
+      "fixture": "spreadsheet.native.bin",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\mechanical-D2-own-resume-v4-stage-forensics\\2eeea138-481c-4fde-9e8a-709d751cc469.0.native.raw.bin",
+      "bytes": 4214,
+      "sha256": "1c0959cec504aa7f29273b312cff2aef092f084762aae36100b8306abdf384ac"
+    },
+    {
+      "fixture": "spreadsheet.xml",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\fixtures\\templates-D2-from-own-D1\\Reports\\ПраваДоступа\\Templates\\Макет\\Ext\\Template.xml",
+      "bytes": 50903,
+      "sha256": "fa196d351c45e5c519c7793d606003652f6daf9ebc4a1c545dfebb6817337933"
+    }
+  ]
+}

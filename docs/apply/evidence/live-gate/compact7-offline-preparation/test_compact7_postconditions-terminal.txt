@@ -1,0 +1,9 @@
+PASS actual repeat assertion refuses third-cycle
+PASS actual repeat assertion refuses tail-change
+PASS actual repeat assertion refuses wrong-state
+PASS actual fullheader refusal/repeat compare catches Config Creation drift
+PASS actual fullheader refusal/repeat compare catches ConfigSave Creation drift
+PASS actual fullheader refusal/repeat compare catches Params Creation drift
+PASS operational Files difference retained explicitly, no false full equality
+PASS actual bounded N3 readiness requires at least5 confirmed document+report receipts per client; third client4 refused
+ALL PASS postcondition mocks; realStarts=realSignals=SQLcalls=registryWrites=0; no runtime/readiness acceptance claim

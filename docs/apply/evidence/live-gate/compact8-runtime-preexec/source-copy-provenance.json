@@ -1,0 +1,19 @@
+{
+  "scope": "Fresh8 exact descriptor + module marker-only source; no runtime compile/SQL write claim",
+  "files": [
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-7\\CommonModules\\ОбсужденияСлужебныйКлиентСервер.xml",
+      "source_sha256": "6D6C10E3205D82194C8682B98B987E42460E3E00420547A9E804A6240CAB3A3A",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-8\\CommonModules\\ОбсужденияСлужебныйКлиентСервер.xml",
+      "sha256": "6D6C10E3205D82194C8682B98B987E42460E3E00420547A9E804A6240CAB3A3A",
+      "bytes": 1672
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-7\\CommonModules\\ОбсужденияСлужебныйКлиентСервер\\Ext\\Module.bsl",
+      "source_sha256": "FD1D3C74AC40391367DA4A5CF525603725E629C7EF422281ABE3B6DE834EB083",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-8\\CommonModules\\ОбсужденияСлужебныйКлиентСервер\\Ext\\Module.bsl",
+      "sha256": "6864CE11847A1687060FFFF7FA79949D8980343A9DA44E79E7255B1ADA122F89",
+      "bytes": 1337
+    }
+  ]
+}

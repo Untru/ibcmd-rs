@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-chart-provkontr-target",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "11.5.27.75",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "cf_archive",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "ibcmd-rs cf extract (this project's own subcommand, not /opt/1cv8's ibcmd)",
+    "skeleton": "none -- extracted directly from a real distribution's 1cv8.cf",
+    "authority": "native_distribution",
+    "note": "Not a seed: this is native UT 11.5.27.75's own DataProcessors/ПроверкаКонтрагента/Forms/Форма ДиаграммаПоказателей attribute record, the actual remainder-item-4 target the whole form-chart-* seed campaign (form-chart-series-count, form-chart-linetype-splinemode, form-chart-placement-and-showmodes, form-chart-points-scale in this same directory) was built to close. Extracted with `ibcmd-rs cf extract <path-to-UT-1cv8.cf> acd13c5d-edf3-4c18-99d7-663ac866d5e8.0 <out-dir>` (the form body storage element), then located as the FIRST occurrence of the `{11},\\r\\n{74,` marker in the decoded UTF-8 text (not the third -- an earlier wave's note mistook a Python str.find offset on decoded text for a byte offset and landed on an unrelated, empty chart elsewhere on the same form)."
+  },
+  "objects": [
+    {
+      "kind": "FormAttributeChartSettings",
+      "owner": "DataProcessor.ПроверкаКонтрагента",
+      "form": "Форма",
+      "attribute": "ДиаграммаПоказателей",
+      "variant": "realSeriesCount=4, chartType=Line, elementsIsInit=false, splineMode=SmoothCurve, legendPlacement=Bottom, titleAreaPlacement=None, pointsScale+valuesScale+seriesScale all present, valuesToolTipShowMode=ShowOnHover, pointsDropLinesShowMode=DontShow, valuesDropLinesShowMode=DontShow -- every item this wave's seed campaign closed, all at once, on the actual native record",
+      "raw_entry": { "path": "raw/target.txt" },
+      "native_outputs": [{ "path": "native/target-settings.xml" }]
+    }
+  ],
+  "proven_claims": [
+    "Every fix landed in this wave for the diagram remainder's item 4 (realSeriesCount>0, marker always Auto, the dropped titleIsInit/legendIsInit/chartIsInit and isTransposed/autoTransposition/legendScrollEnable guards, chartType=Line, splineMode, legendPlacement=Bottom, titleAreaPlacement, the three show-mode fields, and pointsScale/valuesScale/seriesScale) together correctly decode this actual native record byte for byte -- not just the isolated single-variable seeds each fix was individually proven against.",
+    "This closes item 4 of docs/evidence/ut-diagram-remainder-20260825.md's diagram remainder: DataProcessors/ПроверкаКонтрагента/Forms/Форма/Ext/Form.xml should now export exact in the full ut gate (verify with $D/kit/run.sh ut and diff the exact-set against $D/baselines/d0457a6/ut.parity.json -- this file should move from differing to exact, a genuine new fix, not just BROKEN=0)."
+  ],
+  "non_claims": [
+    "This fixture proves the Settings fragment for this one attribute decodes correctly; it does not by itself prove the whole Form.xml file is byte-identical (other parts of the form -- unrelated to this chart attribute -- could in principle still differ). The full ut gate is the authority for that."
+  ]
+}

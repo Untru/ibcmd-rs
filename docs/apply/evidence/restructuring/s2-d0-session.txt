@@ -1,0 +1,8 @@
+== Справочник.КлючевыеОперации
+  attributes: Имя МинимальноДопустимыйУровень Приоритет ЦелевоеВремя ИмяХеш ВыполненаСОшибкой Длительная 
+  indexing ЦелевоеВремя: Индексировать
+  ordered by ЦелевоеВремя: 716 rows, digest A6 9B 6E 77 EE 6F 10 BC 7A CA FB DA A2 17 A6 8F
+  rows: 716, digest of the kept attributes AB C7 BB 3F 4C 4E 98 DE AA 7A ED E0 1E 3B C2 EA
+  xdto: no deleted attribute in the serialization: Да
+  wrote 6 attribute values, read back equal: 6
+  test object deleted

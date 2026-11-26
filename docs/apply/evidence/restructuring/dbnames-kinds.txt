@@ -1,0 +1,56 @@
+DBNames of the 8.3.27 БСП main configuration: max 10824, entries 6459
+metadata class -> number of objects, and the sets of DBNames kinds allocated for them
+Catalog.Attribute                               1108  {('Fld',): 1108}
+InformationRegister.Resource                     726  {('Fld',): 673, ('ByResource', 'Fld'): 53}
+InformationRegister.Dimension                    515  {('Fld',): 404, ('ByDims', 'Fld'): 111}
+Catalog.TabularSection.Attribute                 452  {('Fld',): 452}
+InformationRegister.Attribute                    354  {('Fld',): 303, ('ByProperty', 'Fld'): 51}
+Document.Attribute                               271  {('Fld',): 268, ('ByField', 'Fld'): 3}
+InformationRegister                              259  {('InfoRg', 'InfoRgChngR'): 206, ('InfoRg', 'InfoRgChngR', 'InfoRgOpt'): 52, ('InfoRg', 'InfoRgChngR', 'InfoRgOpt', 'InfoRgSL'): 1}
+Constant                                         245  {('Const', 'ConstChngR', 'Fld'): 245}
+Document.TabularSection.Attribute                170  {('Fld',): 170}
+Enum                                             123  {('Enum',): 123}
+Catalog                                          114  {('RefSInf', 'Reference', 'ReferenceChngR'): 74, ('Reference', 'ReferenceChngR'): 40}
+Catalog.TabularSection                           111  {('LineNo', 'VT'): 111}
+ScheduledJob                                      72  {('ScheduledJobs',): 72}
+Document.TabularSection                           48  {('LineNo', 'VT'): 48}
+BusinessProcess.Attribute                         48  {('Fld',): 25, ('ByField', 'Fld'): 23}
+ChartOfCharacteristicTypes.Attribute              46  {('Fld',): 40, ('ByField', 'Fld'): 5, ('ByField', 'ByParentField', 'Fld'): 1}
+DocumentJournal.Column                            27  {('Fld',): 20, ('ByField', 'Fld'): 7}
+Document                                          25  {('Document', 'DocumentChngR'): 25}
+<not in ConfigDumpInfo>                           22  {('InfoRgOpt',): 22}
+Task.Attribute                                    14  {('ByField', 'Fld'): 7, ('Fld',): 7}
+ExchangePlan.Attribute                            13  {('Fld',): 13}
+ChartOfCharacteristicTypes.TabularSection.Attribute    12  {('Fld',): 12}
+CommonAttribute                                    7  {('Fld',): 3, ('DataSeparationUse', 'Fld'): 2, ('ByField', 'Fld'): 2}
+ExchangePlan                                       6  {('Node',): 6}
+AccountingRegister.Resource                        6  {('Fld', 'Turnover', 'TurnoverCt', 'TurnoverDt'): 6}
+AccountingRegister.Attribute                       6  {('Fld',): 6}
+ChartOfCharacteristicTypes                         5  {('Chrc', 'ChrcChngR', 'ChrcSInf'): 3, ('Chrc', 'ChrcChngR'): 2}
+ExchangePlan.TabularSection.Attribute              5  {('Fld',): 5}
+BusinessProcess.TabularSection.Attribute           5  {('Fld',): 5}
+AccumulationRegister.Dimension                     4  {('Fld',): 4}
+Task.AddressingAttribute                           4  {('ByField', 'Fld'): 4}
+DocumentJournal                                    4  {('DocumentJournal',): 4}
+ExchangePlan.TabularSection                        4  {('LineNo', 'VT'): 4}
+AccountingRegister.Dimension                       4  {('ByDim', 'Fld'): 2, ('Fld',): 2}
+ChartOfAccounts.ExtDimensionAccountingFlag         3  {('Fld',): 3}
+ChartOfCharacteristicTypes.TabularSection          3  {('LineNo', 'VT'): 3}
+BusinessProcess                                    2  {('BPr', 'BPrChngR', 'BPrPoints'): 2}
+AccumulationRegister                               2  {('AccumRg', 'AccumRgChngR', 'AccumRgOpt', 'AccumRgT'): 1, ('AccumRg', 'AccumRgA32h', 'AccumRgAggDict1h', 'AccumRgAggGridK', 'AccumRgAggOptK', 'AccumRgBfK', 'AccumRgChngR', 'AccumRgDlK', 'AccumRgOpt', 'AccumRgSt', 'AccumRgTn'): 1}
+AccumulationRegister.Resource                      2  {('Fld',): 2}
+ChartOfAccounts.AccountingFlag                     2  {('Fld',): 2}
+AccountingRegister                                 2  {('AccRg', 'AccRgAT0', 'AccRgAT1', 'AccRgAT2', 'AccRgAT3', 'AccRgCT', 'AccRgChngR', 'AccRgED', 'AccRgOpt'): 1, ('AccRg', 'AccRgAT0', 'AccRgAT1', 'AccRgAT2', 'AccRgAT3', 'AccRgChngR', 'AccRgED', 'AccRgOpt'): 1}
+CalculationRegister.Dimension                      2  {('ByDimRecorder', 'Fld'): 2}
+CalculationRegister.Recalculation.Dimension        2  {('Fld',): 2}
+Sequence.Dimension                                 2  {('Fld',): 2}
+<nil uuid: platform tables>                        1  (66 distinct kinds, e.g. DbCopies*, ConfigChngR, ExtensionsInfo, STT*, ...)
+Task                                               1  {('Task', 'TaskChngR'): 1}
+BusinessProcess.TabularSection                     1  {('LineNo', 'VT'): 1}
+ChartOfCalculationTypes                            1  {('CKinds', 'CKindsChngR', 'CKindsDN', 'CKindsSInf'): 1}
+ChartOfAccounts                                    1  {('Acc', 'AccChngR', 'AccSInf', 'ExtDim'): 1}
+CalculationRegister                                1  {('CRg', 'CRgActP', 'CRgChngR'): 1}
+CalculationRegister.Resource                       1  {('Fld',): 1}
+CalculationRegister.Recalculation                  1  {('CRgRecalc', 'CRgRecalcChngR'): 1}
+Sequence                                           1  {('Seq', 'SeqB', 'SeqChngR'): 1}
+ChartOfAccounts.Attribute                          1  {('Fld',): 1}

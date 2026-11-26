@@ -1,0 +1,8 @@
+_Reference23	rows 2 / 2	only in A 0	only in B 0
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference7444	rows 0 / 0	only in A 0	only in B 0
+_Reference3408	rows 0 / 0	only in A 0	only in B 0
+_Document1564	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT1962	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT2440	rows 1 / 1	only in A 0	only in B 0

@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.20">
+	<ConfigVersions>
+		<Metadata name="CommonModule.ТестРасширение_Модуль" id="554f39c6-e029-4ee0-8535-8c15291a6a3f" configVersion="8eaf4bb8e9072aa39be4a2483c4b08c2988f2bef"/>
+		<Metadata name="CommonModule.ТестРасширение_Модуль.Module" id="554f39c6-e029-4ee0-8535-8c15291a6a3f.0" configVersion="8209418df82de647ffb8e9f8aa6315c14f85f7de"/>
+		<Metadata name="Configuration.ТестРасширение" id="00000000-0000-0000-0000-000000000014" configVersion="a4068862c3637bc958dd5c7b6fd0a2dde3fe7ec3"/>
+		<Metadata name="Configuration.ТестРасширение.ExternalConnectionModule" id="00000000-0000-0000-0000-000000000017.5" configVersion="9a0d55ade04029b1977b1221030506dc410f09a2"/>
+		<Metadata name="Configuration.ТестРасширение.ManagedApplicationModule" id="00000000-0000-0000-0000-000000000017.6" configVersion="060ef25195f6ce70af706a65e525223186d00872"/>
+		<Metadata name="Configuration.ТестРасширение.OrdinaryApplicationModule" id="00000000-0000-0000-0000-000000000017.0" configVersion="8996aa6ec2c85a94dfd1fc34963dbea25c6ef7be"/>
+		<Metadata name="Configuration.ТестРасширение.SessionModule" id="00000000-0000-0000-0000-000000000017.7" configVersion="d6c705c8e789a08453159b57b42b9904b645da64"/>
+		<Metadata name="Language.Русский" id="00000000-0000-0000-0000-000000000015" configVersion="7ba3d3d7125ad490e7c48903e032d0697d704b3c"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

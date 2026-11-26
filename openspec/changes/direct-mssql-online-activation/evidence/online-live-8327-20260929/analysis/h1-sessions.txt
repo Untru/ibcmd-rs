@@ -1,0 +1,15 @@
+=== h1-warm: 179 lines, session 1
+  first 18:18:30.334 ( -163.91 s)
+  last  18:22:19.629 (  +65.38 s)
+  event open           18:18:30.334 ( -163.91 s) | 1 | режим=poll
+  markers client=ibcmd-online-v1        server=ibcmd-online-v1        B=ibcmd-online-B-v2/ibcmd-online-B-v2      18:18:30.412 ( -163.83 s) .. 18:22:19.629 (  +65.38 s)  n=178
+=== h1-new2: 39 lines, session 11
+  first 18:21:34.431 (  +20.19 s)
+  last  18:22:19.134 (  +64.89 s)
+  event open           18:21:34.431 (  +20.19 s) | 11 | режим=poll
+  markers client=ibcmd-online-v1        server=ibcmd-online-v1        B=ibcmd-online-B-v2/ibcmd-online-B-v2      18:21:34.509 (  +20.26 s) .. 18:22:19.134 (  +64.89 s)  n=38
+=== h1-new3: 30 lines, session 1
+  first 18:23:08.886 ( +114.64 s)
+  last  18:23:37.643 ( +143.40 s)
+  event open           18:23:08.886 ( +114.64 s) | 1 | режим=poll
+  markers client=Telegram               server=Telegram               B=нет/нет                                  18:23:08.999 ( +114.75 s) .. 18:23:37.643 ( +143.40 s)  n=29

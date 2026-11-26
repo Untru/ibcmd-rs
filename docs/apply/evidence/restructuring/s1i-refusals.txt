@@ -1,0 +1,7 @@
+# S1-I: the refusals of the own restructure (mssql-restructure --dry-run; --trial and the apply say the same and write nothing)
+
+## case a: Catalog._ДемоПартнеры (Reference20, adopted by _ДемоРасширение, no table of its own)
+Error: Catalog _ДемоПартнеры is adopted by the extension _ДемоРасширение (object _ДемоПартнеры 3014d9c1-cb00-49fb-81b3-e8ced354975f, active image); the extension keeps no table of its own for it: the own restructure does not change an object an extension adopts, the platform's apply does
+
+## case c: Catalog._ДемоНоменклатура (Reference18, adopted by _ДемоРасширение, _Reference18X1 of its own)
+Error: Catalog _ДемоНоменклатура is adopted by the extension _ДемоРасширение (object _ДемоНоменклатура 2cb40f25-2c61-41e9-9689-e1e4c639e8cb, active image); the extension keeps tables of its own for it (_Reference18X1): the own restructure does not change an object an extension adopts, the platform's apply does

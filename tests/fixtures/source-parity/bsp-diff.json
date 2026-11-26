@@ -1,0 +1,11 @@
+{
+  "left_root": "tests/fixtures/source-parity/bsp-native",
+  "right_root": "tests/fixtures/source-parity/bsp-candidate",
+  "summary": { "left_only": 1, "right_only": 1, "different": 1, "unchanged": 1 },
+  "differences": [
+    { "status": "unchanged", "path": "Documents/Order.xml", "left_sha256": "11", "right_sha256": "11", "left_size_bytes": 20, "right_size_bytes": 20, "kind": "metadata_xml", "object_hint": "Document.Order" },
+    { "status": "different", "path": "DataProcessors/Tool/Ext/Form.xml", "left_sha256": "22", "right_sha256": "33", "left_size_bytes": 21, "right_size_bytes": 22, "kind": "form", "object_hint": "DataProcessor.Tool" },
+    { "status": "left_only", "path": "CommonTemplates/Report/Ext/Template.xml", "left_sha256": "44", "right_sha256": null, "left_size_bytes": 23, "right_size_bytes": null, "kind": "template", "object_hint": "CommonTemplate.Report" },
+    { "status": "right_only", "path": "Ext/Icon.bin", "left_sha256": null, "right_sha256": "55", "left_size_bytes": null, "right_size_bytes": 24, "kind": "binary", "object_hint": null }
+  ]
+}

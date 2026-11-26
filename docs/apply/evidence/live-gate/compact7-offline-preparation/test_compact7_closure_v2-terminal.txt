@@ -1,0 +1,7 @@
+PASS manifest-change closure refused
+PASS file-change closure refused
+PASS reparse closure refused
+PASS manifest-reparse closure refused
+PASS actual worker grant then closure refusal blocks next archive/restore mutation
+PASS actual heavy grant then closure refusal blocks next archive/restore mutation
+PASS pure closure/hash/order tests; realStarts=realSignals=SQLcalls=registryWrites=Moves=0

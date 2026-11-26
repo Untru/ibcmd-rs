@@ -1,0 +1,13 @@
+diff --git a/profiles/platform/8.5.1.1150.json b/profiles/platform/8.5.1.1150.json
+index 4927684b..fd26cea5 100644
+--- a/profiles/platform/8.5.1.1150.json
++++ b/profiles/platform/8.5.1.1150.json
+@@ -18,7 +18,7 @@
+     "mssql.extension.write": "unsupported",
+     "mssql.main.write": "unsupported",
+     "mssql.config.apply": "supported",
+-    "mssql.config.apply.dynamic": "unsupported"
++    "mssql.config.apply.dynamic": "supported"
+   },
+   "evidence": [
+     "docs/apply/own-apply.md",

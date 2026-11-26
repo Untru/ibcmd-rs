@@ -1,0 +1,129 @@
+name: VSCode connections
+on:
+  pull_request:
+    paths: ['editors/vscode/**', 'src/**', 'crates/**', 'Cargo.toml', 'Cargo.lock', 'tests/**', '.github/workflows/vscode-connections.yml', '.github/workflows/release.yml']
+  # A branch is tested through its pull request; a push builds master's
+  # release VSIX.
+  push:
+    branches: [master]
+    paths: ['editors/vscode/**', 'src/**', 'crates/**', 'Cargo.toml', 'Cargo.lock', 'tests/**', '.github/workflows/vscode-connections.yml', '.github/workflows/release.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+jobs:
+  client:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Only master writes caches; pull requests restore master's.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: cargo test --locked --test editor_server --test editor_export_plan --no-default-features
+      - run: npm ci
+        working-directory: editors/vscode
+      - run: npm run bundle
+        working-directory: editors/vscode
+      - run: npm run test:package
+        working-directory: editors/vscode
+      - run: npm run format:check
+        working-directory: editors/vscode
+      - name: Unit and real CLI/RPC integration tests
+        shell: bash
+        run: |
+          export IBCMD_TEST_BINARY="$GITHUB_WORKSPACE/target/debug/ibcmd-rs"
+          if [ "$RUNNER_OS" = Windows ]; then export IBCMD_TEST_BINARY="$IBCMD_TEST_BINARY.exe"; fi
+          npm test
+        working-directory: editors/vscode
+      - name: Extension-host interactions, real offline connection and synthetic failures
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          export IBCMD_TEST_BINARY="$GITHUB_WORKSPACE/target/debug/ibcmd-rs"
+          export IBCMD_TEST_ROOT="$RUNNER_TEMP/ibcmd-vscode-host"
+          export IBCMD_TEST_ROWS="${TMPDIR:-/tmp}/ibcmd-external-editor-server-protocol/rows/demo"
+          xvfb-run -a npm run test:host
+          xvfb-run -a npm run test:tree-host
+          xvfb-run -a npm run test:source-host
+        working-directory: editors/vscode
+      # A pull request packages the debug binary the cargo test step above
+      # built (same sources, --no-default-features) and runs the installed
+      # extension against it; pushes and manual runs package the release
+      # binary. Standalone Release packages the published VSIX itself.
+      - name: Build Windows platform VSIX
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: editors/vscode
+        env:
+          VSIX_PROFILE: ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
+        run: |
+          if ($env:VSIX_PROFILE -eq 'release') {
+            cargo build --locked --release --no-default-features --manifest-path ../../Cargo.toml
+            if ($LASTEXITCODE -ne 0) { throw 'Binary build failed' }
+          }
+          $binary = "../../target/$env:VSIX_PROFILE/ibcmd-rs.exe"
+          "packaging the $env:VSIX_PROFILE binary $binary"
+          $env:SOURCE_DATE_EPOCH = git log -1 --format=%ct
+          python scripts/package.py --target win32-x64 --binary $binary --out ../../target/vsix/ibcmd-rs-win32-x64.vsix
+          if ($LASTEXITCODE -ne 0) { throw 'VSIX packaging failed' }
+          python scripts/package.py --target win32-x64 --binary $binary --out ../../target/vsix/repeated.vsix
+          if ($LASTEXITCODE -ne 0) { throw 'Repeated VSIX packaging failed' }
+          if ((Get-FileHash ../../target/vsix/ibcmd-rs-win32-x64.vsix).Hash -ne (Get-FileHash ../../target/vsix/repeated.vsix).Hash) { throw 'Non-reproducible VSIX' }
+      - name: Install packaged Windows extension in clean editor and verify offline tree
+        timeout-minutes: 15
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: editors/vscode
+        run: |
+          $env:IBCMD_TEST_ROOT = Join-Path $env:RUNNER_TEMP 'ibcmd-installed-host'
+          $env:IBCMD_TEST_VSIX = Join-Path $env:GITHUB_WORKSPACE 'target/vsix/ibcmd-rs-win32-x64.vsix'
+          $env:IBCMD_TEST_ROWS = Join-Path ([System.IO.Path]::GetTempPath()) 'ibcmd-external-editor-server-protocol/rows/demo'
+          npm run test:installed
+          if ($LASTEXITCODE -ne 0) { throw 'Installed extension acceptance failed' }
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Windows'
+        with:
+          # A pull request's VSIX carries a debug binary: named apart.
+          name: vscode-win32-x64${{ github.event_name == 'pull_request' && '-debug' || '' }}
+          path: |
+            target/vsix/ibcmd-rs-win32-x64.vsix
+            target/vsix/ibcmd-rs-win32-x64.vsix.sha256
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Windows'
+        with:
+          name: vscode-installed-acceptance
+          path: |
+            ${{ runner.temp }}/ibcmd-installed-host/**/acceptance.json
+            ${{ runner.temp }}/ibcmd-installed-host/**/phases.jsonl
+            ${{ runner.temp }}/ibcmd-installed-host/**/user-data/logs/**
+          if-no-files-found: warn
+      - name: Export commands in a real isolated editor host
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          export IBCMD_TEST_BINARY="$GITHUB_WORKSPACE/target/debug/ibcmd-rs"
+          export IBCMD_TEST_ROOT="$RUNNER_TEMP/ibcmd-export-host"
+          export IBCMD_TEST_ROWS="${TMPDIR:-/tmp}/ibcmd-external-editor-server-protocol/rows/demo"
+          export IBCMD_TEST_SUITE="export-host-suite.js"
+          xvfb-run -a npm run test:host
+        working-directory: editors/vscode

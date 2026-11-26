@@ -1,0 +1,16 @@
+{
+  "checked_files": 12198,
+  "raw_identical_files": 12197,
+  "normalized_equal_files": 1,
+  "differences": [
+    {
+      "file": "ConfigDumpInfo.xml",
+      "left_sha256": "bbd10505ba4122f8865d95bc3b5caffff1cfa4f0023dbe55dc48b3eff9b79042",
+      "right_sha256": "a4f1d5b760aaed72fc7e3ab56cf7d4865645907ce417042d3349d14463327b31",
+      "normalization": "configVersion attribute values only"
+    }
+  ],
+  "source": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\source",
+  "first_form_override": "snapshots/form-first.xml",
+  "export": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\own-first"
+}

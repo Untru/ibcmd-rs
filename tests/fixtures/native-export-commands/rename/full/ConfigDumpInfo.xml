@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.21">
+	<ConfigVersions>
+		<Metadata name="CommonModule.RenamedLabModule" id="6d1c2a0e-1cd0-4f00-9a00-000000000001" configVersion="d7a1ab608731cc4599f6365743a99c1900000000"/>
+		<Metadata name="CommonModule.RenamedLabModule.Module" id="6d1c2a0e-1cd0-4f00-9a00-000000000001.0" configVersion="a73d01735a4c264f8e65f33715676e2700000000"/>
+		<Metadata name="Configuration.Configuration" id="afb733a6-eae8-418b-b73c-fb9eb581e093" configVersion="047af70058e79c4fb0740a395a4ddcd600000000"/>
+		<Metadata name="Language.English" id="9a236262-c0b7-41e5-a4f6-48c9778f198e" configVersion="36857bd41a9ce8428460925c185b1b5600000000"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

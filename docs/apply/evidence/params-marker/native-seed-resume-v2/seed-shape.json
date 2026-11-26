@@ -1,0 +1,27 @@
+{
+  "scope": "natural seed terminal observation only",
+  "usable": true,
+  "stage_count": 0,
+  "config_pending": [],
+  "params_aliases": [],
+  "params_marker": [
+    {
+      "name": "DynamicallyUpdated",
+      "part": 0,
+      "creation": "4026-09-19 23:33:02",
+      "modified": "4026-10-02 13:59:40",
+      "attributes": 0,
+      "data_size": 156,
+      "byte_len": 156,
+      "sha256": "a6a4becf0894197ff52642b07a26dafd9c9b5298e084a615a031a54b4906a1e6",
+      "offset": 1189079
+    }
+  ],
+  "history": [
+    "848a0a59-8803-445f-b89d-3cfae4f98bbd",
+    "06cb0442-0c47-4fad-986a-f08f28287c1b",
+    "e7215806-d7fc-4ce0-a4dd-80ad2a4f9aa1",
+    "93d00b81-dac6-496d-b4fd-513e7b45535c"
+  ],
+  "no_synthetic_repair": true
+}

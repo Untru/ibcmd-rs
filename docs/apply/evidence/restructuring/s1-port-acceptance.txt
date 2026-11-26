@@ -1,0 +1,217 @@
+S1 port acceptance (#391): the cases t1, b1, c1, b2 through `ibcmd-rs mssql-config-apply --platform-profile platform-8.3.27.2214
+--allow-restructure s1 --i-have-a-backup --allow-non-lab` on twins of the staged backups (_own), against the native `config apply` of the same
+staged state (_nat). Branch feat/0.4-s1-port on feat/0.4 (the apply track's seam, rcheck's apply_check::s1::classify). Checks of docs/apply/
+restructuring.md 12.6: 3 data (EXCEPT both ways), 4 Config rows, 5 DBSchema / DBNames, 6 the .si rows, 7 a native config apply on our twin,
+8 native export of both + ibcmd-rs source-diff. Assembled from the lab logs (logs/port_case_<case>.log).
+
+====================================================================================================
+CASE t1
+====================================================================================================
+[2026-09-30T02:12:22] dry run
+dry exit 0
+[2026-09-30T02:12:25] rehearsal
+rehearse exit 0
+[2026-09-30T02:12:33] real run
+real exit 0
+structure: catalog _ДемоГруппыДоступаПартнеров (Reference569): new attributes Fld11034 = ДемоТ1Булево | catalog _ДемоМестаХранения (Reference16): new attributes Fld11035 = ДемоТ1Дата, Fld11036 = ДемоТ1Число | catalog _ДемоПартнеры (Reference20): new attributes Fld11037 = ДемоТ1Строка, Fld11038 = ДемоТ1Время, Fld11039 = ДемоТ1ЧислоПапки | catalog КлючевыеОперации (Reference2598): new attributes Fld
+[2026-09-30T02:12:41] checks 2-6
+rebuilt tables: _Reference569,_Reference16,_Reference20,_Reference20_VT155,_Reference20_VT159,_Reference2598,_Reference9367,_Document39,_Document39_VT970,_Document39_VT2148,_Document39_VT3663
+3. data of the rebuilt tables (EXCEPT both ways)
+_Reference569	rows 7 / 7	only in A 0	only in B 0
+_Reference16	rows 5 / 5	only in A 0	only in B 0
+_Reference20	rows 14 / 14	only in A 0	only in B 0
+_Reference20_VT155	rows 29 / 29	only in A 0	only in B 0
+_Reference20_VT159	rows 18 / 18	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference9367	rows 3 / 3	only in A 0	only in B 0
+_Document39	rows 8 / 8	only in A 0	only in B 0
+_Document39_VT970	rows 7 / 7	only in A 0	only in B 0
+_Document39_VT2148	rows 4 / 4	only in A 0	only in B 0
+_Document39_VT3663	rows 1 / 1	only in A 0	only in B 0
+_Reference569	rows 7 / 7	only in A 0	only in B 0
+_Reference16	rows 5 / 5	only in A 0	only in B 0
+_Reference20	rows 14 / 14	only in A 0	only in B 0
+_Reference20_VT155	rows 29 / 29	only in A 0	only in B 0
+_Reference20_VT159	rows 18 / 18	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference9367	rows 3 / 3	only in A 0	only in B 0
+_Document39	rows 8 / 8	only in A 0	only in B 0
+_Document39_VT970	rows 7 / 7	only in A 0	only in B 0
+_Document39_VT2148	rows 4 / 4	only in A 0	only in B 0
+_Document39_VT3663	rows 1 / 1	only in A 0	only in B 0
+4. Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+== only in A (0 rows)
+== only in B (0 rows)
+5. DBSchema entries and DBNames
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 348389 348389
+6. the .si rows
+16 of 16 `.si` rows have the same text (compared after inflate)
+[2026-09-30T02:12:59] check 7: native config apply on our twin
+native apply exit=0 in 4,4s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+[2026-09-30T02:13:04] check 8: native exports and source-diff
+export exit=0 in 25,6s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export exit=0 in 20,1s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+[2026-09-30T02:13:56] done t1
+
+====================================================================================================
+CASE b1
+====================================================================================================
+[2026-09-30T02:13:56] dry run
+dry exit 0
+[2026-09-30T02:13:59] rehearsal
+rehearse exit 0
+[2026-09-30T02:14:07] real run
+real exit 0
+structure: catalog _ДемоСтавкиНДС (Reference23): new attributes Fld11034 = СтавкаНовая; removed attributes Fld181 = Ставка | catalog КлассификаторБанков (Reference2565): removed attributes Fld2566 = КоррСчет, Fld7060 = МеждународноеНаименование, Fld9935 = КодСтраны | catalog КлючевыеОперации (Reference2598): removed attributes Fld2646 = ЦелевоеВремя, Fld5283 = ИмяХеш, Fld6495 = Длительная | catalo
+[2026-09-30T02:14:15] checks 2-6
+rebuilt tables: _Reference23,_Reference2565,_Reference2598,_Reference7444,_Reference3408,_Document1564,_Document1564_VT1962,_Document1564_VT2440
+3. data of the rebuilt tables (EXCEPT both ways)
+_Reference23	rows 2 / 2	only in A 0	only in B 0
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference7444	rows 0 / 0	only in A 0	only in B 0
+_Reference3408	rows 0 / 0	only in A 0	only in B 0
+_Document1564	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT1962	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT2440	rows 1 / 1	only in A 0	only in B 0
+_Reference23	rows 2 / 2	only in A 0	only in B 0
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference7444	rows 0 / 0	only in A 0	only in B 0
+_Reference3408	rows 0 / 0	only in A 0	only in B 0
+_Document1564	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT1962	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT2440	rows 1 / 1	only in A 0	only in B 0
+4. Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+== only in A (0 rows)
+== only in B (0 rows)
+5. DBSchema entries and DBNames
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347276 347276
+6. the .si rows
+16 of 16 `.si` rows have the same text (compared after inflate)
+[2026-09-30T02:14:42] check 7: native config apply on our twin
+native apply exit=0 in 6,7s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+[2026-09-30T02:14:50] check 8: native exports and source-diff
+export exit=0 in 50,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export exit=0 in 33,8s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+[2026-09-30T02:16:24] done b1
+
+====================================================================================================
+CASE c1
+====================================================================================================
+[2026-09-30T02:16:25] dry run
+dry exit 0
+[2026-09-30T02:16:29] rehearsal
+rehearse exit 0
+[2026-09-30T02:16:36] real run
+real exit 0
+structure: catalog КлассификаторБанков (Reference2565): widened attributes Fld2567 = Город (50 -> 200), Fld5512 = ИНН (12 -> 20) | catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100) | catalog ШаблоныЗаданийОчереди (Reference3408): widened attributes Fld3519 = ИмяМетода (255 -> 1024) | document _ДемоЗаказПокупателя (Document39): widened attributes Fld3825 = Го
+[2026-09-30T02:16:42] checks 2-6
+rebuilt tables: _Reference2565,_Reference2598,_Reference3408,_Document39,_Document39_VT970,_Document39_VT2148,_Document39_VT3663,_Document1564,_Document1564_VT1962,_Document1564_VT2440
+3. data of the rebuilt tables (EXCEPT both ways)
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference3408	rows 0 / 0	only in A 0	only in B 0
+_Document39	rows 8 / 8	only in A 0	only in B 0
+_Document39_VT970	rows 7 / 7	only in A 0	only in B 0
+_Document39_VT2148	rows 4 / 4	only in A 0	only in B 0
+_Document39_VT3663	rows 1 / 1	only in A 0	only in B 0
+_Document1564	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT1962	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT2440	rows 1 / 1	only in A 0	only in B 0
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference3408	rows 0 / 0	only in A 0	only in B 0
+_Document39	rows 8 / 8	only in A 0	only in B 0
+_Document39_VT970	rows 7 / 7	only in A 0	only in B 0
+_Document39_VT2148	rows 4 / 4	only in A 0	only in B 0
+_Document39_VT3663	rows 1 / 1	only in A 0	only in B 0
+_Document1564	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT1962	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT2440	rows 1 / 1	only in A 0	only in B 0
+4. Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+== only in A (0 rows)
+== only in B (0 rows)
+5. DBSchema entries and DBNames
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347170 347170
+6. the .si rows
+16 of 16 `.si` rows have the same text (compared after inflate)
+[2026-09-30T02:17:09] check 7: native config apply on our twin
+native apply exit=0 in 30,8s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+[2026-09-30T02:17:41] check 8: native exports and source-diff
+export exit=0 in 41,5s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export exit=0 in 45,6s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+[2026-09-30T02:19:25] done c1
+
+====================================================================================================
+CASE b2
+====================================================================================================
+[2026-09-30T02:19:26] dry run
+dry exit 0
+[2026-09-30T02:19:33] rehearsal
+rehearse exit 0
+[2026-09-30T02:19:39] real run
+real exit 0
+structure: catalog _ДемоПроекты (Reference22): removed attributes Fld179 = РеквизитДопУпорядочивания | document _ДемоНачислениеЗарплаты (Document996): removed attributes Fld4062 = ПериодРегистрации
+[2026-09-30T02:19:43] checks 2-6
+rebuilt tables: _Reference22,_Document996,_Document996_VT1121,_Document996_VT2191
+3. data of the rebuilt tables (EXCEPT both ways)
+_Reference22	rows 3 / 3	only in A 0	only in B 0
+_Document996	rows 2 / 2	only in A 0	only in B 0
+_Document996_VT1121	rows 6 / 6	only in A 0	only in B 0
+_Document996_VT2191	rows 4 / 4	only in A 0	only in B 0
+_Reference22	rows 3 / 3	only in A 0	only in B 0
+_Document996	rows 2 / 2	only in A 0	only in B 0
+_Document996_VT1121	rows 6 / 6	only in A 0	only in B 0
+_Document996_VT2191	rows 4 / 4	only in A 0	only in B 0
+4. Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+== only in A (0 rows)
+== only in B (0 rows)
+5. DBSchema entries and DBNames
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347170 347170
+6. the .si rows
+16 of 16 `.si` rows have the same text (compared after inflate)
+[2026-09-30T02:20:17] check 7: native config apply on our twin
+native apply exit=0 in 8,7s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+[2026-09-30T02:20:27] check 8: native exports and source-diff
+export exit=0 in 44,8s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export exit=0 in 36,5s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+[2026-09-30T02:22:00] done b2
+
+====================================================================================================
+BACKUP POLICY (fresh twin of b2)
+====================================================================================================
+without --recovery-backup / --i-have-a-backup: exit 1, the apply refuses before the transaction ("Нужна резервная копия SQL Server ...")
+with --recovery-backup <file>: exit 0, backup taken first: {"kind": "file", "path": "F:\\ibcmd\\lab\\04\\restructure\\bak\\ibcmd_rs_04_ddl_p_b2_bk_before.bak", "seconds": 1.516}

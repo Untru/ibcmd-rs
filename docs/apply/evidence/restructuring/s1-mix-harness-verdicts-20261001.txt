@@ -1,0 +1,29 @@
+S1 harness review follow-up, 2026-10-01
+Scripts only, code/native measurements of s1-mix-release-20261001.txt remain unchanged.
+Command: pwsh -NoProfile -File scripts/restructure-lab/verdicts_selftest.ps1 -Out F:/ibcmd/lab/04/restructure/out/verdicts-selftest-20261001
+The helpers called by both runners were exercised with bounded DB-free fixtures.
+Fresh saved f1 EXCEPT/no-op/full source-diff evidence also passes the strict helpers; diff_paths allows ConfigDumpInfo.xml only.
+PowerShell parse, cargo fmt --all --check and physical-adapter guard pass.
+
+PASS native no-op
+PASS rejects native failure despite no-op text
+PASS rejects native apply was not a no-op
+PASS rejects native export failure
+PASS all rebuilt tables equal
+PASS rejects rebuilt data difference
+PASS rejects missing rebuilt table
+PASS rejects empty EXCEPT output
+PASS rejects incomplete rebuilt-table coverage
+PASS rejects no expected tables
+PASS rejects duplicate table output
+PASS Config rows equal
+PASS rejects truncated Config result
+PASS rejects Config data mismatch
+PASS native exports identical
+PASS rejects source-diff process failure despite valid JSON
+PASS rejects unexpected native export difference
+PASS OUR route allows declared differences for path validator
+PASS rejects empty native exports
+PASS rejects truncated source-diff entries
+PASS rejects unknown source-diff status
+PASS 21 acceptance controls; no database or native command was used

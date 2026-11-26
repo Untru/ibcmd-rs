@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-catalog-ut-based-on-catalog",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "elements": [
+      {
+        "storage_element": "3404cb9a-92ea-42b9-9086-ad481dbc27d7",
+        "source_path": "Catalogs/ДоговорыКонтрагентов.xml",
+        "native_export_size": 214813,
+        "native_export_sha256": "608044820211d59da83088048ec5054d5d27eaad0e563c169abb17f7592e50bd"
+      }
+    ],
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body.",
+    "expectation": "The platform export lists three Catalog.* items under <BasedOn>: Catalog.СоглашенияСКлиентами, Catalog.СоглашенияСПоставщиками and Catalog.Партнеры."
+  },
+  "retained": {
+    "packed_body": {
+      "size": 14597,
+      "sha256": "7eacd8b4a56b5085b77bfec85cacf3ca9fc5a30e6fea2e81d991954de73d2ce7",
+      "unpacked_size": 100464,
+      "unpacked_sha256": "9e52bb8d828fcdc1f66882e058968928af628ad32e265f557d9cd4c575e39177"
+    }
+  }
+}

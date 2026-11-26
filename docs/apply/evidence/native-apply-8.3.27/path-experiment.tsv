@@ -1,0 +1,44 @@
+id	traced	database	nth_apply_on_it	stage_by	staged	staged_rows	descriptor_changed	descriptor_kind	path	seconds	log_structure	log_collect	log_help_index	log_exchange_registration	register_ids_changed
+X0	no	c4_paths	1	S	catalog _ДемоВидыНоменклатуры, patch-mode stage (the attribute is dropped: nothing effective)	9	no		short	20	no	yes	yes	yes	no
+X1	no	c4_paths	2	S	catalog _ДемоКонтрагенты: object module, 5 forms, help	18	no		short	91.7	no	yes	yes	yes	no
+X2	no	c4_x2	1	S	common module _ДемоЛокализацияКлиентСервер	5	no		short	41.9	no	no	no	yes	no
+X4	no	c4_x4	1	S	catalog _ДемоКонтрагенты: synonym changed, forms, help	18	yes	catalog	long	231.3	yes	yes	yes	no	yes
+X3	no	c4_paths	3	N	catalog _ДемоКонтрагенты object module + module of the form ФормаЭлемента of catalog _ДемоГруппыДоступаНоменклатуры	7	yes	catalog	long	149	yes	yes	no	no	yes
+Y1	no	c4_x4	2	S	document _ДемоПоручениеЭкспедитору: manager module, 2 forms, help	11	no		short	18.7	no	yes	yes	yes	no
+Y2	no	c4_paths	4	S	common module + catalog _ДемоКонтрагенты object module (its forms already equal to Config)	20	no		short	15.6	no	yes	yes	yes	no
+Y3	no	c4_paths	5	S	common module (again)	5	no		short	12.8	no	no	no	yes	no
+Y4	no	c4_x4	3	S	common module	5	no		short	14.3	no	no	no	yes	no
+Y5	no	c5_union	1	S	common module + catalog _ДемоКонтрагенты + document _ДемоПоручениеЭкспедитору with forms and help (the stage of c1c)	28	no		long	243.9	yes	yes	yes	no	yes
+Y6	no	c5_doc	1	S	document _ДемоПоручениеЭкспедитору: manager module, 2 forms, help	11	no		short	17.2	no	yes	yes	yes	no
+Y7	no	c5_pair	1	S	document + catalog object module, with forms and help	26	no		long	77.5	yes	yes	yes	no	yes
+Y8	no	c5_doc	2	N	catalog _ДемоКонтрагенты object module + document manager module (no form rows)	7	yes	catalog, document	long	62.9	yes	yes	no	no	yes
+Y9	no	c5_union	2	N	module of one catalog form (ФормаЭлемента of _ДемоГруппыДоступаНоменклатуры)	5	no		short	8.6	no	no	no	yes	no
+Y10	no	c5_pair	2	N	common module + document manager module	7	yes	document	long	52.6	yes	yes	no	no	yes
+Y11	no	c4_x4	4	N	object modules of two catalogs (_ДемоКонтрагенты, _ДемоОрганизации)	7	yes	catalog	long	61.8	yes	yes	no	no	yes
+Y12	no	c4_paths	6	N	two common modules (_ДемоЛокализацияКлиентСервер, _ДемоЛокализация)	7	no		short	28	no	no	no	yes	no
+Y13	no	c5_pair	3	S	common module + document manager module, forms, help (our tool; Y10 staged the same edits natively)	13	no		short	27.4	no	yes	yes	yes	no
+Y14	no	c5_union	3	N	common module + catalog object module requested; native staged the common module only	5	no		short	53.9	no	no	no	yes	no
+Y16	no	c5_cms	1	S	twelve small common modules	27	no		long	454	yes	yes	yes	no	yes
+Y15	no	c5_probe	1	S	common module + catalog _ДемоКонтрагенты with forms and help	20	no		short	19.8	no	yes	yes	yes	no
+Y17	no	c5_union	4	S	nine small common modules	21	no		long	23.7	yes	yes	yes	no	yes
+Y18	no	c5_pair	4	S	ten small common modules	23	no		long	22.2	yes	yes	yes	no	yes
+Y19	no	c5_doc	3	S	eleven small common modules	25	no		long	37.8	yes	yes	yes	no	yes
+Y20	no	c4_x4	5	S	eight small common modules	19	no		short	12.5	no	no	no	yes	no
+2n	yes	c2_attr	1	S	catalog _ДемоВидыНоменклатуры, patch-mode stage (attribute dropped: nothing effective)	9	no		short	45.1					no
+1x	yes	c1_disable	1	S	case 1: five modules (common module, catalog, document, form of a catalog, common form)	38	no		long	108.8					yes
+1d	yes	c1_force	1	S	case 1, --dynamic=force (twin of 1x)	38	no		long	73.1					yes
+1x'	yes	c1_disable	2	S	case 1, edited again	38	no		long	30.2					yes
+1d'	yes	c1_force	2	S	case 1, edited again, --dynamic=force	38	no		long	33.0					yes
+2a	yes	c2_attr	2	N	attribute added to catalog _ДемоВидыНоменклатуры	9	yes	catalog	long	110.2					yes
+2c	yes	c2_attr	3	N	new catalog + Configuration.xml (re-import of the whole tree)	9615	yes	catalog (new)	long	157.3					yes
+c1c	yes	c4_x2	2	S	common module + catalog _ДемоКонтрагенты + document _ДемоПоручениеЭкспедитору with forms and help	28	no		long	210.8					yes
+E01	yes	noop	1	S	no-op import of the whole tree (patch mode)	9517	unknown		long	122.6					yes
+3	yes	c3_new	1	S	the whole tree into a created infobase	all	yes	all (new infobase)	long	123.5					yes
+8.5-first	yes	c85_mod	1	S	case 1 on platform 8.5.1.1150 (five modules)	41	no		long	293.0					yes
+8.5-steady	yes	c85_mod	2	S	case 1 on 8.5.1.1150, edited again	41	no		long	52.9					yes
+S2	other track	(track apply)		S	227 module/form/template edits (patch-mode stage of the whole tree)	9517	unknown		long						yes
+S3	other track	(track apply)		S	delta stage of a catalog, a document and a common module	30	no		long	87.5					yes
+S4	other track	(track apply)		S	new form and new template on a data processor (owner descriptor and new objects' descriptors)	16	yes	data processor	short	39.6					no
+S5A	other track	(track apply)		S	help page, first template, first form of data processors (owner descriptors changed)	15	yes	data processor	short						no
+S5B	other track	(track apply)		S	form of a catalog (the catalog descriptor gains a form reference)	4	yes	catalog	long						yes
+S5C	other track	(track apply)		S	object module added to a data processor	2	no		short	25					no

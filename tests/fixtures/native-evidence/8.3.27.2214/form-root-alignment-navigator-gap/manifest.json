@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-root-alignment-navigator-gap",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "host": "macOS",
+    "note": "Real ERP УХ 3.2.12.6 1cv8.cf storage entries, extracted with `ibcmd-rs cf extract <cf> <form-uuid>.0 <outdir>` (compression raw-deflate). Same root cause as the form-mobile-device-command-bar-content-navigator-gap, form-save-window-settings-navigator-gap and form-root-grouping-navigator-gap fixtures: forms with a built-in Navigator/quick-search child item write one extra field ahead of the classic 24-member form-root trailer's own start, pushing every trailer slot counted from the front out by one -- a 25-member trailer, not 24. This fixture covers the remaining root-trailer readers that shared the same strict [24]-only tail-start search: ConversationsRepresentation (slot 19->20), VerticalAlign (slot 12->13), ChildrenAlign (slot 13->14), ScalingMode (slot 6->7), HorizontalAlign (slot 11->12) and ShowCloseButton (slot 18->19). Each object below independently confirms the same uniform +1 shift already established by the three prior fixtures' fixtures."
+  },
+  "objects": [
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "conversations-representation-show",
+      "description": "Catalogs/ВариантыОтчетов/Forms/ФормаЭлемента. Native <ConversationsRepresentation>Show</ConversationsRepresentation>.",
+      "form_uuid": "595e5752-36a7-4bba-8a40-26920acae01d",
+      "raw_entry": { "path": "raw/595e5752-36a7-4bba-8a40-26920acae01d.deflate", "sha256": "ccc23f7661931e7da63fcdf650ca298d560782e349c53e161bfb459db6873174" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "vertical-align-bottom",
+      "description": "Catalogs/ВидыКонтактнойИнформации/Forms/ИсправлениеВидовКонтактнойИнформации. Native <VerticalAlign>Bottom</VerticalAlign> (raw code 2).",
+      "form_uuid": "826c2821-147d-4aaf-910c-acfbdb58a29f",
+      "raw_entry": { "path": "raw/826c2821-147d-4aaf-910c-acfbdb58a29f.deflate", "sha256": "77877ab87a5168358ae8cc7a4de09917cab244da3beb39989df5d57bc5ca8df0" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "children-align-none",
+      "description": "DataProcessors/ПлатежныйКалендарь/Forms/Настройки. Native <ChildrenAlign>None</ChildrenAlign>.",
+      "form_uuid": "36454dc5-ab04-4773-85cf-f634b17dfc4f",
+      "raw_entry": { "path": "raw/36454dc5-ab04-4773-85cf-f634b17dfc4f.deflate", "sha256": "b8dbf9950f7b5b38b0bcf00d126f00e2f0e128bbb158b900899caaa6d0eac21e" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "scaling-mode-normal",
+      "description": "Catalogs/КлассификаторДОПОГЭПД/Forms/ДобавлениеЭлементовВКлассификатор. Native <ScalingMode>Normal</ScalingMode>.",
+      "form_uuid": "79a77da6-ce40-4cd8-ab79-f70d5b5aa7b0",
+      "raw_entry": { "path": "raw/79a77da6-ce40-4cd8-ab79-f70d5b5aa7b0.deflate", "sha256": "2bc8b512f9616f1b54f2519435c60226033f354e87ddac4c0fcba96b291734e5" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "horizontal-align-center",
+      "description": "DataProcessors/ЕдиныйНалоговыйСчетЛичныйКабинет/Forms/ФормаВыбораПериода. Native <HorizontalAlign>Center</HorizontalAlign>.",
+      "form_uuid": "beed4e3c-4d47-4881-82f0-2f57f9d2bc7b",
+      "raw_entry": { "path": "raw/beed4e3c-4d47-4881-82f0-2f57f9d2bc7b.deflate", "sha256": "fe5e1fdc658b627b15472e1369365ea9f3237bd90c6936ede7171a949908fdce" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "show-close-button-false",
+      "description": "DataProcessors/ДокументооборотСКонтролирующимиОрганами/Forms/ПодключениеЗаданияПолученияСообщенийСЭДО. Native <ShowCloseButton>false</ShowCloseButton>.",
+      "form_uuid": "f30b88e9-919b-45bc-ba99-a2c32ca399e7",
+      "raw_entry": { "path": "raw/f30b88e9-919b-45bc-ba99-a2c32ca399e7.deflate", "sha256": "4fbceecc3ddffa9febaacc94e31f693fc7110d54f3f8ceff9e2ce4a6c422bf3d" }
+    }
+  ]
+}

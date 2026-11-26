@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-query-union-link",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "generator": "Unica native dcs.compile",
+    "commit": "a527d40962d047c6922c903b37510b30f697da42",
+    "authority": "hypothesis_only",
+    "path": "seed/Template.xml",
+    "size": 2457,
+    "sha256": "7eacfc04d24904e3ca7e780623e7f3dde6496aa871769cd2628122c53d1d8b0b"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "700338ab23cf7939a0b330feb435ecf1035bcf999cfc81b4789d81d637e1ba26",
+    "round_2_cf_sha256": "749147b480b77172c20e46928a44f82160eedb4594228df7e54a3f9c28f91f02",
+    "native_template_sha256": "902307f2ff2c9ca69f73d0622c8ec9a49532fc8feca52fd17083203196f3816f",
+    "packed_body_sha256": "a554c6d0c3fbd9fea503dfa2510ed1a39a8eebd1a8d19774901d6a840553a781",
+    "unpacked_body_sha256": "e107c2373e38b3b453e0f6fac83bcdc46adba1422bab685163b8ffe9f81498ca",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "compiler_acceptance": {
+    "candidate_unpacked_size": 3318,
+    "candidate_unpacked_sha256": "30eb6b551a93e5b8ad8589d11af5af5045fb6680a18ed0089c9b295f7819fcfa",
+    "candidate_cf_size": 26362,
+    "candidate_cf_sha256": "dbcb913a1eadd1c64a1b4891c6fa915024ffb34553703e514c063ee067480b1a",
+    "accepted_cf_size": 87706,
+    "accepted_cf_sha256": "91bd718a5a6e3041c994882ffb3c5dbeccc5c8c5559035ce641007749817b70d",
+    "fresh_database_locale": "ru_RU",
+    "load_apply_save": true,
+    "reexported_template_size": 2493,
+    "reexported_template_sha256": "902307f2ff2c9ca69f73d0622c8ec9a49532fc8feca52fd17083203196f3816f",
+    "reexported_template_equal": true
+  },
+  "retained": {
+    "configuration": { "path": "configuration.cf.b64", "decoded_size": 87677, "sha256": "749147b480b77172c20e46928a44f82160eedb4594228df7e54a3f9c28f91f02" },
+    "native_template": { "path": "native-template.xml.b64", "decoded_size": 2493, "sha256": "902307f2ff2c9ca69f73d0622c8ec9a49532fc8feca52fd17083203196f3816f" },
+    "packed_body": { "path": "raw-packed.bin.b64", "decoded_size": 758, "sha256": "a554c6d0c3fbd9fea503dfa2510ed1a39a8eebd1a8d19774901d6a840553a781" },
+    "unpacked_body": { "path": "raw-unpacked.bin.b64", "decoded_size": 2907, "sha256": "e107c2373e38b3b453e0f6fac83bcdc46adba1422bab685163b8ffe9f81498ca" }
+  },
+  "cohort": {
+    "root_order": ["dataSource", "dataSet:DataSetQuery", "dataSet:DataSetUnion", "dataSetLink", "settingsVariant"],
+    "query_children": ["name", "field", "dataSource", "query"],
+    "union_children": ["name", "item:DataSetQuery"],
+    "link_children": ["sourceDataSet", "destinationDataSet", "sourceExpression", "destinationExpression"],
+    "query": "ВЫБРАТЬ \"A\" КАК SortKey",
+    "field": "SortKey"
+  },
+  "non_claims": [
+    "No optional query autoFillFields, field valueType, nested union, object item or multiple item behavior is inferred.",
+    "No optional link parameter, parameterListAllowed, linkConditionExpression, startExpression or required behavior is inferred.",
+    "No more than one Query, one Union, one nested Query, one link or one settings variant is inferred.",
+    "No TypeId, AreaTemplate, defaultSettings, Form context, EDT round trip or other platform patch build is inferred."
+  ]
+}

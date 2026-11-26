@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovAutoConnect_true",
+    "CovPredefined_true",
+    "CovTemplate",
+    "CovUseOSAuthentication_true",
+    "CovUseOSProxy_true",
+    "configuration"
+  ]
+}

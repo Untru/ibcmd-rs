@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source_profile": "xml-2.20",
+  "target_profile": "xml-2.21",
+  "capabilities": [
+    "xcf:palette-namespace",
+    "xcf:use-in-interface-compatibility-mode"
+  ],
+  "source_status": "unsupported",
+  "target_status": "supported",
+  "expected_losses": []
+}

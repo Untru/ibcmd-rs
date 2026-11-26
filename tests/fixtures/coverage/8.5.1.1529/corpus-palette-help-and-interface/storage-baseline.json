@@ -1,0 +1,14 @@
+{
+  "equal": [
+    "Catalogs/CovHelpCatalog.xml",
+    "Catalogs/CovHelpCatalog/Ext/Help.xml",
+    "Catalogs/CovHelpTarget.xml",
+    "Catalogs/CovHelpTarget/Ext/Help.xml",
+    "Catalogs/CovHelpTarget/Ext/Help/ru.html",
+    "Configuration.xml",
+    "ExchangePlans/CovCommandPlan.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+    "StyleItems/CovPaletteStyleTemplate.xml",
+    "Subsystems/CovCommandSubsystem.xml"
+  ]
+}

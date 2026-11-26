@@ -1,0 +1,5 @@
+{
+  "ExitCode": 0,
+  "Stdout": "PASS fmt 13s\nPASS guard 5s\nPASS clippy-1.95 1s\nPASS test-root-lib 289s\nPASS guard-selftest 2s\nPASS edt-corpus 25s\nPASS clippy-1.98.1 24s\nPASS check-release-root 134s\nPASS check-oracle 108s\nPASS test-workspace-layers 49s\nPASS test-root-integration 211s\nPASS test-oracle-compiles 276s\nPASS build-release 555s\nPASS native-evidence 6s\nFAIL(1) sbom 0s\nFAIL(1) audit-release 0s\nDONE\n",
+  "Stderr": ""
+}

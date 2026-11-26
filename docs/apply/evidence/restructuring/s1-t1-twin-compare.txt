@@ -1,0 +1,188 @@
+S1 step 1, the types case (T1): the standalone restructure (mssql-restructure) on ibcmd_rs_04_ddl_s1_t1_own against the native apply on ibcmd_rs_04_ddl_s1_t1_nat.
+Both twins were restored from the COPY_ONLY backup of the staged state (ibcmd_rs_04_ddl_s1_base_t1_staged.bak). Numbers are quoted in docs/apply/restructuring.md, 12.8.
+
+=== the plan of the run: objects and new attributes
+catalog _ДемоГруппыДоступаПартнеров (Reference569): 1 new attribute(s) -> Fld11034 = ДемоТ1Булево
+catalog _ДемоМестаХранения (Reference16): 2 new attribute(s) -> Fld11035 = ДемоТ1Дата, Fld11036 = ДемоТ1Число
+catalog _ДемоПартнеры (Reference20): 3 new attribute(s) -> Fld11037 = ДемоТ1Строка, Fld11038 = ДемоТ1Время, Fld11039 = ДемоТ1ЧислоПапки
+catalog КлючевыеОперации (Reference2598): 9 new attribute(s) -> Fld11040 = ДемоТ1Булево, Fld11041 = ДемоТ1СтрокаПеременная, Fld11042 = ДемоТ1СтрокаФикс, Fld11043 = ДемоТ1СтрокаНеогр, Fld11044 = ДемоТ1ЧислоЦелое, Fld11045 = ДемоТ1ЧислоДробное, Fld11046 = ДемоТ1ЧислоНеотр, Fld11047 = ДемоТ1Дата, Fld11048 = ДемоТ1ДатаВремя
+catalog Удалить_ДемоОбщиеСведения (Reference9367): 1 new attribute(s) -> Fld11049 = ДемоТ1Первый
+document _ДемоЗаказПокупателя (Document39): 7 new attribute(s) -> Fld11050 = ДемоТ1Середина, Fld11051 = ДемоТ1Булево, Fld11052 = ДемоТ1Строка, Fld11053 = ДемоТ1Число, Fld11054 = ДемоТ1Дата, Fld11055 = ДемоТ1ДатаВремя, Fld11056 = ДемоТ1СтрокаНеогр
+
+=== trial (rolled back) and apply: the steps by phase (ms)
+trial-report.json : committed=False trial=True total ms=13798
+  create      11 steps     670 ms
+  drop-old    11 steps     433 ms
+  guard        1 steps      74 ms
+  indexes     40 steps    3484 ms
+  load        11 steps     482 ms
+  publish      9 steps     626 ms
+  rename      51 steps    3857 ms
+apply-report.json : committed=True trial=False total ms=7813
+  create      11 steps     274 ms
+  drop-old    11 steps     530 ms
+  guard        1 steps       5 ms
+  indexes     40 steps    1859 ms
+  load        11 steps     406 ms
+  publish      9 steps     645 ms
+  rename      51 steps    1592 ms
+
+=== check 3: the data of the 11 rebuilt tables, EXCEPT both ways (compare_tables.ps1)
+_Reference569	rows 7 / 7	only in A 0	only in B 0
+_Reference16	rows 5 / 5	only in A 0	only in B 0
+_Reference20	rows 14 / 14	only in A 0	only in B 0
+_Reference20_VT155	rows 29 / 29	only in A 0	only in B 0
+_Reference20_VT159	rows 18 / 18	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference9367	rows 3 / 3	only in A 0	only in B 0
+_Document39	rows 8 / 8	only in A 0	only in B 0
+_Document39_VT970	rows 7 / 7	only in A 0	only in B 0
+_Document39_VT2148	rows 4 / 4	only in A 0	only in B 0
+_Document39_VT3663	rows 1 / 1	only in A 0	only in B 0
+
+=== checks 2 and 4 (snapdiff.py; before = native after, after = ours; the ConfigCAS / Files listings cut)
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (5):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C42222F663 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C4A37577B9 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     - C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     - C _UpdateId binary(16) NULL
+     - C _LastUpdateResult numeric(2,0) NULL
+     - C _LastUpdateError varbinary(max) NULL
+  T _Reference2598
+     - I PK___Referen__AC8ED0C416B890BA CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___Referen__AC8ED0C49E60E23D CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _Reference9367
+     - I PK___Referen__AC8ED0C4C42E51CB CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___Referen__AC8ED0C4D07C607E CLUSTERED [PK UNIQUE] (_IDRRef)
+== data: tables whose rowcount/checksum changed
+(15)
+  Config: (9841, '1323109439') -> (9847, '1565869644')
+  ConfigCAS: (636, '1634444173') -> (12797, '-472238273')
+  DBSchema: (1, '-501452826') -> (1, '-65161421')
+  Files: (44, '-203630609') -> (353, '1036436116')
+  Params: (38, '880764967') -> (39, '-222104422')
+  SchemaStorage: (2, '2098835108') -> (2, '2093054906')
+  _ConfigChngR: (20685, '1354740837') -> (20685, '-1354141076')
+  _ConfigChngR_ExtProps: (21357, '-1424171298') -> (21357, '-1552377122')
+  _Document39: (8, '-714616808') -> (8, '-714614760')
+  _ExtensionsRestructNGS: (3, '2045766927') -> (0, 'None')
+  _Reference16: (5, '-896209186') -> (5, '-895805730')
+  _Reference20: (14, '-344007775') -> (14, '-344007785')
+  _Reference2598: (716, '-138889184') -> (716, '-146397152')
+  _Reference569: (7, '-309512318') -> (7, '-309512086')
+  _Reference9367: (3, '-1542435186') -> (3, '-1579135346')
+== service blobs
+DBSchema same: False ['e66a5407b4563a2078e36b56e6ad15719e22c8f86e858da1b86c0943b4d81532'] ['03bd2e82b188224b0b90cbb0bc55d058ed1c277e5c2120ce93a630a7ec6abefd']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 39; added 1 removed 0 changed 7 meta-only 15
+    + DynamicallyUpdated [0] 82 bytes
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 448532 -> 450423 bytes  e305d180 -> 2a758d1a
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  913c3a02 -> 8732478b
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  bb805ee9 -> dd001d83
+    ~ DBNames [0] 144204 -> 145512 bytes  10e448b1 -> e327feac
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  8f116bfc -> b1e08689
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2998236 -> 2977771 bytes  7ce1fe52 -> d7191235
+    ~ siVersions [0] 1273 -> 1273 bytes  bced2287 -> 565f7850
+    m 0b698dcd-501d-42d9-892d-5a9157bc996a.si [0] 4026-09-29 19:09:45 -> 4026-08-22 09:47:35
+    m 215d232c-9c9e-4f7c-8a87-142cd3797264.si [0] 4026-09-29 19:09:45 -> 4026-08-22 09:47:35
+    m 2203278d-ef4f-4f68-98f1-feb257d53ecc.si [0] 4026-09-29 19:09:45 -> 4026-08-22 09:47:35
+    m 42ed49cc-765d-4314-bc2d-af425af7bf13.si [0] 4026-09-29 19:09:45 -> 4026-08-22 09:47:35
+    m 54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui [0] 4026-09-29 19:02:36 -> 4026-09-19 23:33:02
+    m 59274b8d-4447-4bf4-9d29-bfa099a1de37.si [0] 4026-09-29 19:09:45 -> 4026-08-22 09:47:35
+    m a07b62f0-1f01-484a-93d9-d42764cedac0.si [0] 4026-09-29 19:09:46 -> 4026-08-22 09:47:35
+    m c40aafd6-c889-4229-807a-851d0bc5bc97.si [0] 4026-09-29 19:09:48 -> 4026-08-22 09:47:36
+    m c4629235-4823-4320-b8b5-1d08f4c6d612.si [0] 4026-09-29 19:09:45 -> 4026-08-22 09:47:35
+    m c77bc206-5935-48ea-b32e-508a572d94f4.si [0] 4026-09-29 19:09:48 -> 4026-08-22 09:47:36
+Config: rows 9841 -> 9847; added 6 removed 0 changed 2 meta-only 2
+    + DynamicallyUpdated [0] 45 bytes
+    + a627e390-8fad-4a95-afe6-674f54813188_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b [0] 180 bytes
+    + a627e390-8fad-4a95-afe6-674f54813188_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b.0 [0] 2262 bytes
+    + ab132638-5188-470d-9432-de85f2b2c7d8_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b [0] 123 bytes
+    + ab132638-5188-470d-9432-de85f2b2c7d8_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b.0 [0] 1533 bytes
+    + versions_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b [0] 340598 bytes
+    ~ a627e390-8fad-4a95-afe6-674f54813188.0 [0] 2262 -> 2244 bytes  6c4f62ac -> a0779dc7
+    ~ ab132638-5188-470d-9432-de85f2b2c7d8.0 [0] 1533 -> 1522 bytes  825c84b3 -> 91bc23be
+    m a627e390-8fad-4a95-afe6-674f54813188 [0] 4026-09-19 23:32:53 -> 4026-09-19 23:00:46
+    m ab132638-5188-470d-9432-de85f2b2c7d8 [0] 4026-09-19 23:32:53 -> 4026-09-19 23:00:46
+ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+ConfigCAS: rows 636 -> 12797; added 12161 removed 0 changed 0 meta-only 0
+(... the added ConfigCAS rows of ours: native collected the garbage ...)
+Files: rows 44 -> 353; added 309 removed 0 changed 3 meta-only 0
+
+=== check 4: the Config rows one twin has and the other has not (compare_config.ps1)
+== only in A (4 rows)
+  a627e390-8fad-4a95-afe6-674f54813188 [0]
+  a627e390-8fad-4a95-afe6-674f54813188.0 [0]
+  ab132638-5188-470d-9432-de85f2b2c7d8 [0]
+  ab132638-5188-470d-9432-de85f2b2c7d8.0 [0]
+== only in B (10 rows)
+  a627e390-8fad-4a95-afe6-674f54813188 [0]
+  a627e390-8fad-4a95-afe6-674f54813188.0 [0]
+  a627e390-8fad-4a95-afe6-674f54813188_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b [0]
+  a627e390-8fad-4a95-afe6-674f54813188_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b.0 [0]
+  ab132638-5188-470d-9432-de85f2b2c7d8 [0]
+  ab132638-5188-470d-9432-de85f2b2c7d8.0 [0]
+  ab132638-5188-470d-9432-de85f2b2c7d8_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b [0]
+  ab132638-5188-470d-9432-de85f2b2c7d8_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b.0 [0]
+  DynamicallyUpdated [0]
+  versions_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b [0]
+
+=== check 5: DBSchema entries and DBNames of the two databases (dbschema_cmp.py)
+tables: 1761 / 1761
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+order of the common entries is the same: False
+first positions that differ (1 vs 2): [('DbCopiesSettings', 'DbCopies'), ('DbCopiesTrLogs', 'DbCopiesSettings'), ('DbCopiesTablesStates', 'DbCopiesTrLogs'), ('DbCopiesInitialLast', 'DbCopiesUpdates'), ('DbCopiesTrChObj', 'DbCopiesTablesStates'), ('ChrcOpt', 'DbCopiesInitialLast'), ('CKindsOpt', 'DbCopiesTrChObj'), ('AccOpt', 'ChrcOpt'), ('DbCopiesTrChanges', 'CKindsOpt'), ('Ecs', 'AccOpt'), ('Bots ...
+DBNames text equal: True 348389 348389
+
+=== check 6: the Params *.si rows (si_diff.py)
+== ibcmd_rs_04_ddl_s1_t1_nat/nat_after  ->  ibcmd_rs_04_ddl_s1_t1_own/own_after
+16 of 16 `.si` rows have the same text (compared after inflate)
+
+=== check 7: native config apply on our twin (apply_only.ps1, native lock)
+ConfigSave rows before: 0
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+native apply exit=0
+ConfigSave rows after: 0
+
+=== check 8: native config export of both twins, ibcmd-rs source-diff
+summary: {"left_only":0,"right_only":0,"different":1,"unchanged":12197}
+different: ConfigDumpInfo.xml (3114141 / 3114141 bytes)
+ConfigDumpInfo.xml with configVersion blanked: equal. 6 of 9835 entries have another configVersion: the six restructured objects (the native export reads the versions of the dynamic generation, versions_dynupdate_*, that the standalone promotion left in Config).
+
+=== check 9: the session job (probe/jobs/types_t1.bsl) on both twins in the 1C server cluster, output compared as text
+lines: native 93, ours 93; identical: True
+
+=== the through-the-apply run on ibcmd_rs_04_ddl_s1_t1_seam (mssql-restructure --through-apply)
+dry run: gate "s1 (the conservative rule and the S1 restructurings)", restructuring_required=false, blockers=0; structure phase: 11 tables, 6 objects,
+         caches: ea13a2c9 (23 property lines), 1a621f0f (23 records), siVersions; script 9.3 MB
+rehearsal: executed=false, sql 42.4 s, total 45.6 s; afterwards ConfigSave 9, Config 9847, SchemaStorage 100/100, no *NG table
+apply: executed=true, sql 21.1 s, total 30.3 s; afterwards ConfigSave 0, Config 9841 (native: 9841), SchemaStorage 100/100
+Config vs native (compare_config.ps1): only in native 0 rows, only in ours 0 rows (whole table, Creation/Modified included)
+EXCEPT of the 11 rebuilt tables vs native: 0 rows both ways in all
+DBSchema: 1761/1761 entries, differ: DbCopies, DbCopiesUpdates only; DBNames text equal (348389 bytes)
+si_diff: 16 of 16 .si rows have the same text (compared after inflate)
+native config export of both twins, ibcmd-rs source-diff: {"left_only":0,"right_only":0,"different":0,"unchanged":12198} (ConfigDumpInfo.xml included)
+session job types_t1.bsl, cluster: 93 lines, identical to native's
+native config apply on the seam twin: "Обновление конфигурации базы данных не требуется", exit 0
+
+=== check 11, refusals (mssql-restructure --through-apply --dry-run)
+the T1 stage with the root row changed by one byte (ibcmd_rs_04_ddl_s1_base): refused, exit 1, one blocker "root: the service row root changes"
+the whole native image of a2 (ibcmd_rs_04_ddl_s1_full): refused by the apply before the gate: "the stage carries a `deleted` row, the list of removals: it is empty ..."
+
+=== a failure after everything else (ibcmd_rs_04_ddl_s1_t1_fail, a fresh twin of the same staged backup)
+The generated script (--through-apply --dry-run --script-output) with `IF 1 = 1 THROW 57999, N'injected failure before COMMIT', 1;` as the last
+statement before COMMIT TRANSACTION, run with sqlcmd -d master -i script -b -a 32767 (20 s):
+  Сообщение 57999, уровень 16, состояние 1, ... строка 720: injected failure before COMMIT
+afterwards: ConfigSave 9, Config 9847, SchemaStorage 100/100 (hash of CurrentSchema of id 0 unchanged), no *NG table, _Reference20 has no _Fld11037,
+            DBNames 143619 bytes (unchanged), DynamicallyUpdated still in Config.

@@ -1,0 +1,214 @@
+S1-A acceptance (#397): the types case T1 through `ibcmd-rs mssql-config-apply --platform-profile platform-8.3.27.2214
+--allow-restructure s1 --i-have-a-backup` on twins of ddl's staged backup, against the native `config apply` of the same staged state.
+Branch feat/0.4-apply3 (feat/0.4 847f581a, the S1 gate of the restructure track behind the apply's seam). Protocol: docs/apply/restructuring.md
+12.6, checks 1-10, ddl's kit (scripts/restructure-lab: snapshot.py, snapdiff.py, compare_tables.ps1, compare_config.ps1, dbschema_cmp.py,
+si_diff.py; not modified) with the store in the apply lab, native runs and exports by the apply lab's own runner (the kit's runners take
+ibcmd_rs_04_ddl_* names only), the cluster session by the apply lab's COM job.
+
+The case is T1 WITHOUT THE THREE OBJECTS THE EXTENSION `_ДемоРасширение` ADOPTS: `_ДемоМестаХранения`, `_ДемоГруппыДоступаПартнеров` and
+`_ДемоПартнеры`. Since S1-I (#405) the own restructure refuses to change an object an extension adopts ("the platform's apply does"), so the
+full T1 (6 objects) is refused with that reason on this corpus; the three objects were unstaged on both twins (`stage_tools.py unstage`, the
+`versions` entries given back the ids Config has). What remains: the catalog КлючевыеОперации (attributes of Булево, СтрокаПеременная,
+СтрокаФикс, СтрокаНеогр, ЧислоЦелое, ЧислоДробное, ЧислоНеотр, Дата, ДатаВремя), the catalog Удалить_ДемоОбщиеСведения (a string) and the
+document _ДемоЗаказПокупателя (a number, Булево, Строка, Число, Дата, ДатаВремя, СтрокаНеогр); 6 tables rebuilt. Not covered by this run:
+the types `Время` and `ЧислоПапки`, which only `_ДемоПартнеры` carried (adopted); the full T1 was compared before S1-I in
+s1-port-acceptance.txt (11 tables, checks 3-8), and check 1 below reads the full T1 snapshots.
+
+======================================================================================================================
+CHECK 1  the plan made offline from the staged snapshot equals the native result (full T1, ddl's snapshots, read-only)
+======================================================================================================================
+cargo test --lib restructure::tests_corpus::corpus_plan_of_the_types_case_equals_the_native_result
+test restructure::tests_corpus::corpus_plan_of_the_types_case_equals_the_native_result ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; finished in 7.76s
+
+======================================================================================================================
+OUR SIDE  dry run, refusal without a backup word, rehearsal (CHECK 10), real run
+======================================================================================================================
+[2026-09-30T05:00:18] dry run
+dry exit 0
+[2026-09-30T05:00:35] a real run without a word about a backup must refuse
+no-backup exit 1 (expected 1)
+Error: Применение меняет структуру таблиц базы данных: старые таблицы удаляются внутри транзакции, а артефакт восстановления возвращает только строки Config и кэши. Нуж
+[2026-09-30T05:00:45] rehearsal
+rehearse exit 0
+snapshot ibcmd_rs_04_apply_t1o_20260930/t1_rehearsed: 2234 tables, Config=9847 ConfigSave=6 Params=39
+check 10 (a rehearsal changes nothing):
+== schema: tables added / removed / changed
+added (0):
+removed (0):
+changed (0):
+== data: tables whose rowcount/checksum changed
+(0)
+== service blobs
+DBSchema same: True ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef']
+[2026-09-30T05:01:10] real run
+real exit 0
+structure: catalog КлючевыеОперации (Reference2598): new attributes Fld11034 = ДемоТ1Булево, Fld11035 = ДемоТ1СтрокаПеременная, Fld11036 = ДемоТ1СтрокаФикс, Fld11037 = ДемоТ1СтрокаНеогр, Fld11038 = ДемоТ1ЧислоЦ
+timings: {"storage_check_ms":107,"inventory_ms":44,"gate_ms":7355,"fingerprints_ms":20,"recovery_ms":327,"backup_ms":0,"sql_ms":4197,"total_ms":12553}
+backup: {"kind":"acknowledged","path":null,"seconds":null}
+
+======================================================================================================================
+NATIVE SIDE  snapshot of the staged state, native config apply, snapshot
+======================================================================================================================
+[2026-09-30T04:54:59] snapshot ibcmd_rs_04_apply_t1o_20260930 t1_staged (the staged state, for check 10)
+snapshot ibcmd_rs_04_apply_t1o_20260930/t1_staged: 2234 tables, Config=9847 ConfigSave=6 Params=39
+[2026-09-30T04:55:09] native config apply on ibcmd_rs_04_apply_t1n_20260930
+exit=0 elapsed=155.4 s
+--- stdout (tail)
+[INFO] Обработка данных Реструктуризация  Таблица регистрации изменений конфигурации 15000
+[2026-09-30T04:58:05] snapshot ibcmd_rs_04_apply_t1n_20260930 nat_after
+snapshot ibcmd_rs_04_apply_t1n_20260930/nat_after: 2234 tables, Config=9841 ConfigSave=0 Params=38
+
+======================================================================================================================
+CHECKS 2-6  tables/columns/indexes, data of the rebuilt tables, Config rows, DBSchema and DBNames, the 16 .si rows
+======================================================================================================================
+rebuilt tables: _Reference2598,_Reference9367,_Document39,_Document39_VT970,_Document39_VT2148,_Document39_VT3663
+snapshot ibcmd_rs_04_apply_t1o_20260930/own_after: 2234 tables, Config=9841 ConfigSave=0 Params=38
+2. tables, columns, indexes
+== schema: tables added / removed / changed
+added (0):
+removed (0):
+changed (5):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C4961B202A CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C4A37577B9 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     - C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     - C _UpdateId binary(16) NULL
+     - C _LastUpdateResult numeric(2,0) NULL
+     - C _LastUpdateError varbinary(max) NULL
+  T _Reference2598
+     - I PK___Referen__AC8ED0C49E30FEC4 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___Referen__AC8ED0C4A555778A CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _Reference9367
+     - I PK___Referen__AC8ED0C402EF8AD5 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___Referen__AC8ED0C499A40C2C CLUSTERED [PK UNIQUE] (_IDRRef)
+== data: tables whose rowcount/checksum changed
+(11)
+  ConfigCAS: (636, '1634444173') -> (12797, '-472238273')
+  DBSchema: (1, '-1877032651') -> (1, '1151646107')
+  Files: (44, '-150687389') -> (353, '408077920')
+  Params: (38, '415425330') -> (38, '-1064825875')
+  SchemaStorage: (2, '2142731734') -> (2, '-976235774')
+  _ConfigChngR: (20685, '-1860832183') -> (20685, '-1354141076')
+  _ConfigChngR_ExtProps: (21357, '-332320') -> (21357, '-1552377122')
+  _Document39: (8, '-714614760') -> (8, '-714627048')
+  _ExtensionsRestructNGS: (3, '2045766927') -> (0, 'None')
+3. data of the rebuilt tables (EXCEPT both ways)
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference9367	rows 3 / 3	only in A 0	only in B 0
+_Document39	rows 8 / 8	only in A 0	only in B 0
+_Document39_VT970	rows 7 / 7	only in A 0	only in B 0
+_Document39_VT2148	rows 4 / 4	only in A 0	only in B 0
+_Document39_VT3663	rows 1 / 1	only in A 0	only in B 0
+4. Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+5. DBSchema entries and DBNames
+tables: 1761 / 1761
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+order of the common entries is the same: False
+first positions that differ (1 vs 2): [('DbCopiesSettings', 'DbCopies'), ('DbCopiesTrLogs', 'DbCopiesSettings'), ('DbCopiesTablesStates', 'DbCopiesTrLogs'), ('DbCopiesInitialLast', 'DbCopiesUpdates'), ('DbCopiesTrChObj', 'DbCopies
+DBNames text equal: True 348071 348071
+6. the .si rows
+== ibcmd_rs_04_apply_t1n_20260930/nat_after  ->  ibcmd_rs_04_apply_t1o_20260930/own_after
+16 of 16 `.si` rows have the same text (compared after inflate)
+
+======================================================================================================================
+CHECK 7  a native config apply and a native config check on our twin
+======================================================================================================================
+[2026-09-30T05:01:56] check 7: native config apply on ibcmd_rs_04_apply_t1o_20260930
+exit=0 elapsed=3.4 s
+--- stdout (tail)
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+--- stderr (tail)
+[2026-09-30T05:02:01] check 7b: native config check on our twin
+exit=0 elapsed=2.8 s
+--- stdout (tail)
+[INFO] Проверка корректности метаданных...
+[INFO] Проверка корректности метаданных успешно завершена
+--- stderr (tail)
+
+======================================================================================================================
+CHECK 8  native config export of both twins and ibcmd-rs source-diff
+======================================================================================================================
+[2026-09-30T05:02:10] native export of ibcmd_rs_04_apply_t1n_20260930
+exit=0 elapsed=13.1 s
+--- stdout (tail)
+[INFO] Экспорт конфигурации в XML...
+[2026-09-30T05:02:24] native export of ibcmd_rs_04_apply_t1o_20260930
+exit=0 elapsed=15 s
+--- stdout (tail)
+[INFO] Экспорт конфигурации в XML...
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+
+======================================================================================================================
+CHECK 9  a session in the 8.3.27 cluster on both twins (external connection): defaults, write, read back, query, delete
+======================================================================================================================
+session outputs identical: True (58 lines)
+
+======================================================================================================================
+SESSION OUTPUT (identical on the two twins)
+======================================================================================================================
+== Справочник.КлючевыеОперации
+rows before: 716
+default ДемоТ1Булево = False
+default ДемоТ1СтрокаПеременная =
+default ДемоТ1СтрокаФикс =
+default ДемоТ1СтрокаНеогр =
+default ДемоТ1ЧислоЦелое = 0
+default ДемоТ1ЧислоДробное = 0
+default ДемоТ1ЧислоНеотр = 0
+default ДемоТ1Дата = 0100-01-01T00:00:00
+default ДемоТ1ДатаВремя = 0100-01-01T00:00:00
+object ДемоТ1Булево = True
+object ДемоТ1СтрокаПеременная = переменная
+object ДемоТ1СтрокаФикс = фикс
+object ДемоТ1СтрокаНеогр = неограниченная строка
+object ДемоТ1ЧислоЦелое = 42
+object ДемоТ1ЧислоДробное = 3.142
+object ДемоТ1ЧислоНеотр = 5
+object ДемоТ1Дата = 2026-01-02T00:00:00
+object ДемоТ1ДатаВремя = 2026-01-02T03:04:05
+query  ДемоТ1Булево = True
+query  ДемоТ1СтрокаПеременная = переменная
+query  ДемоТ1СтрокаФикс = фикс
+query  ДемоТ1СтрокаНеогр = неограниченная строка
+query  ДемоТ1ЧислоЦелое = 42
+query  ДемоТ1ЧислоДробное = 3.142
+query  ДемоТ1ЧислоНеотр = 5
+query  ДемоТ1Дата = 2026-01-02T00:00:00
+query  ДемоТ1ДатаВремя = 2026-01-02T03:04:05
+query rows: 1
+rows with ДемоТ1Булево = itself: 717
+rows after: 716
+== Документ._ДемоЗаказПокупателя
+rows before: 8
+default ДемоТ1Середина = 0
+default ДемоТ1Булево = False
+default ДемоТ1Строка =
+default ДемоТ1Число = 0
+default ДемоТ1Дата = 0100-01-01T00:00:00
+default ДемоТ1ДатаВремя = 0100-01-01T00:00:00
+default ДемоТ1СтрокаНеогр =
+object ДемоТ1Середина = 0
+object ДемоТ1Булево = True
+object ДемоТ1Строка = строка
+object ДемоТ1Число = 99.5
+object ДемоТ1Дата = 2026-03-04T00:00:00
+object ДемоТ1ДатаВремя = 2026-03-04T05:06:07
+object ДемоТ1СтрокаНеогр = документ, неограниченная строка
+query  ДемоТ1Середина = 0
+query  ДемоТ1Булево = True
+query  ДемоТ1Строка = строка
+query  ДемоТ1Число = 99.5
+query  ДемоТ1Дата = 2026-03-04T00:00:00
+query  ДемоТ1ДатаВремя = 2026-03-04T05:06:07
+query  ДемоТ1СтрокаНеогр = документ, неограниченная строка
+query rows: 1
+rows with ДемоТ1Середина = itself: 9
+rows after: 8

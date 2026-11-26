@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<DimensionTable uuid="59945b31-4421-4845-b868-8eefd291dc8c">
+		<InternalInfo>
+			<xr:GeneratedType name="ExternalDataSourceCubeDimensionTableManager.ВнешнийИсточникДанных1.Куб1.ТаблицаИзмерения1" category="Manager">
+				<xr:TypeId>9cde7680-6527-4107-a35c-7d3a6918c839</xr:TypeId>
+				<xr:ValueId>fd1d07a7-fcbc-471e-a18c-800aa51a6518</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExternalDataSourceCubeDimensionTableObject.ВнешнийИсточникДанных1.Куб1.ТаблицаИзмерения1" category="Object">
+				<xr:TypeId>2541bd8b-f4d6-42b6-9e90-c29de180649c</xr:TypeId>
+				<xr:ValueId>d3833999-20f9-4df3-9cd4-426dc4ed1607</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExternalDataSourceCubeDimensionTableRef.ВнешнийИсточникДанных1.Куб1.ТаблицаИзмерения1" category="Ref">
+				<xr:TypeId>d74c16a5-79c8-4dc2-b7d3-9939b0495848</xr:TypeId>
+				<xr:ValueId>9e3e0b35-38e8-4383-80fe-44920c255887</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExternalDataSourceCubeDimensionTableList.ВнешнийИсточникДанных1.Куб1.ТаблицаИзмерения1" category="List">
+				<xr:TypeId>976e8ea6-ffd5-4a2c-b99e-17e9d1240e1b</xr:TypeId>
+				<xr:ValueId>b418ccf4-4357-4647-a359-fdb2a4eee0cd</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>ТаблицаИзмерения1</Name>
+			<Synonym/>
+			<Comment/>
+			<NameInDataSource>Test</NameInDataSource>
+			<PresentationField/>
+			<HierarchyNameInDataSource/>
+			<LevelNumber>0</LevelNumber>
+			<Hierarchical>false</Hierarchical>
+			<UnfilledParentValue xsi:nil="true"/>
+			<UseStandardCommands>false</UseStandardCommands>
+			<QuickChoice>false</QuickChoice>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+		</Properties>
+		<ChildObjects/>
+	</DimensionTable>
+</MetaDataObject>

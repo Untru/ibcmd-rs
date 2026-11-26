@@ -1,0 +1,101 @@
+{
+  "scope": "Only new paths plus runtime closure checks; original accepted58 immutable. No lease/readiness/SQL protocol change.",
+  "copies": [
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_lifetime_v2.ps1",
+      "original_sha256": "AF9CD36263987775A74F979B5A9D75A4A0207DEA61E1C0246962A9DBB373FD7F",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_lifetime_v2.ps1",
+      "runtime_sha256": "76D73CCCCEDB6B83D1FD6131C783DBC03D6FEC377D79FA10B87787158C3A611A"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_checkpoint_v2.ps1",
+      "original_sha256": "60984C93565D1B243DABC018124055001292943F4D55A2AC67DBF5089A3F7845",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_checkpoint_v2.ps1",
+      "runtime_sha256": "244788348D5B5A4EF54F9451C4C1F8864AA1F3D0EF99FCD673010019D6C38943"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_activate.ps1",
+      "original_sha256": "FFDEDE6289542BE4AA69151DD4D68743963D38D58316DEC782BF596291B28FB0",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_activate.ps1",
+      "runtime_sha256": "878F91A8F8C81C686700EF191D13E9C9ECDBF618731E4E4E8D434261343BA410"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_native.ps1",
+      "original_sha256": "44BE89A12A47F1752C47292BE138403D627C6A92213BD7A6DB25F908B7E43138",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_native.ps1",
+      "runtime_sha256": "3F8C4F00CBAC665BF42DD71DAEE49779FB76A35D6CCFD44F69DD543105F2A1E8"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_snapshot.ps1",
+      "original_sha256": "6BCA0D8C974F6AAFCF7558C6DBAC95164FC4B779906A8041E8378252D1151C31",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_snapshot.ps1",
+      "runtime_sha256": "87E4F625E47315275FC7C7F68977F08412B89A24E510923E04F62A8B82AE8F32"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_prior_archive.ps1",
+      "original_sha256": "DB68D2DA6C9588C9F2FB848EAC7FB33CD4ADFB5CC7A39EB562859ADD6DA62265",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_prior_archive.ps1",
+      "runtime_sha256": "4599205E8B94964C8B4CE57FE68ABB098C5B56803C1C226319F9614CE69FB674"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\lib.ps1",
+      "original_sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\lib.ps1",
+      "runtime_sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\private-lib.ps1",
+      "original_sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\private-lib.ps1",
+      "runtime_sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\private-register.ps1",
+      "original_sha256": "DF4CF95A237E9AFFFC43702E97DE7B11CAFE80AAA518956D441ECE53D7E454AE",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\private-register.ps1",
+      "runtime_sha256": "DF4CF95A237E9AFFFC43702E97DE7B11CAFE80AAA518956D441ECE53D7E454AE"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\private-start.ps1",
+      "original_sha256": "171AFA8D03B964B828D2C06276FE31A54871C4B281A243842AA10BEFE8BC6502",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\private-start.ps1",
+      "runtime_sha256": "70A85D8162FD10811B2136E432C1D2FFA5363D927EF212406FE4AB02EED5F0A7"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\private-stop.ps1",
+      "original_sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\private-stop.ps1",
+      "runtime_sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\start.ps1",
+      "original_sha256": "2EA22CF472161AFE067040406C76E99F134AD1AA8AC7BCB2A319FCBD4261C9E8",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\start.ps1",
+      "runtime_sha256": "50DB7C39C4EA5BCF9E3E7D559615D5CE9B9C27E1A00527E48B0195FE93CA480E"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\stop.ps1",
+      "original_sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\cluster\\stop.ps1",
+      "runtime_sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\obs.ps1",
+      "original_sha256": "86CB2522A94B90BFCFE19CFCA60ABB087C5D24489A65FF7A15D59364B3D61010",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\live\\obs.ps1",
+      "runtime_sha256": "7735168902AEB5C7D7A66D2E447187963F74AF4C12BB1E3E72E62838F080DE09"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\process.ps1",
+      "original_sha256": "FE606A689D3597D89D6EEB99ABEC3C0D39888BC9C9575196647E83B581A3F5F9",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\live\\process.ps1",
+      "runtime_sha256": "0768EF6899C6819E002C2B5A740F8648B97E5FFD96108346B377952465BB4255"
+    },
+    {
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\workload_lab.ps1",
+      "original_sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71",
+      "runtime_copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7-tools\\live\\workload_lab.ps1",
+      "runtime_sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71"
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+# The Params *.si cache rows in case a2: what the native apply changes, and what our prototype changes
+# (si_diff.py; snapshots of the twins; row text compared after inflate; the XDTO model row is shown decoded from its base64 block)
+
+== ibcmd_rs_04_ddl_bsp8327_a/a2_staged  ->  ibcmd_rs_04_ddl_a2_nat/a2n_after
+-- 1a621f0f-5568-4183-bd9f-f6ef670e7090.si: raw 447544 -> 447590 bytes, text 1613134 -> 1613276 chars, sha256 272c4386dcc0 -> 59812b39d675
+  diff lines: 7
+  --- before
+  +++ after
+  -{10807,66193438-abc5-410b-a1f1-a204102d1a62,00000000-0000-0000-0000-000000000000,0,"БиблиотекаСтандартныхПодсистемДемо",
+  +{10808,66193438-abc5-410b-a1f1-a204102d1a62,00000000-0000-0000-0000-000000000000,0,"БиблиотекаСтандартныхПодсистемДемо",
+  +},0,0,c60cdc87-198a-4f6e-8f17-76bcb1b1914b,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,36,"ДемоНовыйРеквизит",
+  +{1,1,
+  +{"ru","Демо новый реквизит"}
+-- c77bc206-5935-48ea-b32e-508a572d94f4.si: raw 24397 -> 24143 bytes, text 71116 -> 71116 chars, sha256 f87960ddf415 -> 1270db366ed5
+  diff lines: 4
+  --- before
+  +++ after
+  -{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,105cd740-1f60-45e1-871c-adeecd291b0d,0,01914e00-3164-4c89-8c95-14b72786f20b,0,fc665789-1453-4225-b9ff-1bbf1a6b54f1,0,bf1ab189-634d-4b31-82e3-35fb15305da9,0,3aa6cf89-542a-48a2-b50d-5d9cfa4383fb,0,15cd04c9-c12a-44ea-a397-d2adbac99c5b,0,05c27c89-2c26-4252-84
+  +{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,105cd740-1f60-45e1-871c-adeecd291b0d,0,01914e00-3164-4c89-8c95-14b72786f20b,0,29af5a21-4a97-4abe-8b77-6c29b1901e93,0,04055821-03ce-4049-af2c-8670c80517f6,0,34af6221-e41e-45a9-be2e-c18d10e7ab88,0,3aa6cf89-542a-48a2-b50d-5d9cfa4383fb,0,bf1ab189-634d-4b31-82
+-- ea13a2c9-0c2f-40fa-b855-710387e3271d.si: raw 2996649 -> 2998675 bytes, text 25173365 -> 25173491 chars, sha256 910cd235b14f -> e6ef24c99408
+  (the base64 block decoded: the XDTO model XML)
+  diff lines: 3
+  --- before
+  +++ after
+  +			<property name="ДемоНовыйРеквизит" type="xs:string" lowerBound="0"/>
+13 of 16 `.si` rows have the same text (compared after inflate)
+
+== ibcmd_rs_04_ddl_bsp8327_a/a2_staged  ->  ibcmd_rs_04_ddl_a2_fin/fin_after
+-- ea13a2c9-0c2f-40fa-b855-710387e3271d.si: raw 2996649 -> 2977849 bytes, text 25173365 -> 25173491 chars, sha256 910cd235b14f -> e6ef24c99408
+  (the base64 block decoded: the XDTO model XML)
+  diff lines: 3
+  --- before
+  +++ after
+  +			<property name="ДемоНовыйРеквизит" type="xs:string" lowerBound="0"/>
+15 of 16 `.si` rows have the same text (compared after inflate)
+
+== ibcmd_rs_04_ddl_a2_nat/a2n_after  ->  ibcmd_rs_04_ddl_a2_fin/fin_after
+-- 1a621f0f-5568-4183-bd9f-f6ef670e7090.si: raw 447590 -> 447544 bytes, text 1613276 -> 1613134 chars, sha256 59812b39d675 -> 272c4386dcc0
+  diff lines: 7
+  --- before
+  +++ after
+  -{10808,66193438-abc5-410b-a1f1-a204102d1a62,00000000-0000-0000-0000-000000000000,0,"БиблиотекаСтандартныхПодсистемДемо",
+  +{10807,66193438-abc5-410b-a1f1-a204102d1a62,00000000-0000-0000-0000-000000000000,0,"БиблиотекаСтандартныхПодсистемДемо",
+  -},0,0,c60cdc87-198a-4f6e-8f17-76bcb1b1914b,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,36,"ДемоНовыйРеквизит",
+  -{1,1,
+  -{"ru","Демо новый реквизит"}
+-- c77bc206-5935-48ea-b32e-508a572d94f4.si: raw 24143 -> 24397 bytes, text 71116 -> 71116 chars, sha256 1270db366ed5 -> f87960ddf415
+  diff lines: 4
+  --- before
+  +++ after
+  -{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,105cd740-1f60-45e1-871c-adeecd291b0d,0,01914e00-3164-4c89-8c95-14b72786f20b,0,29af5a21-4a97-4abe-8b77-6c29b1901e93,0,04055821-03ce-4049-af2c-8670c80517f6,0,34af6221-e41e-45a9-be2e-c18d10e7ab88,0,3aa6cf89-542a-48a2-b50d-5d9cfa4383fb,0,bf1ab189-634d-4b31-82
+  +{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,105cd740-1f60-45e1-871c-adeecd291b0d,0,01914e00-3164-4c89-8c95-14b72786f20b,0,fc665789-1453-4225-b9ff-1bbf1a6b54f1,0,bf1ab189-634d-4b31-82e3-35fb15305da9,0,3aa6cf89-542a-48a2-b50d-5d9cfa4383fb,0,15cd04c9-c12a-44ea-a397-d2adbac99c5b,0,05c27c89-2c26-4252-84
+14 of 16 `.si` rows have the same text (compared after inflate)
+
+# The same, native apply of a THIRD attribute on our twin whose caches our runs had left stale (case alter_native):
+# native recomputes the caches from the metadata: all three attributes are inserted, not only the third
+== ibcmd_rs_04_ddl_a2_own/own_after  ->  ibcmd_rs_04_ddl_a2_own2/alter_native_after
+-- 1a621f0f-5568-4183-bd9f-f6ef670e7090.si: raw 447544 -> 447674 bytes, text 1613134 -> 1613564 chars, sha256 272c4386dcc0 -> 675e4a14f936
+  diff lines: 13
+  --- before
+  +++ after
+  -{10807,66193438-abc5-410b-a1f1-a204102d1a62,00000000-0000-0000-0000-000000000000,0,"БиблиотекаСтандартныхПодсистемДемо",
+  +{10810,66193438-abc5-410b-a1f1-a204102d1a62,00000000-0000-0000-0000-000000000000,0,"БиблиотекаСтандартныхПодсистемДемо",
+  +},0,0,c60cdc87-198a-4f6e-8f17-76bcb1b1914b,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,36,"ДемоНовыйРеквизит",
+  +{1,1,
+  +{"ru","Демо новый реквизит"}
+  +},0,0,7b0e2f4c-91c5-4d3a-8e6f-2a5b9c1d3e47,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,36,"ДемоВторойРеквизит",
+  +{1,1,
+  +{"ru","Демо второй реквизит"}
+  +},0,0,3c1d5e7f-2a4b-4c6d-8e9f-0a1b2c3d4e5f,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,36,"ДемоТретийРеквизит",
+  +{1,1,
+  +{"ru","Демо третий реквизит"}
+-- c77bc206-5935-48ea-b32e-508a572d94f4.si: raw 24397 -> 24143 bytes, text 71116 -> 71116 chars, sha256 f87960ddf415 -> 1270db366ed5
+  diff lines: 4
+  --- before
+  +++ after
+  -{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,105cd740-1f60-45e1-871c-adeecd291b0d,0,01914e00-3164-4c89-8c95-14b72786f20b,0,fc665789-1453-4225-b9ff-1bbf1a6b54f1,0,bf1ab189-634d-4b31-82e3-35fb15305da9,0,3aa6cf89-542a-48a2-b50d-5d9cfa4383fb,0,15cd04c9-c12a-44ea-a397-d2adbac99c5b,0,05c27c89-2c26-4252-84
+  +{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,105cd740-1f60-45e1-871c-adeecd291b0d,0,01914e00-3164-4c89-8c95-14b72786f20b,0,29af5a21-4a97-4abe-8b77-6c29b1901e93,0,04055821-03ce-4049-af2c-8670c80517f6,0,34af6221-e41e-45a9-be2e-c18d10e7ab88,0,3aa6cf89-542a-48a2-b50d-5d9cfa4383fb,0,bf1ab189-634d-4b31-82
+-- ea13a2c9-0c2f-40fa-b855-710387e3271d.si: raw 2996649 -> 2998676 bytes, text 25173365 -> 25173747 chars, sha256 910cd235b14f -> a38091ada1bc
+  (the base64 block decoded: the XDTO model XML)
+  diff lines: 5
+  --- before
+  +++ after
+  +			<property name="ДемоНовыйРеквизит" type="xs:string" lowerBound="0"/>
+  +			<property name="ДемоВторойРеквизит" type="xs:string" lowerBound="0"/>
+  +			<property name="ДемоТретийРеквизит" type="xs:string" lowerBound="0"/>
+13 of 16 `.si` rows have the same text (compared after inflate)
+
+# Where native puts the entry in the object registry 1a621f0f-....si (a pre-order list of the metadata objects:
+#   }<flag>,<flag>,<object uuid>,<owner uuid>,<kind>,"<name>",{1,1,{"ru","<synonym>"}}   kind 36 = attribute, 39 = tabular section;
+#   the first number of the file body, 10807 -> 10808, is the number of entries). Case a2, native apply, lines of the new file:
+   11712 },0,0,bea6bcc8-66a9-440e-b676-f71b92dd2f43,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,36,"ГруппаДоступа",
+   11713 {1,1,
+   11714 {"ru","Группа доступа"}
+   11715 },0,0,8368127f-b077-4dda-9f23-f521164bc754,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,36,"ВидПартнера",
+   11716 {1,1,
+   11717 {"ru","Вид партнера"}
+ + 11718 },0,0,c60cdc87-198a-4f6e-8f17-76bcb1b1914b,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,36,"ДемоНовыйРеквизит",
+ + 11719 {1,1,
+ + 11720 {"ru","Демо новый реквизит"}
+   11721 },0,0,be5a03cb-a98b-4e33-8699-623c01a231a1,5eab8a1b-070f-4dcf-bdcc-a259c62c3693,39,"ДополнительныеРеквизиты",
+# 5eab8a1b-... is the catalog _ДемоПартнеры: the entry follows its last attribute and precedes its first tabular section.
+
+# siVersions is plain brace text {0,16,"<row>.si",<version guid>,...}: native gives ALL 16 rows a new random guid on every apply that
+# promotes something (and reorders the pairs); our run leaves the file as it was. A server that is already running and keys its
+# cache by these guids would have to see a new guid for the XDTO row -- not tested (needs a running server across the restructure).

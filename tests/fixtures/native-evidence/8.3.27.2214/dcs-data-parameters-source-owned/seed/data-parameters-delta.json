@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "base_fixture": "8.3.27.2214-xml-2.20-dcs-core",
+  "operation": "insert-direct-settings-child",
+  "target": "DataCompositionSchema/settingsVariant/settings",
+  "placement": "after-selection-before-order",
+  "inserted_xml": "<dcsset:dataParameters>\r\n\t\t\t\t<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">\r\n\t\t\t\t\t<dcscor:parameter>Caption</dcscor:parameter>\r\n\t\t\t\t\t<dcscor:value xsi:type=\"xs:string\">Opaque probe</dcscor:value>\r\n\t\t\t\t</dcscor:item>\r\n\t\t\t</dcsset:dataParameters>",
+  "existing_parameter": {
+    "name": "Caption",
+    "value_type": "xs:string",
+    "maximum_length": 40
+  },
+  "source_template_sha256": "4e29eb37d821ff47a65c0240751427369c19cf9ec57c7eaa366e4b9efc35818f",
+  "authority": "bounded_hypothesis_only; pinned platform round 2 is the byte authority"
+}

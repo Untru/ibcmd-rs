@@ -1,0 +1,444 @@
+{
+  "verified_snapshot_packs": {
+    "staged_form_b_native": {
+      "Config": {
+        "rows": 9938,
+        "bytes": 99256704,
+        "pack_sha256": "e4d93254e345739fe32bed251bcbc5868489ad96ad67de8d83da26aadeb33d8e"
+      },
+      "ConfigSave": {
+        "rows": 5,
+        "bytes": 346637,
+        "pack_sha256": "21e84ac118490c482698667760a7d4745f1d9d550697c989a03cc33367827ea6"
+      },
+      "Params": {
+        "rows": 38,
+        "bytes": 4715704,
+        "pack_sha256": "aba9ceaba87ff18d7d783f000861e7406229cd14c11fa492c3785feb72b53ea7"
+      },
+      "Files": {
+        "rows": 370,
+        "bytes": 1607830,
+        "pack_sha256": "cf7e5b10a4f253f874963f774610248732498952088c11561cca5a4c0ebe79e7"
+      },
+      "ConfigCAS": {
+        "rows": 19359,
+        "bytes": 38810116,
+        "pack_sha256": "5aa60a0b33728dba1fe5e4384ce0af270f4d25cf5258625b282fbb8e77b7bba9"
+      },
+      "ConfigCASSave": {
+        "rows": 5,
+        "bytes": 35891,
+        "pack_sha256": "16b68da803b2d9aaf77a352b5f064b312b7b2921d6b3acd4eea8ac96a4ee35f1"
+      }
+    },
+    "staged_form_b_own": {
+      "Config": {
+        "rows": 9938,
+        "bytes": 99256704,
+        "pack_sha256": "e4d93254e345739fe32bed251bcbc5868489ad96ad67de8d83da26aadeb33d8e"
+      },
+      "ConfigSave": {
+        "rows": 5,
+        "bytes": 346637,
+        "pack_sha256": "21e84ac118490c482698667760a7d4745f1d9d550697c989a03cc33367827ea6"
+      },
+      "Params": {
+        "rows": 38,
+        "bytes": 4715704,
+        "pack_sha256": "aba9ceaba87ff18d7d783f000861e7406229cd14c11fa492c3785feb72b53ea7"
+      },
+      "Files": {
+        "rows": 370,
+        "bytes": 1607830,
+        "pack_sha256": "cf7e5b10a4f253f874963f774610248732498952088c11561cca5a4c0ebe79e7"
+      },
+      "ConfigCAS": {
+        "rows": 19359,
+        "bytes": 38810116,
+        "pack_sha256": "5aa60a0b33728dba1fe5e4384ce0af270f4d25cf5258625b282fbb8e77b7bba9"
+      },
+      "ConfigCASSave": {
+        "rows": 5,
+        "bytes": 35891,
+        "pack_sha256": "16b68da803b2d9aaf77a352b5f064b312b7b2921d6b3acd4eea8ac96a4ee35f1"
+      }
+    },
+    "before_native_form_b_write_warm": {
+      "Config": {
+        "rows": 9938,
+        "bytes": 99256704,
+        "pack_sha256": "e4d93254e345739fe32bed251bcbc5868489ad96ad67de8d83da26aadeb33d8e"
+      },
+      "ConfigSave": {
+        "rows": 5,
+        "bytes": 346637,
+        "pack_sha256": "21e84ac118490c482698667760a7d4745f1d9d550697c989a03cc33367827ea6"
+      },
+      "Params": {
+        "rows": 38,
+        "bytes": 4715704,
+        "pack_sha256": "aba9ceaba87ff18d7d783f000861e7406229cd14c11fa492c3785feb72b53ea7"
+      },
+      "Files": {
+        "rows": 370,
+        "bytes": 1607853,
+        "pack_sha256": "bf332184dad9f92460420b3aff05a1b6b98574461f77f1f848fe68486cab5e1f"
+      },
+      "ConfigCAS": {
+        "rows": 19359,
+        "bytes": 38810116,
+        "pack_sha256": "5aa60a0b33728dba1fe5e4384ce0af270f4d25cf5258625b282fbb8e77b7bba9"
+      },
+      "ConfigCASSave": {
+        "rows": 5,
+        "bytes": 35891,
+        "pack_sha256": "16b68da803b2d9aaf77a352b5f064b312b7b2921d6b3acd4eea8ac96a4ee35f1"
+      }
+    },
+    "after_native_form_b_force": {
+      "Config": {
+        "rows": 9942,
+        "bytes": 99603109,
+        "pack_sha256": "22e2ab1b122886b72e80456744170465f176fe0fa6badcaa59a2c8f9215c0ecc"
+      },
+      "ConfigSave": {
+        "rows": 0,
+        "bytes": 0,
+        "pack_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Params": {
+        "rows": 39,
+        "bytes": 4715786,
+        "pack_sha256": "d2f8cc2fb04eeb8573734942b4fe958568240782dc8a00ea6e0838e9dd8a67dd"
+      },
+      "Files": {
+        "rows": 370,
+        "bytes": 1607853,
+        "pack_sha256": "eb5b8bb721e254c621af2d4d40e1314c2e8b43e36598fa76184d445c9dfa0be0"
+      },
+      "ConfigCAS": {
+        "rows": 19359,
+        "bytes": 38810116,
+        "pack_sha256": "5aa60a0b33728dba1fe5e4384ce0af270f4d25cf5258625b282fbb8e77b7bba9"
+      },
+      "ConfigCASSave": {
+        "rows": 5,
+        "bytes": 35891,
+        "pack_sha256": "16b68da803b2d9aaf77a352b5f064b312b7b2921d6b3acd4eea8ac96a4ee35f1"
+      }
+    },
+    "before_own_form_write_warm": {
+      "Config": {
+        "rows": 9938,
+        "bytes": 99256704,
+        "pack_sha256": "e4d93254e345739fe32bed251bcbc5868489ad96ad67de8d83da26aadeb33d8e"
+      },
+      "ConfigSave": {
+        "rows": 5,
+        "bytes": 346637,
+        "pack_sha256": "21e84ac118490c482698667760a7d4745f1d9d550697c989a03cc33367827ea6"
+      },
+      "Params": {
+        "rows": 38,
+        "bytes": 4715704,
+        "pack_sha256": "aba9ceaba87ff18d7d783f000861e7406229cd14c11fa492c3785feb72b53ea7"
+      },
+      "Files": {
+        "rows": 370,
+        "bytes": 1607853,
+        "pack_sha256": "bf332184dad9f92460420b3aff05a1b6b98574461f77f1f848fe68486cab5e1f"
+      },
+      "ConfigCAS": {
+        "rows": 19359,
+        "bytes": 38810116,
+        "pack_sha256": "5aa60a0b33728dba1fe5e4384ce0af270f4d25cf5258625b282fbb8e77b7bba9"
+      },
+      "ConfigCASSave": {
+        "rows": 5,
+        "bytes": 35891,
+        "pack_sha256": "16b68da803b2d9aaf77a352b5f064b312b7b2921d6b3acd4eea8ac96a4ee35f1"
+      }
+    },
+    "after_own_form_candidate": {
+      "Config": {
+        "rows": 9942,
+        "bytes": 99603109,
+        "pack_sha256": "22e2ab1b122886b72e80456744170465f176fe0fa6badcaa59a2c8f9215c0ecc"
+      },
+      "ConfigSave": {
+        "rows": 0,
+        "bytes": 0,
+        "pack_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Params": {
+        "rows": 39,
+        "bytes": 4715786,
+        "pack_sha256": "805c16d78bd863df5dc0f85ec816954a3ba94ae24f8cbc470f7ed4fd1e8356b7"
+      },
+      "Files": {
+        "rows": 370,
+        "bytes": 1607853,
+        "pack_sha256": "e5867b06b4ecd77a87539b35b400e10e6785e2c09e21031cac9ad90a4ac184e6"
+      },
+      "ConfigCAS": {
+        "rows": 19359,
+        "bytes": 38810116,
+        "pack_sha256": "5aa60a0b33728dba1fe5e4384ce0af270f4d25cf5258625b282fbb8e77b7bba9"
+      },
+      "ConfigCASSave": {
+        "rows": 5,
+        "bytes": 35891,
+        "pack_sha256": "16b68da803b2d9aaf77a352b5f064b312b7b2921d6b3acd4eea8ac96a4ee35f1"
+      }
+    },
+    "after_own_form_cohort": {
+      "Config": {
+        "rows": 9942,
+        "bytes": 99603109,
+        "pack_sha256": "22e2ab1b122886b72e80456744170465f176fe0fa6badcaa59a2c8f9215c0ecc"
+      },
+      "ConfigSave": {
+        "rows": 0,
+        "bytes": 0,
+        "pack_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "Params": {
+        "rows": 39,
+        "bytes": 4715786,
+        "pack_sha256": "805c16d78bd863df5dc0f85ec816954a3ba94ae24f8cbc470f7ed4fd1e8356b7"
+      },
+      "Files": {
+        "rows": 370,
+        "bytes": 1607853,
+        "pack_sha256": "e5867b06b4ecd77a87539b35b400e10e6785e2c09e21031cac9ad90a4ac184e6"
+      },
+      "ConfigCAS": {
+        "rows": 19359,
+        "bytes": 38810116,
+        "pack_sha256": "5aa60a0b33728dba1fe5e4384ce0af270f4d25cf5258625b282fbb8e77b7bba9"
+      },
+      "ConfigCASSave": {
+        "rows": 5,
+        "bytes": 35891,
+        "pack_sha256": "16b68da803b2d9aaf77a352b5f064b312b7b2921d6b3acd4eea8ac96a4ee35f1"
+      }
+    }
+  },
+  "staged_twins_exact": true,
+  "own_after_write_and_after_new_cohort_exact": true,
+  "auxiliary_all_eight_multisets_exact": true,
+  "unclassified_deltas": 0,
+  "explicit_raw_differences": [
+    {
+      "table": "Config",
+      "name": "DynamicallyUpdated",
+      "part": 0,
+      "classification": "independent publication time; exact marker bytes",
+      "fields": [
+        "creation",
+        "modified"
+      ],
+      "native": {
+        "name": "DynamicallyUpdated",
+        "part": 0,
+        "creation": "4026-10-01 19:47:59",
+        "modified": "4026-10-01 19:47:59",
+        "attributes": 0,
+        "data_size": 45,
+        "byte_len": 45,
+        "sha256": "076e5edc5550375dde1a0415716f18b0d8a3eea8245292bb9db9bf3378dc8c0a"
+      },
+      "own": {
+        "name": "DynamicallyUpdated",
+        "part": 0,
+        "creation": "4026-10-01 21:09:00",
+        "modified": "4026-10-01 21:09:00",
+        "attributes": 0,
+        "data_size": 45,
+        "byte_len": 45,
+        "sha256": "076e5edc5550375dde1a0415716f18b0d8a3eea8245292bb9db9bf3378dc8c0a"
+      }
+    },
+    {
+      "table": "Params",
+      "name": "54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui",
+      "part": 0,
+      "classification": "native runtime .ui change; own exact warm preimage retained, no licensing codec/write",
+      "fields": [
+        "modified"
+      ],
+      "native": {
+        "name": "54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui",
+        "part": 0,
+        "creation": "4017-07-24 10:18:29",
+        "modified": "4026-10-01 19:47:59",
+        "attributes": 0,
+        "data_size": 9,
+        "byte_len": 9,
+        "sha256": "f9dcd78faa774ca90ed0e9997f8a85c236e0de5c1bbe3e266cfb29af3cc5546f"
+      },
+      "own": {
+        "name": "54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui",
+        "part": 0,
+        "creation": "4017-07-24 10:18:29",
+        "modified": "4026-10-01 18:38:20",
+        "attributes": 0,
+        "data_size": 9,
+        "byte_len": 9,
+        "sha256": "f9dcd78faa774ca90ed0e9997f8a85c236e0de5c1bbe3e266cfb29af3cc5546f"
+      }
+    },
+    {
+      "table": "Params",
+      "name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+      "part": 0,
+      "classification": "native runtime .ui change; own exact warm preimage retained, no licensing codec/write",
+      "fields": [
+        "modified",
+        "sha256"
+      ],
+      "native": {
+        "name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+        "part": 0,
+        "creation": "4024-09-09 20:13:05",
+        "modified": "4026-10-01 19:47:59",
+        "attributes": 0,
+        "data_size": 24368,
+        "byte_len": 24368,
+        "sha256": "7e9db1aeb744f0bf3c2978a6b8cb006632161734582bb44bf9c33510c6bb85e3"
+      },
+      "own": {
+        "name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+        "part": 0,
+        "creation": "4024-09-09 20:13:05",
+        "modified": "4026-10-01 18:38:20",
+        "attributes": 0,
+        "data_size": 24368,
+        "byte_len": 24368,
+        "sha256": "ba14dc0acfa423a47d70572ddecbf5aa8c1829b346d12644615feb0b7c313b1a"
+      }
+    },
+    {
+      "table": "Params",
+      "name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+      "part": 0,
+      "classification": "native runtime .ui change; own exact warm preimage retained, no licensing codec/write",
+      "fields": [
+        "modified",
+        "sha256"
+      ],
+      "native": {
+        "name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+        "part": 0,
+        "creation": "4024-09-09 20:13:05",
+        "modified": "4026-10-01 19:47:59",
+        "attributes": 0,
+        "data_size": 94,
+        "byte_len": 94,
+        "sha256": "1a4d73a8f2fbfa3f3fe2971845cc5b029c0c2498374d345a2e4124dcb9a967b3"
+      },
+      "own": {
+        "name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+        "part": 0,
+        "creation": "4024-09-09 20:13:05",
+        "modified": "4026-10-01 18:38:20",
+        "attributes": 0,
+        "data_size": 94,
+        "byte_len": 94,
+        "sha256": "46c2f38f3d505f8b28abf889db8fdb151772d0eb7ae5e5207cea6e8b40d235a5"
+      }
+    },
+    {
+      "table": "Params",
+      "name": "DynamicallyUpdated",
+      "part": 0,
+      "classification": "independent publication time; exact marker bytes",
+      "fields": [
+        "creation",
+        "modified"
+      ],
+      "native": {
+        "name": "DynamicallyUpdated",
+        "part": 0,
+        "creation": "4026-10-01 19:47:59",
+        "modified": "4026-10-01 19:47:59",
+        "attributes": 0,
+        "data_size": 82,
+        "byte_len": 82,
+        "sha256": "faa141a18a9c17cadac0c148894dfda6deb33027123d57f3f94fe1d74893f42b"
+      },
+      "own": {
+        "name": "DynamicallyUpdated",
+        "part": 0,
+        "creation": "4026-10-01 21:09:00",
+        "modified": "4026-10-01 21:09:00",
+        "attributes": 0,
+        "data_size": 82,
+        "byte_len": 82,
+        "sha256": "faa141a18a9c17cadac0c148894dfda6deb33027123d57f3f94fe1d74893f42b"
+      }
+    },
+    {
+      "table": "Files",
+      "name": "55ad223f-a71e-4c29-88a5-b06ed3327c23.2299104b-aedc-4032-b686-cb35c1176bf5",
+      "part": 0,
+      "classification": "opaque startup cache independent warm Modified only; both publications retain exact warm row",
+      "fields": [
+        "modified"
+      ],
+      "native": {
+        "name": "55ad223f-a71e-4c29-88a5-b06ed3327c23.2299104b-aedc-4032-b686-cb35c1176bf5",
+        "part": 0,
+        "creation": "4026-10-01 17:10:45",
+        "modified": "4026-10-01 19:46:33",
+        "attributes": 0,
+        "data_size": 50,
+        "byte_len": 50,
+        "sha256": "f0279c34a59a0e4748defe0df10a9c1d1a79dcddefc1ddaa2e9233423dbca8d1"
+      },
+      "own": {
+        "name": "55ad223f-a71e-4c29-88a5-b06ed3327c23.2299104b-aedc-4032-b686-cb35c1176bf5",
+        "part": 0,
+        "creation": "4026-10-01 17:10:45",
+        "modified": "4026-10-01 21:06:56",
+        "attributes": 0,
+        "data_size": 50,
+        "byte_len": 50,
+        "sha256": "f0279c34a59a0e4748defe0df10a9c1d1a79dcddefc1ddaa2e9233423dbca8d1"
+      }
+    },
+    {
+      "table": "Files",
+      "name": "MobileVersions.dat",
+      "part": 0,
+      "classification": "independently fresh head UUID/time; exact capped 999-entry tail",
+      "fields": [
+        "creation",
+        "modified",
+        "sha256"
+      ],
+      "native": {
+        "name": "MobileVersions.dat",
+        "part": 0,
+        "creation": "4026-10-01 19:47:59",
+        "modified": "4026-10-01 19:47:59",
+        "attributes": 0,
+        "data_size": 37009,
+        "byte_len": 37009,
+        "sha256": "a18a64b1a581e9b1e01fc7002ca16284cac253a7ed50c0891eccca168ce405df"
+      },
+      "own": {
+        "name": "MobileVersions.dat",
+        "part": 0,
+        "creation": "4026-10-01 21:09:00",
+        "modified": "4026-10-01 21:09:00",
+        "attributes": 0,
+        "data_size": 37009,
+        "byte_len": 37009,
+        "sha256": "4f7f48453429726fc624e01b87bfec64d9ccb577c34c8b1a50591a57ed399cc3"
+      }
+    }
+  ],
+  "scope": "existing initial CommonForm V4/layout59 .0 module-only exact8.5.1.1150; not full byte/header parity; no repeat/main/extension/LIVE/worker admission"
+}

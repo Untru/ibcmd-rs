@@ -1,0 +1,98 @@
+== table Document4883
+   sub-tables before [] after ['VT11050']
+   sub-table VT11050 (new)
+     + field {"LineNo11051",0,{1,{"N",5,0,"",0}},"",0}
+     + field {"Fld11052",0,{1,{"S",2147483663,0,"",0}},"",0}
+     + field {"Fld11053",0,{1,{"N",15,2,"",0}},"",0}
+     entry {"VT11050","I",0,"Document4883",{3,{"LineNo11051",0,{1,{"N",5,0,"",0}},"",0},{"Fld11052",0,{1,{"S",2 ... 3663,0,"",0}},"",0},{"Fld11053",0,{1,{"N",15,2,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   indexes before (2):
+      {"ByDocNum",1,{2,"Number","ID"},0,0,0,{0},0,0}
+      {"ByDocDate",1,{3,"Date_Time","ID","Marked"},0,0,0,{0},0,0}
+   indexes after (2):
+      {"ByDocNum",1,{2,"Number","ID"},0,0,0,{0},0,0}
+      {"ByDocDate",1,{3,"Date_Time","ID","Marked"},0,0,0,{0},0,0}
+== table Document578
+   sub-tables before ['VT668'] after ['VT668', 'VT11047']
+   sub-table VT11047 (new)
+     + field {"LineNo11048",0,{1,{"N",5,0,"",0}},"",0}
+     + field {"Fld11049",0,{1,{"L",0,0,"",0}},"",0}
+     entry {"VT11047","I",0,"Document578",{2,{"LineNo11048",0,{1,{"N",5,0,"",0}},"",0},{"Fld11049",0,{1,{"L",0, ... "N",5,0,"",0}},"",0},{"Fld11049",0,{1,{"L",0,0,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   indexes before (2):
+      {"ByDocNum",1,{2,"Number","ID"},0,0,0,{0},0,0}
+      {"ByDocDate",1,{3,"Date_Time","ID","Marked"},0,0,0,{0},0,0}
+   indexes after (2):
+      {"ByDocNum",1,{2,"Number","ID"},0,0,0,{0},0,0}
+      {"ByDocDate",1,{3,"Date_Time","ID","Marked"},0,0,0,{0},0,0}
+== table Reference14
+   sub-tables before ['VT67'] after ['VT67', 'VT11034']
+   sub-table VT11034 (new)
+     + field {"LineNo11035",0,{1,{"N",5,0,"",0}},"",0}
+     + field {"Fld11036",0,{1,{"S",2147483658,0,"",0}},"",0}
+     entry {"VT11034","I",0,"Reference14",{2,{"LineNo11035",0,{1,{"N",5,0,"",0}},"",0},{"Fld11036",0,{1,{"S",21 ... ",0}},"",0},{"Fld11036",0,{1,{"S",2147483658,0,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   indexes before (3):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"OwnerDescr",1,{3,"OwnerID","Description","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+   indexes after (3):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"OwnerDescr",1,{3,"OwnerID","Description","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+== table Reference21
+   sub-tables before ['VT960'] after ['VT960', 'VT11037']
+   sub-table VT11037 (new)
+     + field {"LineNo11038",0,{1,{"N",5,0,"",0}},"",0}
+     + field {"Fld11039",0,{1,{"T",0,0,"",0}},"",0}
+     + field {"Fld11040",0,{1,{"S",2147483698,0,"",0}},"",0}
+     index {"ByFieldFld11040",0,{2,"Fld11040","ID"},0,0,0,{0},0,0}
+     entry {"VT11037","I",0,"Reference21",{3,{"LineNo11038",0,{1,{"N",5,0,"",0}},"",0},{"Fld11039",0,{1,{"T",0, ... ,0}},{0},{1,{"ByFieldFld11040",0,{2,"Fld11040","ID"},0,0,0,{0},0,0}},1,"S",{0},{0},"",0,0}
+   indexes before (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"ParentCode",1,{3,"ParentID","Code","ID"},0,0,0,{0},0,0}
+      {"ParentDescr",1,{3,"ParentID","Description","ID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+   indexes after (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"ParentCode",1,{3,"ParentID","Code","ID"},0,0,0,{0},0,0}
+      {"ParentDescr",1,{3,"ParentID","Description","ID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+== table Reference23
+   sub-tables before [] after ['VT11041']
+   sub-table VT11041 (new)
+     + field {"LineNo11042",0,{1,{"N",5,0,"",0}},"",0}
+     + field {"Fld11043",0,{1,{"S",2147483668,0,"",0}},"",0}
+     + field {"Fld11044",0,{1,{"N",10,2,"",0}},"",0}
+     + field {"Fld11045",0,{1,{"L",0,0,"",0}},"",0}
+     + field {"Fld11046",0,{1,{"S",2147483648,0,"",0}},"",0}
+     index {"ByFieldFld11044",0,{2,"Fld11044","ID"},0,0,0,{0},0,0}
+     entry {"VT11041","I",0,"Reference23",{5,{"LineNo11042",0,{1,{"N",5,0,"",0}},"",0},{"Fld11043",0,{1,{"S",21 ... ,0}},{0},{1,{"ByFieldFld11044",0,{2,"Fld11044","ID"},0,0,0,{0},0,0}},1,"S",{0},{0},"",0,0}
+   indexes before (3):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+   indexes after (3):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+== DBNames: header max 10824 -> 11053, count 6459 -> 6479
+   ADDED 11034 VT 1179c7b4-5f01-4577-98dd-cc2032737edb
+   ADDED 11035 LineNo 1179c7b4-5f01-4577-98dd-cc2032737edb
+   ADDED 11036 Fld f9adaf8a-d593-4506-bbd3-669474b8f251
+   ADDED 11037 VT 8fa3b39f-b209-45ad-818d-45cd87b341f8
+   ADDED 11038 LineNo 8fa3b39f-b209-45ad-818d-45cd87b341f8
+   ADDED 11039 Fld dfa75091-9258-4eb4-9ea8-267d04b6896e
+   ADDED 11040 Fld 34702243-ca4b-4b61-a5af-840f3fea92f7
+   ADDED 11041 VT b8b31986-3d3b-43e1-96e7-838a1d58bb10
+   ADDED 11042 LineNo b8b31986-3d3b-43e1-96e7-838a1d58bb10
+   ADDED 11043 Fld eb67f168-3b6c-4dd2-bcf3-75988be0754c
+   ADDED 11044 Fld 687c0ab1-e8ea-4bbe-a632-1dc335e9ab0e
+   ADDED 11045 Fld 663181ac-a178-4486-b968-4af68e98bd4e
+   ADDED 11046 Fld 1430d482-8caf-4426-85c1-4b7208709ff1
+   ADDED 11047 VT 038e0368-d8ad-4298-a7e1-14942702365c
+   ADDED 11048 LineNo 038e0368-d8ad-4298-a7e1-14942702365c
+   ADDED 11049 Fld 9ca9371b-c6df-4566-b144-efe5c1079404
+   ADDED 11050 VT d8a3c66f-6625-4a7f-be83-da7e5ce6196b
+   ADDED 11051 LineNo d8a3c66f-6625-4a7f-be83-da7e5ce6196b
+   ADDED 11052 Fld aa21d26c-a723-49c1-af4d-b77b8ff7a9ef
+   ADDED 11053 Fld 50dc1406-dad1-4af3-8e43-0c9a48230e70

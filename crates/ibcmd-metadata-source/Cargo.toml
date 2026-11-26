@@ -1,0 +1,16 @@
+[package]
+name = "ibcmd-metadata-source"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The seam through which the packers of a 1C configuration's stored bodies read its XML source tree (the MetadataSource trait), with the source bytes and memoised answers it returns"
+
+[dependencies]
+# Errors as in the packers, whose callers add their own context.
+anyhow = "1.0"
+# The metadata object a data path names (`ConfigurationObject`).
+ibcmd-form-native = { path = "../ibcmd-form-native" }
+
+[lints.rust]
+unsafe_code = "forbid"

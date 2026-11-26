@@ -1,0 +1,10 @@
+{
+  "left_files": 12198,
+  "right_files": 12198,
+  "differences": [
+    [
+      "ConfigDumpInfo.xml",
+      "configVersion values only"
+    ]
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "database": "ibcmd_rs_05_p85_w3_ext_version_native_20261001",
+  "before_tag": "ext_version_native_v2_warm_before",
+  "after_tag": "ext_version_native_v4_postfailed",
+  "normalization": "none; pack offsets are capture locations and excluded only from SQL row-header delta",
+  "storage": {
+    "Config": {
+      "before_rows": 9948,
+      "after_rows": 9948,
+      "unchanged_rows": 9948,
+      "added": [],
+      "removed": [],
+      "changed": []
+    },
+    "ConfigCAS": {
+      "before_rows": 19362,
+      "after_rows": 19362,
+      "unchanged_rows": 19362,
+      "added": [],
+      "removed": [],
+      "changed": []
+    },
+    "ConfigCASSave": {
+      "before_rows": 0,
+      "after_rows": 0,
+      "unchanged_rows": 0,
+      "added": [],
+      "removed": [],
+      "changed": []
+    },
+    "ConfigSave": {
+      "before_rows": 0,
+      "after_rows": 0,
+      "unchanged_rows": 0,
+      "added": [],
+      "removed": [],
+      "changed": []
+    },
+    "Files": {
+      "before_rows": 373,
+      "after_rows": 373,
+      "unchanged_rows": 373,
+      "added": [],
+      "removed": [],
+      "changed": []
+    },
+    "Params": {
+      "before_rows": 38,
+      "after_rows": 38,
+      "unchanged_rows": 38,
+      "added": [],
+      "removed": [],
+      "changed": []
+    }
+  },
+  "auxiliary": {
+    "_ConfigChngR": {
+      "columns": [
+        "_NodeTRef",
+        "_NodeRRef",
+        "_MessageNo",
+        "_MDObjID",
+        "_IDRRef"
+      ],
+      "before_rows": 21219,
+      "after_rows": 21219,
+      "added": [],
+      "removed": []
+    },
+    "_ConfigChngR_ExtProps": {
+      "columns": [
+        "_ConfigChngR_IDRRef",
+        "_KeyField",
+        "_FileName"
+      ],
+      "before_rows": 21863,
+      "after_rows": 21863,
+      "added": [],
+      "removed": []
+    },
+    "_ExtensionsInfo": {
+      "columns": [
+        "_IDRRef",
+        "_ExtensionOrder",
+        "_ExtName",
+        "_UpdateTime",
+        "_ExtensionUsePurpose",
+        "_ExtensionScope",
+        "_ExtensionZippedInfo",
+        "_MasterNode",
+        "_UsedInDistributedInfoBase",
+        "_Version",
+        "_DataSeparationUse2858",
+        "_Fld2683"
+      ],
+      "before_rows": 3,
+      "after_rows": 3,
+      "added": [],
+      "removed": []
+    },
+    "_ExtensionsInfoNGS": {
+      "columns": [
+        "_IDRRef",
+        "_ExtensionOrder",
+        "_ExtName",
+        "_UpdateTime",
+        "_ExtensionUsePurpose",
+        "_ExtensionScope",
+        "_ExtensionZippedInfo",
+        "_MasterNode",
+        "_UsedInDistributedInfoBase",
+        "_Version",
+        "_DataSeparationUse2858",
+        "_Fld2683"
+      ],
+      "before_rows": 0,
+      "after_rows": 0,
+      "added": [],
+      "removed": []
+    },
+    "_ExtensionsRestruct": {
+      "columns": [
+        "_ExtDataID",
+        "_RestructData",
+        "_RestructDataInt",
+        "_RestructDataType",
+        "_DataSeparationUse2858",
+        "_Fld2683"
+      ],
+      "before_rows": 82,
+      "after_rows": 82,
+      "added": [],
+      "removed": []
+    },
+    "_ExtensionsRestructNGS": {
+      "columns": [
+        "_ExtDataID",
+        "_RestructData",
+        "_RestructDataInt",
+        "_RestructDataType",
+        "_DataSeparationUse2858",
+        "_Fld2683"
+      ],
+      "before_rows": 1,
+      "after_rows": 1,
+      "added": [],
+      "removed": []
+    },
+    "_ExtsChngR": {
+      "columns": [
+        "_NodeTRef",
+        "_NodeRRef",
+        "_MessageNo",
+        "_MDObjID",
+        "_IDRRef",
+        "_ExtensionID"
+      ],
+      "before_rows": 1264,
+      "after_rows": 1264,
+      "added": [],
+      "removed": []
+    },
+    "_ExtsChngR_ExtProps": {
+      "columns": [
+        "_ExtsChngR_IDRRef",
+        "_KeyField",
+        "_FileName"
+      ],
+      "before_rows": 1100,
+      "after_rows": 1100,
+      "added": [],
+      "removed": []
+    }
+  }
+}

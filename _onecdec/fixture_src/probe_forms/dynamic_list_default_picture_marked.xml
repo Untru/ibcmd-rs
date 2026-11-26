@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" version="2.20">
+	<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>
+	<ChildItems>
+		<Table name="Список" id="1">
+			<DataPath>Список</DataPath>
+			<RowPictureDataPath>~Список.DefaultPicture</RowPictureDataPath>
+			<ContextMenu name="СписокКонтекстноеМеню" id="2"/>
+			<AutoCommandBar name="СписокКоманднаяПанель" id="3"/>
+			<ExtendedTooltip name="СписокРасширеннаяПодсказка" id="4"/>
+			<ChildItems>
+				<InputField name="СписокПоле1" id="5">
+					<DataPath>Список.Поле1</DataPath>
+					<ContextMenu name="СписокПоле1КонтекстноеМеню" id="6"/>
+					<ExtendedTooltip name="СписокПоле1РасширеннаяПодсказка" id="7"/>
+				</InputField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Список" id="1">
+			<Type>
+				<v8:Type>cfg:DynamicList</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<Settings xsi:type="DynamicList">
+				<ManualQuery>true</ManualQuery>
+				<DynamicDataRead>false</DynamicDataRead>
+				<QueryText>ВЫБРАТЬ
+	1 КАК Поле1</QueryText>
+			</Settings>
+		</Attribute>
+	</Attributes>
+</Form>

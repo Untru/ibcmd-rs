@@ -1,0 +1,24 @@
+[package]
+name = "ibcmd-module-blob"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The stored-body codec of a 1C configuration: raw deflate, the format-15 V8 container with anyhow errors, the module blob, the versions blob patcher, the deleted row of an import and the digests reported for them"
+
+[dependencies]
+# Errors as in the root, whose callers add their own context.
+anyhow = "1.0"
+flate2 = "1.1"
+# The lenient base64 reader of a payload digest and the strict UUID check of a
+# versions entry.
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-v8 = { path = "../ibcmd-v8" }
+# `VersionReplacement` is part of the root's `VersionsBlobPatchReport`.
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
+# A versions entry's fresh generation UUID.
+uuid = { version = "1.19", features = ["v4"] }
+
+[lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,17 @@
+PASS fmt 5s
+PASS guard 5s
+PASS clippy-1.95 12s
+PASS test-root-lib 226s
+PASS guard-selftest 2s
+PASS edt-corpus 21s
+PASS clippy-1.98.1 13s
+PASS check-release-root 49s
+PASS check-oracle 47s
+PASS test-workspace-layers 29s
+PASS test-root-integration 124s
+PASS test-oracle-compiles 152s
+PASS build-release 172s
+PASS native-evidence 4s
+PASS sbom 0s
+PASS audit-release 0s
+DONE

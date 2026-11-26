@@ -1,0 +1,14 @@
+{
+  "started_utc": "2026-10-01T22:23:27.6803615Z",
+  "executable": "sqlcmd",
+  "deadline_seconds": 30,
+  "arguments": [
+    "-S",
+    "localhost",
+    "-E",
+    "-C",
+    "-b",
+    "-Q",
+    "IF DB_ID(N'ibcmd_rs_05_p85_w3_ext_version_native_20261001') IS NULL THROW 57239,'owned source absent',1; IF (SELECT state FROM sys.databases WHERE name=N'ibcmd_rs_05_p85_w3_ext_version_native_20261001')<>0 OR (SELECT user_access FROM sys.databases WHERE name=N'ibcmd_rs_05_p85_w3_ext_version_native_20261001')<>0 THROW 57239,'source not online multi-user',1; IF EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON s.session_id=r.session_id WHERE s.session_id<>@@SPID AND (s.database_id=DB_ID(N'ibcmd_rs_05_p85_w3_ext_version_native_20261001') OR r.database_id=DB_ID(N'ibcmd_rs_05_p85_w3_ext_version_native_20261001'))) THROW 57239,'source SQL sessions remain',1; IF EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions s ON s.transaction_id=d.transaction_id WHERE d.database_id=DB_ID(N'ibcmd_rs_05_p85_w3_ext_version_native_20261001') AND s.session_id<>@@SPID) THROW 57239,'source transaction remains',1; IF EXISTS(SELECT 1 FROM [ibcmd_rs_05_p85_w3_ext_version_native_20261001].dbo.ConfigSave) OR EXISTS(SELECT 1 FROM [ibcmd_rs_05_p85_w3_ext_version_native_20261001].dbo.ConfigCASSave) THROW 57239,'source pending stage',1; SELECT N'OWNED_IDLE';"
+  ]
+}

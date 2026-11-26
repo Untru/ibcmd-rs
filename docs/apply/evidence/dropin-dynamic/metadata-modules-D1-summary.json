@@ -1,0 +1,135 @@
+{
+  "scope": "Actual native/OWN dynamic26-module cohort. No OWN template, nestedForm, >128 or fullstorage acceptance.",
+  "actual_write_source": "bb86ee58ca228db583712157eb82956beae88d29",
+  "actual_own_cli_sha256": "B402DC94A55ED6AB316C446D2DD344BFD3EBC75DAA4E5072646EA0D419C5CEC0",
+  "actual_native_write_platform": "8.3.27.2214",
+  "sessions_per_control": {
+    "samples": 4,
+    "module_observations": 104,
+    "template_observations": 12,
+    "old": "A/A",
+    "new": "B/B",
+    "unchanged_templates": "A/A",
+    "errors": 0
+  },
+  "source_per_control": {
+    "inventory": 12198,
+    "byte_equal": 12197,
+    "CDI_only": "configVersion values; native42=26modules+16owners, OWN26modules and zeroowners"
+  },
+  "module_payloads": {
+    "rows": 26,
+    "info_text_exact": 26,
+    "raw_exact": 0,
+    "inflated_container_exact": 0
+  },
+  "stage_rows": {
+    "native": 45,
+    "own": 29
+  },
+  "selected_raw_verified": {
+    "native": 493,
+    "own": 445
+  },
+  "registration": {
+    "bindings": 20685,
+    "linked_rows": 21357,
+    "native_replaced_IDs": 20685,
+    "own_replaced_IDs": 0,
+    "all_filelists_exact": true,
+    "touched_zero_to_NULL": 60,
+    "native_extra_NULL_to_zero": 65,
+    "own_extra_NULL_to_zero": 0
+  },
+  "explicit_native_only_effects": [
+    "16 descriptor aliases/owner CDI changes",
+    "16SI and siVersions changes",
+    "physical registration ID rebuild",
+    "65 untouched message changes",
+    "three opaque .ui Params rows",
+    "extd_props_cached/gc.mrk"
+  ],
+  "limitations": [
+    "Native three .ui and gc afterpayloads not selected: full header/SHA only",
+    "Actual generations/dates/container bytes differ and are retained",
+    "Help/search writer and complete storage parity not claimed",
+    "Template preparation only; two authorized COPY_ONLY captures completed; no D2 restore/activation/lifecycle"
+  ],
+  "cleanup": "Both controls unregistered/private cluster stopped without purge/clients closed/worker native released; databases retained under standard60-minute idle guard; old shared pending registration untouched",
+  "matching_quick": {
+    "source": "bb86ee58ca228db583712157eb82956beae88d29",
+    "focused_passed": 46,
+    "root_passed": 3711,
+    "failed": 0,
+    "ignored": 10,
+    "all_four": "PASS",
+    "lab_path": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\gates-semantic-identical\\summary.txt"
+  },
+  "originals": [
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-native-modules-D1-checkpoint.json",
+      "bytes": 156366,
+      "sha256": "2CF977C6E645C7E320209D86E87780D18EBB0A826A227A5EE8FDA7CEE36C6571"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-own-modules-D1-checkpoint.json",
+      "bytes": 140372,
+      "sha256": "062B73879021FF9A135F880EBDD18CE74E9A65AF61813D995879637D9796B52C"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-modules-D1-twins.json",
+      "bytes": 73543,
+      "sha256": "57F80822DEB8EF9C46E0521D742D561278B296D6DDF6F7A1C456358BEA8534CF"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-native-modules-D1-source.json",
+      "bytes": 669,
+      "sha256": "5A8A643E3318C5610F99AB57821DF8CECA49DA867ECBC2FC32E119F398D8D121"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-native-modules-D1-storage.json",
+      "bytes": 14660763,
+      "sha256": "A0FDE605D71760AAFA8FFA8C3F8A270F3786B8F391B4BB9E83D7A96F27C79943"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-native-modules-D1-registration.json",
+      "bytes": 109730,
+      "sha256": "7125314871284D878BBA80CB34D3C5A2E9CEBAD91A3F38EE70A7D5EE1E185CD8"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-own-modules-D1-source.json",
+      "bytes": 666,
+      "sha256": "1EEDFE4CE0C828E5FA076AA5D09380613F0FEBDB341780A717A5C465BE0A55D6"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-own-modules-D1-storage.json",
+      "bytes": 80557,
+      "sha256": "B16F3D3F503E006A820194FA108B8DBD80212ED161CAC22BA15154C07AD59CD9"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2-own-modules-D1-registration.json",
+      "bytes": 67640,
+      "sha256": "049E7BC8548EC912114F3FB8C567DEFA1A95A957029F45DD836F425D6B17B1AE"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\body2_own_modules_D1-source-freeze.json",
+      "bytes": 624,
+      "sha256": "0826B848D981BFC350E8B4CC2D1324151C69B1368B34F6D61D631D4459037693"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\candidate-metadata-v8-clean-binary.json",
+      "bytes": 753,
+      "sha256": "BCB7F5A123C61249D6348013401D9B54FF3E1A1D390A2E3B023E133F1E1322C9"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\templates-D2-preparation.md",
+      "bytes": 5403,
+      "sha256": "3DC7F58DC97355A59DAABF700C97774B4DD716F984C5B6B1CF650FE3BC0658E0"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\metadata\\evidence\\templates-D2-baselines-checkpoint.json",
+      "bytes": 2804,
+      "sha256": "A488A16A1A2177F36E4806D86494A826DD10A209B3BFF3B68CAB2A117AA1E085"
+    }
+  ]
+}

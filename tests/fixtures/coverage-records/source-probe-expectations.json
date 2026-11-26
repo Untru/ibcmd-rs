@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "cases": {
+    "embedded-table": {
+      "expected_failure": "<embeddedTable> of a SpreadsheetDocument has no writer"
+    },
+    "series-count": {
+      "expected_failure": "the chart declares 1 series and spells 0"
+    },
+    "generated-user-settings-group": {
+      "expected_failure": "a table settles into ProbeПанельДействийВыделенныхСтрок, which the form does not declare"
+    },
+    "legacy-create-by-parameter": {
+      "expected_failure": "no measured uuid for Form.StandardCommand.CreateByParameter on cfg:DynamicList"
+    },
+    "legacy-edit-list": {
+      "expected_failure": "unsupported Form ExcludedCommand: EditList"
+    },
+    "existing-interfaces-8.3.27.2342": {
+      "reader_platform": "8.3.27.2214",
+      "expected_parity": "native_interface_descriptor"
+    },
+    "existing-interfaces-8.5.1.1150": {
+      "expected_parity": "native_interface_descriptor"
+    }
+  }
+}

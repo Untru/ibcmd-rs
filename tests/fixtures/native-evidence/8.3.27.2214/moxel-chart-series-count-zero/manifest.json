@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-moxel-chart-series-count-zero",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "A hand-built CommonTemplate (SpreadsheetDocument, 'ChartTest') carrying one Chart drawing, copied verbatim from native UT 11.5.27.75's Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/СравнительныйАнализМенеджеров (chartType=StackedBar, realSeriesCount=0, realPointCount=0 -- an unpopulated template chart) as the control, then five single-field variations of it. Each variation changes exactly one XML element from the control and is imported/re-exported by ibcmd 8.3.27.2214 itself; every pair below round-trips through the platform byte for byte."
+  },
+  "objects": [
+    {
+      "kind": "MOXCEL chart drawing (object payload only, not the whole <drawing> wrapper)",
+      "variant": "empty-extended-scales",
+      "description": "Control: verbatim copy of the native UT target chart. realSeriesCount=0, realPointCount=0, isShowLegend=true, legendPlacement=UseCoordinates, titleIsInit/legendIsInit/chartIsInit=false, pointsScale/valuesScale/colorPaletteDescription present, xLabelsOrientation=Horizontal, paletteKind=Palette8.",
+      "raw_entry": { "path": "raw/empty-extended-scales.txt" },
+      "native_object_fragment": { "path": "native/empty-extended-scales-object.xml" }
+    },
+    {
+      "kind": "MOXCEL chart drawing",
+      "variant": "one-real-series-extended-scales",
+      "description": "Control plus one <d3p1:realSeriesData> (realSeriesCount=1); everything else unchanged. Proves the scale-item id-list pair (N = 1 + series_count) grows by one {0,K,0}/{0,0} record and the per-scale legend list gains one entry near the rectangles -- see validate_moxel_chart_v74_scale_id_list. Also proves the automatic-series-name ('Pivot') substitution stays suppressed here (still publishes the stored 'Сводная') because has_extended_scales is still set, not because realSeriesCount is 0 -- see push_moxel_chart_series_text_xml.",
+      "raw_entry": { "path": "raw/one-real-series-extended-scales.txt" },
+      "native_object_fragment": { "path": "native/one-real-series-extended-scales-object.xml" }
+    },
+    {
+      "kind": "MOXCEL chart drawing",
+      "variant": "one-real-point-extended-scales",
+      "description": "Control plus one <d3p1:realPointData> (realPointCount=1); everything else unchanged. Proves the per-scale legend list's points-entry (single wrapped colour, distinct shape from the series entries) is inserted ahead of the mandatory extra-series entry, and that the five-token rectangle check's X token depends on isShowLegend, not on series_count*point_count -- see validate_moxel_chart_v74_rectangle_check.",
+      "raw_entry": { "path": "raw/one-real-point-extended-scales.txt" },
+      "native_object_fragment": { "path": "native/one-real-point-extended-scales-object.xml" }
+    },
+    {
+      "kind": "MOXCEL chart drawing",
+      "variant": "empty-legend-none",
+      "description": "Control with <d3p1:legendPlacement> reset to None (isShowLegend flips to false as a platform-enforced consequence); everything else including has_extended_scales unchanged. Proves isShowLegend/legendPlacement's raw slot (tail[13], tail[88..90)) is independent of has_extended_scales (post[0]/post[1] stay unchanged) and independent of titleIsInit/legendIsInit/chartIsInit (those stay false here too).",
+      "raw_entry": { "path": "raw/empty-legend-none.txt" },
+      "native_object_fragment": { "path": "native/empty-legend-none-object.xml" }
+    },
+    {
+      "kind": "MOXCEL chart drawing",
+      "variant": "empty-design-init",
+      "description": "Control with <d3p1:titleIsInit>/<d3p1:legendIsInit>/<d3p1:chartIsInit> set to true; everything else unchanged. Proves post[7..10) is an independent, directly settable trio distinct from has_extended_scales and isShowLegend/legendPlacement -- ruling out the earlier (wrong) guess that isShowLegend gated these three.",
+      "raw_entry": { "path": "raw/empty-design-init.txt" },
+      "native_object_fragment": { "path": "native/empty-design-init-object.xml" }
+    },
+    {
+      "kind": "MOXCEL chart drawing",
+      "variant": "empty-no-extended-scales",
+      "description": "Control with <d3p1:pointsScale>, <d3p1:valuesScale>, <d3p1:colorPaletteDescription> removed and <d3p1:xLabelsOrientation>/<d3p1:paletteKind> reset to Auto (the pre-existing 13-corpus's shape); realSeriesCount/realPointCount stay 0. Proves has_extended_scales flips post[0]/post[1] from \"0\",\"0\" to \"14\",\"2\" independent of series_count/point_count, and that with has_extended_scales clear the automatic-series-name substitution applies again even at realSeriesCount == 0 -- publishes 'Сводная' still, because realSeriesCount == 0 remains the other necessary condition (see one-real-series-extended-scales above and one-real-series variant reasoning in push_moxel_chart_series_text_xml's doc comment).",
+      "raw_entry": { "path": "raw/empty-no-extended-scales.txt" },
+      "native_object_fragment": { "path": "native/empty-no-extended-scales-object.xml" }
+    }
+  ],
+  "proven_claims": [
+    "series_count == 0 is a real, native-published chart state (a template chart populated at runtime), not a parse gap: parse_moxel_chart now accepts it and the post-region layout it implies.",
+    "post[0]/post[1] and post[7..10) are two independent gates (has_extended_scales and is_title_init respectively), each pinned down by a seed pair that toggles only one XML element.",
+    "The automatic series name ('Pivot' vs the stored cache) requires BOTH has_extended_scales clear AND at least one real series -- neither condition alone is sufficient, proven by three of the variants above.",
+    "Colour code -23 is style:ToolTipBackColor -- new, not in the pre-existing 3-entry table.",
+    "isAutoPointName, scaleColor ('auto'), gaugeThickness and gaugeBushThickness are read fields, not literals: this target chart carries different values than all 13 pre-existing corpus records."
+  ],
+  "non_claims": [
+    "paletteKind's only proven non-Auto value is 'Palette8' (one example); this is not a general palette-name decoder.",
+    "pointsScale's and valuesScale's (has_extended_scales branch) content is proven fixed only for the one example seen; a chart with has_extended_scales set AND a non-empty vsFormat simultaneously is untested -- see the doc comment above the valuesScale block in push_moxel_chart_xml.",
+    "post[41..43] (three large nested blocks) and post's `tail[84]`/`tail[86]`/`tail[87]` (design-time legend/plot-area coordinates) remain uninterpreted: no XML element this reader emits differs across any observation gathered here, so their exact meaning is left unclaimed.",
+    "tail[7..10) of the post prefix in an earlier, superseded reading was believed tied to has_real_data (series_count * point_count > 0); the empty-no-extended-scales variant disproves that (has_real_data is false there too, yet post[0]/post[1] read \"14\",\"2\") -- the correct gate is has_extended_scales, documented on validate_moxel_chart_v74_post_prefix."
+  ]
+}

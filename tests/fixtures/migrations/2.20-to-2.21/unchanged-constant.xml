@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+  <Constant uuid="11111111-1111-4111-8111-111111111111">
+    <InternalInfo>
+      <xr:GeneratedType name="ConstantManager.UseFeature" category="Manager">
+        <xr:TypeId>22222222-2222-4222-8222-222222222222</xr:TypeId>
+        <xr:ValueId>33333333-3333-4333-8333-333333333333</xr:ValueId>
+      </xr:GeneratedType>
+    </InternalInfo>
+    <Properties>
+      <Name>UseFeature</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>en</v8:lang>
+          <v8:content>Use feature</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>Feature flag</Comment>
+      <Type><v8:Type>xs:boolean</v8:Type></Type>
+      <UseStandardCommands>true</UseStandardCommands>
+    </Properties>
+  </Constant>
+</MetaDataObject>

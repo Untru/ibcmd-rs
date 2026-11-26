@@ -1,0 +1,4 @@
+[alias]
+# The verification loop for people and coding agents: `cargo xtask check`,
+# `cargo xtask ci`, `cargo xtask affected`. See CONTRIBUTING.md.
+xtask = "run --quiet --locked --manifest-path xtask/Cargo.toml --"

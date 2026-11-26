@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "database": "ibcmd_rs_05_ext_wave2_own20261001",
+  "claimed_platform_profile": "platform-8.3.27.2214",
+  "verified_platform_profile": "platform-8.3.27.2214",
+  "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+  "all_extensions": false,
+  "activation_required": true,
+  "dry_run": false,
+  "executed": true,
+  "extensions": [
+    {
+      "name": "ServiceDesk",
+      "input_dir": "F:\\ibcmd\\lab\\05\\wave2\\extensions\\version1",
+      "staged_rows": 431,
+      "staged_bytes": 569942,
+      "proposed_cas_root": "9cded519f8a07c2c868d0e776c18c928a163fd55",
+      "compiled_targets": 1,
+      "retained_base_targets": 0,
+      "selection": "tree",
+      "changed_files": [
+        "Configuration.xml"
+      ],
+      "compiled_objects": [
+        "Configuration.xml"
+      ]
+    }
+  ]
+}

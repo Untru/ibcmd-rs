@@ -1,0 +1,2 @@
+== ibcmd_rs_04_rcheck_dn_mix2_nat20261001/after  ->  ibcmd_rs_04_rcheck_dn_mix2_ownfinal20261001/after
+16 of 16 `.si` rows have the same text (compared after inflate)

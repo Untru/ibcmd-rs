@@ -1,0 +1,33 @@
+[package]
+name = "ibcmd-form-writer"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The native form body writer of a 1C configuration: a managed form's Form.xml compiled into its stored body (the 8.3.27 writer, its 2.21 route for platform 8.5 and an extension's adopted form), with the dynamic-list, chart and planner writers it calls"
+
+[dependencies]
+# Errors as in the root, whose callers add their own context.
+anyhow = "1.0"
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-1c-vocab = { path = "../ibcmd-1c-vocab" }
+ibcmd-core = { path = "../ibcmd-core" }
+ibcmd-form-body = { path = "../ibcmd-form-body" }
+ibcmd-form-native = { path = "../ibcmd-form-native" }
+ibcmd-form-schema = { path = "../ibcmd-form-schema" }
+# The seam the writer reads the configuration's source tree through.
+ibcmd-metadata-source = { path = "../ibcmd-metadata-source" }
+ibcmd-module-blob = { path = "../ibcmd-module-blob" }
+ibcmd-schema = { path = "../ibcmd-schema" }
+ibcmd-xml = { path = "../ibcmd-xml" }
+quick-xml = "0.38"
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
+uuid = "1.19"
+
+[dev-dependencies]
+# Fresh item uuids in a form test, as in the root.
+uuid = { version = "1.19", features = ["v4"] }
+
+[lints.rust]
+unsafe_code = "forbid"

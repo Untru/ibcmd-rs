@@ -1,0 +1,30 @@
+=== on-warm-a: 1321 lines, session 1
+  first 17:00:47.526 ( -468.16 s)
+  last  17:28:55.944 (+1220.25 s)
+  event open           17:00:47.526 ( -468.16 s) | 1 | режим=poll
+  markers client=Telegram               server=Telegram               B=-                                        17:00:47.571 ( -468.12 s) .. 17:28:55.944 (+1220.25 s)  n=1320
+=== on-warm-b: 1254 lines, session 4
+  first 17:01:37.769 ( -417.92 s)
+  last  17:29:12.830 (+1237.14 s)
+  event open           17:01:37.769 ( -417.92 s) | 4 | режим=txn
+  event txn-begin      17:08:15.638 (  -20.05 s) | 4 | константа=20260929 секунд=60
+  event txn-end        17:09:15.694 (  +40.00 s) | 4 | ЗАФИКСИРОВАНО за 60023 мс
+  markers client=Telegram               server=Telegram               B=-                                        17:01:37.998 ( -417.69 s) .. 17:29:12.830 (+1237.14 s)  n=1251
+  gap  60.06 s between 17:08:15.638 (  -20.05 s) and 17:09:15.694 (  +40.00 s) (txn-begin -> txn-end)
+=== on-lazy: 1966 lines, session 5
+  first 17:01:44.718 ( -410.97 s)
+  last  17:43:18.675 (+2082.99 s)
+  event open           17:01:44.718 ( -410.97 s) | 5 | режим=lazy
+  event lazy-armed     17:08:36.749 (   +1.06 s) | 5 | 
+  markers client=Telegram               server=Telegram               B=-                                        17:08:37.122 (   +1.43 s) .. 17:43:18.675 (+2082.99 s)  n=1639
+  beats n=325 17:01:44.719 ( -410.97 s) .. 17:08:35.735 (   +0.04 s)
+=== on-new1: 1612 lines, session 8
+  first 17:09:05.195 (  +29.50 s)
+  last  17:43:18.267 (+2082.58 s)
+  event open           17:09:05.195 (  +29.50 s) | 8 | режим=poll
+  markers client=ibcmd-online-v1        server=ibcmd-online-v1        B=-                                        17:09:05.230 (  +29.54 s) .. 17:43:18.267 (+2082.58 s)  n=1611
+=== on-new2: 1505 lines, session 9
+  first 17:11:22.301 ( +166.61 s)
+  last  17:43:18.676 (+2082.99 s)
+  event open           17:11:22.301 ( +166.61 s) | 9 | режим=poll
+  markers client=ibcmd-online-v1        server=ibcmd-online-v1        B=-                                        17:11:22.358 ( +166.67 s) .. 17:43:18.676 (+2082.99 s)  n=1504

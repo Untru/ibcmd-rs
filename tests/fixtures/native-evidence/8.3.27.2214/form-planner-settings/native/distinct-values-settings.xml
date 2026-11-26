@@ -1,0 +1,92 @@
+			<Settings xmlns:pl="http://v8.1c.ru/8.3/data/planner" xsi:type="pl:Planner">
+				<pl:item>
+					<pl:value xsi:nil="true"/>
+					<pl:text>ЭлементТекст</pl:text>
+					<pl:tooltip>ЭлементПодсказка</pl:tooltip>
+					<pl:begin>2001-02-03T04:05:06</pl:begin>
+					<pl:end>2007-08-09T10:11:12</pl:end>
+					<pl:borderColor>#010203</pl:borderColor>
+					<pl:backColor>#040506</pl:backColor>
+					<pl:textColor>#070809</pl:textColor>
+					<pl:font kind="AutoFont"/>
+					<pl:dimensionValues/>
+					<pl:replacementDate>2011-12-13T14:15:16</pl:replacementDate>
+					<pl:deleted>false</pl:deleted>
+					<pl:id>11112222-3333-4444-5555-666677778888</pl:id>
+					<pl:textFormatted>false</pl:textFormatted>
+					<pl:border width="3">
+						<v8ui:style xsi:type="v8ui:ControlBorderType">Single</v8ui:style>
+					</pl:border>
+					<pl:editMode>EnableEdit</pl:editMode>
+				</pl:item>
+				<pl:borderColor>#0A0B0C</pl:borderColor>
+				<pl:backColor>#0D0E0F</pl:backColor>
+				<pl:textColor>#101112</pl:textColor>
+				<pl:lineColor>#131415</pl:lineColor>
+				<pl:font kind="AutoFont"/>
+				<pl:beginOfRepresentationPeriod>2021-01-02T03:04:05</pl:beginOfRepresentationPeriod>
+				<pl:endOfRepresentationPeriod>2022-02-03T04:05:06</pl:endOfRepresentationPeriod>
+				<pl:alignElementsOfTimeScale>true</pl:alignElementsOfTimeScale>
+				<pl:displayTimeScaleWrapHeaders>true</pl:displayTimeScaleWrapHeaders>
+				<pl:displayWrapHeaders>true</pl:displayWrapHeaders>
+				<pl:timeScaleWrapHeadersFormat>
+					<v8:item>
+						<v8:lang>#</v8:lang>
+						<v8:content>DLF="MM"</v8:content>
+					</v8:item>
+					<v8:item>
+						<v8:lang>ru</v8:lang>
+						<v8:content>DLF="MM"</v8:content>
+					</v8:item>
+				</pl:timeScaleWrapHeadersFormat>
+				<pl:periodicVariantUnit>Month</pl:periodicVariantUnit>
+				<pl:periodicVariantRepetition>7</pl:periodicVariantRepetition>
+				<pl:timeScaleWrapBeginIndent>11</pl:timeScaleWrapBeginIndent>
+				<pl:timeScaleWrapEndIndent>13</pl:timeScaleWrapEndIndent>
+				<pl:timeScale>
+					<placement xmlns="http://v8.1c.ru/8.2/data/chart">Top</placement>
+					<level xmlns="http://v8.1c.ru/8.2/data/chart">
+						<measure>Minute</measure>
+						<interval>17</interval>
+						<show>true</show>
+						<line width="5" gap="false">
+							<v8ui:style xsi:type="v8ui:ChartLineType">Dotted</v8ui:style>
+						</line>
+						<scaleColor>#161718</scaleColor>
+						<dayFormatRule>WeekDay</dayFormatRule>
+						<format>
+							<v8:item>
+								<v8:lang>#</v8:lang>
+								<v8:content>DF="mm"</v8:content>
+							</v8:item>
+						</format>
+						<labels>
+							<ticks>19</ticks>
+						</labels>
+						<backColor>#191A1B</backColor>
+						<textColor>#1C1D1E</textColor>
+						<showPereodicalLabels>true</showPereodicalLabels>
+					</level>
+					<transparent xmlns="http://v8.1c.ru/8.2/data/chart">false</transparent>
+					<backColor xmlns="http://v8.1c.ru/8.2/data/chart">#1F2021</backColor>
+					<textColor xmlns="http://v8.1c.ru/8.2/data/chart">#222324</textColor>
+					<currentLevel xmlns="http://v8.1c.ru/8.2/data/chart">0</currentLevel>
+				</pl:timeScale>
+				<pl:period>
+					<pl:begin>2031-03-04T05:06:07</pl:begin>
+					<pl:end>2032-04-05T06:07:08</pl:end>
+				</pl:period>
+				<pl:displayCurrentDate>true</pl:displayCurrentDate>
+				<pl:itemsTimeRepresentation>BeginTime</pl:itemsTimeRepresentation>
+				<pl:itemsBehaviorWhenSpaceInsufficient>CollapseItems</pl:itemsBehaviorWhenSpaceInsufficient>
+				<pl:autoMinColumnWidth>true</pl:autoMinColumnWidth>
+				<pl:autoMinRowHeight>true</pl:autoMinRowHeight>
+				<pl:minColumnWidth>23</pl:minColumnWidth>
+				<pl:minRowHeight>29</pl:minRowHeight>
+				<pl:fixDimensionsHeader>auto</pl:fixDimensionsHeader>
+				<pl:fixTimeScaleHeader>auto</pl:fixTimeScaleHeader>
+				<pl:border width="2">
+					<v8ui:style xsi:type="v8ui:ControlBorderType">Single</v8ui:style>
+				</pl:border>
+				<pl:newItemsTextType>String</pl:newItemsTextType>
+			</Settings>

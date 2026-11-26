@@ -1,0 +1,9 @@
+run=online
+tag=baseline-act2
+mode=exclusive
+dry_run=False
+database=ibcmd_rs_05_online_a1
+start_utc=2026-09-29T16:22:12.806Z
+end_utc=2026-09-29T16:22:28.447Z
+wall_ms=15617
+exit=1

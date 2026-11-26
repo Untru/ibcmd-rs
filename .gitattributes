@@ -1,0 +1,34 @@
+tests/fixtures/xml/** -text
+tests/fixtures/native-evidence/** -text whitespace=cr-at-eol
+tests/fixtures/coverage/** -text whitespace=cr-at-eol
+tests/fixtures/coverage-records/** -text whitespace=cr-at-eol
+tests/fixtures/migrations/** -text
+tests/fixtures/form_choice_parameters_slot27_live.json text eol=lf
+crates/ibcmd-schema/data/** text eol=lf
+tests/fixtures/mssql_extension_list_snapshot.json text eol=lf
+*.sh text eol=lf
+tests/fixtures/external/** -text
+crates/ibcmd-edt/vendor/** -text whitespace=cr-at-eol
+crates/ibcmd-edt/tests/fixtures/** -text
+tests/fixtures/platform85-dynamic/*.bin binary
+tests/fixtures/dynamic-metadata-native/*.bin binary
+tests/fixtures/template-physical-preservation/*.bin binary
+tests/fixtures/template-physical-preservation/*.xml -text whitespace=cr-at-eol
+
+tests/fixtures/template-physical-preservation/provenance.json -text whitespace=cr-at-eol
+tests/fixtures/file-infobase/*.gz binary
+tests/fixtures/file-infobase/*.cf binary
+tests/fixtures/file-infobase/tiny-xml/** -text whitespace=cr-at-eol
+tests/fixtures/file-infobase/tiny-source/** -text whitespace=cr-at-eol
+tests/fixtures/file-infobase/empty-xml-8.3.27/** -text whitespace=cr-at-eol
+tests/fixtures/file-infobase/empty-xml-8.5.1/** -text whitespace=cr-at-eol
+crates/ibcmd-dump/src/mssql_dump/empty_configuration/** -text whitespace=cr-at-eol
+tests/fixtures/file-infobase/default-button-xml/** -text whitespace=cr-at-eol
+tests/fixtures/file-infobase/default-button-source/** -text whitespace=cr-at-eol
+src/load/seeds/** -text
+tests/fixtures/native-export-commands/** -text whitespace=cr-at-eol
+tests/fixtures/native-export-commands/**/*.gz binary
+
+# Native EDS oracle bytes must be identical on every checkout platform.
+tests/fixtures/eds-matrix/**/*.xml -text whitespace=cr-at-eol
+tests/fixtures/eds-corpus2/*.xml -text whitespace=cr-at-eol

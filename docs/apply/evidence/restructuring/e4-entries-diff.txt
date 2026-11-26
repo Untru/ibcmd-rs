@@ -1,0 +1,62 @@
+== table Document8409
+   + field {"Fld11039",0,{1,{"S",2147483668,0,"",0}},"",0}
+   sub-tables before ['VT8415'] after ['VT8415', 'VT11041', 'VT11045']
+   sub-table VT8415 (changed)
+     + field {"Fld11040",0,{1,{"S",2147483653,0,"",0}},"",0}
+     entry {"VT8415","I",0,"Document8409",{7,{"LineNo8416",0,{1,{"N",5,0,"",0}},"",0},{"Fld8417",0,{1,{"R",0,0, ... ",0}},"",0},{"Fld11040",0,{1,{"S",2147483653,0,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   sub-table VT11041 (new)
+     + field {"LineNo11042",0,{1,{"N",5,0,"",0}},"",0}
+     + field {"Fld11043",0,{1,{"S",2147483658,0,"",0}},"",0}
+     + field {"Fld11044",0,{1,{"N",10,0,"",0}},"",0}
+     entry {"VT11041","I",0,"Document8409",{3,{"LineNo11042",0,{1,{"N",5,0,"",0}},"",0},{"Fld11043",0,{1,{"S",2 ... 3658,0,"",0}},"",0},{"Fld11044",0,{1,{"N",10,0,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   sub-table VT11045 (new)
+     + field {"LineNo11046",0,{1,{"N",5,0,"",0}},"",0}
+     + field {"Fld11047",0,{1,{"T",0,0,"",0}},"",0}
+     entry {"VT11045","I",0,"Document8409",{2,{"LineNo11046",0,{1,{"N",5,0,"",0}},"",0},{"Fld11047",0,{1,{"T",0 ... "N",5,0,"",0}},"",0},{"Fld11047",0,{1,{"T",0,0,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   indexes before (4):
+      {"ByDocNumPrefix",1,{3,"NumberPrefix","Number","ID"},0,0,0,{0},0,0}
+      {"ByDocNum",1,{2,"Number","ID"},0,0,0,{0},0,0}
+      {"ByDocDate",1,{3,"Date_Time","ID","Marked"},0,0,0,{0},0,0}
+      {"ByFieldFld8410",1,{2,"Fld8410","ID"},0,0,0,{0},0,0}
+   indexes after (4):
+      {"ByDocNumPrefix",1,{3,"NumberPrefix","Number","ID"},0,0,0,{0},0,0}
+      {"ByDocNum",1,{2,"Number","ID"},0,0,0,{0},0,0}
+      {"ByDocDate",1,{3,"Date_Time","ID","Marked"},0,0,0,{0},0,0}
+      {"ByFieldFld8410",1,{2,"Fld8410","ID"},0,0,0,{0},0,0}
+== table Reference21
+   + field {"Fld11034",0,{1,{"S",2147483668,0,"",0}},"",0}
+   sub-tables before ['VT960'] after ['VT960', 'VT11036']
+   sub-table VT960 (changed)
+     + field {"Fld11035",0,{1,{"S",2147483660,0,"",0}},"",0}
+     entry {"VT960","I",0,"Reference21",{3,{"LineNo961",0,{1,{"N",5,0,"",0}},"",0},{"Fld962",0,{1,{"R",0,0,"Ref ... ",3}},"",0},{"Fld11035",0,{1,{"S",2147483660,0,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   sub-table VT11036 (new)
+     + field {"LineNo11037",0,{1,{"N",5,0,"",0}},"",0}
+     + field {"Fld11038",0,{1,{"L",0,0,"",0}},"",0}
+     entry {"VT11036","I",0,"Reference21",{2,{"LineNo11037",0,{1,{"N",5,0,"",0}},"",0},{"Fld11038",0,{1,{"L",0, ... "N",5,0,"",0}},"",0},{"Fld11038",0,{1,{"L",0,0,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   indexes before (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"ParentCode",1,{3,"ParentID","Code","ID"},0,0,0,{0},0,0}
+      {"ParentDescr",1,{3,"ParentID","Description","ID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+   indexes after (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"ParentCode",1,{3,"ParentID","Code","ID"},0,0,0,{0},0,0}
+      {"ParentDescr",1,{3,"ParentID","Description","ID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+== DBNames: header max 10824 -> 11047, count 6459 -> 6473
+   ADDED 11034 Fld e8f46a12-2ba4-4c7c-bd76-66336d2eb5ee
+   ADDED 11035 Fld 22b7cb3b-d7ab-4936-975c-ad5eea50f2cc
+   ADDED 11036 VT 4e28d682-8e63-4063-b0de-d0d199890902
+   ADDED 11037 LineNo 4e28d682-8e63-4063-b0de-d0d199890902
+   ADDED 11038 Fld 386a239f-cf5c-4c5f-a641-7da7f639d338
+   ADDED 11039 Fld 63250320-b65a-4903-9c6e-2e369124093a
+   ADDED 11040 Fld a238b5ff-648b-45b0-946f-355e3738f47e
+   ADDED 11041 VT 7e068f59-9677-4e1d-ac2b-5de39152171b
+   ADDED 11042 LineNo 7e068f59-9677-4e1d-ac2b-5de39152171b
+   ADDED 11043 Fld 12ba8ba2-3fa8-474e-83fd-714bf4fe4bb2
+   ADDED 11044 Fld d0da81bf-c810-42ce-a22d-76a1ff41164f
+   ADDED 11045 VT 7b9b7a71-1576-4b0a-a4e4-f01d68049cfd
+   ADDED 11046 LineNo 7b9b7a71-1576-4b0a-a4e4-f01d68049cfd
+   ADDED 11047 Fld c5478e17-8d54-48d1-b1ff-468bf3ef18ba

@@ -1,0 +1,11 @@
+{
+  "equal": [
+    "CovChoiceHistoryOnInput_DontUse",
+    "CovChoiceMode_QuickChoice",
+    "CovExplanation_Cov",
+    "CovQuickChoice_false",
+    "CovTemplate",
+    "CovUseStandardCommands_true",
+    "configuration"
+  ]
+}

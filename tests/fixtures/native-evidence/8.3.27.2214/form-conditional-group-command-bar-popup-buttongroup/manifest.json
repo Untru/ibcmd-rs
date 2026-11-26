@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-conditional-group-command-bar-popup-buttongroup",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "host": "macOS",
+    "note": "Real ERP УХ 3.2.12.6 1cv8.cf storage entries, extracted with `ibcmd-rs cf extract <cf> <form-uuid>.0 <outdir>` (compression raw-deflate). `FormConditionalGroupSchema::from_raw_layout` (src/form_schema.rs) admitted the wrapper-`22` conditional `UserVisible`-common prefix tuple (slot 5, `{0,{0,{\"B\",v},0}}`) only for shifted-discriminator `2`|`3`|`4`|`5` (ColumnGroup/Pages/Page/UsualGroup) and, in a second arm, `8`|`9` (Table's own ContextMenu/AutoCommandBar) -- never for `0` (CommandBar), `1` (Popup) or `6` (ButtonGroup), even though the neighbouring FormChildItemVisibleSchema already lists all seven kinds together for the identical tuple. Without the shift, `form_child_item_tag`/`parse_form_child_item_name` read the discriminator/name slot one member early -- landing on the prefix tuple's own opening brace, never a bare `\"0\"`..`\"9\"` digit or a quoted name -- and both refused, so `parse_form_child_item_with_metadata_owners` returned `None` for the whole item. `parse_form_child_item_pairs`'s exact-count-or-best-effort-partial bookkeeping then silently dropped that one item from its parent's child list (`.unwrap_or_default()`/partial-match fallback, doctrine point 2/6: a silent default, not a typed refusal) -- taking every nested item the dropped one owned down with it. All three objects below are confirmed on real bytes at field_count 35 (the `31 + 2k`, `k=2` progression the accepted discriminators already run on), tuple flag `Some(true)` (the default state the platform writes no `<UserVisible>` for)."
+  },
+  "objects": [
+    {
+      "kind": "Form child item (wrapper 22, shifted discriminator 0 = CommandBar)",
+      "variant": "command-bar-with-conditional-prefix",
+      "description": "Documents/ВерсияДокументацииЗакупочныхПроцедур/Forms/ФормаРедактированияТекстаЗакупочнойПроцедуры. Root ChildItems -> UsualGroup id=625 -> ChildItems -> CommandBar name=\"ГруппаКоманднаяПанель\" id=73, whose own subtree (a deeply nested `Вставить в текст` Popup menu) was dropped whole -- 1054 native lines missing from ours, ~768 tags. `command-bar-open.xml` is the item's own opening fragment (name/id/ExtendedTooltip), not the full nested menu tree.",
+      "form_uuid": "89738071-8272-45ca-b19c-17b0f4423c1e",
+      "raw_entry": { "path": "raw/89738071-8272-45ca-b19c-17b0f4423c1e.deflate", "sha256": "73c3bf737b4ebcfa433afe4ba3c1ecce3db895f99ea26afa382fada39677b641" },
+      "native_entry": "native/command-bar-open.xml"
+    },
+    {
+      "kind": "Form child item (wrapper 22, shifted discriminator 1 = Popup)",
+      "variant": "popup-with-conditional-prefix",
+      "description": "DocumentJournals/ДвижениеИнвестиций/Forms/ФормаРеестраИнвестиций. Popup name=\"ИзменитьДолюУчастия\" id=107, dropped whole together with its own nested Button children.",
+      "form_uuid": "f46eb0f0-c10e-4bff-b40d-200dc10ce7b9",
+      "raw_entry": { "path": "raw/f46eb0f0-c10e-4bff-b40d-200dc10ce7b9.deflate", "sha256": "fd7c1e5bce90c8e3b729683d354d0a0a25463a4fb8903633560b15f60060900b" },
+      "native_entry": "native/popup-block.xml"
+    },
+    {
+      "kind": "Form child item (wrapper 22, shifted discriminator 6 = ButtonGroup)",
+      "variant": "button-group-with-conditional-prefix",
+      "description": "Catalogs/БланкиОтчетов/Forms/ФормаВыбора. Root's own built-in AutoCommandBar (id=-1) carries exactly one child, ButtonGroup name=\"ГруппаСтандартные\" id=28 -- losing that sole item emptied the AutoCommandBar's <ChildItems> entirely, not just this one item's own properties.",
+      "form_uuid": "9582d589-957a-404a-aae8-a705e82882c1",
+      "raw_entry": { "path": "raw/9582d589-957a-404a-aae8-a705e82882c1.deflate", "sha256": "55d253a5587f8a6803bf32c4a39dc8b0fd32a746628817ee352b0b2084947532" },
+      "native_entry": "native/button-group-block.xml"
+    }
+  ]
+}

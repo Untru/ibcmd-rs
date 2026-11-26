@@ -1,0 +1,3792 @@
+{
+  "schema_version": 1,
+  "snapshot": "2026-10-25",
+  "scope": "Observed completed corpus runs; not release or SQL parity evidence",
+  "product_binary_commit": "26f116648d70e6d2f0881963a7f957068a084540",
+  "product_binary_sha256": "11175e72ff51cee29bf8d0e17f11b4f681f7d04d8219629fdef0eb8c431a47a2",
+  "failed_xml_rows": 2042,
+  "class_counts": {
+    "same_failure_cf": 99,
+    "same_failure_xml_normalized": 3,
+    "same_failure_legacy_xml": 2
+  },
+  "classes": [
+    {
+      "id": "I001",
+      "signature": "MXL: <verticalPageBreak> of a SpreadsheetDocument has no writer",
+      "occurrences": 1286,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetVerticalPageBreak.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetVerticalPageBreak.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I002",
+      "signature": "no code for UseInInterfaceCompatibilityMode \"Version85\"",
+      "occurrences": 148,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridModeVersion85.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernModeVersion85.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I003",
+      "signature": "no code for UseInInterfaceCompatibilityMode \"Taxi\"",
+      "occurrences": 117,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridModeTaxi.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernModeTaxi.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I004",
+      "signature": "form <UsualGroup>: ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
+      "occurrences": 85,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridParentButton.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernParentButton.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I005",
+      "signature": "the form's tail names something the writer cannot place",
+      "occurrences": 48,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyChildrenAlign.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyVerticalSingle.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I006",
+      "signature": "MXL: colour pal:<name> names an unknown namespace",
+      "occurrences": 29,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetPalette.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I007",
+      "signature": "<LabelDecoration> names a font the writer cannot place",
+      "occurrences": 25,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernLabelDecorationFont.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I008",
+      "signature": "MXL: drawing line style Dashed has no stored code",
+      "occurrences": 19,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetDashed.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I009",
+      "signature": "MXL: built-in StyleItem font reference read as a file",
+      "occurrences": 18,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetBuiltinFont.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I010",
+      "signature": "<Table> excludes SelectAll, which has no measured uuid",
+      "occurrences": 16,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovTableOnlySelectAll.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I011",
+      "signature": "<LabelDecoration> names a colour the writer cannot place",
+      "occurrences": 14,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelDecorationTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationTextColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I012",
+      "signature": "an embedded mxl:SpreadsheetDocument with cells has no writer yet",
+      "occurrences": 14,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovEmbeddedSpreadsheetCells.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovEmbeddedSpreadsheetCells.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I013",
+      "signature": "a group names a background colour it cannot place",
+      "occurrences": 12,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridUsualGroupBackColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyUsualGroupBackColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernUsualGroupBackColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I014",
+      "signature": "a <ChartField> names a property whose slot is not measured",
+      "occurrences": 9,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxWidth.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxHeight.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartMaxWidth.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxWidth.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxHeight.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartMaxWidth.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I015",
+      "signature": "form <PictureDecoration>: PictureColor: the writer cannot place the colour pal:<name>",
+      "occurrences": 8,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureDecorationPictureColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyPictureDecorationPictureColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureDecorationPictureColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I016",
+      "signature": "MXL: <printSettings><pageSize> has no writer",
+      "occurrences": 6,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetPageSizeA4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetPageSizeA4.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I017",
+      "signature": "MXL: an AutoFont <font> spells members",
+      "occurrences": 6,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetAutoFontHeight.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetAutoFontHeight.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I018",
+      "signature": "form <InputField>: TextSize: the 2.21 value Some(\"Reduced\") has no 8.5 code",
+      "occurrences": 6,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridReducedText.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernReducedText.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I019",
+      "signature": "form <LabelField>: UseCopy: the 2.21 value Some(\"false\") has no 8.5 code",
+      "occurrences": 6,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldUseCopy.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldUseCopy.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I020",
+      "signature": "<Table> excludes DeselectAll, which has no measured uuid",
+      "occurrences": 5,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesDeselectAll.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovTableOnlyDeselectAll.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I021",
+      "signature": "unsupported Form VerticalScroll: use",
+      "occurrences": 5,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-settings",
+          "source": "CommonForms/CovVerticalScrollAlways.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-cross-forms-from27",
+          "source": "CommonForms/CovVerticalScrollAlways.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-settings",
+          "source": "CommonForms/CovVerticalScrollAlways.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I022",
+      "signature": "unsupported colour \"pal:<name>\"",
+      "occurrences": 5,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "StyleItems/CovPaletteViolet.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I023",
+      "signature": "<LabelField> cannot encode a bound path",
+      "occurrences": 4,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I024",
+      "signature": "<LabelField> names a colour the writer cannot place",
+      "occurrences": 4,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelFieldTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldTextColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I025",
+      "signature": "MXL: standard picture reference read as a file",
+      "occurrences": 4,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetAppearanceCheckIcon.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-standard-picture",
+          "source": "CommonTemplates/CovSpreadsheetStandardPicture.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetAppearanceCheckIcon.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-standard-picture",
+          "source": "CommonTemplates/CovSpreadsheetStandardPicture.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I026",
+      "signature": "a <GraphicalSchemaField> names a property whose slot is not measured",
+      "occurrences": 4,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I027",
+      "signature": "no base-free compiler for Interface yet",
+      "occurrences": 4,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2342/interfaces",
+          "source": "Interfaces/CovTemplate.xml",
+          "probe": "existing-interfaces-8.3.27.2342",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/interfaces",
+          "source": "Interfaces/CovTemplate.xml",
+          "probe": "existing-interfaces-8.5.1.1150",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I028",
+      "signature": "no measured value for StdPicture.NewConversation",
+      "occurrences": 4,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureNewConversation.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureNewConversation.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I029",
+      "signature": "the form names an event the writer cannot place",
+      "occurrences": 4,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-task-form-events",
+          "source": "Tasks/CovEventTask/Forms/EventsForm.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-task-form-events",
+          "source": "Tasks/CovEventTask/Forms/EventsForm.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I030",
+      "signature": "unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
+      "occurrences": 4,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-catalog-additional-index",
+          "source": "Catalogs/CovIndexedCatalog.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-catalog-additional-index",
+          "source": "Catalogs/CovIndexedCatalog.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I031",
+      "signature": "<InputField> cannot encode a bound path",
+      "occurrences": 3,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I032",
+      "signature": "<LabelField> names a font the writer cannot place",
+      "occurrences": 3,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelFieldTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernLabelFieldFont.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I033",
+      "signature": "form <InputField>: WidthInCard: the 2.21 value Some(\"Full\") has no 8.5 code",
+      "occurrences": 3,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldWidthInCard.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldWidthInCard.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I034",
+      "signature": "form <InputField>: no measured value for StdPicture.CollaborationSystemExternalUser",
+      "occurrences": 3,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputPictureExternalUser.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputPictureExternalUser.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I035",
+      "signature": "form <RadioButtonField>: HorizontalStretch: the 2.21 value Some(\"false\") has no 8.5 code",
+      "occurrences": 3,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridRadioButtonFieldHorizontalStretch.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernRadioButtonFieldHorizontalStretch.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I036",
+      "signature": "no measured value for StdPicture.Char",
+      "occurrences": 3,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureChar.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernPictureChar.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I037",
+      "signature": "no measured value for StdPicture.Today",
+      "occurrences": 3,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureToday.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureToday.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I038",
+      "signature": "<ChartField> names an event the writer cannot place",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartOnActivate.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartOnActivate.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I039",
+      "signature": "<CheckBoxField> cannot encode a bound path",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-deep-bindings",
+          "source": "CommonForms/CovDeepComposerBinding.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-deep-bindings",
+          "source": "CommonForms/CovDeepComposerBinding.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I040",
+      "signature": "<PeriodField> has no writer yet",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovPeriodField.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovPeriodField.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I041",
+      "signature": "<PlannerField> names an event the writer cannot place",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I042",
+      "signature": "<SpreadSheetDocumentField> excludes FormattedString, which has no measured uuid",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridSheetFormattedString.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernSheetFormattedString.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I043",
+      "signature": "<Table> excludes AddAutoSelectedField, which has no measured uuid",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I044",
+      "signature": "ClientApplicationInterface: unsupported layout property",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-client-application-interface",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-client-application-interface",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I045",
+      "signature": "InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-mobile-permission-messages",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-mobile-permission-messages",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I046",
+      "signature": "MXL: <chart:chartType> spells Column, which the chart writer has not measured",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetChartColumn.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I047",
+      "signature": "MXL: a <line> with a gap has no writer",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetGapLine.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetGapLine.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I048",
+      "signature": "MXL: a value of type v8:ValueListType has no writer",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetValueListDetail.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetValueListDetail.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I049",
+      "signature": "MXL: drawing line style DashDotted has no stored code",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetDashDotted.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetDashDotted.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I050",
+      "signature": "MXL: system font sys:OEMFixedFont has no stored code",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetOEMFixedFont.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetOEMFixedFont.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I051",
+      "signature": "MXL: web colour SandyBrown has no stored code",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetSandyBrown.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetSandyBrown.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I052",
+      "signature": "MXL: web colour SkyBlue has no stored code",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetSkyBlue.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I053",
+      "signature": "a command names the shortcut Space, which is not measured",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I054",
+      "signature": "a dynamic list's <KeyType>RowNumber is not measured",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-settings",
+          "source": "CommonForms/CovDynamicListRowNumber.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-cross-forms-from27",
+          "source": "CommonForms/CovDynamicListRowNumber.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-settings",
+          "source": "CommonForms/CovDynamicListRowNumber.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I055",
+      "signature": "a progress bar's <Representation>BrokenTilt is not measured",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridBrokenTilt.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernBrokenTilt.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I056",
+      "signature": "a table's <RowPictureDataPath> names <path>, which the writer cannot place",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovRecordSetRowPicture.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I057",
+      "signature": "command: unknown standard picture StdPicture.QueryWizardTempTableDescription",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-reference-network",
+          "source": "InformationRegisters/CovNetworkOptions.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-reference-network",
+          "source": "InformationRegisters/CovNetworkOptions.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I058",
+      "signature": "form <ColumnGroup>: ShowTitleInCard: the 2.21 value Some(\"true\") has no 8.5 code",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridColumnGroupCard.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernColumnGroupCard.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I059",
+      "signature": "form <CommandBar>: AppearanceMode: the 2.21 value Some(\"UsualGroup\") has no 8.5 code",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridCommandBarAppearance.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernCommandBarAppearance.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I060",
+      "signature": "form <LabelField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldCellHyperlinkRepresentation.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldCellHyperlinkRepresentation.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I061",
+      "signature": "no measured ordinal for AccountingRegister.StandardCommand.OpenList",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovNavigationAccountingRegister.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I062",
+      "signature": "no measured value for StdPicture.AccountingRegister",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAccountingRegister.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAccountingRegister.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I063",
+      "signature": "no measured value for StdPicture.AppearanceStarHalfFilled",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I064",
+      "signature": "no measured value for StdPicture.FormattedString",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureFormattedString.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureFormattedString.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I065",
+      "signature": "no measured value for StdPicture.GotoURL",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureGotoURL.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureGotoURL.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I066",
+      "signature": "no measured value for StdPicture.QueryWizardTempTableDescription",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I067",
+      "signature": "no stored value for StdPicture.GotoURL",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-catalog-pictures",
+          "source": "Catalogs/CovCatalogPictureTemplate.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-catalog-pictures",
+          "source": "Catalogs/CovCatalogPictureTemplate.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I068",
+      "signature": "the exporter names no `ExchangePlan` standard command `Create`",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "Subsystems/CovCommandSubsystem.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I069",
+      "signature": "unresolved reference -2",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-orphan-characteristics",
+          "source": "Catalogs/CovOrphanCharacteristics.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-orphan-characteristics",
+          "source": "Catalogs/CovOrphanCharacteristics.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I070",
+      "signature": "unsupported colour \"web:MediumGreen\"",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorMediumGreen.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I071",
+      "signature": "unsupported colour \"web:Tomato\"",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorTomato.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I072",
+      "signature": "unsupported picture reference 0",
+      "occurrences": 2,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-orphan-catalog-facets",
+          "source": "Catalogs/CovOrphanCatalogTemplate.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-orphan-catalog-facets",
+          "source": "Catalogs/CovOrphanCatalogTemplate.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I073",
+      "signature": "<AutofillHint>PhoneNumber is not measured",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldAutofillHint.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldAutofillHint.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I074",
+      "signature": "<Button> names a colour the writer cannot place",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridButtonTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyButtonTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernButtonTextColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I075",
+      "signature": "<GeographicalSchemaField> has no writer yet",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridGeographicalSchema.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernGeographicalSchema.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I076",
+      "signature": "<InputField> names an event the writer cannot place",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputMultipleValueEvent.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputMultipleValueEvent.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I077",
+      "signature": "<LabelDecoration> names a background colour it cannot place",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationBackColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelDecorationBackColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationBackColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I078",
+      "signature": "<PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPdfGray.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPdfGray.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I079",
+      "signature": "<Settings> names <chart:selectionMode>, which the chart writer cannot place",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartSelectionMode.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I080",
+      "signature": "<UsualGroup> names a font the writer cannot place",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyGroupTitleFont.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I081",
+      "signature": "<chart:chartType> spells Column, which the chart writer has not measured",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartTypeColumn.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I082",
+      "signature": "<chart:chartType> spells Pie3D, which the chart writer has not measured",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartTypePie3D.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I083",
+      "signature": "Configuration <InterfaceCompatibilityMode> \"TaxiEnableVersion8_5\" has no known V76 pair",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I084",
+      "signature": "Help: stored-page read-back differs",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "Catalogs/CovHelpCatalog.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I085",
+      "signature": "MXL: <embeddedTable> of a SpreadsheetDocument has no writer",
+      "occurrences": 1,
+      "coverage_status": "same_failure_xml_normalized",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetEmbeddedTable.xml",
+          "probe": "embedded-table",
+          "scope": "accepted_then_normalized_away"
+        }
+      ]
+    },
+    {
+      "id": "I086",
+      "signature": "MXL: the exporter cannot read back the chart the writer built",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetChartLine.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I087",
+      "signature": "a <ChoiceList> item names <variant>",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridChoicePeriod.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernChoicePeriod.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I088",
+      "signature": "a table settles into <panel>, which the form does not declare",
+      "occurrences": 1,
+      "coverage_status": "same_failure_xml_normalized",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
+          "probe": "generated-user-settings-group",
+          "scope": "accepted_then_normalized_away"
+        }
+      ]
+    },
+    {
+      "id": "I089",
+      "signature": "a track bar's marking appearance is not measured",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridTrackBarFieldMarkingAppearance.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernTrackBarFieldMarkingAppearance.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I090",
+      "signature": "form <InputField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldCellHyperlinkRepresentation.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldCellHyperlinkRepresentation.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I091",
+      "signature": "no flowchart code for Shape \"VerticalBrackets\"",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-template-bodies",
+          "source": "CommonTemplates/CovVerticalBrackets.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-template-bodies",
+          "source": "CommonTemplates/CovVerticalBrackets.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I092",
+      "signature": "no measured ordinal for ChartOfAccounts.StandardCommand.OpenList",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovNavigationChartOfAccounts.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I093",
+      "signature": "no measured uuid for <ExcludedCommand>ChangeHistory</ExcludedCommand> on cfg:ExchangePlanObject",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovExchangePlanHistory.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I094",
+      "signature": "no measured uuid for Form.Item.<name>.StandardCommand.Back on <PlannerField>",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovPlannerBackCommand.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I095",
+      "signature": "no measured uuid for Form.StandardCommand.CreateByParameter on cfg:DynamicList",
+      "occurrences": 1,
+      "coverage_status": "same_failure_legacy_xml",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
+          "probe": "legacy-create-by-parameter",
+          "scope": "refused_by_current_native"
+        }
+      ]
+    },
+    {
+      "id": "I096",
+      "signature": "no measured value for StdPicture.AppearanceUpArrowGray",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureAppearanceUpArrowGray.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureAppearanceUpArrowGray.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I097",
+      "signature": "no measured value for StdPicture.DontNotify",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureDontNotify.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureDontNotify.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I098",
+      "signature": "no measured value for StdPicture.GrayedAll",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureGrayedAll.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureGrayedAll.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I099",
+      "signature": "no measured value for StdPicture.StartVideoconference",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureStartVideoconference.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureStartVideoconference.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I100",
+      "signature": "the chart declares 1 series and spells 0",
+      "occurrences": 1,
+      "coverage_status": "same_failure_xml_normalized",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartMissingSeries.xml",
+          "probe": "series-count",
+          "scope": "accepted_then_normalized_away"
+        }
+      ]
+    },
+    {
+      "id": "I101",
+      "signature": "unsupported Form ExcludedCommand: EditList",
+      "occurrences": 1,
+      "coverage_status": "same_failure_legacy_xml",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "Catalogs/CovNavigationCatalog/Forms/EditListForm.xml",
+          "probe": "legacy-edit-list",
+          "scope": "refused_by_current_native"
+        }
+      ]
+    },
+    {
+      "id": "I102",
+      "signature": "unsupported Form ExcludedCommand: Preview",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovReportExcludePreview.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I103",
+      "signature": "unsupported colour \"web:Linen\"",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorLinen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorLinen.xml",
+          "scope": "native_cf"
+        }
+      ]
+    },
+    {
+      "id": "I104",
+      "signature": "unsupported enum value colour pal:<name>",
+      "occurrences": 1,
+      "coverage_status": "same_failure_cf",
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "Enums/CovPaletteEnum.xml",
+          "scope": "native_cf"
+        }
+      ]
+    }
+  ],
+  "sets": [
+    {
+      "set": "8.3.27.2214/corpus-business-process-flowchart",
+      "manifest_sha256": "19d412318cd03b2c93fa3a3bc636164da630d98253a33101a36ebdb0e4bac3a7",
+      "inputs_sha256": "e1130a53a3376253643995a3027652259ecffebf34ef81fd1414f3ba4197196e",
+      "native_cf_sha256": "e63a4ff9722a6d4f4b936e0066b7f2701bafebf508ff4cf99da1c15e8e8f9e80",
+      "native_proven": 6,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart.xml",
+          "status": "missing"
+        },
+        {
+          "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart/Items/Work/Picture.gif",
+          "status": "missing"
+        },
+        {
+          "path": "BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-catalog-additional-index",
+      "manifest_sha256": "cfd859ad0e8b238fc0b069d34af45eb841e2324a27ff8e76dcef7da6cc60b604",
+      "inputs_sha256": "34e788d83f65ad92aae85e54ba920efaea2f5ee8f383669b16f8f451e53ddd45",
+      "native_cf_sha256": "c06b1bc538d6e68a64069583c921b6a632aa82324e07ab5df441dc1df581e26d",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-catalog-pictures",
+      "manifest_sha256": "1a39275d269eb8de215de8add08c4528e47e55aed7362934959691682291155c",
+      "inputs_sha256": "9ab06ec89fe21440afff46701a83ac53561a24b8b4ac37821ccb88df2e113b8c",
+      "native_cf_sha256": "814e6dde98dea40035b48e897f708915fee1b4b9f6d69051af3cdca88b82e8ad",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Catalogs/CovCatalogPictureTemplate.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-client-application-interface",
+      "manifest_sha256": "0eae666dd0aa08ff0bee4904e656f3251d863e685658508ffcc4f1b5889fdcd6",
+      "inputs_sha256": "ebd7aecf51aae3d133af86b30194da2f74154224f85351659fcf0fda566ebf1d",
+      "native_cf_sha256": "278a1934e997794830c4708b4f7581c07b14824c93aedc5f72f0abdd5040b381",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-cross-forms-from85",
+      "manifest_sha256": "afa9f17991c376622cfd3c968fc95e8e84f6c5b76a865999e07850e047582eda",
+      "inputs_sha256": "be09f405b0729cd17451166cdd38e459159dabe5c336114cc647b0e70a486106",
+      "native_cf_sha256": "927b6023bc6b4387d530e230d754ed142b93798273a624005e4b493b9dbf280e",
+      "native_proven": 4,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovCompatibleTable/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "Configuration.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-defined-type-resource",
+      "manifest_sha256": "10cd89b10e4a3f7ca23230d252dc38cc116e671a363687aa9159714480ab1318",
+      "inputs_sha256": "c5aab43b86a982a8b48999c5b39bda1c5ab3b2c6c39c768766f3a2f88f85d8a9",
+      "native_cf_sha256": "d7395e53b90077390976b8a6b639ac45e646d96e62c41a836c642f3778b425d8",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-english-composition",
+      "manifest_sha256": "d6c345c4d474feb3e71d4593157854db10576358c03c50f0240f8eed4665728a",
+      "inputs_sha256": "3e0bfc757bf2af7462ffbc724eaa04ba2c15fc1bd1046cce65588ef204f2668d",
+      "native_cf_sha256": "53903aad7e3f0dd64d6c0a02cc5cc4404a2507fdc95eee385f266c136ffdb610",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovEnglishComposition/Ext/Template.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-form-deep-bindings",
+      "manifest_sha256": "07070153e9eff44b70dba46fe6444ea964421d26269b4c5bafecc60f7c94b069",
+      "inputs_sha256": "6bd7e9f7c2308e79dc0bd93459500b6d17b4a65c1a7c20b0bc68da0fdf9de553",
+      "native_cf_sha256": "2a23fe4a1c1e93c8bc5431b1e6e947fe850f4d772d74e4a2f1960e3b43ba54b8",
+      "native_proven": 4,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovDeepComposerBinding/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-form-facets",
+      "manifest_sha256": "a94d944be5534be67ea08b804bbda889b3f92a2e438e4628fd41b8adfcd53d0c",
+      "inputs_sha256": "0f7102830214aac90f4ec62ed20671164072f6054f494044dc043f437c30e204",
+      "native_cf_sha256": "eb5623ee0c8c8e3119c1631eb69017fd24a940b22a640f8b8cccf800a8255652",
+      "native_proven": 19,
+      "platform_refused": [
+        "CovFacetTableExcludesDeselectAll"
+      ],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovFacetChartAutoMaxHeight/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetChartAutoMaxWidth/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetChartMaxWidth/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetChartOnActivate/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetCommandSpace/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetPlannerCommandGenerateProcessing/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetTableExcludesAddAutoSelectedField/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 6,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-form-settings",
+      "manifest_sha256": "0ba4c64958c9a58507818d18837a4ea1381d22e90dcf2e914ea5bf47908deba2",
+      "inputs_sha256": "78c076e7af56475b5235973fee447a2e7993a4c5d2c33856c53e73deccd1bf6f",
+      "native_cf_sha256": "28589661b0f5d21682b789e8cc0c66d579d7598d73ba643a9b1383345627ec4e",
+      "native_proven": 17,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovBoundTableExcludesSelectAll/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureAccountingRegister/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureAppearanceStarHalfFilled/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureFormattedString/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureGotoURL/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureNewConversation/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureQueryWizardTempTableDescription/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureToday/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovDynamicListRowNumber/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovTablePictureTitleFont/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovVerticalScrollAlways/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 3,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-graphical-schema-image",
+      "manifest_sha256": "e0e48d8f49f26947643dbb15b3c8e678b6cb50e9acadd83c15a0409afdd94930",
+      "inputs_sha256": "bf9a7377ebbedf0d48e05a7df4359da9e9611cd648defd805ca7a2af9b1de880",
+      "native_cf_sha256": "37f7045ff3b4cd12dc5c9b9a728f09598912f2cb831124f7ee34b30c1a4b5f64",
+      "native_proven": 4,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template/Items/Probe/Picture.gif",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-managed-forms",
+      "manifest_sha256": "94ae830850a9ca8bc9756c7b853d6313a7e4f367d7b6fd1f0a1963c093bb1d17",
+      "inputs_sha256": "fe06ccb3fdd8f22df013712ef7be4bb6f9864e80c010798d3b1a7b0cfcba619e",
+      "native_cf_sha256": "c1b9f0504f35f999ca61c8a8e4262eeac5c5e225eb3e9c2def0d139322d06c77",
+      "native_proven": 24,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovButtonPictureAccountingRegister/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureAppearanceStarHalfFilled/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureFormattedString/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureGotoURL/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureNewConversation/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureQueryWizardTempTableDescription/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureToday/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFormCommandSpace/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLabelDecorationTextColorMediumGreen/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLabelDecorationTextColorTomato/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLabelFieldTextColorMediumGreen/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLabelFieldTextColorTomato/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovPeriodField/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovUsualGroupBackColorMediumGreen/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovUsualGroupBackColorTomato/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovValueTableChildDataPath/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 17,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-mobile-permission-messages",
+      "manifest_sha256": "7a883c4d544b56570bce4631beba4922503c6dc0474269e153bcb10c51f81705",
+      "inputs_sha256": "b8805ca7c0c776b3e2f29827f9769dc85cd59b37a42ef42d972970a736eb6628",
+      "native_cf_sha256": "8aeffd9a7f78d6fc78e1d3b690b80cbc3301d2c915596488cb5fafa968660e12",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-nested-subsystem-rights",
+      "manifest_sha256": "9cb2ad585ca62f89d886f06f6176adef832fc07f2aa4adac02bd67276d5a1bf6",
+      "inputs_sha256": "4bdf427f00665d18021cd87fae21363106fc371491a0f4a4af42cbe505cf2171",
+      "native_cf_sha256": "e0a738fa9c86270e6080a43cf0a095a48e6528c1a81891e6568d186d0fb99a75",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-orphan-catalog-facets",
+      "manifest_sha256": "c3de558b00f1bbc720c1a37ce92f4865ca072e02ac9d4e0843a9759d5c50fdd4",
+      "inputs_sha256": "e1eb04f4eb028ff5204753c96c43451dd833198659fafa160f7ef45363e830ef",
+      "native_cf_sha256": "197de0a08aeb4e273c6fd92b29e43b256a60a9299e4ea0efc1ae24e8749d11f3",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-orphan-characteristics",
+      "manifest_sha256": "89714532b3efe166c05eb793964c9f74acbd173caedfd110dcdacb1d7d9e12d8",
+      "inputs_sha256": "e506241c261acdfd7abe93d53ed0a1fb8442cdb02c14fd14bce138008da12c72",
+      "native_cf_sha256": "9c69aa23e06fd5c81b5b7bb95944f832b3c6fe2ad214d37c7540226dd6a39ca0",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Catalogs/CovOrphanCharacteristics.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-owned-catalog-forms",
+      "manifest_sha256": "50a7c0709a12b6509ffe0aadd18b163c81dc3d6314ff137e976a60bb88d09664",
+      "inputs_sha256": "be9769ee337a45eb6ab8cf62027f8128f6f25721a06cd61096e1f5efadc0b855",
+      "native_cf_sha256": "08f28000a675cc4f47dfa185f823a5a0802a510944caf994f1f19c5b102b0751",
+      "native_proven": 8,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "Catalogs/CovOwnedBindingCatalog/Forms/TableForm/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "Catalogs/CovOwnedDefinedCatalog/Forms/TableForm/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "Catalogs/CovOwnedUnionCatalog/Forms/TableForm/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 3,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-recordset-references",
+      "manifest_sha256": "39ade7630558ded0cdb5fddf0379e965ee697b39616f6f3e28979efd1bc4e19c",
+      "inputs_sha256": "d68fb67392ad35e3bfd90a6bd9d2eb49a7b4c9e5b0d22f87af0432c01f13e5a0",
+      "native_cf_sha256": "6fcb22d4a178d896d4a1f50bae63aa7db5df63a17b11b6e9cb1ac5a6a496a0cb",
+      "native_proven": 4,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-reference-network",
+      "manifest_sha256": "d35c80be20fc9e8cf1056e79fa518e732dfdfcfdf1c1a606e03488a099ce604d",
+      "inputs_sha256": "7189cf804261ff16fe18e73fc6c7d55358010d53c3ec329d9969fc756f84aab2",
+      "native_cf_sha256": "60f91f1d3473916874396326abd79daf58b4c0bb1ebd6c1749c210914f45b3af",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "InformationRegisters/CovNetworkOptions.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-resource-storage",
+      "manifest_sha256": "1a3a1fa0cecad6edecd41f205abd47dd3886d44f97a5ea07c1e69aeb81555598",
+      "inputs_sha256": "69e803be4d207be96c3413ec04615d7e5ee8ac08265141b727f8f12c7325497b",
+      "native_cf_sha256": "ca531c7e73e8266a08033fd2a939a0eb014668ab617cb26313a54454286fd50b",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-role-object-rights",
+      "manifest_sha256": "94d867a944b8caaac3d21a1e04155fb78210793754b8706b74ca0da7583f72a1",
+      "inputs_sha256": "81428cd20e1d2bd191c5b6cb4657fc79328bfe7aeab3210a31a57d529c8a9ee2",
+      "native_cf_sha256": "4f335dbb0e3f30e7ecbb930796affed1068ca1d9c960439b4d1b1beddc033409",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-spreadsheet-facets",
+      "manifest_sha256": "029a0fdd7b773be73856d0c21c1fa8fa0c9af3025af5d9a9de2b17246085a5a8",
+      "inputs_sha256": "01cfc456a0572411d9856d680bc0ebd78d2d53b5aabaaf5c1d9bc3438c8f8155",
+      "native_cf_sha256": "0a10aa69f798ac50b5f0f70cee61f9dd91763df5117503f1418ff0d471bf1a28",
+      "native_proven": 11,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 9,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-spreadsheet-standard-picture",
+      "manifest_sha256": "a1c87fa6a3bb1c159d465ef2e2ec50b1a09eb8d869a6244a6243e7f35883f0f5",
+      "inputs_sha256": "e053d93cd7568a156fc9e1aa3e8fc216d6f06b801c184a6d38bc957f45d79b1b",
+      "native_cf_sha256": "cdbb59ea3aef1677843c6b05bc2cc4165e4bbd3e18667aea6d2aa27071042b4e",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-style-colors",
+      "manifest_sha256": "61fed50e58cbf0b526cd8ebc038a0dead775d5d10d61943c36bbb24aef725216",
+      "inputs_sha256": "188937388d552ecea8f231b95b3aced57e370462745a2406685b468a01a159aa",
+      "native_cf_sha256": "1a02c7353003ea2f450363e5d242feccef221509f61b8e5acc692338729e91cc",
+      "native_proven": 5,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "StyleItems/CovStyleColorLinen.xml",
+          "status": "missing"
+        },
+        {
+          "path": "StyleItems/CovStyleColorMediumGreen.xml",
+          "status": "missing"
+        },
+        {
+          "path": "StyleItems/CovStyleColorTomato.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 3,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-subsystem-references",
+      "manifest_sha256": "b3c50e2f44f2951522b02de906756372118f5b157fd9351239705542aa77d04c",
+      "inputs_sha256": "ea0f9acf2fe1c350f19be56fcc581582818bf69fed86343bc2d87bdd11282fcb",
+      "native_cf_sha256": "6f19e8620645283767f6d971809ed2af166efa662b9444599553c8d1eb74df0e",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-task-addressing",
+      "manifest_sha256": "d8ab563010e881b8d5649f6740ba87cdeccb9b4992a691209542b5487e7eaa49",
+      "inputs_sha256": "314cdb130429d328b4b96aadda50c55aec0ef7b59461411d56ea25361bea0213",
+      "native_cf_sha256": "a63b49c61215307adb5b13dae30d99471db24459ba79b1579e360d7a9e7aa615",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-task-form-events",
+      "manifest_sha256": "ce9a7b78ead3194f58c8482079440b1b95c0ca6ccaa787105c092fdfc57dd9d7",
+      "inputs_sha256": "63c590fcb7d846d4df7923d77fd1a767d00743b1b7bdf93267a003777ffe0f16",
+      "native_cf_sha256": "f910ee85812df81361e544365ee7eba81a79b0c38e1865418e55b25b03acbf95",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.3.27.2214/corpus-template-bodies",
+      "manifest_sha256": "f92c9131c299e3e4a9ac94d6507bacad4c1322217c44acff76094a90d0369998",
+      "inputs_sha256": "5b3566910b09888f17fbeba07a5fcd9bf21cff01539778dca1f49b0a2d7af9cd",
+      "native_cf_sha256": "682f1ca8d121796a7a71c5ccc30a5aa45194b0c09bd09ea3a68011d1d8ac24f1",
+      "native_proven": 6,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovVerticalBrackets/Ext/Template.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-business-process-flowchart",
+      "manifest_sha256": "7df11515b007b7195fdc06ecc77277e81a15ab4becc7c2dd8fb0cf9a2233d8ea",
+      "inputs_sha256": "cf0e6c22c9c8aa473b2e01abacca07c54929461e238be0c11ef7fad602fdf0c6",
+      "native_cf_sha256": "d0faddc8c1523a50f98aac245355975dc51378c187277b26375f7102227bdbfa",
+      "native_proven": 6,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart.xml",
+          "status": "missing"
+        },
+        {
+          "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart/Items/Work/Picture.gif",
+          "status": "missing"
+        },
+        {
+          "path": "BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-catalog-additional-index",
+      "manifest_sha256": "b76c2168cda6edcb38c4d3e9d219220244d905e888c8165538c475b7247e5654",
+      "inputs_sha256": "6fac6100bc66efb6e118c86ffb8a57214d6eedce99de8ed96f0ef504ceee1084",
+      "native_cf_sha256": "38a1580b7da58940b3d9fa8e3d5e39bdfe62ab18af3145b5fbda9f884e5a1904",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-catalog-pictures",
+      "manifest_sha256": "db8471305ce28429c9c8713bd71c298d198cf7f4ef31aea76b1e1c366bdf6fe5",
+      "inputs_sha256": "d7bc7483ac0ded70690c02de9f4cc30ec08aab77a4879312646aaa6bd8fc3a17",
+      "native_cf_sha256": "a537e66120e55dbc012ca84f7bb9c405c6ed552ecb5d21a30e53358a2c19dcfb",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Catalogs/CovCatalogPictureTemplate.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-client-application-interface",
+      "manifest_sha256": "43b354366eddc4a4bfd152594465c9cd16cda5d2e805703c5d0643fe1190343d",
+      "inputs_sha256": "81ceaf49977a2fe6bf64b14a51ad02d599ebdddd9818111d1a56637f20f00af3",
+      "native_cf_sha256": "59ed979240d956e707dabbb03f4551b56d3e3bd7398e3941dde98f42d0c86659",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-compatible-form-layouts",
+      "manifest_sha256": "99bfa03c49d822d713c6acf5d754049e756b7234d26e8f916862bf532a53995a",
+      "inputs_sha256": "0eee71e6f0ed35995e13a4a6f588fcc68d12eb9da5331b9cdfdeb414fbb3a4e6",
+      "native_cf_sha256": "927b6023bc6b4387d530e230d754ed142b93798273a624005e4b493b9dbf280e",
+      "native_proven": 4,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovCompatibleTable/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-cross-forms-from27",
+      "manifest_sha256": "dee71f05c0b35f1a9190006d44b7691730ebe741ab24cae897d50c011bfed754",
+      "inputs_sha256": "af621f9013121a615d91a628b14b039fd4d91ee8ea756f0913044846e1187d3d",
+      "native_cf_sha256": "28589661b0f5d21682b789e8cc0c66d579d7598d73ba643a9b1383345627ec4e",
+      "native_proven": 17,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovBoundTableExcludesSelectAll/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureAccountingRegister/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureAppearanceStarHalfFilled/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureFormattedString/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureGotoURL/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureNewConversation/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureQueryWizardTempTableDescription/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureToday/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovDynamicListRowNumber/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovPictureTitleFontEnterOnInput/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovTablePictureTitleFont/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovVerticalScrollAlways/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 3,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-defined-type-resource",
+      "manifest_sha256": "47e038c33e656f5730de80b953c44827364e65b3ffa19f57e89554e57ff3ba46",
+      "inputs_sha256": "5586cb591cfbb9af8a248db6633255625541b51922755dce80a14c4b8a4c09e9",
+      "native_cf_sha256": "cac16912c6f6aa17b3e6a2a0121909157373dafecaa7ef88b6e1e3e38084e062",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-english-composition",
+      "manifest_sha256": "2f2617b1397fc15a8244a1eb3d0808612ee4564a123f850f56f4c79481a2e31e",
+      "inputs_sha256": "d72166553d78053adcfad2c50fee9df3f0b3be09328d711afc41cec54e0bb8cd",
+      "native_cf_sha256": "756f10d8758d41f5117f077412dce6acb1cc5cedd1dbe18e1334d88aa9b58e87",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovEnglishComposition/Ext/Template.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-form-deep-bindings",
+      "manifest_sha256": "dc91df67b3cf6fef5de6bd4c865320e5216074f90fa373234a28414d16d721b6",
+      "inputs_sha256": "8ee6cc4a24681d45ef7d2a2bd264868f98a7bbe2512aea6600deab6c28d573b8",
+      "native_cf_sha256": "ead48609831bc1bf352e55c5223f04fc82eed86e453ad4e581e8aaf0b49794a1",
+      "native_proven": 4,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovDeepComposerBinding/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-form-facets",
+      "manifest_sha256": "186cd9fc1c1466a3628a02ae985e9ff39c408bc49fb7e21c1b5e8e47d0cf5555",
+      "inputs_sha256": "ca86eba2176ca740e6390a8fc5b3b3a8913e5b68a27110be0b89b8feb82c3814",
+      "native_cf_sha256": "87b3213960f931cb294ad6e47439331f573305991ac01e419eab27cf2ad4a448",
+      "native_proven": 20,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovFacetChartAutoMaxHeight/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetChartAutoMaxWidth/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetChartMaxWidth/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetChartOnActivate/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetCommandSpace/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetPlannerCommandGenerateProcessing/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetTableExcludesAddAutoSelectedField/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetTableExcludesDeselectAll/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFacetTableExcludesSelectAll/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 7,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-form-settings",
+      "manifest_sha256": "d464082d145e2658db29f40e5b7bb1f202423d56631c77f69ddfc35baefa97dd",
+      "inputs_sha256": "c87d93e7fae9a77239b794f8c2164d93a20cfc64973971be2f4276b10c584351",
+      "native_cf_sha256": "44504a3f663410b941e3b3c037b82ea20741fa0251b48c04a8bd4a9ed1991bcb",
+      "native_proven": 17,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovBoundTableExcludesSelectAll/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureAccountingRegister/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureAppearanceStarHalfFilled/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureFormattedString/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureGotoURL/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureNewConversation/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureQueryWizardTempTableDescription/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovCommandPictureToday/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovDynamicListRowNumber/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovTablePictureTitleFont/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovVerticalScrollAlways/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 3,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-graphical-schema-image",
+      "manifest_sha256": "a9fd276d55ad0f424b20bf4b978ac433d4a7a62a6ca35d68a2c9346e56355a89",
+      "inputs_sha256": "98530028136e9e1507fd828709070729f16bf703a2f5afb9f66be229742d2aec",
+      "native_cf_sha256": "8a6ad449939dd9f2335a08b494415badc33565db6380cf17a787c2cd250413a2",
+      "native_proven": 4,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template/Items/Probe/Picture.gif",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-managed-forms",
+      "manifest_sha256": "8be8a6664afc8e22cea22b34fcbb8c6c78584d10f8880f7187bb9217f0251f0e",
+      "inputs_sha256": "12bea1c84066b75a7112792c97b7d0786e57cd2e25caee0486e4b8632a8281ee",
+      "native_cf_sha256": "66901bcba3d460d88b4b6ce7198a31b39b502f7c87af64a35e51fd39f2875604",
+      "native_proven": 24,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovButtonPictureAccountingRegister/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureAppearanceStarHalfFilled/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureFormattedString/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureGotoURL/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureNewConversation/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureQueryWizardTempTableDescription/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovButtonPictureToday/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovFormCommandSpace/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLabelDecorationTextColorMediumGreen/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLabelDecorationTextColorTomato/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLabelFieldTextColorMediumGreen/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLabelFieldTextColorTomato/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovPeriodField/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovUsualGroupBackColorMediumGreen/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovUsualGroupBackColorTomato/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovValueTableChildDataPath/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 17,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-mobile-permission-messages",
+      "manifest_sha256": "813e7d33cc028d7561e7602e541d1e59dfed9d2f1a5a186bbd5e1f05eefc3557",
+      "inputs_sha256": "062107c120fac1fa87438b9ab3ade293de0f07b09fe130f7fd730232f3ed6138",
+      "native_cf_sha256": "f2d92c2f9ce656775d3cb6b4e7c4eae914422f07c7d0b9e5991afcc6bc8b2c6d",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-nested-subsystem-rights",
+      "manifest_sha256": "86cef408dc50bd273e41de5d04fe84b4731b74e630df40278979e06031bea58a",
+      "inputs_sha256": "e3b29cd85e8c702947e74e267fab788cd00378acbbba6daddec80daa437d43b8",
+      "native_cf_sha256": "9f984c022ebedd666dbf043c12bb84b9f3d1024d8728c33f6e8b0cba890ea488",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-orphan-catalog-facets",
+      "manifest_sha256": "eb815f641601f2c515635298a84182f4c1c3bbb485847b10cc87659902739af3",
+      "inputs_sha256": "3a7e71acea230e0a87c47ee7484751c0f55bc865827b9e1efa3fad768a017321",
+      "native_cf_sha256": "d6e353933cad02666e4329066ea34a6d1c1a871662bfcdf89cf544e4a8309fdc",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-orphan-characteristics",
+      "manifest_sha256": "f803f01159a332af8f36253faebccc733d827b446edbbbe55d79616cdc63bdfa",
+      "inputs_sha256": "b4294e96a79cb1ec2aa5608069f65e5dc766474f7ee980a461df184c37465d4e",
+      "native_cf_sha256": "bdfa6acfe2501b6938fb1db2aeab57fcd74a831c5509fa62b3da78da61f51f64",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Catalogs/CovOrphanCharacteristics.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-owned-catalog-forms",
+      "manifest_sha256": "4c5f3ce824cfae7957877467f0e6eef0141efb8d28f7df07759b1af3bb53bbe2",
+      "inputs_sha256": "3f97692168279c1ec1adf405c0b062c5104416e5f1619c113a671612b9caafc4",
+      "native_cf_sha256": "dee7f0668be42908c92521898cd7b2baadc637bbd84582cf76a28ce82db09b3a",
+      "native_proven": 8,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "Catalogs/CovOwnedBindingCatalog/Forms/TableForm/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "Catalogs/CovOwnedDefinedCatalog/Forms/TableForm/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "Catalogs/CovOwnedUnionCatalog/Forms/TableForm/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 3,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-recordset-references",
+      "manifest_sha256": "e686d6ff54ddf4e67b7932d8db782216a92457a1b9a373f238a6662fa8008cd7",
+      "inputs_sha256": "012772327ea20c504b3237cfffd7e46a05e25874c106ebc50507d71fdc2f821f",
+      "native_cf_sha256": "d8770ba46e6c0bc31d3c023216bc9985a4b70f4d159b77876bb5151e908f21bc",
+      "native_proven": 4,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-reference-network",
+      "manifest_sha256": "1aa02ca5cf250e002fe0063e76a9e8a4254b17b4986c30efc2e3feecec672eee",
+      "inputs_sha256": "5356b768855ea637626f62fd7362d93c5d5ebd63e827dd6ca7e111f407a81584",
+      "native_cf_sha256": "870621a066f836621683ee3277566b7392a9d7cff4965827374044854b71aec9",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "InformationRegisters/CovNetworkOptions.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-resource-storage",
+      "manifest_sha256": "63cb0ae65a3d172c2b043ac5e77b5f4af86a5a7b28dd6a04ced26bee4e2575d9",
+      "inputs_sha256": "7869244a653528cc2676e5326b1bcf8ffabd667f068709f7785b95f01ad6f594",
+      "native_cf_sha256": "4ba72f68043fa8103a502b573b42ca6087cee9070f19d7859b774e6938d95890",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-role-object-rights",
+      "manifest_sha256": "0df6d183953ab4293da4990004f17581211eb4d98a13126d023629b728c16a6b",
+      "inputs_sha256": "8fe124e4ffdd4bb76831849378df48b380d83a7a930b07e14f8ac6aa8b481d28",
+      "native_cf_sha256": "33e4098b96a3f10a9c2393366f6c508e586b38b5756c4543fc866c6739b9e888",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-spreadsheet-facets",
+      "manifest_sha256": "5a24e01fb34686f93734196e8cb0120f66fb38b8a175cb53fe2312c487addbbf",
+      "inputs_sha256": "50e6bdc85b49766f679ed8c357667cb230d40a15d7bef3c64c84a9e350cf6c85",
+      "native_cf_sha256": "3490af9c79c00d0a67677378c44b61bdfc3e946f34b6828500eb13a5b4127eac",
+      "native_proven": 11,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 9,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-spreadsheet-standard-picture",
+      "manifest_sha256": "8d8fbcf58539f321b467d17b42d48a4e6096548dd9c5119187436e7208b20a76",
+      "inputs_sha256": "bce91a28448bc49e32f21a4a85de7b35c77b4e3eec32e4f465d4b9d586db5c76",
+      "native_cf_sha256": "9d9c9054efbfead560993b61ec969f82cc906844143b30a89f275e10e8f8f36c",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-style-colors",
+      "manifest_sha256": "e618499935a2f651a03a49dd4ee70c85970ca0af34f3e7809524db80aa4737c7",
+      "inputs_sha256": "debe09bd085b8d91b1f5638140d785565d584c96635b369ec125c3b088267dcd",
+      "native_cf_sha256": "55e03e57bb3f460ad253493345e8b3efc0fe2af472e2be7fe2fcf51b8df20f53",
+      "native_proven": 5,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "StyleItems/CovStyleColorLinen.xml",
+          "status": "missing"
+        },
+        {
+          "path": "StyleItems/CovStyleColorMediumGreen.xml",
+          "status": "missing"
+        },
+        {
+          "path": "StyleItems/CovStyleColorTomato.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 3,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-subsystem-references",
+      "manifest_sha256": "ecfc8aa387b79e80edf3727e772e2499666ceb45dd3940f0f9958d53468aac13",
+      "inputs_sha256": "8afbbbc097467166848f087c85f0099624db3e1e3483195306bbafadfb9cebb3",
+      "native_cf_sha256": "9aadd34fd25cabde582414d9af8dd04e2a0fc18fbffa2ba4c828e55680ca7ecf",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-task-addressing",
+      "manifest_sha256": "0368c5a0474d6116db82960b925ee375c58f6e4b141d18d847d37efed510024c",
+      "inputs_sha256": "111fc12a060f41452006c5e72cd354396e29f79456247679fcc2f8c92d38ad58",
+      "native_cf_sha256": "f068a9118a88d1068abc8b47030a83dbd63cf6164b0ca06744043ba29179e35f",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 0,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-task-form-events",
+      "manifest_sha256": "51d0bfa1dd168f962f85669a79af93668e31e8134d7637eea6b3e2c60cfcb67b",
+      "inputs_sha256": "979b56cf900486d05b6a6f8e7f6c728a43d9fc4570ef23c47e70ed89e4ae6664",
+      "native_cf_sha256": "9c31f4e0920121d0b5b34136eed1ce8c433286c9af11e64746a7beb6bf87b340",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1150/corpus-template-bodies",
+      "manifest_sha256": "440eb5c03d01f969c95200fd76d02e5ca48fa0f356ffe6a78b02ad2771035003",
+      "inputs_sha256": "a28740418c66f899cad55972042923feca9dfb88f1f0d92296cefaf994229c6e",
+      "native_cf_sha256": "25f4a40f3e49a3e2509c35aaefcf1344928375d451624f1924661c91b50fb446",
+      "native_proven": 6,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovVerticalBrackets/Ext/Template.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 1,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-chart-settings",
+      "manifest_sha256": "a5fc684df8b02435fb2f80df264800cf5b4851cf0ceebe89e1cbdc735951ad20",
+      "inputs_sha256": "3e41889b7fbc369d458194a986acb58f91a12356e9b05f57b33a5f776f05d0ae",
+      "native_cf_sha256": "1a957508eaa7c80dfc5faf32c144fa20dcfd219ff41dbb2feab26986f715972b",
+      "native_proven": 6,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovChartMissingSeries/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovChartSelectionMode/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovChartTypeColumn/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovChartTypePie3D/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 4,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-hybrid-interface",
+      "manifest_sha256": "1146c281ea7a4566c45e471d0d32d09289f0fd231f7481e4ed45e3efef5754d4",
+      "inputs_sha256": "6ab208e06f9fea122bbe344ccf02f2e8b2a88af7302941a93ea0d2f53260cbd8",
+      "native_cf_sha256": "dc18afd914f2b98f39edd97c1ece3fced7de4b028ac10bf3e52cbf9cf1240037",
+      "native_proven": 48,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovHybridBrokenTilt/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridButtonTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridChoicePeriod/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridColumnGroupCard/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridCommandBarAppearance/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridGeographicalSchema/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridInputFieldAutofillHint/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridInputFieldCellHyperlinkRepresentation/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridInputFieldWidthInCard/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridInputMultipleValueEvent/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridInputPictureExternalUser/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationBackColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelDecorationTitleLevel4/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldCellHyperlinkRepresentation/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldTitleLevel4/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridLabelFieldUseCopy/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridModeTaxi.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridModeVersion85.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridParentButton/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridPdfGray/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureAppearanceUpArrowGray/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureChar/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureDecorationPictureColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureDontNotify/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureGrayedAll/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridPictureStartVideoconference/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridRadioButtonFieldHorizontalStretch/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridReducedText/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovHybridSheetFormattedString/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridTrackBarFieldMarkingAppearance/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovHybridUsualGroupBackColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "Configuration.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 34,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-legacy-form-properties",
+      "manifest_sha256": "b7e18774169b3904471e8c5ef8e54b948fe4b6b41f238c56a69a705230900d30",
+      "inputs_sha256": "38d9e6653e23b2e315bb86fac08150acfd8ef6100dbd481349176c82f6801dec",
+      "native_cf_sha256": "4243f736968336785d025708f9a8fb1b0710faf1377d712de1502bd2469a3114",
+      "native_proven": 14,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovLegacyButtonTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyButtonTextColorPalette/Ext/Form/Module.bsl",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyGroupTitleFont/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationBackColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationBackColorPalette/Ext/Form/Module.bsl",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelDecorationTextColorPalette/Ext/Form/Module.bsl",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTextColorPalette/Ext/Form/Module.bsl",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyLabelFieldTitleLevel4/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovLegacyPictureDecorationPictureColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyPictureDecorationPictureColorPalette/Ext/Form/Module.bsl",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyUsualGroupBackColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovLegacyUsualGroupBackColorPalette/Ext/Form/Module.bsl",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 10,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-modern-details",
+      "manifest_sha256": "0f14995123407da927f6efc6c461541d03f63da8cc4776d9291a5894814ba626",
+      "inputs_sha256": "d33377986bcfd49511907d302d9142e88a68f8811beb02308b7ac13942f71c43",
+      "native_cf_sha256": "56d525dcf24628687c88f3d07e260b824dafa2d277f05b9edd35b9055a57d892",
+      "native_proven": 40,
+      "platform_refused": [
+        "CovModernRootExcludePreview",
+        "CovModernRootExcludeEditList"
+      ],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovModernButtonTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernChoicePeriod/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernColumnGroupCard/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernCommandBarAppearance/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernGeographicalSchema/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernInputFieldAutofillHint/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernInputFieldCellHyperlinkRepresentation/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernInputFieldWidthInCard/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernInputMultipleValueEvent/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernInputPictureExternalUser/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernLabelDecorationBackColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernLabelDecorationTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernLabelDecorationTitleLevel4/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernLabelFieldCellHyperlinkRepresentation/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernLabelFieldTextColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernLabelFieldTitleLevel4/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernLabelFieldUseCopy/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernPdfGray/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernPictureAppearanceUpArrowGray/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernPictureDecorationPictureColorPalette/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernPictureDontNotify/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernPictureGrayedAll/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernPictureStartVideoconference/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernRadioButtonFieldHorizontalStretch/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernTrackBarFieldMarkingAppearance/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernUsualGroupBackColorPalette/Ext/Form.xml",
+          "status": "missing"
+        }
+      ],
+      "xml_compile_failure_count": 26,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-modern-forms",
+      "manifest_sha256": "5e4645491c5e69735e5f756f902cb04359fd9435f20cf6b483b70be4881afb4e",
+      "inputs_sha256": "4b995858ddf87d881fc1278439e07648fabf5d1a0d1eb186d9ea5f7fec8dc4eb",
+      "native_cf_sha256": "0f141e519be26f61acb7ddf854564c5ec6c8bb4ed80f4ddd78495c08bdf1093a",
+      "native_proven": 12,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonForms/CovModernBrokenTilt/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernLabelDecorationFont/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernLabelFieldFont/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernModeTaxi.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernModeVersion85.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernParentButton/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernPictureChar/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovModernReducedText/Ext/Form.xml",
+          "status": "missing"
+        },
+        {
+          "path": "CommonForms/CovModernSheetFormattedString/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 9,
+      "cf_export_exit_code": 2,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-modern-owned-interface",
+      "manifest_sha256": "a4bfc092def5a5b5514913315cd7f695a586e4df305fd8addb384e4082963050",
+      "inputs_sha256": "1bb8067ac0f0afc80af8972e98241ee764fc3cb003e57adfebf98f0bd228e77a",
+      "native_cf_sha256": "3d5a5df693772922426585d08cb2aedc69f636221c4590563e49a980efacb1a9",
+      "native_proven": 2,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml",
+          "status": "different"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml",
+          "status": "different"
+        },
+        {
+          "path": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 3,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-modern-spreadsheet",
+      "manifest_sha256": "41e3fdc2711859a1bbe6846585ea1b4741d238b2ac7c3788d26d5fbaf033c80a",
+      "inputs_sha256": "07ed278a9cf030c1ec20c7b42d85bfbc99f2ea26bf1173a80a512fb47d0fdb92",
+      "native_cf_sha256": "de37f8c326144b7155d7e3305464165b3ebe5596e7dca62a7235c547e5db8871",
+      "native_proven": 9,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "CommonTemplates/CovModernSheetChartColumn/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetChartLine/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetDashed/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetPalette/Ext/Template.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonTemplates/CovModernSheetSkyBlue/Ext/Template.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 6,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-navigation-commands",
+      "manifest_sha256": "69db631fa4a8dfdb62f410ab0c1302b8ee7079aa6e063113918cf7c243454f3b",
+      "inputs_sha256": "2a1b82efed0900c199a69e6cb6b09b66317b19af13ec66f211114d324c9d3e9f",
+      "native_cf_sha256": "5b1e7d4bb694c531bc362530c37b7822da847146a07308d747be63fa24dddbc5",
+      "native_proven": 11,
+      "platform_refused": [
+        "CovDynamicCreateByParameter",
+        "CovDynamicEditList"
+      ],
+      "export_differences": [
+        {
+          "path": "Catalogs/CovNavigationCatalog/Forms/EditListForm/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovGeneratedUserSettingsGroup/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovPlannerBackCommand/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovRecordSetRowPicture/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovReportExcludePreview/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovTableOnlyDeselectAll/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "CommonForms/CovTableOnlySelectAll/Ext/Form.xml",
+          "status": "different"
+        },
+        {
+          "path": "Configuration.xml",
+          "status": "missing"
+        },
+        {
+          "path": "DocumentJournals/CovNavigationJournal/Forms/ListForm/Ext/Form.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 9,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    },
+    {
+      "set": "8.5.1.1529/corpus-palette-help-and-interface",
+      "manifest_sha256": "070209eeae91248135038af2e113e4a01f04662454fe59e812cda67fc092bbfa",
+      "inputs_sha256": "e5393f907572b1e5caba5a58279a5a4c6d1abeb80fd418bf38ee59c26efbb9cd",
+      "native_cf_sha256": "2eabf1289683c13375990242a0cb307a7a468239fee275dcc6103081655488b0",
+      "native_proven": 3,
+      "platform_refused": [],
+      "export_differences": [
+        {
+          "path": "Catalogs/CovHelpCatalog/Ext/Help/ru.html",
+          "status": "different"
+        },
+        {
+          "path": "Enums/CovPaletteEnum.xml",
+          "status": "different"
+        },
+        {
+          "path": "StyleItems/CovPaletteViolet.xml",
+          "status": "missing"
+        },
+        {
+          "path": "Subsystems/CovCommandSubsystem/Ext/CommandInterface.xml",
+          "status": "different"
+        }
+      ],
+      "xml_compile_failure_count": 4,
+      "cf_export_exit_code": 0,
+      "xml_audit_exit_code": 0
+    }
+  ]
+}

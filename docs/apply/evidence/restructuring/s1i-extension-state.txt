@@ -1,0 +1,35 @@
+# S1-I: the extension side of the БСП 8.3.27 corpus clone (four extensions)
+
+## SchemaStorage / DBNames rows / registry / bookkeeping
+DBNames header 10824 count 6459 entries 6459 {'Fld': 4057, 'InfoRg': 259, 'InfoRgChngR': 259, 'Const': 245, 'ConstChngR': 245, 'VT': 167, 'LineNo': 167, 'Enum': 123}
+DBNames-Ext-1 header 10989 count 0 entries 0 {}
+DBNames-Ext-347eea02-0773-11e8-8780-107b44a2858a header 7841 count 41 entries 41 {'Fld': 15, 'Document': 2, 'Reference': 1, 'DataHistoryVersionsExt': 1, 'DataHistoryLatestVerExt': 1, 'DataHistoryMetadataExt': 1, 'DataHistorySettin
+DBNames-Ext-b3fa0ef0-9968-11f1-8f4f-00e04c680093 header 11033 count 753 entries 753 {'Fld': 552, 'VT': 25, 'LineNo': 25, 'InfoRg': 23, 'Enum': 16, 'Reference': 14, 'Document': 11, 'AccumRg': 9}
+SchemaStorage 0 bytes 977473 tables 0 [] ...
+SchemaStorage 1 bytes 177155 tables 0 [] ...
+ExtensionsInfo columns:
+   _IDRRef binary
+   _ExtensionOrder numeric
+   _ExtName nvarchar
+   _UpdateTime datetime2
+   _ExtensionUsePurpose numeric
+   _ExtensionScope numeric
+   _ExtensionZippedInfo varbinary
+   _MasterNode nvarchar
+   _UsedInDistributedInfoBase binary
+   _Version timestamp
+   _DataSeparationUse2858 binary
+   _Fld2683 numeric
+_ExtensionsInfo 4 ['_IDRRef', '_ExtensionOrder', '_ExtName', '_UpdateTime', '_ExtensionUsePurpose', '_ExtensionScope', '_ExtensionZippedInfo', '_MasterNode', '_UsedInDistributedInfoBase', '_Version', '_DataSeparationUse2858', '_Fl
+_ExtensionsRestruct 57 ['_ExtDataID', '_RestructData', '_RestructDataInt', '_RestructDataType', '_DataSeparationUse2858', '_Fld2683']
+_ExtensionsRestructNGS 3 ['_ExtDataID', '_RestructData', '_RestructDataInt', '_RestructDataType', '_DataSeparationUse2858', '_Fld2683']
+
+## tables of the extension schema by owner
+extension schema table entries: 221 owned by an extension (number in DBNames-Ext-*): 142 with a main object number (extends an adopted object): 78 neither: 1
+companion kinds: {'AccumRgOpt': 2, 'AccRgOpt': 1, 'Enum': 1, 'CRgRecalc': 1, 'CRgRecalcChngR': 1, 'Reference': 5, 'ChrcChngR': 1, 'RefSInf': 1, 'InfoRg': 32, 'InfoRgChngR': 30, 'Chrc': 1, 'Task': 1, 'BPr': 1}
+companions: AccumRgOpt2363 AccumRgOpt2364 AccRgOpt3965 Enum2894 CRgRecalc3975 CRgRecalcChngR7761 Reference18 ChrcChngR1277 Reference6523 Reference2596 RefSInf4605 Reference5125 Reference9936 InfoRg5045 InfoRgChngR5946 InfoRg9987 InfoRgChngR9990 InfoRg429 InfoRgChngR5418 InfoRg5419 InfoRgChngR5478 InfoRg4911 InfoRgChngR5952 InfoRg445 InfoRgChngR1177 InfoRg3217 InfoRgChngR3576 InfoRg7133 InfoRgChngR7138 InfoRg4013 InfoRgChngR4027 InfoRg5015 InfoRgChngR5497 InfoRg5426 InfoRgChngR5975 InfoRg7924 Inf
+
+## adopted objects per extension (mssql-restructure --extensions-report, active images)
+registered 4 adoptions 75 tables of the extension schema 243
+{('_ДемоПустоеРасширение', 'active'): 1, ('_ДемоРасширение', 'active'): 58, ('ServiceDesk', 'active'): 15, ('VAExtension', 'active'): 1}
+adopted objects whose header names the object it extends by uuid: 28 by identity (nil uuid): 47

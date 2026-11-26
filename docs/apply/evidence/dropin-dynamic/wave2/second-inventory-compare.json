@@ -1,0 +1,158 @@
+{
+  "native_snapshot": "native_second.json",
+  "own_snapshot": "own_second.json",
+  "before_snapshot": "own_first.json",
+  "history_mapping": {
+    "06cb0442-0c47-4fad-986a-f08f28287c1b": "06cb0442-0c47-4fad-986a-f08f28287c1b",
+    "2909f9dd-1510-4532-b1fa-94d314b2b11f": "2909f9dd-1510-4532-b1fa-94d314b2b11f",
+    "7a127e9c-06da-4393-b190-9017c2cdea62": "0c0501bd-3bea-40e6-bcef-eafda65c667b"
+  },
+  "full_storage_equal": false,
+  "known_derived_help_search_cache_difference": true,
+  "registration_rows_and_keys_equal": true,
+  "prior_aliases_preserved_raw": true,
+  "raw_si_aliases_equal_ordinary": true,
+  "payload_differences": [
+    [
+      "Config",
+      "DynamicallyUpdated",
+      [
+        0,
+        119,
+        "4e95ed4002c7df86889374fe37e60c13d3f8c97f0b50387d29a938bc434e7c69"
+      ],
+      [
+        0,
+        119,
+        "a2d6da69e4dab18a0eb83e0e4df792adfc391ee2c658b1c8cfa592c9bcaa1f27"
+      ]
+    ],
+    [
+      "Config",
+      "versions_dynupdate_0c0501bd-3bea-40e6-bcef-eafda65c667b",
+      [
+        0,
+        344214,
+        "e996f8c59393c684d43048fc4881fabda6bad2118d9b2259048722355edf3b5b"
+      ],
+      [
+        0,
+        344218,
+        "e32a24858315547b998ebfc3b96161a45d7ba0f5f87ae2fb635c8374421e058c"
+      ]
+    ],
+    [
+      "Params",
+      "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+      [
+        0,
+        24301,
+        "9037ea2fcbf87a568442b834ba4330de74467bd00569224939157773e107d3da"
+      ],
+      [
+        0,
+        24301,
+        "8732478bd93df47469cc9ca6a0842aab77593fdc7db14d646a0421dae09beda5"
+      ]
+    ],
+    [
+      "Params",
+      "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+      [
+        0,
+        94,
+        "1258ac287b55d84b00a4fb025d91733432e845bcf002e86fa3f5ffe360af4de3"
+      ],
+      [
+        0,
+        94,
+        "dd001d8357c5e4b23b67aea675d44997072ea0bfeb9d228c8031582c81fbed1d"
+      ]
+    ],
+    [
+      "Params",
+      "DynamicallyUpdated",
+      [
+        0,
+        156,
+        "8706d111a2bd2bedfa6a36f8050e977c022140fd35b5c357166dcb2391d74e3d"
+      ],
+      [
+        0,
+        156,
+        "0cfbf6861914c31bd4915b9307eb209a42bd3f33b6d69d9005cc4df0185a91c5"
+      ]
+    ],
+    [
+      "Params",
+      "siVersions",
+      [
+        0,
+        1273,
+        "830322e77fb427e25046f202896359abc4efaf2830a64ae87e2850324ac6c462"
+      ],
+      [
+        0,
+        1273,
+        "e9e4082e50a74d24a83a81157d82f95b4bf2806d9f276222a99b3db9bd83b390"
+      ]
+    ],
+    [
+      "Files",
+      "MobileVersions.dat",
+      [
+        0,
+        37009,
+        "f82196ae27d91ae209f4ae05c7d3ad435263aa3abaf926391a458c5675b74bdd"
+      ],
+      [
+        0,
+        37009,
+        "e48eb9fa86425b4dd47e412f9b6bc8cc0fea8d4038acc99f27ae131ffb984bb5"
+      ]
+    ],
+    [
+      "Files",
+      "userDocs_ru.bin",
+      [
+        0,
+        47456,
+        "af20452e0ac5f8279c823ae9426c238c265a14af6ee38bfa1f3b9aa9b140b9d4"
+      ],
+      [
+        0,
+        47528,
+        "cae1d95a6a2e4b741634a2478fb135c1d712e1de44450c527cf987e72795aa69"
+      ]
+    ],
+    [
+      "Files",
+      "userPostings_ru.bin",
+      [
+        0,
+        536921,
+        "191ff8fc037ec650f4ec0e302964a965455c92f7c3e7f1bbe82a47801669149c"
+      ],
+      [
+        0,
+        537522,
+        "792f02b6495311a8893c658e8097e9933a3ee702ac8360432e4e8d1c14e7a075"
+      ]
+    ],
+    [
+      "Files",
+      "userVocabulary_ru.bin",
+      [
+        0,
+        105654,
+        "0adbf4d7b44a693bb9c2a6751485d1f383263530bf7ce8162bfac36a4e895b4b"
+      ],
+      [
+        0,
+        105710,
+        "fe236c5f5c4bfdf83316087e729cd876c8b7d5c5f343b6103052b111f3b663ad"
+      ]
+    ]
+  ],
+  "scope": "timestamps excluded from snapshot; independently generated version tokens/mobile head and licensing .ui listed explicitly; export/source equality is separate proof"
+}

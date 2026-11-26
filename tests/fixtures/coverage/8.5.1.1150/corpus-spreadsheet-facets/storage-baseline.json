@@ -1,0 +1,18 @@
+{
+  "equal": [
+    "CommonTemplates/CovSheetAppearanceCheckIcon.xml",
+    "CommonTemplates/CovSheetAutoFontHeight.xml",
+    "CommonTemplates/CovSheetDashDotted.xml",
+    "CommonTemplates/CovSheetGapLine.xml",
+    "CommonTemplates/CovSheetOEMFixedFont.xml",
+    "CommonTemplates/CovSheetPageSizeA4.xml",
+    "CommonTemplates/CovSheetSandyBrown.xml",
+    "CommonTemplates/CovSheetValueListDetail.xml",
+    "CommonTemplates/CovSheetVerticalPageBreak.xml",
+    "CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml",
+    "CommonTemplates/CovSpreadsheetFacetTemplate.xml",
+    "CommonTemplates/CovSpreadsheetFacetTemplate/Ext/Template.xml",
+    "Configuration.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+  ]
+}

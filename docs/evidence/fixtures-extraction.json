@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "source_commit": "ab2834c4b8fd2a2f450fbc35fa4ef640689dc776",
+  "corpus_repository": "https://github.com/Untru/1c-fixtures",
+  "corpus_commit": "afcdcb010841f89f07c04a99aa07120a76b7116f",
+  "source_paths_accounted": 7343,
+  "dispositions": {
+    "adapted_documentation_or_tool": 7,
+    "relocated": 7109,
+    "split_converter_expectations": 1,
+    "retained": 223,
+    "adapted_consumer_tool": 3
+  },
+  "retained_baseline_files": 223,
+  "native_oracle_bytes_unchanged": true,
+  "source_probe_split_lossless": true,
+  "provenance": "tests/fixtures/1c-fixtures/provenance/ibcmd-rs-export.json",
+  "checksum_scope": "raw Git blobs, independent of archive or checkout EOL conversion",
+  "corrected_archive_eol_materialization_hashes": 15
+}

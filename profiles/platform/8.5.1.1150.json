@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "platform-8.5.1.1150",
+  "status": "experimental",
+  "platform_build": "8.5.1.1150",
+  "storage_profile": "storage:mssql-config-configsave",
+  "constants": {
+    "platform.xml_format": "2.21",
+    "platform.form_layout": "8.5.1",
+    "platform.feature.palette-colors": "2dd2d9e1-40c8-430b-a433-a81ec6856ab0"
+  },
+  "fingerprints": {
+    "mssql.ibversion": "7|80313",
+    "mssql.config-schema.sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3"
+  },
+  "capabilities": {
+    "mssql.extension.registry-read": "supported",
+    "mssql.extension.write": "supported",
+    "mssql.main.write": "unsupported",
+    "mssql.config.apply": "supported",
+    "mssql.config.apply.dynamic": "supported"
+  },
+  "evidence": [
+    "docs/apply/evidence/platform85/initial-common-module-2026-10-01.md",
+    "docs/apply/own-apply.md",
+    "docs/evidence/cf-platform-8.5.md",
+    "openspec/changes/complete-native-source-load-parity/evidence/empty-database-load-20260928.md",
+    "openspec/changes/support-platform-8-5-live-activation/evidence/baseline-20260830.md",
+    "tests/fixtures/native-evidence/8.5.1.1150/form-root-8.5.1-down-conversion/manifest.json",
+    "openspec/changes/enable-extension-apply-851150/evidence/native-publication.md"
+  ]
+}

@@ -1,0 +1,279 @@
+{
+  "format": 1,
+  "scope": "compact6 PREPARATION only; ONE fresh lifecycle requires root and peer PREEXEC plus scheduling; compact5 originals immutable",
+  "runtime_executed": false,
+  "source_parent": "a3d7f5c376a65d8f863b8953a238142633eec986",
+  "binary_source": "fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2",
+  "binary_sha256": "81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0",
+  "database": "ibcmd_rs_05_load_w3_compact6_20261002",
+  "receipt_root": "F:/ibcmd/lab/05/wave3/load/compact6-child-receipts",
+  "archive_sources": [
+    "F:/ibcmd/lab/05/wave3/load/cluster/srvinfo",
+    "F:/ibcmd/lab/05/wave3/load/cluster/logs"
+  ],
+  "archive_destination": "F:/ibcmd/lab/05/wave3/load/evidence/compact6-case5-prior",
+  "files": [
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\lib.ps1",
+      "sha256": "8D02DCD0C3B9E3E45611ED460EAFE8D8B870D6C8221C9D09A7DC531B64B6A059",
+      "bytes": 6331
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-lib.ps1",
+      "sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E",
+      "bytes": 18703
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-register.ps1",
+      "sha256": "F673EDB24965F7DDDA01AA53D619D6F970BC53499415B63379F9A2EC9F671081",
+      "bytes": 1696
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-start.ps1",
+      "sha256": "4D5C8BA38AE77ED95A9102AE1C1BCFA1F21C73C8DB18280280037905040AF726",
+      "bytes": 3785
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-stop.ps1",
+      "sha256": "CF73BA4AEA75E53D1F4B269B3209C5F2C4D647D0D95B80A74D6F343B74044592",
+      "bytes": 2468
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\start.ps1",
+      "sha256": "A2326082C236A051AB5715835542E92FE6509952AD0021B080DB55E098791DCB",
+      "bytes": 4989
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\stop.ps1",
+      "sha256": "9F06D5976366C5FFD809ECCA46B599D3DBCCF5340B72828BB0E3A1CECB51287D",
+      "bytes": 2996
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\obs.ps1",
+      "sha256": "86CB2522A94B90BFCFE19CFCA60ABB087C5D24489A65FF7A15D59364B3D61010",
+      "bytes": 6681
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\process.ps1",
+      "sha256": "68CE228D591E7EB1B3A56BC9C28AFA872C064BFEA3A18141C3430C4F75013AD7",
+      "bytes": 6807
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\test_process.ps1",
+      "sha256": "1ADB76DEA00396E37F52C2D7E03EE9E3B5BB785B7310018F4B9E18137B782678",
+      "bytes": 6355
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\test_receipt_context.ps1",
+      "sha256": "8B6A27C19BCD933186F91DE616CD8CFD55D5B794365E23220CD204883866877E",
+      "bytes": 2234
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\workload_lab.ps1",
+      "sha256": "7793D8C5756260836B18158754D5F793071EF9D72D1BBC1BAC94EC9C7EA7C52A",
+      "bytes": 1617
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_activate.ps1",
+      "sha256": "F7E3EC25E784EF108B2331B9476A875D565462931B0B624515D9DD37713C1DA9",
+      "bytes": 2571
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_archive_case5.ps1",
+      "sha256": "7E7CC9C78F00DDEE29F422579BC51756AE3E5CE0A6F98FC21A0E88E57A9FACFA",
+      "bytes": 6315
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_checkpoint.ps1",
+      "sha256": "B4F8252E89CC4702B5157C7B9F737B6DE2306896627C2D6E3DCAA16A93919BED",
+      "bytes": 20256
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_lifetime.ps1",
+      "sha256": "10FA6CFEF2276C904347C90F0C137D6B64AB6F5423CCB1A9C4C9624BD3404A67",
+      "bytes": 12122
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_native.ps1",
+      "sha256": "28214ADEAD206A09EFCD68BACB79D36DF6B1415E51BDF7C8279A4C1B22610D83",
+      "bytes": 7207
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_receipts.ps1",
+      "sha256": "34DAFB2C55EDB1FB30C76D3913F7288CFBD156C5251D114218CB53EF0CD5DC73",
+      "bytes": 3045
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_snapshot.ps1",
+      "sha256": "699D4F71B44AA83DF1091C5BF4F5CA2F6328DD5794EB34ABDEAD529B580F1171",
+      "bytes": 3086
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_archive.ps1",
+      "sha256": "D4EF66074513D367B9F9E7E5EBBAA6AF28D134C0F655A3E0769218817E3C7D0B",
+      "bytes": 4864
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_invalid_control.ps1",
+      "sha256": "ADEC29B1BF6CE0BD9CF263F80F898E3962ACC1A42B22696DA0A29869F0F3FBC3",
+      "bytes": 3053
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_receipts.ps1",
+      "sha256": "F54211618F56340FBF7753BA6384E769C408D3C377E1DF844776EB07930CE1AA",
+      "bytes": 1598
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_safety.ps1",
+      "sha256": "7724D49601FD83757BAD4D4DBD35EDC87B61475BFEE631DA45C4D1E68AE00FF3",
+      "bytes": 12862
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\read_compact6_recovery.py",
+      "sha256": "A26A2D40E286AC711B4502BF5CD53D9CA7521EC953A9D5BC23225D42DD4128AE",
+      "bytes": 9859
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_recovery.py",
+      "sha256": "F303CFD6B3E099FFB59F451372C090E305905A5E7A6D4AC36AA2548666AC16B1",
+      "bytes": 4900
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\make_compact6_negatives.py",
+      "sha256": "05B65DD39E2925E6577DF73F46ADD8FB406338842B239A5B33258D5C3CE2781E",
+      "bytes": 2373
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-process-mapping.patch",
+      "sha256": "61ACCD13E085E35191CBDAC7D0F4F541947716BC685C363A92174FA223829204",
+      "bytes": 924
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools-baseline.json",
+      "sha256": "0FDD15FD54B284DBBCF6597A3842D2DCC2AD9644F193F2BF44079823F5D1160E",
+      "bytes": 4986
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-6\\CommonModules\\ОбсужденияСлужебныйКлиентСервер\\Ext\\Module.bsl",
+      "sha256": "21840E1A0D20F0834EB1FF51C3045658AE3ED831130C4384495C6A89795B495A",
+      "bytes": 1340
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-6\\CommonModules\\ОбсужденияСлужебныйКлиентСервер.xml",
+      "sha256": "6D6C10E3205D82194C8682B98B987E42460E3E00420547A9E804A6240CAB3A3A",
+      "bytes": 1672
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_acquire.ps1",
+      "sha256": "0E1A8CCA3EDE4D902D73164007E5B524D900F2020B6B14C40E3C065D3CD17E25",
+      "bytes": 4496
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_closure.ps1",
+      "sha256": "E469100AA2E2C3DAC196CD64EEFFB32006A6103B97A6F70FE3773F9B02E4CD05",
+      "bytes": 1873
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_closure.ps1",
+      "sha256": "B6233172721F56AC712E735F8F4D7DDBC343B46B74F6B8185444F20CE43A4CB2",
+      "bytes": 2877
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_uuid.py",
+      "sha256": "AC052FC76AC35A478D4B667D4192C23AB65EFC1AE8EC5B822EC33744134FDFFD",
+      "bytes": 4118
+    }
+  ],
+  "dependencies": [
+    {
+      "file": "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+      "sha256": "A4E35EF94EAED6B5636E1F0F441D15F1B143EFAB3720FCB0DAC8651DFEB8A7A3",
+      "bytes": 4794
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\04\\tools\\restore-clone.ps1",
+      "sha256": "DD04BCC443E67134263D16A8C005F90C7188F205FE1388C0AF5047873049A478",
+      "bytes": 4103
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\04\\tools\\register-ib.ps1",
+      "sha256": "BE6020774C91FAE394D2F3B4CB9644245637ECD96E750307CD3514C0F0DDF09D",
+      "bytes": 7714
+    },
+    {
+      "file": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-trace\\lab\\online-live\\winshot.ps1",
+      "sha256": "E0FDDF9F56A04DACB7B05AC4545F92495E7459AAE5DECDAC404FA437A311F503",
+      "bytes": 2838
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf",
+      "sha256": "6E4A29C045346CEBA9BA364418D9CCCAD02ECEC1811DAD29D9FDE530AD31C3C7",
+      "bytes": 8501
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\f5-owned-full.bak",
+      "sha256": "2B258E55F57432839208C9CD3981CBEA0A2439F19FE165EAA5939D336D90098D",
+      "bytes": 256057344
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\cluster\\stopped-state-20261002001827166.json",
+      "sha256": "5B09714CAF28B294D13D2BF85A0BC0A5344D870E508E3931C984EF17FFF4943A",
+      "bytes": 3468
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact5-lifetime-cleanup-status.json",
+      "sha256": "B3AC09A7DE39EA9984A51393073CA04DA5EF3169A897167F6E3B983D6711EB85",
+      "bytes": 243
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact5-lifetime-worker-release.json",
+      "sha256": "DBE34A83596365476832B017042243494A4714EF753B82F9D4B72AC3A741D2ED",
+      "bytes": 84
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact5-lifetime-heavy-release.json",
+      "sha256": "776ED20D1C052D0E466C7BCB917237FBE7EBDF69FF13E65CAEBD4CFBDA16A037",
+      "bytes": 83
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\ibcmd-rs-fbf2d743-debug.exe",
+      "sha256": "81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0",
+      "bytes": 87359488
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\binary-fbf2d743-debug.json",
+      "sha256": "92D6E9FECBEF202D856548BD98B71889A03A944CB35F260DA45A53DAEB28D7CB",
+      "bytes": 400
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact5-load-5-r1.recovery.live.json",
+      "sha256": "33FF20A28B2F64FC713B86E62C41FC8B3756FD44289A0CA9EDB43BE9501FAD98",
+      "bytes": 1165
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact5-load-5-r1.recovery.json",
+      "sha256": "AA93ABF5E540F90A99026B38FE7B5DD942DEFDABC4757C2D66337D62183D6D39",
+      "bytes": 4348
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\ibcmd-live-5b57a2fec276f8586ad35316d9f0d7ba23414b3d6d050bfc7aeda627e3190058.recovery.json",
+      "sha256": "AA93ABF5E540F90A99026B38FE7B5DD942DEFDABC4757C2D66337D62183D6D39",
+      "bytes": 4348
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\ibcmd-recovery-5b8f05bb6b5ca46a334c88e31f3fdbc045f94203addf544a61fa1b7a81298297.pack",
+      "sha256": "5B8F05BB6B5CA46A334C88E31F3FDBC045F94203ADDF544A61FA1B7A81298297",
+      "bytes": 683038
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\snapshots\\compact5-load-5-staged-storage.txt",
+      "sha256": "ACEC3FAB3F8648C4522C27ED0A038E9ED625E9CBC9B5EC6C424D0CE06D9862CA",
+      "bytes": 1683388
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact5-load-5-header-1.result.json",
+      "sha256": "D75D150894BCE95E2DDF5577B5115C473358E13FB477291AD1F57498F95F60C8",
+      "bytes": 853
+    }
+  ]
+}

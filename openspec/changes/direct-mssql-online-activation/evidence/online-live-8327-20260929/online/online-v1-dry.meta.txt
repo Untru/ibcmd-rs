@@ -1,0 +1,10 @@
+run=online
+tag=online-v1-dry
+mode=online
+dry_run=True
+database=ibcmd_rs_05_online_a1
+src=o1
+start_utc=2026-09-29T17:03:47.492Z
+end_utc=2026-09-29T17:04:00.065Z
+wall_ms=12512
+exit=0

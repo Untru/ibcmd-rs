@@ -1,0 +1,15 @@
+PASS virtual actual-package DB8/UUID/schema upper
+PASS virtual actual-package DB8/UUID/schema lower
+PASS virtual actual-package DB8/UUID/schema mixed
+PASS virtual actual-package DB8/UUID/schema foreign-db5
+PASS virtual actual-package DB8/UUID/schema foreign-db7
+PASS virtual actual-package DB8/UUID/schema malformed-operation
+PASS virtual actual-package DB8/UUID/schema malformed-cluster_id
+PASS virtual actual-package DB8/UUID/schema malformed-infobase_id
+PASS virtual actual-package DB8/UUID/schema malformed-database_guid
+PASS virtual actual-package DB8/UUID/schema malformed-family_guid
+PASS virtual actual-package DB8/UUID/schema malformed-recovery_fork
+PASS virtual actual-package DB8/UUID/schema foreign-valid-guid
+PASS virtual actual-package DB8/UUID/schema duplicate-standalone
+PASS virtual actual-package DB8/UUID/schema unknown-standalone
+PASS originals unchanged; fixtures/cleanup/SQL/native/OS actions0; DB8 runtime UNMEASURED

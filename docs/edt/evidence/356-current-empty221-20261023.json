@@ -1,0 +1,125 @@
+{
+  "status": "COMPATIBILITY_PROBE_MATCH",
+  "strict_equal": false,
+  "configuration_content_equal": true,
+  "storage_inventory_exclusion": "ConfigDumpInfo.xml; full original rows retained in comparison.json",
+  "scope": "Same authentic EDT project, installed EDT export, fresh native file DB create/import/export; no activation claim",
+  "corpus_label": "native-empty-2.21-installed-EDT-2026.2.1.3",
+  "versions": {
+    "native": "8.5.1.1592",
+    "ours": "ibcmd-rs 0.4.1",
+    "edt": "2026.2.1.3"
+  },
+  "source_profile": "edt-2025.2.3-xml-2.21",
+  "runtime": "8.5.1",
+  "xml_version": "2.21",
+  "schema_evidence_sha256": "80388c74b5dc59c46c028251bef1a2505643b162d72a287b31c4549039632f88",
+  "installation_manifest_sha256": "ffbf511eb9e2c1b27c0c5438705776dd4148ea5ad0063bde760d2a70ee17b62c",
+  "counts": {
+    "ours": 2,
+    "native": 3,
+    "strict_differences": 1,
+    "content_differences": 0
+  },
+  "evidence_kind": "Non-private empty-configuration smoke summary; full raw inventories retained externally",
+  "candidate": {
+    "source_rust_tree": "f9ebb8dd6a4b84d57c72a72d5941931e48fae73b",
+    "sha256": "e4ac476fad5b93723ecf2c335921efa19e61572f49956cdeddd611a53cd9ebbd",
+    "borrowed_from": "issue-357 locked offline no-default-features Rust 1.95 build"
+  },
+  "immutability": {
+    "project_unchanged": true,
+    "changed_tools": [],
+    "installation_unchanged": true,
+    "schema_evidence_unchanged": true
+  },
+  "inventories": {
+    "authentic_project": {
+      "file_count": 4,
+      "total_bytes": 2696,
+      "tree_sha256": "0fb32885175ee1f02d4dc7be6921150e19b168e36334d4affb86329b151f4cf0"
+    },
+    "installed_edt_export": {
+      "file_count": 2,
+      "total_bytes": 12369,
+      "tree_sha256": "aed7d8eaab162c15126e77ffffed6055bc1702830ce3bb2794b1020b1de60d5b"
+    },
+    "native_reference": {
+      "file_count": 3,
+      "total_bytes": 13009,
+      "tree_sha256": "302f44957e754fd6b954f26a349505214a7e8ceaa37f035a83a1fd61f038d554"
+    },
+    "ours": {
+      "file_count": 2,
+      "total_bytes": 12369,
+      "tree_sha256": "91f1ebc3575dc135b14396347ec95a0dad597c4b9d76e66aa1a050c513a4cf60"
+    }
+  },
+  "strict_differences": [
+    {
+      "path": "ConfigDumpInfo.xml",
+      "left": null,
+      "right": {
+        "path": "ConfigDumpInfo.xml",
+        "bytes": 640,
+        "sha256": "b0b1c4a34b1c22ef1b080e257ce253b71be717186b797cd51668c493b9131e61"
+      }
+    }
+  ],
+  "commands": {
+    "convert": {
+      "exit_code": 0,
+      "duration_seconds": 0.292
+    },
+    "edt-export": {
+      "exit_code": 0,
+      "duration_seconds": 26.751
+    },
+    "edt-version": {
+      "exit_code": 0,
+      "duration_seconds": 18.427
+    },
+    "native-create": {
+      "exit_code": 0,
+      "duration_seconds": 9.54
+    },
+    "native-export": {
+      "exit_code": 0,
+      "duration_seconds": 6.887
+    },
+    "native-import": {
+      "exit_code": 0,
+      "duration_seconds": 7.081
+    },
+    "native-version": {
+      "exit_code": 0,
+      "duration_seconds": 1.85
+    },
+    "ours-version": {
+      "exit_code": 0,
+      "duration_seconds": 0.023
+    }
+  },
+  "diagnostics": {
+    "post_capture_combined_workspace_error_entries": 3,
+    "installed_edt_validation": "NOT_ACCEPTED; no error suppression or clean SDK validation claim",
+    "supplement": "post-capture-diagnostics.json; appended without modifying original capture records",
+    "edt_export_stdout_error_count": 1,
+    "edt_export_stdout_error_lines": [
+      {
+        "file": "edt-export.stdout",
+        "line": 1,
+        "text": "[Fatal Error] :1:1: Premature end of file."
+      }
+    ],
+    "matched_route_origin": "Authentic installed-EDT native import, exported with --project into fresh workspace; also occurs without ours-generated project"
+  },
+  "jvm_provenance": "Selected Java executable/release rows only; libraries/modules not fully inventoried",
+  "acceptance_limits": [
+    "Empty configuration only; full BSP not available",
+    "Current installed EDT with explicit legacy model profile; no full 2026 schema support claim",
+    "Strict whole-tree equality false: ConfigDumpInfo.xml retained as explicit difference",
+    "Installed EDT emitted three unresolved workspace error entries",
+    "No database activation or production ERP validation"
+  ]
+}

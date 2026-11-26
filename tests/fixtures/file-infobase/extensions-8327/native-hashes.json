@@ -1,0 +1,57 @@
+{
+  "platform": "8.3.27.2214",
+  "provenance": "Clean-room cfe_base and ТестРасширение templates; a common module is adopted; the second extension has separate identities. Expected hashes were captured by native ibcmd.",
+  "cases": {
+    "staged": {
+      "ТестРасширение": {
+        "CommonModules/ОбщийМодуль.xml": "4aaae1dd49b893c10f1044ad487db000152ac32017a8d5cb482745fdb680d0f0",
+        "CommonModules/ТестРасширение_Модуль/Ext/Module.bsl": "fb10d328d07b843e9eaec22b83bf76b5c3773cf1bb6b3c2d62073b880093ce02",
+        "CommonModules/ТестРасширение_Модуль.xml": "4f0c7786553d169ef7d94327a64fe48dd3cb9276464dbe5968485676fa59d251",
+        "ConfigDumpInfo.xml": "9ceced5ee43d2eb3da08c0fa74b3615f26d5e17dd799043b9a03472776acb589",
+        "Configuration.xml": "dc49378948ee2d80c37976bbefbfc3d44cfb8c8ae6bcac89cee5384afaa2534a",
+        "Languages/Русский.xml": "a10c26bdd8e2d8d2656b95f339d592c16b5e9cee442d28352518cd156564961e"
+      },
+      "ДругоеРасширение": {
+        "CommonModules/ДругоеРасширение_Модуль/Ext/Module.bsl": "fb10d328d07b843e9eaec22b83bf76b5c3773cf1bb6b3c2d62073b880093ce02",
+        "CommonModules/ДругоеРасширение_Модуль.xml": "20544744dbf3dd2bf68a3cb0b9c7f991596221793b1b8506892e7699db0056f5",
+        "ConfigDumpInfo.xml": "b52672762e057e9a432117ae07a507ff7f645451cba3b7a6c4b58dca1499c96d",
+        "Configuration.xml": "6cc8dd8497efea568b77e819cc0b427cf1177543b3cdc3c1e580b48ee9116514",
+        "Languages/Русский.xml": "f2aa208a57ef6d2c54ef672d138f3dccf6c0a9e8c9f6863e0f21e233158f0af4"
+      }
+    },
+    "applied": {
+      "ТестРасширение": {
+        "CommonModules/ОбщийМодуль.xml": "4aaae1dd49b893c10f1044ad487db000152ac32017a8d5cb482745fdb680d0f0",
+        "CommonModules/ТестРасширение_Модуль/Ext/Module.bsl": "fb10d328d07b843e9eaec22b83bf76b5c3773cf1bb6b3c2d62073b880093ce02",
+        "CommonModules/ТестРасширение_Модуль.xml": "4f0c7786553d169ef7d94327a64fe48dd3cb9276464dbe5968485676fa59d251",
+        "ConfigDumpInfo.xml": "9ceced5ee43d2eb3da08c0fa74b3615f26d5e17dd799043b9a03472776acb589",
+        "Configuration.xml": "dc49378948ee2d80c37976bbefbfc3d44cfb8c8ae6bcac89cee5384afaa2534a",
+        "Languages/Русский.xml": "a10c26bdd8e2d8d2656b95f339d592c16b5e9cee442d28352518cd156564961e"
+      },
+      "ДругоеРасширение": {
+        "CommonModules/ДругоеРасширение_Модуль/Ext/Module.bsl": "fb10d328d07b843e9eaec22b83bf76b5c3773cf1bb6b3c2d62073b880093ce02",
+        "CommonModules/ДругоеРасширение_Модуль.xml": "20544744dbf3dd2bf68a3cb0b9c7f991596221793b1b8506892e7699db0056f5",
+        "ConfigDumpInfo.xml": "7df7fbd06d9ca8ee4219f5981c09471c10723652e004d8f2fef4009699127886",
+        "Configuration.xml": "6cc8dd8497efea568b77e819cc0b427cf1177543b3cdc3c1e580b48ee9116514",
+        "Languages/Русский.xml": "fb148de4bb77a920034fdc2d790acab396eef630780259b7cfbec0bc4a66f8f6"
+      }
+    },
+    "mixed": {
+      "ТестРасширение": {
+        "CommonModules/ОбщийМодуль.xml": "4aaae1dd49b893c10f1044ad487db000152ac32017a8d5cb482745fdb680d0f0",
+        "CommonModules/ТестРасширение_Модуль/Ext/Module.bsl": "414f8d2ed0e33c2ecb7c1fa2ff0733191438c8594bbf21704f6c78a3df7c6494",
+        "CommonModules/ТестРасширение_Модуль.xml": "4f0c7786553d169ef7d94327a64fe48dd3cb9276464dbe5968485676fa59d251",
+        "ConfigDumpInfo.xml": "fc93eee060906789ab781a95eb35361b23ec0dd15b0c3d98e89c2e02765a0b6e",
+        "Configuration.xml": "dc49378948ee2d80c37976bbefbfc3d44cfb8c8ae6bcac89cee5384afaa2534a",
+        "Languages/Русский.xml": "a10c26bdd8e2d8d2656b95f339d592c16b5e9cee442d28352518cd156564961e"
+      },
+      "ДругоеРасширение": {
+        "CommonModules/ДругоеРасширение_Модуль/Ext/Module.bsl": "fb10d328d07b843e9eaec22b83bf76b5c3773cf1bb6b3c2d62073b880093ce02",
+        "CommonModules/ДругоеРасширение_Модуль.xml": "20544744dbf3dd2bf68a3cb0b9c7f991596221793b1b8506892e7699db0056f5",
+        "ConfigDumpInfo.xml": "7df7fbd06d9ca8ee4219f5981c09471c10723652e004d8f2fef4009699127886",
+        "Configuration.xml": "6cc8dd8497efea568b77e819cc0b427cf1177543b3cdc3c1e580b48ee9116514",
+        "Languages/Русский.xml": "fb148de4bb77a920034fdc2d790acab396eef630780259b7cfbec0bc4a66f8f6"
+      }
+    }
+  }
+}

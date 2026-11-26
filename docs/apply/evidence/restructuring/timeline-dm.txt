@@ -1,0 +1,19 @@
+total span 113.2s, 53600 events
+read ConfigSave/Config rows (check metadata)       1.7 ..   113.2 s  x6879
+copy ConfigSave -> Config.new                     26.3 ..    60.1 s  x9839
+SchemaStorage Status=200 + NewGenCreated          63.2 ..    63.6 s  x3
+create table ...NG                                63.1 ..    63.6 s  x5
+create index ...NG (1st pass)                     63.2 ..    64.1 s  x18
+drop index ...NG                                  63.2 ..    63.6 s  x9
+copy data INSERT INTO ...NG                       63.2 ..    63.5 s  x3
+bulk copy (insert bulk ...NG)                     63.8 ..    64.1 s  x7
+SchemaStorage Status=400                          75.5 ..    75.5 s  x1
+drop table (old generation)                       75.5 ..    75.6 s  x5
+SchemaStorage Status=500                          75.6 ..    75.6 s  x1
+sp_rename NG -> final                             75.6 ..    76.2 s  x28
+SchemaStorage Status=100 + CurrentSchema          76.5 ..    76.5 s  x1
+UPDATE DBSchema                                   76.6 ..    76.6 s  x1
+Params .sinew rename                              76.7 ..    76.9 s  x16
+Config .new -> final rename                       77.0 ..   108.1 s  x9838
+DELETE FROM ConfigSave                            26.2 ..   112.8 s  x2
+Files help index rename                          112.8 ..   113.1 s  x4

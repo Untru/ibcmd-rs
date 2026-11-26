@@ -1,0 +1,26 @@
+=== lv-warm-a: 545 lines, session 2
+  first 17:44:29.888 ( -697.57 s)
+  last  17:56:00.406 (   -7.05 s)
+  event open           17:44:29.888 ( -697.57 s) | 2 | режим=poll
+  markers client=Telegram               server=Telegram               B=нет/нет                                  17:44:29.991 ( -697.47 s) .. 17:56:00.406 (   -7.05 s)  n=544
+=== lv-warm-b: 513 lines, session 3
+  first 17:44:36.911 ( -690.54 s)
+  last  17:55:28.468 (  -38.99 s)
+  event open           17:44:36.911 ( -690.54 s) | 3 | режим=txn
+  event txn-begin      17:55:28.468 (  -38.99 s) | 3 | константа=20260929 секунд=60
+  markers client=Telegram               server=Telegram               B=нет/нет                                  17:44:36.999 ( -690.46 s) .. 17:55:28.291 (  -39.16 s)  n=511
+=== lv-lazy: 544 lines, session 4
+  first 17:44:29.900 ( -697.56 s)
+  last  17:56:00.155 (   -7.30 s)
+  event open           17:44:29.900 ( -697.56 s) | 4 | режим=lazy
+  beats n=543 17:44:29.902 ( -697.55 s) .. 17:56:00.155 (   -7.30 s)
+=== lv-new1: 418 lines, session 8
+  first 17:56:43.232 (  +35.78 s)
+  last  18:05:32.650 ( +565.19 s)
+  event open           17:56:43.232 (  +35.78 s) | 8 | режим=poll
+  markers client=ibcmd-live-v1          server=Telegram               B=нет/нет                                  17:56:43.303 (  +35.85 s) .. 18:05:32.650 ( +565.19 s)  n=417
+=== lv-new2: 165 lines, session 15
+  first 18:02:04.568 ( +357.11 s)
+  last  18:05:32.258 ( +564.80 s)
+  event open           18:02:04.568 ( +357.11 s) | 15 | режим=poll
+  markers client=ibcmd-live-v1          server=Telegram               B=нет/нет                                  18:02:04.658 ( +357.20 s) .. 18:05:32.258 ( +564.80 s)  n=164

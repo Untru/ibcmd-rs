@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-root-grouping-navigator-gap",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-25",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "host": "macOS",
+    "note": "Real ERP УХ 3.2.12.6 1cv8.cf storage entries, extracted with `ibcmd-rs cf extract <cf> <form-uuid>.0 <outdir>` (compression raw-deflate). Same root cause as the form-mobile-device-command-bar-content-navigator-gap and form-save-window-settings-navigator-gap fixtures: forms with a built-in Navigator/quick-search child item write one extra field ahead of the classic 24-member form-root trailer's own start -- a 25-member trailer, not 24 -- pushing every trailer slot counted from the front out by one. `FormRootGroupSchema` (Group, trailer slots 14/21) and `FormRootGroupingSchema` (HorizontalSpacing/VerticalSpacing/CollapseItemsByImportanceVariant, trailer slots 9/10/20) previously required trailer_len==24 exactly and read those fixed slot numbers; for a 25-member trailer the strict tail-start search found no valid count-list at all and the whole property silently disappeared. Confirmed on 4 native forms here (2 Group, 2 VerticalSpacing) plus 12 more sampled but not embedded, spanning Catalogs/DataProcessors/Documents/InformationRegisters -- 14/14 root-50 samples pass; the one root-49 (ERP УХ MDM_Management) sample checked is a different, unverified shape and stays out of scope (root-49 forms are handled separately elsewhere in this codebase, e.g. FormRootVerticalScrollSchema)."
+  },
+  "objects": [
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "group-always-horizontal",
+      "description": "Catalogs/ВидыОповещенийПользователей/Forms/ПодборИсточников. Native <Group>AlwaysHorizontal</Group>.",
+      "form_uuid": "cd41f832-773f-42e8-a4ed-8f521eace1fc",
+      "raw_entry": { "path": "raw/cd41f832-773f-42e8-a4ed-8f521eace1fc.deflate", "sha256": "09e5d6ed8cdfed44f341b20c6f4023340cae263e2f3ea1f77b17eb58c5b62dbb" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "group-horizontal-if-possible",
+      "description": "DataProcessors/НастройкаЗаполненияБухгалтерскойОтчетности/Forms/НастройкаПоказателей. Native <Group>HorizontalIfPossible</Group> -- the third of the three Group encodings, confirming the shift holds for all three.",
+      "form_uuid": "e2ce87bf-3feb-4c15-870e-d876fd5f3ab7",
+      "raw_entry": { "path": "raw/e2ce87bf-3feb-4c15-870e-d876fd5f3ab7.deflate", "sha256": "6fd052c55744b7e538ba764c749f0f49d73914e3d7f79f544eedc2ddb352bca8" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "vertical-spacing-half",
+      "description": "Catalogs/ДокументыРеализацииПолномочийНалоговыхОрганов/Forms/ПодтверждениеВыбораОбязательностиЭДО. Native <VerticalSpacing>Half</VerticalSpacing> (raw code 2).",
+      "form_uuid": "1e9ea8b1-7ff1-463b-b249-60c15fc5fb33",
+      "raw_entry": { "path": "raw/1e9ea8b1-7ff1-463b-b249-60c15fc5fb33.deflate", "sha256": "744715cc5aa7fef45e099883ab3d30b4d7275d3e8bc3f1dd602bfbfdae6e3149" }
+    },
+    {
+      "kind": "Form body (managed form root, layout marker 50, 25-member trailer)",
+      "variant": "vertical-spacing-one-and-half",
+      "description": "DataProcessors/ДокументооборотСКонтролирующимиОрганами/Forms/ОтправкаЗаявленияОПереходеВКоробку. Native <VerticalSpacing>OneAndHalf</VerticalSpacing> (raw code 4), independent object family from the Catalog sample above.",
+      "form_uuid": "2bf025be-45bd-4ff8-bc86-02feabc4bfda",
+      "raw_entry": { "path": "raw/2bf025be-45bd-4ff8-bc86-02feabc4bfda.deflate", "sha256": "4a560f68068333608c35527e8bbeb3197c689bc9361ac34777016e06c4f2b165" }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "equal": [
+    "CommonForms/CovBoundTableExcludesSelectAll.xml",
+    "CommonForms/CovCommandPictureAccountingRegister.xml",
+    "CommonForms/CovCommandPictureAppearanceStarHalfFilled.xml",
+    "CommonForms/CovCommandPictureFormattedString.xml",
+    "CommonForms/CovCommandPictureGotoURL.xml",
+    "CommonForms/CovCommandPictureNewConversation.xml",
+    "CommonForms/CovCommandPictureQueryWizardTempTableDescription.xml",
+    "CommonForms/CovCommandPictureToday.xml",
+    "CommonForms/CovDynamicListRowNumber.xml",
+    "CommonForms/CovPictureTitleFontEnterOnInput.xml",
+    "CommonForms/CovPictureTitleFontEnterOnInput/Ext/Form.xml",
+    "CommonForms/CovPictureTitleFontStyleItem.xml",
+    "CommonForms/CovPictureTitleFontStyleItem/Ext/Form.xml",
+    "CommonForms/CovRootCollapseImportance.xml",
+    "CommonForms/CovRootCollapseImportance/Ext/Form.xml",
+    "CommonForms/CovRootEventChoiceProcessing.xml",
+    "CommonForms/CovRootEventChoiceProcessing/Ext/Form.xml",
+    "CommonForms/CovSettingsFormTemplate.xml",
+    "CommonForms/CovSettingsFormTemplate/Ext/Form.xml",
+    "CommonForms/CovTablePictureTitleFont.xml",
+    "CommonForms/CovVerticalScrollAlways.xml",
+    "Configuration.xml",
+    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+  ]
+}

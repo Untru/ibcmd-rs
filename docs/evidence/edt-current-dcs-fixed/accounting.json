@@ -1,0 +1,623 @@
+{
+  "schema_version": 1,
+  "status": "FORWARD_RETURN_CONTENT_MATCH_DIRECT_PREFLIGHT_BLOCKED",
+  "installed_edt_build": "2026.2.1.3",
+  "model_profile": "edt-2025.2.3-xml-2.21",
+  "candidate_build": {
+    "built_head": "5e5b5bcdb2a2e56c685ea25d2893ac34734c1434",
+    "build_command": "cargo build --bin ibcmd-rs --locked --offline --no-default-features",
+    "jobs": 2,
+    "rust": "1.95.0",
+    "profile": "dev",
+    "build_exit_code": 0,
+    "build_log": "/Volumes/Work/Dev/ibcmd-rs-lab/logs/issue357-combined-build.log",
+    "candidate": "/Volumes/Work/Dev/ibcmd-rs-lab/build/issue357-candidate-5e5b5bcd/ibcmd-rs",
+    "candidate_sha256": "6da274e498d6b21ef017c00bc8698cf6c14596d996604acce40a77bfe8431016",
+    "version_stdout": "ibcmd-rs 0.4.1\n",
+    "version_stderr": "",
+    "working_changes_during_build": "Only tests/scripts/xml_to_edt_macos_test.py Windows path assertion fix; production source unchanged",
+    "source_binary_sha256": "6da274e498d6b21ef017c00bc8698cf6c14596d996604acce40a77bfe8431016"
+  },
+  "forward_capture_acceptance": {
+    "status": "FAIL",
+    "gates": {
+      "installation_unchanged_and_bound": true,
+      "launcher_ini_unchanged": true,
+      "exact_original_xml_tree_including_dump_info": true,
+      "same_installed_serializer_exact_tree": true,
+      "authentic_native_no_source_errors_or_unknown_rows": false,
+      "authentic_native_project_unchanged": true,
+      "no_source_errors_or_unknown_validation_rows": false,
+      "no_new_structured_validation_diagnostics": true,
+      "no_new_matched_phase_errors": true,
+      "no_command_or_workspace_errors": false,
+      "native_unchanged": true,
+      "generated_project_unchanged": true,
+      "stripped_project_unchanged": true,
+      "tools_unchanged": true,
+      "authentic_export_unchanged": true,
+      "installed_export_unchanged": true,
+      "terminal_immutable_audits_passed": true
+    },
+    "installed_edt_build": "2026.2.1.3",
+    "writer_model_profile": "edt-2025.2.3-xml-2.21",
+    "model_schema_evidence": "Legacy model profile exercised against the named installed build; no new model/schema profile is asserted",
+    "scope": "This supplied corpus and exact tool build only. Exact XML return uses the retained generated project with provenance; installed EDT loads the separate provenance-free copy. This does not claim exact native XML from EDT's own serializer or unrestricted configuration support."
+  },
+  "forward_terminal_audit": {
+    "route_status": "FAIL",
+    "route_error": null,
+    "trees": {
+      "native": {
+        "exists": true,
+        "compared": true,
+        "unchanged": true
+      },
+      "authentic-project": {
+        "exists": true,
+        "compared": true,
+        "unchanged": true
+      },
+      "authentic-export": {
+        "exists": true,
+        "compared": true,
+        "unchanged": true
+      },
+      "generated-project": {
+        "exists": true,
+        "compared": true,
+        "unchanged": true
+      },
+      "stripped-project": {
+        "exists": true,
+        "compared": true,
+        "unchanged": true
+      },
+      "installed-export": {
+        "exists": true,
+        "compared": true,
+        "unchanged": true
+      },
+      "returned-xml": {
+        "exists": true,
+        "compared": true,
+        "unchanged": true
+      }
+    },
+    "errors": [],
+    "installation_unchanged": true,
+    "tools_unchanged": true,
+    "immutable_audits_passed": true,
+    "scope": "Immutability compares available saved baselines; partial stages without baselines are captured only."
+  },
+  "structured_validation_differential": {
+    "no_new_diagnostics": true,
+    "exact_multiset_equal": true,
+    "ignored_columns": [
+      "timestamp",
+      "project_label"
+    ],
+    "original_sha256": "aebd9024427035274a9370364dc6f998cb273c60721c749b55d7c4b2952b280f",
+    "generated_sha256": "cb22c32105e932669cf7f5c3cfa61a8148fbb29dd2b603e34354718862fcba71",
+    "original_row_count": 24,
+    "generated_row_count": 24,
+    "added_diagnostics": [],
+    "removed_diagnostics": []
+  },
+  "raw_route_reports": {
+    "installed-forward-serializer": {
+      "summary": {
+        "all_equal": 16,
+        "native_edt_not_ours": 0,
+        "native_ours_not_edt": 0,
+        "edt_ours_not_native": 3,
+        "all_different": 0
+      },
+      "row_count": 19,
+      "raw_all_equal": false,
+      "configuration_data_all_equal": false,
+      "derived_comparison": {
+        "excluded_paths": [
+          "ConfigDumpInfo.xml"
+        ],
+        "reason": "Installed EDT does not emit native storage-generation dump information",
+        "original_excluded_rows": [
+          {
+            "path": "ConfigDumpInfo.xml",
+            "native_sha256": "7301e7124e132fc5119c4a4c809b84187f475d8f89ec7a89a6085ea4e4447b7d",
+            "native_size_bytes": 3084,
+            "edt_sha256": null,
+            "edt_size_bytes": null,
+            "ours_sha256": null,
+            "ours_size_bytes": null,
+            "agreement": "edt_ours_not_native",
+            "candidate_interpretation": "candidate: native export, storage state, or version divergence; hashes alone do not prove a cause"
+          }
+        ],
+        "raw_report_sha256": "ee5e44802dee23271619f07492bb7f2a1e6e6cb441879e10d6cfce2b8f9d90e2",
+        "configuration_rows": 18,
+        "different_rows": 2
+      }
+    },
+    "unchanged-return": {
+      "summary": {
+        "all_equal": 16,
+        "native_edt_not_ours": 0,
+        "native_ours_not_edt": 3,
+        "edt_ours_not_native": 0,
+        "all_different": 0
+      },
+      "row_count": 19,
+      "raw_all_equal": false,
+      "configuration_data_all_equal": false,
+      "derived_comparison": {
+        "excluded_paths": [
+          "ConfigDumpInfo.xml"
+        ],
+        "reason": "Installed EDT does not emit native storage-generation dump information",
+        "original_excluded_rows": [
+          {
+            "path": "ConfigDumpInfo.xml",
+            "native_sha256": "771c0f4553afce1ead3ba889e700195eefc319ea81f75ca57cf746c4427a7aef",
+            "native_size_bytes": 3084,
+            "edt_sha256": null,
+            "edt_size_bytes": null,
+            "ours_sha256": "771c0f4553afce1ead3ba889e700195eefc319ea81f75ca57cf746c4427a7aef",
+            "ours_size_bytes": 3084,
+            "agreement": "native_ours_not_edt",
+            "candidate_interpretation": "candidate: EDT import/export oracle divergence; hashes alone do not prove a cause"
+          }
+        ],
+        "raw_report_sha256": "cba224cf0ed889e9c6f51362c4259165c920fb737cefad22681bb270d794e5ae",
+        "configuration_rows": 18,
+        "different_rows": 2
+      }
+    }
+  },
+  "direct_route": {
+    "status": "BLOCKED_CONVERTER_ENCODE_PREFLIGHT",
+    "candidate_output_exists": false,
+    "records": {
+      "convert.command.json": {
+        "argv": [
+          "/Volumes/Work/Dev/ibcmd-rs-lab/build/issue357-candidate-5e5b5bcd/ibcmd-rs",
+          "convert",
+          "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/native-workspace/NativeControl",
+          "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/ours-xml",
+          "--source-format",
+          "edt",
+          "--target-format",
+          "xml",
+          "--source-profile",
+          "edt-2025.2.3-xml-2.21",
+          "--target-profile",
+          "xml-2.21",
+          "--report",
+          "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/convert.report.json"
+        ],
+        "cwd": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002",
+        "environment_overrides": {
+          "TMPDIR": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/tmp",
+          "TEMP": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/tmp",
+          "TMP": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/tmp",
+          "HOME": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/home",
+          "XDG_CACHE_HOME": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/cache",
+          "XDG_CONFIG_HOME": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/config",
+          "XDG_DATA_HOME": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/data",
+          "XDG_STATE_HOME": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/state"
+        },
+        "started_utc": "2026-10-23T10:59:58Z",
+        "timeout_seconds": 240,
+        "exit_code": 2,
+        "duration_seconds": 0.502
+      },
+      "convert.report.json": {
+        "schema_version": 1,
+        "command": "convert",
+        "ok": false,
+        "dry_run": false,
+        "input": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/native-workspace/NativeControl",
+        "output": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/ours-xml",
+        "source": {
+          "format": "edt",
+          "profile": "edt-2025.2.3-xml-2.21"
+        },
+        "target": {
+          "format": "xml",
+          "profile": "xml-2.21"
+        },
+        "loss_policy": "error",
+        "phases": [
+          {
+            "phase": "decode",
+            "status": "completed"
+          },
+          {
+            "phase": "validate",
+            "status": "pending"
+          },
+          {
+            "phase": "migration_plan",
+            "status": "pending"
+          },
+          {
+            "phase": "migrate",
+            "status": "pending"
+          },
+          {
+            "phase": "encode_preflight",
+            "status": "failed"
+          },
+          {
+            "phase": "atomic_encode",
+            "status": "pending"
+          }
+        ],
+        "migrations": [],
+        "output_published": false,
+        "errors": [
+          {
+            "code": "conversion.edt-encode-preflight-failed",
+            "phase": "encode_preflight",
+            "message": "edt: read [Catalog] FilterProbe.ListForm: /Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/tmp/ibcmd-edt-disk-Mf2QPr/input/src/Catalogs/FilterProbe/Forms/ListForm/Attributes/Список/ExtInfo/ListSettings.dcss: form: envelope: dcss: must be CRLF, found Lf",
+            "path": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/native-workspace/NativeControl"
+          }
+        ]
+      },
+      "reference-binding.json": {
+        "status": "BOUND_IDENTICAL_COMPLETE_INPUT_INVENTORIES",
+        "current_export_equals_original_import_input": true,
+        "original_project_equals_current_project": true,
+        "native_capture": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-001",
+        "native_version": "8.5.1.1592",
+        "installed_edt_version": {
+          "actual": "2026.2.1.3",
+          "expected": "2026.2.1.3"
+        },
+        "candidate_build": {
+          "built_head": "5e5b5bcdb2a2e56c685ea25d2893ac34734c1434",
+          "build_command": "cargo build --bin ibcmd-rs --locked --offline --no-default-features",
+          "jobs": 2,
+          "rust": "1.95.0",
+          "profile": "dev",
+          "build_exit_code": 0,
+          "build_log": "/Volumes/Work/Dev/ibcmd-rs-lab/logs/issue357-combined-build.log",
+          "candidate": "/Volumes/Work/Dev/ibcmd-rs-lab/build/issue357-candidate-5e5b5bcd/ibcmd-rs",
+          "candidate_sha256": "6da274e498d6b21ef017c00bc8698cf6c14596d996604acce40a77bfe8431016",
+          "version_stdout": "ibcmd-rs 0.4.1\n",
+          "version_stderr": "",
+          "working_changes_during_build": "Only tests/scripts/xml_to_edt_macos_test.py Windows path assertion fix; production source unchanged",
+          "source_binary_sha256": "6da274e498d6b21ef017c00bc8698cf6c14596d996604acce40a77bfe8431016"
+        },
+        "native_input_tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2",
+        "native_reference_tree_sha256": "8628cfab808f7414be1e6e8912ff7912fe7c027b95ab4c303cf451d17141cc67",
+        "note": "Original real SDK chain reused only after full path/byte/hash equality; no fresh SDK or JVM run"
+      },
+      "immutability.json": {
+        "all_inputs_unchanged": true,
+        "candidate_unchanged": true,
+        "bound_command_receipts_and_build_unchanged": true
+      }
+    }
+  },
+  "native_reference_reuse": {
+    "status": "BOUND_IDENTICAL_INSTALLED_EXPORT_INPUT",
+    "original_native_capture": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-001",
+    "original_native_manifest_sha256": "f4c152370ff30b599208045d4a2fe6de1300a9a84bbe028a1becbb1917f294cd",
+    "current_edt_export": {
+      "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/authentic-xml",
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2",
+      "files": [
+        {
+          "path": "Catalogs/CorpusList.xml",
+          "bytes": 15353,
+          "sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac"
+        },
+        {
+          "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+          "bytes": 19444,
+          "sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Catalogs/FilterProbe.xml",
+          "bytes": 15364,
+          "sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+          "bytes": 8283,
+          "sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Configuration.xml",
+          "bytes": 11305,
+          "sha256": "4ad07d2fb94927e39066a326ad83d73a35a18fd1dc76b076ea094107491f2054"
+        },
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "bytes": 836,
+          "sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "bytes": 1306,
+          "sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06"
+        },
+        {
+          "path": "Reports/FilterProbeReport.xml",
+          "bytes": 2312,
+          "sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema.xml",
+          "bytes": 1317,
+          "sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+          "bytes": 3189,
+          "sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000"
+        }
+      ]
+    },
+    "old_edt_export": {
+      "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-001/edt-xml",
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2",
+      "files": [
+        {
+          "path": "Catalogs/CorpusList.xml",
+          "bytes": 15353,
+          "sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac"
+        },
+        {
+          "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+          "bytes": 19444,
+          "sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Catalogs/FilterProbe.xml",
+          "bytes": 15364,
+          "sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+          "bytes": 8283,
+          "sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Configuration.xml",
+          "bytes": 11305,
+          "sha256": "4ad07d2fb94927e39066a326ad83d73a35a18fd1dc76b076ea094107491f2054"
+        },
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "bytes": 836,
+          "sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "bytes": 1306,
+          "sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06"
+        },
+        {
+          "path": "Reports/FilterProbeReport.xml",
+          "bytes": 2312,
+          "sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema.xml",
+          "bytes": 1317,
+          "sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+          "bytes": 3189,
+          "sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000"
+        }
+      ]
+    },
+    "native_reference": {
+      "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-001/native-xml",
+      "file_count": 19,
+      "total_bytes": 86112,
+      "tree_sha256": "8628cfab808f7414be1e6e8912ff7912fe7c027b95ab4c303cf451d17141cc67",
+      "files": [
+        {
+          "path": "Catalogs/CorpusList.xml",
+          "bytes": 15353,
+          "sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac"
+        },
+        {
+          "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+          "bytes": 19444,
+          "sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Catalogs/FilterProbe.xml",
+          "bytes": 15364,
+          "sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+          "bytes": 8283,
+          "sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "ConfigDumpInfo.xml",
+          "bytes": 3084,
+          "sha256": "7301e7124e132fc5119c4a4c809b84187f475d8f89ec7a89a6085ea4e4447b7d"
+        },
+        {
+          "path": "Configuration.xml",
+          "bytes": 11305,
+          "sha256": "9de0688e13c30f49d1780faa75b58a60b6f5af0272ce5fd1be4e3f72f65ae6c7"
+        },
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "bytes": 836,
+          "sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "bytes": 1306,
+          "sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06"
+        },
+        {
+          "path": "Reports/FilterProbeReport.xml",
+          "bytes": 2312,
+          "sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema.xml",
+          "bytes": 1317,
+          "sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+          "bytes": 3264,
+          "sha256": "05c5fe4b67aaf6eb46bbf644fe8872f281a046ff1c236714c7ea0e675d58c635"
+        }
+      ]
+    },
+    "note": "Reused only after complete input inventory equality; prior actual fresh native command chain exits0. No replacement native run or storage-generation equality claim."
+  },
+  "claims": {
+    "strict_acceptance": false,
+    "all_three_routes_completed": false,
+    "current_model_schema_support": false,
+    "full_bsp_uh_acceptance": false
+  },
+  "evidence_bindings": {
+    "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/invocation.json": "285bfc1acb19156884143d19ebf3268f04ec39a828a71ca5b7d447d5c7ff72a4",
+    "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/acceptance.json": "682ccd4bdeed2454e556270a6b420c51d702004f2a9d76e931e8fb03e1ea79fe",
+    "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/terminal-audit.json": "616b61024b8d5ce3a17a967bdf90c3a9ff16cc589cab630a6bc5064d53dcf505",
+    "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/invocation.json": "3dc125834ccf5a0049f7d2cedc3db0ff0102a5415f5380d5ab0dae88055b7d78",
+    "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/reference-binding.json": "8cef22df6a2aebb93431c1ab6bfcb6850b6226efac34971342b2ad0b1af8b345",
+    "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-002/immutability.json": "b5461926e85c15f8a322221f87740eaeb9b459a076fc3d421551bd40f754bd70"
+  },
+  "note": "Historical failed captures remain retained. Two fixed candidate content routes match their distinct criteria; raw serializer/storage differences and strict SDK/style failure remain. No direct raw three-way report can be created until the real candidate output exists."
+}

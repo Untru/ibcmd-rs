@@ -1,0 +1,31 @@
+[package]
+name = "ibcmd-sql"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Database clients and values for infobase adapters"
+
+[features]
+default = []
+mssql-live-tests = []
+
+[dependencies]
+anyhow = "1.0"
+ibcmd-postgres = { path = "../ibcmd-postgres" }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "sql-browser-tokio"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync", "macros", "rt-multi-thread"] }
+tokio-util = { version = "0.7", default-features = false, features = ["compat"] }
+# The query digest marker of the calls' journal (`runtime_evidence_schema`).
+sha2 = "0.10"
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+# Integrated Windows logins keep the same SSPI implementation.
+tiberius = { version = "0.13", default-features = false, features = ["winauth"] }
+
+[lints.rust]
+unsafe_code = "forbid"

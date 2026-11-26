@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.21">
+	<ConfigVersions>
+		<Metadata name="CommonForm.ТестРасширение_Форма85" id="6c1f0b2e-3a4d-4e5f-8a9b-0c1d2e3f4a5b" configVersion="ac556eca496f0472712a37b1901a2d6f9165ba3d"/>
+		<Metadata name="CommonForm.ТестРасширение_Форма85.Form" id="6c1f0b2e-3a4d-4e5f-8a9b-0c1d2e3f4a5b.0" configVersion="c332e9f6e4af9eba29993d7c85d37d593f49d5dc"/>
+		<Metadata name="CommonModule.ТестРасширение_Модуль" id="554f39c6-e029-4ee0-8535-8c15291a6a3f" configVersion="8eaf4bb8e9072aa39be4a2483c4b08c2988f2bef"/>
+		<Metadata name="CommonModule.ТестРасширение_Модуль.Module" id="554f39c6-e029-4ee0-8535-8c15291a6a3f.0" configVersion="f2a8bedd89c3f61d8fbf2dbb7c376f5cb5893cf3"/>
+		<Metadata name="Configuration.ТестРасширение" id="00000000-0000-0000-0000-000000000014" configVersion="8c21d48e20dece78567d770281836de12ebe13fc"/>
+		<Metadata name="Language.Русский" id="00000000-0000-0000-0000-000000000015" configVersion="7ba3d3d7125ad490e7c48903e032d0697d704b3c"/>
+		<Metadata name="Report.ТестРасширение_Отчет" id="7d2e1c3b-4a5f-4b6c-9d8e-1f2a3b4c5d6e" configVersion="df93854ae2a007af7380c020009259c8bb60db2a"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

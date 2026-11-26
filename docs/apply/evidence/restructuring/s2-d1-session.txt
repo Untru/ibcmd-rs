@@ -1,0 +1,60 @@
+== Справочник.КлючевыеОперации
+  attributes: Имя МинимальноДопустимыйУровень Приоритет ЦелевоеВремя ИмяХеш ВыполненаСОшибкой Длительная 
+  indexing ЦелевоеВремя: Индексировать
+  ordered by ЦелевоеВремя: 716 rows, digest A6 9B 6E 77 EE 6F 10 BC 7A CA FB DA A2 17 A6 8F
+  indexing Приоритет: НеИндексировать
+  ordered by Приоритет: 716 rows, digest 54 FB 1A EE 9B 0C 45 8A 3C 7D FC C2 B1 8E 4E EF
+  indexing ВыполненаСОшибкой: НеИндексировать
+  ordered by ВыполненаСОшибкой: 716 rows, digest 4D A9 10 E5 1E 25 39 47 F3 5E FB 6D 18 CB EC 3E
+  rows: 716, digest of the kept attributes AB C7 BB 3F 4C 4E 98 DE AA 7A ED E0 1E 3B C2 EA
+  xdto: no deleted attribute in the serialization: Да
+  wrote 6 attribute values, read back equal: 6
+  test object deleted
+== Справочник.КлассификаторБанков
+  attributes: КоррСчет Город Адрес Телефоны ДеятельностьПрекращена СВИФТБИК ИНН УдалитьСтрана МеждународноеНаименование ГородМеждународный АдресМеждународный БИКРКЦ ВнутреннийКодЦБ КодСтраны 
+  indexing Город: Индексировать
+  ordered by Город: 4 840 rows, digest 45 BB BB 91 58 FC F1 4D 07 44 8F 13 04 3B 64 D2
+  indexing Телефоны: ИндексироватьСДопУпорядочиванием
+  ordered by Телефоны: 4 840 rows, digest B0 B3 96 1B 12 1D 30 14 68 CD 5F 6A 20 82 E0 A9
+  rows: 4 840, digest of the kept attributes B7 29 1E 06 CE F5 7E 12 91 9F 5F 18 4E 09 00 56
+  xdto: no deleted attribute in the serialization: Да
+  wrote 12 attribute values, read back equal: 11
+  test object deleted
+== Справочник.ТомаХраненияФайлов
+  attributes: Комментарий МаксимальныйРазмер ПолныйПутьLinux ПолныйПутьWindows ПорядокЗаполнения ВремяПоследнейОчисткиФайлов 
+  indexing МаксимальныйРазмер: Индексировать
+  ordered by МаксимальныйРазмер: 2 rows, digest C0 5F 71 06 EB A0 83 81 FB 6E 82 4B 95 E4 0A 50
+  indexing ПорядокЗаполнения: НеИндексировать
+  ordered by ПорядокЗаполнения: 2 rows, digest 97 A6 C8 6C 7B BC D7 58 DB 61 35 A2 3C B0 78 72
+  rows: 2, digest of the kept attributes 51 FA AD FF 7B 55 01 CE 3D F7 38 53 B8 34 6C F5
+  xdto: no deleted attribute in the serialization: Да
+  wrote 5 attribute values, read back equal: 5
+  test object deleted
+== Документ._ДемоЗаказПокупателя
+  attributes: АдресДоставки АдресДоставкиСтрокой Валюта ГородДоставки ДатаДоставки Договор ДоменноеИмяСервера Комментарий КонтактноеЛицо Контрагент Организация Ответственный Партнер РегионДоставки СтатусЗаказа СтранаДоставки СуммаДокумента УведомлятьОбИзменениеСтатусаЗаказа УдалитьЗаказЗакрыт ШаблонСообщения ЭлектроннаяПочта ЭлектроннаяПочтаСтрокой 
+  indexing РегионДоставки: Индексировать
+  ordered by РегионДоставки: 8 rows, digest B3 7C 4C 1E C2 8C BB FF 20 23 4E 80 D2 68 7A A0
+  indexing ДатаДоставки: ИндексироватьСДопУпорядочиванием
+  ordered by ДатаДоставки: 8 rows, digest 74 E8 1D B0 91 D2 B7 07 4A 58 AD 62 16 46 E4 6D
+  indexing СтатусЗаказа: НеИндексировать
+  ordered by СтатусЗаказа: 8 rows, digest C8 FB 76 50 54 83 E1 34 33 16 92 18 25 C4 C4 44
+  rows: 8, digest of the kept attributes DE C7 66 CC 92 6E 01 7B 71 52 74 08 87 B1 63 0F
+  xdto: no deleted attribute in the serialization: Да
+  wrote 11 attribute values, read back equal: 11
+  test object deleted
+== Справочник._ДемоПроекты
+  attributes: РеквизитДопУпорядочивания РегламентПроекта Организация Подразделение Ответственный 
+  indexing РеквизитДопУпорядочивания: НеИндексировать
+  ordered by РеквизитДопУпорядочивания: 3 rows, digest 1D BF 33 D3 97 C6 50 AA BA 38 65 EE 38 13 81 16
+  rows: 3, digest of the kept attributes 49 3E 5A 7E 07 D7 FC 54 6B 7A B7 D1 61 66 2D 64
+  xdto: no deleted attribute in the serialization: Да
+  wrote 1 attribute values, read back equal: 1
+  test object deleted
+== Документ._ДемоНачислениеЗарплаты
+  attributes: Организация ПериодРегистрации Ответственный Комментарий 
+  indexing ПериодРегистрации: НеИндексировать
+  ordered by ПериодРегистрации: 2 rows, digest 35 52 02 18 90 CD 5A 30 30 8A D7 80 93 AB 09 3A
+  rows: 2, digest of the kept attributes 80 AB 3E 24 30 47 09 D4 DE C3 AE F6 89 7D 7B 1F
+  xdto: no deleted attribute in the serialization: Да
+  wrote 1 attribute values, read back equal: 1
+  test object deleted

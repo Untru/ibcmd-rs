@@ -1,0 +1,42 @@
+[
+  {
+    "type": "ChartOfAccounts",
+    "name": "CorpusAccounts",
+    "maxExtDimensionCount": 0
+  },
+  {
+    "type": "ChartOfCalculationTypes",
+    "name": "CorpusCalculationTypes"
+  },
+  {
+    "type": "AccountingRegister",
+    "name": "CorpusAccountingRegister",
+    "chartOfAccounts": "ChartOfAccounts.CorpusAccounts",
+    "dimensions": [
+      "Department:String(50)"
+    ],
+    "resources": [
+      "Amount:Number(15,2)"
+    ]
+  },
+  {
+    "type": "CalculationRegister",
+    "name": "CorpusCalculationRegister",
+    "chartOfCalculationTypes": "ChartOfCalculationTypes.CorpusCalculationTypes",
+    "periodicity": "Month",
+    "dimensions": [
+      "Employee:String(50)"
+    ],
+    "resources": [
+      "Result:Number(15,2)"
+    ]
+  },
+  {
+    "type": "Document",
+    "name": "CorpusRecorder",
+    "registerRecords": [
+      "AccountingRegister.CorpusAccountingRegister",
+      "CalculationRegister.CorpusCalculationRegister"
+    ]
+  }
+]

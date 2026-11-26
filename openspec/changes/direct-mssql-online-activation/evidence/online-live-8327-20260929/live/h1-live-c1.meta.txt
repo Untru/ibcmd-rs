@@ -1,0 +1,9 @@
+run=h1
+tag=h1-live-c1
+mode=live
+dry_run=False
+database=ibcmd_rs_05_online_a1
+start_utc=2026-09-29T18:21:07.578Z
+end_utc=2026-09-29T18:21:23.332Z
+wall_ms=15743
+exit=1

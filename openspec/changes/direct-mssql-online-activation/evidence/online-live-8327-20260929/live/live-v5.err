@@ -1,0 +1,6 @@
+Error: SQL script F:\ibcmd\lab\05\online\runs\live5\live-v5.sql failed
+
+Caused by:
+    0: the script failed
+    1: SQL Server request failed
+    2: Token error: '1C SQL connections did not recover before the live activation deadline; database is online and the second recovery was not started' on server DESKTOP-SMI5N4O executing  on line 78 (code: 57234, state: 1, class: 16)

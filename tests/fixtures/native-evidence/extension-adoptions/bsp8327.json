@@ -1,0 +1,1001 @@
+{
+ "source": "ibcmd-rs mssql-restructure --extensions-report on the БСП 8.3.27 corpus clone (four extensions), 2026-09-30; tables = the extension schema (SchemaStorage 1)",
+ "registered": 4,
+ "adoptions": [
+  {
+   "extension": "_ДемоПустоеРасширение",
+   "image": "active",
+   "object": {
+    "row": "efc14f05-e4ab-4235-8c63-9082143c3ca9",
+    "uuid": "efc14f05-e4ab-4235-8c63-9082143c3ca9",
+    "name": "Русский",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "054d8ebe-c66f-466e-be4e-5a86d795c89a",
+    "uuid": "054d8ebe-c66f-466e-be4e-5a86d795c89a",
+    "name": "_ДемоЮридическоеФизическоеЛицо",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "0765f65f-3090-45eb-ad47-43b89cbf38fd",
+    "uuid": "0765f65f-3090-45eb-ad47-43b89cbf38fd",
+    "name": "ДлительнаяОперация48",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "08ee52d4-69e7-41b0-b84a-e87864de6537",
+    "uuid": "08ee52d4-69e7-41b0-b84a-e87864de6537",
+    "name": "ОбъектСДополнительнымиКомандами",
+    "extends": "cdef5df6-f3a1-4950-b197-4f375914f885"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "0b83937d-3da9-484e-b0a8-efa405842ad6",
+    "uuid": "0b83937d-3da9-484e-b0a8-efa405842ad6",
+    "name": "Предупреждение",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "0b9e01c9-37b9-4ca2-9dbd-7e75dde1aad3",
+    "uuid": "0b9e01c9-37b9-4ca2-9dbd-7e75dde1aad3",
+    "name": "РежимИспользованияПриложенияВСервисеЛокально",
+    "extends": "4bdc1a18-f184-4f95-bda4-8f5c4b7c3aa1"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "1020844a-42fe-4fb5-9601-bf44cca9e466",
+    "uuid": "1020844a-42fe-4fb5-9601-bf44cca9e466",
+    "name": "ГраницаВокруг",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "14c78921-3309-49d8-95d1-23c2fd7701e7",
+    "uuid": "14c78921-3309-49d8-95d1-23c2fd7701e7",
+    "name": "_ДемоЧтениеПеремещенийТоваров",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "155263d0-8380-4a70-8b90-82a9a0b3c405",
+    "uuid": "155263d0-8380-4a70-8b90-82a9a0b3c405",
+    "name": "Использование",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "16d0146b-abad-434d-9130-70d656a0d2dc",
+    "uuid": "16d0146b-abad-434d-9130-70d656a0d2dc",
+    "name": "ОбщегоНазначенияПереопределяемый",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "1d45878a-0194-448b-995c-f712c1cdc35e",
+    "uuid": "1d45878a-0194-448b-995c-f712c1cdc35e",
+    "name": "ШиринаКолонки",
+    "extends": "9bd92328-8c9c-4882-8956-a1fccf555a64"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "1ddfba6b-7544-474d-a2a0-363ae54be28e",
+    "uuid": "1ddfba6b-7544-474d-a2a0-363ae54be28e",
+    "name": "_ДемоСписаниеТоваров",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "2cb40f25-2c61-41e9-9689-e1e4c639e8cb",
+    "uuid": "2cb40f25-2c61-41e9-9689-e1e4c639e8cb",
+    "name": "_ДемоНоменклатура",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "2ff2b7b4-492b-47a3-b0b2-ce22eb7fccd0",
+    "uuid": "2ff2b7b4-492b-47a3-b0b2-ce22eb7fccd0",
+    "name": "_ДемоЗаведующиеМестамиХранения",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "3014d9c1-cb00-49fb-81b3-e8ced354975f",
+    "uuid": "3014d9c1-cb00-49fb-81b3-e8ced354975f",
+    "name": "_ДемоПартнеры",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "32550e24-8185-4c82-b42c-49d55e25bc3c",
+    "uuid": "32550e24-8185-4c82-b42c-49d55e25bc3c",
+    "name": "_ДемоКонтрагенты",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "3361e997-fedf-4cb4-a225-009d1992b5b4",
+    "uuid": "3361e997-fedf-4cb4-a225-009d1992b5b4",
+    "name": "_ДемоСчетНаОплатуПокупателю",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "387a7076-4ee9-4930-97f5-2abf10b241ea",
+    "uuid": "387a7076-4ee9-4930-97f5-2abf10b241ea",
+    "name": "_ДемоПоступлениеТоваров",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "39f7ba80-2e08-4fb5-a408-20cb020108c1",
+    "uuid": "39f7ba80-2e08-4fb5-a408-20cb020108c1",
+    "name": "ПредметШаблонаСообщения",
+    "extends": "08fe5e70-ac6b-427a-b6f2-0e2f7848fa6b"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "42f33787-550c-4275-9e44-231055f76c86",
+    "uuid": "42f33787-550c-4275-9e44-231055f76c86",
+    "name": "_ДемоДобавлениеИзменениеСкладскихДокументов",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "44a40b03-7d67-4c37-b6af-602b886fcb85",
+    "uuid": "44a40b03-7d67-4c37-b6af-602b886fcb85",
+    "name": "ТипыКонтактнойИнформации",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "492af577-268d-4329-b801-f98581ade4ec",
+    "uuid": "492af577-268d-4329-b801-f98581ade4ec",
+    "name": "ЦветГраницы",
+    "extends": "61cfdc9a-49c3-4316-b38d-997910cf25c3"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "4caa15d7-8ebe-4281-b9f9-5918d8252b14",
+    "uuid": "4caa15d7-8ebe-4281-b9f9-5918d8252b14",
+    "name": "УменьшитьШрифт",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "4cbb1dbc-9a29-4649-993b-1bbd320107ba",
+    "uuid": "4cbb1dbc-9a29-4649-993b-1bbd320107ba",
+    "name": "_ДемоМестаХранения",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "55d52e1a-2277-43e2-9613-fda932f6df46",
+    "uuid": "55d52e1a-2277-43e2-9613-fda932f6df46",
+    "name": "УправлениеДоступомПереопределяемый",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "612b348c-95af-44bf-8979-90a9db173eba",
+    "uuid": "612b348c-95af-44bf-8979-90a9db173eba",
+    "name": "РедактированиеТабличногоДокумента",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "629a7b85-481b-4a21-99d3-95c851608136",
+    "uuid": "629a7b85-481b-4a21-99d3-95c851608136",
+    "name": "Администрирование",
+    "extends": "9233322b-dfdb-4c66-91fe-1299292d40a5"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "62e890da-cf0b-44b3-bfba-9322530eb28b",
+    "uuid": "62e890da-cf0b-44b3-bfba-9322530eb28b",
+    "name": "ВставитьКолонкуСправа",
+    "extends": "d61fa2fb-a035-469f-9ae1-b78ecd82c83d"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "6be5806e-4232-469e-b21f-41b45a7867a3",
+    "uuid": "6be5806e-4232-469e-b21f-41b45a7867a3",
+    "name": "ВставитьКолонкуСлева",
+    "extends": "7bbd6fe8-c2fe-4ed2-abd7-2b3fc5b2f410"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "6fdea6d3-2c2f-41b4-9daf-29b5ba2a6eaa",
+    "uuid": "6fdea6d3-2c2f-41b4-9daf-29b5ba2a6eaa",
+    "name": "ВариантыОтчетовПереопределяемый",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "7559133a-9648-4561-868a-9c3bf2e203ad",
+    "uuid": "7559133a-9648-4561-868a-9c3bf2e203ad",
+    "name": "_ДемоВариантыОтчетов",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "7982f9b2-2068-4a44-b74f-8fdf024c407b",
+    "uuid": "7982f9b2-2068-4a44-b74f-8fdf024c407b",
+    "name": "_ДемоДобавлениеИзменениеПеремещенийТоваров",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "8cce67a3-d6f2-4b32-8362-bfdb3a0e2773",
+    "uuid": "8cce67a3-d6f2-4b32-8362-bfdb3a0e2773",
+    "name": "_ДемоРазделИнтегрируемыеПодсистемы",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "8def5319-547b-49bc-9be5-0e365b1faf16",
+    "uuid": "8def5319-547b-49bc-9be5-0e365b1faf16",
+    "name": "ВставитьГруппировкуВыше",
+    "extends": "ba06091b-b659-4d29-a971-81335cf4060a"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "8ebf4040-d930-4d5f-806e-71d6acde613c",
+    "uuid": "8ebf4040-d930-4d5f-806e-71d6acde613c",
+    "name": "ХранилищеВариантовОтчетов",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "95a5bbe6-86b5-4a78-a5fd-24071a597de7",
+    "uuid": "95a5bbe6-86b5-4a78-a5fd-24071a597de7",
+    "name": "ДополнительныеОтчетыИОбработкиПереопределяемый",
+    "extends": "b1b5bf08-1c57-4875-87bb-ad1fa1a3251f"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "974a67f8-0116-4266-bd86-e766250afd17",
+    "uuid": "974a67f8-0116-4266-bd86-e766250afd17",
+    "name": "_ДемоОстаткиТоваровВМестахХранения",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "aa456e07-a242-41cc-98b2-d5c0bee2c848",
+    "uuid": "aa456e07-a242-41cc-98b2-d5c0bee2c848",
+    "name": "Успешно32",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "abcdfe11-32b4-4fd5-9c0c-704084661910",
+    "uuid": "abcdfe11-32b4-4fd5-9c0c-704084661910",
+    "name": "_ДемоГруппыДоступаПартнеров",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "b0f62367-6338-47f5-a4fc-d8219195944b",
+    "uuid": "b0f62367-6338-47f5-a4fc-d8219195944b",
+    "name": "УвеличитьШрифт",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "b189b7b5-0ac0-4163-8f42-6695d64b9f44",
+    "uuid": "b189b7b5-0ac0-4163-8f42-6695d64b9f44",
+    "name": "Пользователи",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "b51ebb2e-c756-4b8b-ad2f-3697dfcb1e6c",
+    "uuid": "b51ebb2e-c756-4b8b-ad2f-3697dfcb1e6c",
+    "name": "ВставитьГруппировкуНиже",
+    "extends": "7c376c72-409e-4b5f-a5b6-85b0a1c23f58"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "b5fe11de-db77-497c-88ca-19999354558b",
+    "uuid": "b5fe11de-db77-497c-88ca-19999354558b",
+    "name": "_ДемоЧтениеНСИ",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "b64eeabd-db42-4ee6-b394-e7fe69eb7874",
+    "uuid": "b64eeabd-db42-4ee6-b394-e7fe69eb7874",
+    "name": "_ДемоРеализацияТоваров",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "b689ea96-4c4c-4fcd-8312-e27a825fe4aa",
+    "uuid": "b689ea96-4c4c-4fcd-8312-e27a825fe4aa",
+    "name": "_ДемоОрганизации",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "c38c0dc4-2eb3-4cc4-b759-dfa3e3801394",
+    "uuid": "c38c0dc4-2eb3-4cc4-b759-dfa3e3801394",
+    "name": "Информация32",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "ca4abdd6-dea2-4903-93ca-b93604e890b7",
+    "uuid": "ca4abdd6-dea2-4903-93ca-b93604e890b7",
+    "name": "ПоясняющийТекст",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "cb486b13-0ac4-4f8d-ad1e-c38ef80fa1d2",
+    "uuid": "cb486b13-0ac4-4f8d-ad1e-c38ef80fa1d2",
+    "name": "_ДемоУправлениеДоступом",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "cd9aecaa-e480-481c-8c77-ff6600837681",
+    "uuid": "cd9aecaa-e480-481c-8c77-ff6600837681",
+    "name": "ОтчетыКлиентПереопределяемый",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "cebb29b7-f448-40c2-b17b-20f063b10895",
+    "uuid": "cebb29b7-f448-40c2-b17b-20f063b10895",
+    "name": "_ДемоУправлениеДоступом",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "d0737a69-ff55-41a2-928e-b4135e0745eb",
+    "uuid": "d0737a69-ff55-41a2-928e-b4135e0745eb",
+    "name": "ВидыКонтактнойИнформации",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "d7b47b2b-a825-491e-9f12-c9f578e2a692",
+    "uuid": "d7b47b2b-a825-491e-9f12-c9f578e2a692",
+    "name": "_ДемоЧтениеСкладскихДокументов",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "e0d07c9b-fc7d-49b3-8cfa-9cd34bbe14b8",
+    "uuid": "e0d07c9b-fc7d-49b3-8cfa-9cd34bbe14b8",
+    "name": "_ДемоОрганайзер",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "e4cddf23-dc99-4c6f-a849-8ec369763af2",
+    "uuid": "e4cddf23-dc99-4c6f-a849-8ec369763af2",
+    "name": "ВысотаСтроки",
+    "extends": "c83f7826-0fef-4a9b-8d36-dee5d93c7417"
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "e64bf27d-4ac4-41a8-8f6b-4c8986d3e464",
+    "uuid": "e64bf27d-4ac4-41a8-8f6b-4c8986d3e464",
+    "name": "ДенежнаяСуммаНеотрицательная",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "edbe9cc3-36d6-4664-8f12-56062e63fd72",
+    "uuid": "edbe9cc3-36d6-4664-8f12-56062e63fd72",
+    "name": "ПодключаемыеОтчетыИОбработки",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "eecf216b-994d-452b-a20c-d6c32a4e20f0",
+    "uuid": "eecf216b-994d-452b-a20c-d6c32a4e20f0",
+    "name": "Русский",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "fc4ac0a6-f666-41e4-946e-0262b7b25e33",
+    "uuid": "fc4ac0a6-f666-41e4-946e-0262b7b25e33",
+    "name": "_ДемоДобавлениеИзменениеНСИ",
+    "extends": null
+   }
+  },
+  {
+   "extension": "_ДемоРасширение",
+   "image": "active",
+   "object": {
+    "row": "feae993b-aef7-4193-933f-7965faf9c05d",
+    "uuid": "feae993b-aef7-4193-933f-7965faf9c05d",
+    "name": "УправлениеПечатьюПереопределяемый",
+    "extends": "e1803e54-ec5e-4a82-8097-5e2331820991"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "114203be-9f20-499a-9478-a2ae0a9eac54",
+    "uuid": "114203be-9f20-499a-9478-a2ae0a9eac54",
+    "name": "ВладелецКонтактнойИнформации",
+    "extends": "83385f31-2cdf-44a1-85c3-461e4ad5fd45"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "19136861-1e83-44e8-bf87-d9fe5ef52cd4",
+    "uuid": "19136861-1e83-44e8-bf87-d9fe5ef52cd4",
+    "name": "ВладелецФайлов",
+    "extends": "ae698468-f42a-4400-aee6-fd849740e634"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "33649ea8-a03d-475c-83ef-3713dfb71eba",
+    "uuid": "33649ea8-a03d-475c-83ef-3713dfb71eba",
+    "name": "СвязанныеДокументы",
+    "extends": "18bf6916-83cc-41e5-a35b-1489450ae632"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "395d91c1-df5a-4ef9-be4b-759da1d8c578",
+    "uuid": "395d91c1-df5a-4ef9-be4b-759da1d8c578",
+    "name": "_ДемоТекущийПроект",
+    "extends": "bcfc5e5d-214a-4f45-8ae4-e494f2734080"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "48790080-643a-4423-9e0c-e193fb5267d6",
+    "uuid": "48790080-643a-4423-9e0c-e193fb5267d6",
+    "name": "ПрисоединенныйФайл",
+    "extends": "bef6081e-f377-41d6-83a1-b0e218a3fb46"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "4ccc59ea-8ad3-40ec-a2e4-f186864a1597",
+    "uuid": "4ccc59ea-8ad3-40ec-a2e4-f186864a1597",
+    "name": "ВладелецПрисоединенныхФайловОбъект",
+    "extends": "1a9177fe-6699-42b3-9588-eed9c6008c2d"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "52bddabb-6ba5-4616-9a71-5392d506cf86",
+    "uuid": "52bddabb-6ba5-4616-9a71-5392d506cf86",
+    "name": "СвязанныеДокументы",
+    "extends": "35bc58df-8aff-48dd-83a9-b60b0461f94d"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "540e26a3-5356-4e04-9da4-a1819e024205",
+    "uuid": "540e26a3-5356-4e04-9da4-a1819e024205",
+    "name": "Русский",
+    "extends": "db4a9ccb-9ef5-4b3c-8577-b6fe5db1b62e"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "950b1cfd-0418-48ba-94f8-5e756d8ba375",
+    "uuid": "950b1cfd-0418-48ba-94f8-5e756d8ba375",
+    "name": "ПредметНапоминания",
+    "extends": "20c2053c-8ebd-4c07-8d95-956b424d047c"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "98b71d7d-a47a-4538-aa66-3201fccbf890",
+    "uuid": "98b71d7d-a47a-4538-aa66-3201fccbf890",
+    "name": "СвязанныеДокументы",
+    "extends": "41f87891-ddd5-4e0f-a4f2-8039fb71981b"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "9fa2e350-5148-4f40-aa29-f51af677d2f1",
+    "uuid": "9fa2e350-5148-4f40-aa29-f51af677d2f1",
+    "name": "ПредметЗадачи",
+    "extends": "d942d536-5d01-4571-b910-abd973996a38"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "c3c7b388-e937-4050-b2bf-1356fa965873",
+    "uuid": "c3c7b388-e937-4050-b2bf-1356fa965873",
+    "name": "ПрисоединенныйФайлОбъект",
+    "extends": "9b67bfd5-ef23-4205-b7ba-9466517e9999"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "eb50ccde-ac43-46b8-a693-56b559ca323a",
+    "uuid": "eb50ccde-ac43-46b8-a693-56b559ca323a",
+    "name": "ПодсистемыКонфигурацииПереопределяемый",
+    "extends": "640d7486-8abd-40aa-a244-2ed899b7225a"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "f6f208dd-bd0c-47e6-a477-19665830d602",
+    "uuid": "f6f208dd-bd0c-47e6-a477-19665830d602",
+    "name": "ВладелецПрисоединенныхФайлов",
+    "extends": "deb69010-80b0-4e28-acc7-8c50e8e6f873"
+   }
+  },
+  {
+   "extension": "ServiceDesk",
+   "image": "active",
+   "object": {
+    "row": "fab9f052-5fa1-4cce-8c2a-537206255c9e",
+    "uuid": "fab9f052-5fa1-4cce-8c2a-537206255c9e",
+    "name": "РаботаСФайламиПереопределяемый",
+    "extends": "c4351896-eff1-4e4d-8823-028d63a9d6bf"
+   }
+  },
+  {
+   "extension": "VAExtension",
+   "image": "active",
+   "object": {
+    "row": "ea4cb1a0-9c26-4a77-96fc-7f6b4f692a21",
+    "uuid": "ea4cb1a0-9c26-4a77-96fc-7f6b4f692a21",
+    "name": "Русский",
+    "extends": null
+   }
+  }
+ ],
+ "tables": [
+  "Acc7810",
+  "AccRg7832",
+  "AccRgAT07835",
+  "AccRgCT7839",
+  "AccRgOpt3965",
+  "AccRgOpt7841",
+  "AccumRg10362",
+  "AccumRg10379",
+  "AccumRg10392",
+  "AccumRg10412",
+  "AccumRg10431",
+  "AccumRg10437",
+  "AccumRg10442",
+  "AccumRg10446",
+  "AccumRg10450",
+  "AccumRg7819",
+  "AccumRgAggDict1h10373",
+  "AccumRgAggDict1h10387",
+  "AccumRgAggDict1h10404",
+  "AccumRgAggDict1h10423",
+  "AccumRgAggDict1h10456",
+  "AccumRgAggDict2h10374",
+  "AccumRgAggDict2h10388",
+  "AccumRgAggDict2h10405",
+  "AccumRgAggDict2h10424",
+  "AccumRgAggDict3h10375",
+  "AccumRgAggDict3h10406",
+  "AccumRgAggDict3h10425",
+  "AccumRgAggDict4h10407",
+  "AccumRgAggDict4h10426",
+  "AccumRgAggDict5h10408",
+  "AccumRgAggDict5h10427",
+  "AccumRgAggGridK10371",
+  "AccumRgAggGridK10385",
+  "AccumRgAggGridK10402",
+  "AccumRgAggGridK10421",
+  "AccumRgAggGridK10454",
+  "AccumRgAggOptK10372",
+  "AccumRgAggOptK10386",
+  "AccumRgAggOptK10403",
+  "AccumRgAggOptK10422",
+  "AccumRgAggOptK10455",
+  "AccumRgBfK10377",
+  "AccumRgBfK10390",
+  "AccumRgBfK10410",
+  "AccumRgBfK10429",
+  "AccumRgBfK10458",
+  "AccumRgDlK10376",
+  "AccumRgDlK10389",
+  "AccumRgDlK10409",
+  "AccumRgDlK10428",
+  "AccumRgDlK10457",
+  "AccumRgOpt10460",
+  "AccumRgOpt10461",
+  "AccumRgOpt10462",
+  "AccumRgOpt10463",
+  "AccumRgOpt10464",
+  "AccumRgOpt10465",
+  "AccumRgOpt10466",
+  "AccumRgOpt10467",
+  "AccumRgOpt10468",
+  "AccumRgOpt2363",
+  "AccumRgOpt2364",
+  "AccumRgOpt7823",
+  "AccumRgSt10378",
+  "AccumRgSt10391",
+  "AccumRgSt10411",
+  "AccumRgSt10430",
+  "AccumRgSt10459",
+  "AccumRgT10436",
+  "AccumRgT10441",
+  "AccumRgT10445",
+  "AccumRgT10449",
+  "AccumRgT7822",
+  "AccumRgTn10370",
+  "AccumRgTn10384",
+  "AccumRgTn10401",
+  "AccumRgTn10420",
+  "AccumRgTn10453",
+  "BPr9",
+  "CKinds7815",
+  "CRg7816",
+  "CRgRecalc3975",
+  "CRgRecalcChngR7761",
+  "Chrc53",
+  "Chrc7814",
+  "ChrcChngR1277",
+  "Const10306",
+  "Const10308",
+  "Const10612",
+  "Const10614",
+  "Const10616",
+  "DataHistoryLatestVerExt",
+  "DataHistoryMetadataExt",
+  "DataHistorySettingsExt",
+  "DataHistoryVersionsExt",
+  "DbSegments",
+  "DbSegmentsItems",
+  "Document10068",
+  "Document10069",
+  "Document10070",
+  "Document10071",
+  "Document10072",
+  "Document10073",
+  "Document10074",
+  "Document10075",
+  "Document10076",
+  "Document10077",
+  "Document10491",
+  "Document7811",
+  "Document7812",
+  "Enum10078",
+  "Enum10079",
+  "Enum10080",
+  "Enum10081",
+  "Enum10082",
+  "Enum10083",
+  "Enum10084",
+  "Enum10085",
+  "Enum10086",
+  "Enum10087",
+  "Enum10088",
+  "Enum10089",
+  "Enum10090",
+  "Enum10492",
+  "Enum10826",
+  "Enum11017",
+  "Enum2894",
+  "Enum7813",
+  "InfoRg10038",
+  "InfoRg10310",
+  "InfoRg10317",
+  "InfoRg10327",
+  "InfoRg10335",
+  "InfoRg10341",
+  "InfoRg10347",
+  "InfoRg10350",
+  "InfoRg10359",
+  "InfoRg10479",
+  "InfoRg10507",
+  "InfoRg10512",
+  "InfoRg10529",
+  "InfoRg10836",
+  "InfoRg10848",
+  "InfoRg10868",
+  "InfoRg10909",
+  "InfoRg10922",
+  "InfoRg10932",
+  "InfoRg10943",
+  "InfoRg10963",
+  "InfoRg11018",
+  "InfoRg11022",
+  "InfoRg11025",
+  "InfoRg1217",
+  "InfoRg1240",
+  "InfoRg2123",
+  "InfoRg2133",
+  "InfoRg2311",
+  "InfoRg2905",
+  "InfoRg3217",
+  "InfoRg3311",
+  "InfoRg3349",
+  "InfoRg3588",
+  "InfoRg4013",
+  "InfoRg429",
+  "InfoRg445",
+  "InfoRg4911",
+  "InfoRg4916",
+  "InfoRg496",
+  "InfoRg5015",
+  "InfoRg5045",
+  "InfoRg5048",
+  "InfoRg5419",
+  "InfoRg5426",
+  "InfoRg5435",
+  "InfoRg6215",
+  "InfoRg6553",
+  "InfoRg7133",
+  "InfoRg7373",
+  "InfoRg7710",
+  "InfoRg7924",
+  "InfoRg7928",
+  "InfoRg9142",
+  "InfoRg9840",
+  "InfoRg9987",
+  "InfoRgChngR1177",
+  "InfoRgChngR1248",
+  "InfoRgChngR2128",
+  "InfoRgChngR3300",
+  "InfoRgChngR3576",
+  "InfoRgChngR4027",
+  "InfoRgChngR4220",
+  "InfoRgChngR5418",
+  "InfoRgChngR5478",
+  "InfoRgChngR5497",
+  "InfoRgChngR5539",
+  "InfoRgChngR5946",
+  "InfoRgChngR5947",
+  "InfoRgChngR5952",
+  "InfoRgChngR5975",
+  "InfoRgChngR5980",
+  "InfoRgChngR5989",
+  "InfoRgChngR6000",
+  "InfoRgChngR6009",
+  "InfoRgChngR6027",
+  "InfoRgChngR6042",
+  "InfoRgChngR6235",
+  "InfoRgChngR6572",
+  "InfoRgChngR7138",
+  "InfoRgChngR7727",
+  "InfoRgChngR8084",
+  "InfoRgChngR8091",
+  "InfoRgChngR9149",
+  "InfoRgChngR9843",
+  "InfoRgChngR9990",
+  "RefSInf4605",
+  "Reference10059",
+  "Reference10060",
+  "Reference10061",
+  "Reference10062",
+  "Reference10063",
+  "Reference10064",
+  "Reference10065",
+  "Reference10066",
+  "Reference10067",
+  "Reference10523",
+  "Reference10543",
+  "Reference10825",
+  "Reference10877",
+  "Reference10878",
+  "Reference18",
+  "Reference2596",
+  "Reference5125",
+  "Reference6523",
+  "Reference7366",
+  "Reference9936",
+  "ScheduledJobs10478",
+  "ScheduledJobs10847",
+  "ScheduledJobs10876",
+  "ScheduledJobs10998",
+  "ScheduledJobs10999",
+  "ScheduledJobs11031",
+  "Task11"
+ ]
+}

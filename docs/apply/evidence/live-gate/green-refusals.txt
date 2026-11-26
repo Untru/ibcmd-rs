@@ -1,0 +1,14 @@
+The refusals of the fixed tool (scripts/apply-lab/live/f9_f10.ps1 -Label green, 2026-09-30 14:51), complete. Each one comes before the stage: ConfigSave stays
+empty and the ordinary rows are as they were (f9f10-green.log).
+
+== chain
+Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'live activation needs a log backup chain: take a full backup of the database (BACKUP DATABASE ... TO DISK=...) after the recovery model was set; the tail-log backup would fail with error 4214 after the promotion was committed' on server DESKTOP-SMI5N4O executing on line 6 (code: 57235, state: 1, class: 16)
+
+== nodir
+Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'the directory of the tail-log output does not exist on the SQL Server host' on server DESKTOP-SMI5N4O executing on line 7 (code: 57236, state: 1, class: 16)
+
+== nowrite
+Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'невозможно открыть устройство резервного копирования C:\Windows\System32\config\ibcmdrs-live-probe-270B9079-ADE4-4D7C-8F31-EFCC73A39ACF.ibcmdrsprobe. Ошибка операционной системы 5(Отказано в доступе.).' on server DESKTOP-SMI5N4O executing on line 9 (code: 3201, state: 1, class: 16) [the SQL Server service account cannot write a backup to the directory of the tail-log output, or cannot remove the probe file from it; the tail-log backup would fail the same way after the promotion was committed]
+
+== sessions
+Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'live activation refused: 1 session(s) of the database have an open transaction or a running request; the live switch would roll their work back (ROLLBACK IMMEDIATE). Wait until they are idle, or accept the interruption with --interrupt-sessions' on server DESKTOP-SMI5N4O executing on line 12 (code: 57238, state: 1, class: 16) [1 session(s) with open work: session 146 of "DESKTOP-SMI5N4O\\Pavel" on "DESKTOP-SMI5N4O" ("ibcmd-lab-writer", sleeping, 1 open transaction(s))]

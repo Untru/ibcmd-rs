@@ -1,0 +1,72 @@
+{
+  "scope": "Exactly one parent-granted full authentic reverse conversion; no SDK/JVM/build",
+  "status": "FAIL_CLOSED_AT_NEXT_DCSSCA_ENVELOPE_BOUNDARY",
+  "candidate_sha256": "5542dce707bbd7629d5a344a1c5aa13e7a1b64d6d704f9744a336498b14d5113",
+  "candidate_source_head": "484372e18a8ed334fd64aa3d4382730f5c0ec49f",
+  "candidate_source_tree": "7cc71ac761c3c1968dd31fc6eb4b3bda00796e3a",
+  "candidate_tests": {
+    "CAI": 4,
+    "DCSS": 3,
+    "form": 2,
+    "exit_code": 0
+  },
+  "candidate_build_exit_code": 0,
+  "installed_edt_build": "2026.2.1.3",
+  "native_sdk_build": "8.5.1.1592",
+  "source_profile": "edt-2025.2.3-xml-2.21",
+  "reference_reuse": "Renewed complete genuine project/export/native-reference and bound actual SDK command/receipt/SDK binary checks; new candidate/test/build raw logs checked",
+  "inventories": {
+    "project": {
+      "file_count": 19,
+      "total_bytes": 79140,
+      "tree_sha256": "c9781c7a36e856978b337d695dd92abf0c5d93ee89eefb6523a6fc0cce897a80"
+    },
+    "current-installed-export": {
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2"
+    },
+    "old-installed-export": {
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2"
+    },
+    "native-reference": {
+      "file_count": 19,
+      "total_bytes": 86112,
+      "tree_sha256": "8628cfab808f7414be1e6e8912ff7912fe7c027b95ab4c303cf451d17141cc67"
+    }
+  },
+  "immutability": {
+    "all_inputs_unchanged": true,
+    "candidate_unchanged": true,
+    "bound_command_receipts_and_build_unchanged": true
+  },
+  "convert_exit_code": 2,
+  "failure": {
+    "code": "conversion.edt-encode-preflight-failed",
+    "decode_completed": true,
+    "output_published": false,
+    "owner": "#355 shared codec; coordinated with #357",
+    "path": "Catalogs/FilterProbe/Forms/ListForm/ConditionalAppearance.dcssca",
+    "reason": "dcssca envelope requires CRLF but authentic current serializer emits LF"
+  },
+  "minimal_public_fixtures": [
+    {
+      "source_relative": "src/Catalogs/FilterProbe/Forms/ListForm/ConditionalAppearance.dcssca",
+      "fixture": "01-ConditionalAppearance.dcssca",
+      "bytes": 1317,
+      "sha256": "c6e6e9b8b6055d5103a49a944f2d2cf2a6913b5678bbb648170beac6a71c7373",
+      "has_crlf": false,
+      "has_lf": true
+    }
+  ],
+  "limits": [
+    "No output to compare against native or use for direct three-way reporting",
+    "No BSP/UH acceptance",
+    "No current-model semantic support claim",
+    "SDK/style diagnostics remain unsuppressed",
+    "Historical native configuration custody not retroactively upgraded"
+  ],
+  "release": "Full release reported immediately to planner so #381 integration can follow; no second conversion or SDK/JVM run"
+}

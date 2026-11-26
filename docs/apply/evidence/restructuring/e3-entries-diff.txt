@@ -1,0 +1,76 @@
+== table Document578
+   sub-tables before ['VT668'] after ['VT668']
+   sub-table VT668 (changed)
+     + field {"Fld11038",0,{1,{"N",15,3,"",0}},"",0}
+     + field {"Fld11039",0,{1,{"S",2147483658,0,"",0}},"",0}
+     index {"ByFieldFld11039",0,{2,"Fld11039","ID"},0,0,0,{0},0,0}
+     entry {"VT668","I",0,"Document578",{5,{"LineNo669",0,{1,{"N",5,0,"",0}},"",0},{"Fld11038",0,{1,{"N",15,3," ... ,0}},{0},{1,{"ByFieldFld11039",0,{2,"Fld11039","ID"},0,0,0,{0},0,0}},1,"S",{0},{0},"",0,0}
+   indexes before (2):
+      {"ByDocNum",1,{2,"Number","ID"},0,0,0,{0},0,0}
+      {"ByDocDate",1,{3,"Date_Time","ID","Marked"},0,0,0,{0},0,0}
+   indexes after (2):
+      {"ByDocNum",1,{2,"Number","ID"},0,0,0,{0},0,0}
+      {"ByDocDate",1,{3,"Date_Time","ID","Marked"},0,0,0,{0},0,0}
+== table Reference19
+   sub-tables before ['VT131'] after ['VT131']
+   sub-table VT131 (changed)
+     + field {"Fld11034",0,{1,{"N",12,3,"",0}},"",0}
+     + field {"Fld11035",0,{1,{"L",0,0,"",0}},"",0}
+     index {"ByFieldFld133",0,{2,"Fld133","ID"},0,0,0,{0},0,0}
+     index {"ByFieldFld134",0,{2,"Fld134","ID"},0,0,0,{0},0,0}
+     entry {"VT131","I",0,"Reference19",{17,{"LineNo132",0,{1,{"N",5,0,"",0}},"",0},{"Fld133",0,{1,{"R",0,0,"En ... ,0,0,0,{0},0,0},{"ByFieldFld134",0,{2,"Fld134","ID"},0,0,0,{0},0,0}},1,"S",{0},{0},"",0,0}
+   indexes before (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+      {"ByFieldFld4817",1,{2,"Fld4817","ID"},0,0,0,{0},0,0}
+      {"ByFieldFld4822",1,{2,"Fld4822","ID"},0,0,0,{0},0,0}
+   indexes after (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+      {"ByFieldFld4817",1,{2,"Fld4817","ID"},0,0,0,{0},0,0}
+      {"ByFieldFld4822",1,{2,"Fld4822","ID"},0,0,0,{0},0,0}
+== table Reference20
+   sub-tables before ['VT155', 'VT159'] after ['VT155', 'VT159']
+   sub-table VT159 (changed)
+     + field {"Fld11036",0,{1,{"S",2147483663,0,"",0}},"",0}
+     index {"ByFieldFld161",0,{2,"Fld161","ID"},0,0,0,{0},0,0}
+     index {"ByFieldFld162",0,{2,"Fld162","ID"},0,0,0,{0},0,0}
+     entry {"VT159","I",0,"Reference20",{15,{"LineNo160",0,{1,{"N",5,0,"",0}},"",0},{"Fld161",0,{1,{"R",0,0,"En ... ,0,0,0,{0},0,0},{"ByFieldFld162",0,{2,"Fld162","ID"},0,0,0,{0},0,0}},1,"S",{0},{0},"",0,0}
+   indexes before (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"ParentCode",1,{4,"ParentID","Folder","Code","ID"},0,0,0,{0},0,0}
+      {"ParentDescr",1,{4,"ParentID","Folder","Description","ID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+   indexes after (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"ParentCode",1,{4,"ParentID","Folder","Code","ID"},0,0,0,{0},0,0}
+      {"ParentDescr",1,{4,"ParentID","Folder","Description","ID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+== table Reference21
+   sub-tables before ['VT960'] after ['VT960']
+   sub-table VT960 (changed)
+     + field {"Fld11037",0,{1,{"S",2147483678,0,"",0}},"",0}
+     entry {"VT960","I",0,"Reference21",{3,{"LineNo961",0,{1,{"N",5,0,"",0}},"",0},{"Fld962",0,{1,{"R",0,0,"Ref ... ",3}},"",0},{"Fld11037",0,{1,{"S",2147483678,0,"",0}},"",0}},{0},{0},1,"S",{0},{0},"",0,0}
+   indexes before (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"ParentCode",1,{3,"ParentID","Code","ID"},0,0,0,{0},0,0}
+      {"ParentDescr",1,{3,"ParentID","Description","ID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+   indexes after (5):
+      {"ByPredefinedIDNotUniq",0,{1,"PredefinedID"},0,0,0,{0},0,0}
+      {"ParentCode",1,{3,"ParentID","Code","ID"},0,0,0,{0},0,0}
+      {"ParentDescr",1,{3,"ParentID","Description","ID"},0,0,0,{0},0,0}
+      {"Code",1,{2,"Code","ID"},0,0,0,{0},0,0}
+      {"Descr",1,{2,"Description","ID"},0,0,0,{0},0,0}
+== DBNames: header max 10824 -> 11039, count 6459 -> 6465
+   ADDED 11034 Fld 5561cf4f-5704-46d3-8f7d-8ef8bb71f991
+   ADDED 11035 Fld 2968ea8b-5e18-41dd-b4ab-7cfc419c0eca
+   ADDED 11036 Fld d8b23b6b-8750-40af-94bb-0021926260b2
+   ADDED 11037 Fld 8f314118-9bc3-48f2-bcbc-aa1b455a2480
+   ADDED 11038 Fld 9224cc7d-a521-4ecd-886a-86fa220778b1
+   ADDED 11039 Fld c39ab9ab-3da3-47c8-989e-6d370a654b05

@@ -1,0 +1,61 @@
+[package]
+name = "ibcmd-compiler"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The source-to-storage compiler's coordinator: compile requests and overlays, the bootstrap, root, version and versions compilers, the external package intake, the profile-gated body codecs (managed form, template, DCS, spreadsheet with its writer, predefined data, role rights, support policy) and the selected file's physical identity"
+
+[dependencies]
+# Source errors, as in the root.
+anyhow = "1.0"
+# The special entries' raw deflate.
+flate2 = "1.1"
+# The template codec's base64 payloads, the DCS read-back's palette namespace.
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-compiler-families = { path = "../ibcmd-compiler-families" }
+# The bootstrap-readiness manifest, re-exported as `compiler::readiness`.
+ibcmd-compiler-readiness = { path = "../ibcmd-compiler-readiness" }
+ibcmd-core = { path = "../ibcmd-core" }
+# The DCS normalizer the schema compiler reads its body back through, and the
+# braced-record scanner of the spreadsheet language patch.
+ibcmd-form-body = { path = "../ibcmd-form-body" }
+# The 2.21 writer's line edits (`bodies::dcs_2_21`).
+ibcmd-form-writer = { path = "../ibcmd-form-writer" }
+# The base-free packers (module, command interface, metadata, form body) and
+# the form body reader the compilers call.
+ibcmd-metadata-blob = { path = "../ibcmd-metadata-blob" }
+# The source the spreadsheet writer reads the configuration through.
+ibcmd-metadata-source = { path = "../ibcmd-metadata-source" }
+# The spreadsheet blob's raw deflate and digest.
+ibcmd-module-blob = { path = "../ibcmd-module-blob" }
+# The chart reader the spreadsheet writer proves a chart against.
+ibcmd-moxel = { path = "../ibcmd-moxel" }
+ibcmd-schema = { path = "../ibcmd-schema" }
+ibcmd-xml = { path = "../ibcmd-xml" }
+# The DCS and spreadsheet XML readers.
+quick-xml = "0.38"
+# The versions entry's digests.
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+# The selected file's volume and index (`file_identity`), as in the root.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_SystemInformation"] }
+
+[dev-dependencies]
+# The bootstrap tests assemble and validate a `.cf`.
+ibcmd-cf = { path = "../ibcmd-cf" }
+ibcmd-compiler-families = { path = "../ibcmd-compiler-families", features = ["test-fixtures"] }
+# The brace tree of a compiled Configuration row.
+ibcmd-restructure = { path = "../ibcmd-restructure" }
+ibcmd-v8 = { path = "../ibcmd-v8" }
+
+[features]
+# `ManagedFormCodecProfile::fixture` and `MxlCodecProfile::fixture`, for the
+# root's codec tests.
+test-fixtures = ["ibcmd-compiler-families/test-fixtures"]
+
+[lints.rust]
+# `file_identity` reads a Windows file's identity through one FFI call and
+# allows it there; nothing else may.
+unsafe_code = "deny"

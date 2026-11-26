@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovConfigurationExtensionsSeparation_Separate",
+    "CovIndexing_IndexWithAdditionalOrder",
+    "CovSeparatedDataUse_IndependentlyAndSimultaneously",
+    "CovTemplate",
+    "CovUsersSeparation_Separate",
+    "configuration"
+  ]
+}

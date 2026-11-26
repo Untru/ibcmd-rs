@@ -1,0 +1,7 @@
+PASS invalid10 refusal
+PASS invalid1extra refusal
+PASS invalid0extra refusal
+PASS duplicate;report_ok=1 refusal
+PASS duplicate;committed=1 refusal
+PASS duplicate;attempt=1 refusal
+PASS valid1, malformed3, duplicate3, report0/commit0 excluded; no process/native/SQL starts

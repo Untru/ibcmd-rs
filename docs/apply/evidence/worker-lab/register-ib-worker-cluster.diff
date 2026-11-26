@@ -1,0 +1,93 @@
+diff --git a/F:/ibcmd/lab/05/cluster/register-ib.ps1.before-worker-cluster b/F:/ibcmd/lab/04/tools/register-ib.ps1
+index b3e1ff27..f7a216c0 100644
+--- a/F:/ibcmd/lab/05/cluster/register-ib.ps1.before-worker-cluster
++++ b/F:/ibcmd/lab/04/tools/register-ib.ps1
+@@ -9,6 +9,11 @@
+ #   pwsh -NoProfile -File F:\ibcmd\lab\04\tools\register-ib.ps1 register   -Database <db> -Platform 8.3.27|8.5 -Track <track>
+ #   pwsh -NoProfile -File F:\ibcmd\lab\04\tools\register-ib.ps1 unregister -Database <db> -Platform 8.3.27|8.5 -Track <track>
+ #   pwsh -NoProfile -File F:\ibcmd\lab\04\tools\register-ib.ps1 list [-Platform 8.3.27|8.5]
++# The WORKER LAB cluster (0.5, scripts/apply-lab/cluster/start.ps1 in the repo: a console ragent+rmngr+ras of 8.3.27.2214 on the ports
++# 5540/5541/5545, started for a run and stopped after it) takes -Cluster worker; the default cluster is the platform's service as before:
++#   pwsh -NoProfile -File F:\ibcmd\lab\04\tools\register-ib.ps1 register -Database <db> -Cluster worker -Track <track>
++# and clients connect with Srvr="localhost:5541";Ref="<db>". The worker cluster must be running; it is never started from here.
++# Unregister a database from the worker cluster before it is dropped: drop-lab-dbs.ps1 only looks at the two service clusters.
+ # Only databases ibcmd_rs_04_* / ibcmd_rs_05_*. The infobase name is the
+ # database name; scheduled jobs are denied. The database itself is never
+ # created, cleared or dropped here (no --create-database, no --drop-database).
+@@ -18,19 +23,34 @@ param(
+     [Parameter(Mandatory = $true, Position = 0)][ValidateSet('register', 'unregister', 'list')][string]$Action,
+     [string]$Database = '',
+     [ValidateSet('8.3.27', '8.5')][string]$Platform = '8.3.27',
+-    [string]$Track = ''
++    [string]$Track = '',
++    [Alias('Cluster')][ValidateSet('default', 'worker')][string]$ClusterName = 'default'
+ )
+ $ErrorActionPreference = 'Stop'
+ [Console]::OutputEncoding = [Text.Encoding]::UTF8
+ $clusters = @{
+     '8.3.27' = @{ Rac = 'C:\Program Files\1cv8\8.3.27.2214\bin\rac.exe'; Ras = 'localhost:2545'; Srvr = 'localhost:2541' }
+     '8.5'    = @{ Rac = 'C:\Program Files\1cv8\8.5.1.1150\bin\rac.exe'; Ras = 'localhost:3545'; Srvr = 'localhost:3541' }
++    # the worker lab cluster: the ports are those of scripts\apply-lab\cluster\lib.ps1
++    'worker' = @{ Rac = 'C:\Program Files\1cv8\8.3.27.2214\bin\rac.exe'; Ras = 'localhost:5545'; Srvr = 'localhost:5541' }
++}
++if ($ClusterName -eq 'worker') {
++    if ($Platform -ne '8.3.27') { throw 'the worker lab cluster is platform 8.3.27.2214 (-Platform 8.3.27)' }
++    $c = $clusters['worker']
++    $where = 'worker lab'
++} else {
++    $c = $clusters[$Platform]
++    $where = $Platform
+ }
+-$c = $clusters[$Platform]
+ $rac = $c.Rac
+ $ras = $c.Ras
+-$cluster = ((& $rac $ras cluster list) | Select-String '^cluster\s*:' | Select-Object -First 1) -replace '^cluster\s*:\s*', ''
+-if (-not $cluster) { throw "no cluster behind $ras" }
++$clusterId = $null
++try { $clusterId = ((& $rac $ras cluster list 2>$null) | Select-String '^cluster\s*:' | Select-Object -First 1) -replace '^cluster\s*:\s*', '' } catch { $clusterId = $null }
++if (-not $clusterId) {
++    if ($ClusterName -eq 'worker') { throw "the worker lab cluster is not running (nothing answers at $ras): start it with F:\ibcmd\src\<worktree>\scripts\apply-lab\cluster\start.ps1 -Track <track>" }
++    throw "no cluster behind $ras"
++}
++$cluster = $clusterId
+ 
+ function Get-Infobases {
+     $map = @{}
+@@ -51,7 +71,7 @@ if (-not $Track) { throw '-Track is required' }
+ $existing = Get-Infobases
+ 
+ if ($Action -eq 'register') {
+-    if ($existing.ContainsKey($Database)) { "already registered: $Database in the $Platform cluster"; exit 0 }
++    if ($existing.ContainsKey($Database)) { "already registered: $Database in the $where cluster"; exit 0 }
+     $count = & sqlcmd -S localhost -E -C -h -1 -W -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.databases WHERE name = N'$Database'"
+     if ((($count | Where-Object { $_.Trim() -match '^\d+$' } | Select-Object -First 1) + '').Trim() -ne '1') { throw "database $Database does not exist" }
+     # The SQL login, read here and never printed.
+@@ -70,22 +90,22 @@ if ($Action -eq 'register') {
+     $sqlPwd = $null
+     if ($code -ne 0) { throw "rac infobase create failed ($code): $safe" }
+     Add-Content -LiteralPath 'F:\ibcmd\lab\04\databases.tsv' -Encoding utf8 -Value ("{0}`t{1}`t{2}`t{3}`t{4}" -f $Database, $Track,
+-        "registered in the $Platform cluster (Srvr=$($c.Srvr);Ref=$Database)", (Get-Date -Format s), 'cluster registration')
+-    "registered: $Database in the $Platform cluster; connect with Srvr=`"$($c.Srvr)`";Ref=`"$Database`""
++        "registered in the $where cluster (Srvr=$($c.Srvr);Ref=$Database)", (Get-Date -Format s), 'cluster registration')
++    "registered: $Database in the $where cluster; connect with Srvr=`"$($c.Srvr)`";Ref=`"$Database`""
+     exit 0
+ }
+ 
+ # unregister: the registration only; the database stays.
+-if (-not $existing.ContainsKey($Database)) { "not registered: $Database in the $Platform cluster"; exit 0 }
++if (-not $existing.ContainsKey($Database)) { "not registered: $Database in the $where cluster"; exit 0 }
+ $uuid = $existing[$Database]
+ # The БСП 8.5 corpus names its administrator «Администратор (обычное приложение)».
+ foreach ($auth in @(@(), @('--infobase-user=Администратор'), @('--infobase-user=Администратор (обычное приложение)'))) {
+     & $rac $ras infobase drop "--cluster=$cluster" "--infobase=$uuid" @auth 2>&1 | Out-Null
+     if ($LASTEXITCODE -eq 0) {
+         Add-Content -LiteralPath 'F:\ibcmd\lab\04\databases.tsv' -Encoding utf8 -Value ("{0}`t{1}`t{2}`t{3}`t{4}" -f $Database, $Track,
+-            "unregistered from the $Platform cluster", (Get-Date -Format s), 'cluster registration')
+-        "unregistered: $Database from the $Platform cluster (the database stays)"
++            "unregistered from the $where cluster", (Get-Date -Format s), 'cluster registration')
++        "unregistered: $Database from the $where cluster (the database stays)"
+         exit 0
+     }
+ }
+-throw "could not unregister $Database (infobase $uuid) from the $Platform cluster"
++throw "could not unregister $Database (infobase $uuid) from the $where cluster"

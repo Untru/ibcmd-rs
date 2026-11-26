@@ -1,0 +1,921 @@
+S1-F (#402): the twin protocol of docs/apply/restructuring.md 12.6, ours (mssql-config-apply --allow-restructure s1) against the
+native apply, on twins of one staged state each (base: a database that already had a native apply). Lab: F:\ibcmd\lab\05\s1g.
+Register: reg_cmp.py (the random _IDRRef keys left out; the _MessageNo of objects the stage does not touch is the documented drift).
+
+====================================================================================================
+N1 (fn1): a flat catalog with attributes of every kind
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog ДемоКатН1 (Reference11041): new catalog, tables _Reference11041
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C42ECAEB7C CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347975 347975
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 110934 -> 111771 bytes, text 565722 -> 565722 chars, sha256 785fc379fed6 -> 549a6fe235c4
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 8, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17325, of them NULL in the staged clone already (the drift): 17325
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   [INFO] Обновление конфигурации базы данных не требуется
+-- 9. a cluster session on both twins
+   outputs identical: True (21 lines)
+   objects: 1
+   == Справочник.ДемоКатН1
+     found by name: Да
+     found by the reference type: Справочник.ДемоКатН1
+     synonym: Демо: каталог Н1
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 25
+     attributes: Строка50(НеИндексировать) Число(НеИндексировать) Дата(НеИндексировать) Флаг(НеИндексировать) Пользователь(НеИндексировать) ИндексСтрока(Индексировать) ПорядокСтрока(ИндексироватьСДопУпорядочиванием) 
+     xdto CatalogObject.ДемоКатН1: 12 properties: Ref DeletionMark Code Description PredefinedDataName Строка50 Число Дата Флаг Пользователь ИндексСтрока ПорядокСтрока 
+     xdto CatalogRef.ДемоКатН1: Тип значения XDTO
+     wrote the Элемент: 7 attribute values, read back equal: 6, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject.ДемоКатН1 Ref DeletionMark Code Description Строка50 Число Дата Флаг Пользователь ИндексСтрока ПорядокСтрока 
+     rows: 1
+     ordered by Строка50: 1 rows
+     ordered by Число: 1 rows
+     ordered by Дата: 1 rows
+     ordered by Флаг: 1 rows
+     ordered by Пользователь: 1 rows
+     ordered by ИндексСтрока: 1 rows
+     ordered by ПорядокСтрока: 1 rows
+     test objects deleted, rows left: 0
+-- 8. native export of both, source-diff
+   {"left_only": 0, "right_only": 0, "different": 0, "unchanged": 12200}
+-- 12. a failure before COMMIT takes everything back
+   (not run)
+
+====================================================================================================
+N2 (fn2): a hierarchical catalog with a tabular section
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog ДемоКатН2 (Reference11041): new catalog, tables _Reference11041, _Reference11041_VT11046
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C491FFDB6C CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+   _Reference11041_VT11046	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 348083 348083
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 110932 -> 111731 bytes, text 565722 -> 565722 chars, sha256 e02e02e39563 -> 65e32d11578c
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 8, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17325, of them NULL in the staged clone already (the drift): 17325
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   [INFO] Обновление конфигурации базы данных не требуется
+-- 9. a cluster session on both twins
+   outputs identical: True (23 lines)
+   objects: 1
+   == Справочник.ДемоКатН2
+     found by name: Да
+     found by the reference type: Справочник.ДемоКатН2
+     synonym: Демо: каталог Н2
+     hierarchical: Да, kind ИерархияГруппИЭлементов, code 9 Строка, name 25
+     attributes: ДляЭлементов(НеИндексировать) ДляГрупп(НеИндексировать) Общий(НеИндексировать) ИндексЭл(Индексировать) 
+     tabular section Строки: Количество(НеИндексировать) Сотрудник(НеИндексировать) ИндексТЧ(Индексировать) 
+     xdto CatalogObject.ДемоКатН2: 12 properties: IsFolder Ref DeletionMark Parent Code Description PredefinedDataName ДляЭлементов ДляГрупп Общий ИндексЭл Строки 
+     xdto CatalogRef.ДемоКатН2: Тип значения XDTO
+     wrote the Группа: 3 attribute values, read back equal: 2, tabular rows 0
+     Группа: tabular rows read back 0
+     Группа xdto elements: CatalogObject.ДемоКатН2 IsFolder Ref DeletionMark Parent Code Description ДляГрупп Общий ИндексЭл 
+     wrote the Элемент: 3 attribute values, read back equal: 2, tabular rows 3
+     Элемент: tabular rows read back 3
+     Элемент xdto elements: CatalogObject.ДемоКатН2 IsFolder Ref DeletionMark Parent Code Description ДляЭлементов Общий ИндексЭл Строки Строки Строки 
+     rows: 2
+     ordered by ДляЭлементов: 2 rows
+     ordered by ДляГрупп: 2 rows
+     ordered by Общий: 2 rows
+     ordered by ИндексЭл: 2 rows
+     section Строки: 3 rows, total 7,5
+     test objects deleted, rows left: 0
+-- 12. a failure before COMMIT takes everything back
+   the script ran for 40,7 s and said: Контекст базы данных изменен на "ibcmd_rs_05_trace_fn2_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 204 | injected failure before COMMIT
+   before:
+   Config rows|9839
+   ConfigSave rows|5
+   Params rows|38
+   Config checksum|1588137120
+   ConfigSave checksum|-978163876
+   Params checksum|-1608607075
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|657474394
+   DBSchema|657474394
+   DBNames|-2144247735
+   columns|-1027505210
+   indexes|-530520772
+   tables *NG|0
+   tables|2239
+   after:
+   Config rows|9839
+   ConfigSave rows|5
+   Params rows|38
+   Config checksum|1588137120
+   ConfigSave checksum|-978163876
+   Params checksum|-1608607075
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|657474394
+   DBSchema|657474394
+   DBNames|-2144247735
+   columns|-1027505210
+   indexes|-530520772
+   tables *NG|0
+   tables|2239
+   digest unchanged: True
+
+====================================================================================================
+N3 (fn3): a new catalog listed BEFORE a changed catalog (which gains an attribute)
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog _ДемоСтавкиНДС (Reference23): new attributes Fld11044 = ДемоН3Реквизит | catalog ДемоКатН3 (Reference11041): new catalog, tables _Reference11041
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C4103CD8AC CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference23	rows 2 / 2	only in A 0	only in B 0
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347710 347710
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 111052 -> 111731 bytes, text 565722 -> 565722 chars, sha256 3a72100fc937 -> 2acaa489302d
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 20, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17313, of them NULL in the staged clone already (the drift): 17313
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   [INFO] Обновление конфигурации базы данных не требуется
+-- 9. a cluster session on both twins
+   outputs identical: True (30 lines)
+   objects: 2
+   == Справочник.ДемоКатН3
+     found by name: Да
+     found by the reference type: Справочник.ДемоКатН3
+     synonym: Демо: каталог Н3
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 25
+     attributes: Наименование3(НеИндексировать) 
+     xdto CatalogObject.ДемоКатН3: 6 properties: Ref DeletionMark Code Description PredefinedDataName Наименование3 
+     xdto CatalogRef.ДемоКатН3: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject.ДемоКатН3 Ref DeletionMark Code Description Наименование3 
+     rows: 1
+     ordered by Наименование3: 1 rows
+     test objects deleted, rows left: 0
+   == Справочник._ДемоСтавкиНДС
+     found by name: Да
+     found by the reference type: Справочник._ДемоСтавкиНДС
+     synonym: Демо: Ставки НДС
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 50
+     attributes: Ставка(НеИндексировать) ДемоН3Реквизит(НеИндексировать) 
+     xdto CatalogObject._ДемоСтавкиНДС: 7 properties: Ref DeletionMark Code Description PredefinedDataName Ставка ДемоН3Реквизит 
+     xdto CatalogRef._ДемоСтавкиНДС: Тип значения XDTO
+     wrote the Элемент: 2 attribute values, read back equal: 2, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject._ДемоСтавкиНДС Ref DeletionMark Code Description Ставка ДемоН3Реквизит 
+     rows: 3
+     ordered by Ставка: 3 rows
+     ordered by ДемоН3Реквизит: 3 rows
+     test objects deleted, rows left: 2
+-- 12. a failure before COMMIT takes everything back
+   the script ran for 75,2 s and said: Контекст базы данных изменен на "ibcmd_rs_05_trace_fn3_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 204 | injected failure before COMMIT
+   before:
+   Config rows|9839
+   ConfigSave rows|13
+   Params rows|38
+   Config checksum|1588137120
+   ConfigSave checksum|483537295
+   Params checksum|-1608607075
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|657474394
+   DBSchema|657474394
+   DBNames|-2144247735
+   columns|-1027505210
+   indexes|-530520772
+   tables *NG|0
+   tables|2239
+   after:
+   Config rows|9839
+   ConfigSave rows|13
+   Params rows|38
+   Config checksum|1588137120
+   ConfigSave checksum|483537295
+   Params checksum|-1608607075
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|657474394
+   DBSchema|657474394
+   DBNames|-2144247735
+   columns|-1027505210
+   indexes|-530520772
+   tables *NG|0
+   tables|2239
+   digest unchanged: True
+
+====================================================================================================
+N4 (fn4): a document with a periodic numeric number and a tabular section
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: document ДемоДокН4 (Document11041): new document, tables _Document11041, _Document11041_VT11045
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C4E1D6AA11 CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Document11041	rows 0 / 0	only in A 0	only in B 0
+   _Document11041_VT11045	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347923 347923
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 110928 -> 111756 bytes, text 565699 -> 565699 chars, sha256 a2db36059098 -> 1f8f4e8fff24
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 8, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17325, of them NULL in the staged clone already (the drift): 17325
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   [INFO] Обновление конфигурации базы данных не требуется
+-- 9. a cluster session on both twins
+   outputs identical: True (20 lines)
+   objects: 1
+   == Документ.ДемоДокН4
+     found by name: Да
+     found by the reference type: Документ.ДемоДокН4
+     synonym: Демо: документ Н4
+     number: 12 Число, periodicity Год
+     attributes: Комментарий(НеИндексировать) ИндексЧисло(Индексировать) ПорядокСтрока(ИндексироватьСДопУпорядочиванием) 
+     tabular section Товары: Количество(НеИндексировать) 
+     xdto DocumentObject.ДемоДокН4: 9 properties: Ref DeletionMark Date Number Posted Комментарий ИндексЧисло ПорядокСтрока Товары 
+     xdto DocumentRef.ДемоДокН4: Тип значения XDTO
+     wrote the Элемент: 3 attribute values, read back equal: 3, tabular rows 3
+     Элемент: tabular rows read back 3
+     Элемент xdto elements: DocumentObject.ДемоДокН4 Ref DeletionMark Date Number Posted Комментарий ИндексЧисло ПорядокСтрока Товары Товары Товары 
+     rows: 1
+     ordered by Комментарий: not possible ({(1, 28)}: Недопустимое поле для упорядочивания "Комментарий"
+   ВЫБРАТЬ Ссылка КАК Ссылка, <<?>>Комментарий КАК Значение ИЗ Документ.ДемоДокН4 УПОРЯДОЧИТЬ ПО Комментарий, Ссылка)
+     ordered by ИндексЧисло: 1 rows
+     ordered by ПорядокСтрока: 1 rows
+     section Товары: 3 rows, total 7,5
+     test objects deleted, rows left: 0
+-- 12. a failure before COMMIT takes everything back
+   (not run)
+
+====================================================================================================
+N5 (fn5): a catalog and a document in one stage
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog ДемоКатН5 (Reference11041): new catalog, tables _Reference11041 | document ДемоДокН5 (Document11042): new document, tables _Document11042, _Document11042_VT11045
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C4DCC64BEF CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+   _Document11042	rows 0 / 0	only in A 0	only in B 0
+   _Document11042_VT11045	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1768 / 1768
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347929 347929
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 111017 -> 111828 bytes, text 565871 -> 565871 chars, sha256 ff6dc6661ccf -> 45179290163a
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20694, own 20694, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 11, own 17336, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 6, own 6, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17325, of them NULL in the staged clone already (the drift): 17325
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   [INFO] Обновление конфигурации базы данных не требуется
+-- 9. a cluster session on both twins
+   outputs identical: True (32 lines)
+   objects: 2
+   == Справочник.ДемоКатН5
+     found by name: Да
+     found by the reference type: Справочник.ДемоКатН5
+     synonym: Демо: каталог Н5
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 25
+     attributes: Описание5(НеИндексировать) 
+     xdto CatalogObject.ДемоКатН5: 6 properties: Ref DeletionMark Code Description PredefinedDataName Описание5 
+     xdto CatalogRef.ДемоКатН5: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject.ДемоКатН5 Ref DeletionMark Code Description Описание5 
+     rows: 1
+     ordered by Описание5: 1 rows
+     test objects deleted, rows left: 0
+   == Документ.ДемоДокН5
+     found by name: Да
+     found by the reference type: Документ.ДемоДокН5
+     synonym: Демо: документ Н5
+     number: 11 Строка, periodicity Непериодический
+     attributes: Комментарий(НеИндексировать) 
+     tabular section Товары: Количество(НеИндексировать) 
+     xdto DocumentObject.ДемоДокН5: 7 properties: Ref DeletionMark Date Number Posted Комментарий Товары 
+     xdto DocumentRef.ДемоДокН5: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 3
+     Элемент: tabular rows read back 3
+     Элемент xdto elements: DocumentObject.ДемоДокН5 Ref DeletionMark Date Number Posted Комментарий Товары Товары Товары 
+     rows: 1
+     ordered by Комментарий: not possible ({(1, 28)}: Недопустимое поле для упорядочивания "Комментарий"
+   ВЫБРАТЬ Ссылка КАК Ссылка, <<?>>Комментарий КАК Значение ИЗ Документ.ДемоДокН5 УПОРЯДОЧИТЬ ПО Комментарий, Ссылка)
+     section Товары: 3 rows, total 7,5
+     test objects deleted, rows left: 0
+-- 8. native export of both, source-diff
+   {"left_only": 0, "right_only": 0, "different": 0, "unchanged": 12201}
+-- 12. a failure before COMMIT takes everything back
+   the script ran for 20,2 s and said: Контекст базы данных изменен на "ibcmd_rs_05_trace_fn5_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 208 | injected failure before COMMIT
+   before:
+   Config rows|9839
+   ConfigSave rows|6
+   Params rows|38
+   Config checksum|1588137120
+   ConfigSave checksum|1065152078
+   Params checksum|-1608607075
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|657474394
+   DBSchema|657474394
+   DBNames|-2144247735
+   columns|-1027505210
+   indexes|-530520772
+   tables *NG|0
+   tables|2239
+   after:
+   Config rows|9839
+   ConfigSave rows|6
+   Params rows|38
+   Config checksum|1588137120
+   ConfigSave checksum|1065152078
+   Params checksum|-1608607075
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|657474394
+   DBSchema|657474394
+   DBNames|-2144247735
+   columns|-1027505210
+   indexes|-530520772
+   tables *NG|0
+   tables|2239
+   digest unchanged: True
+
+====================================================================================================
+N6 (fn6): a new catalog listed AFTER a changed catalog (which gains an attribute)
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog _ДемоСтавкиНДС (Reference23): new attributes Fld11043 = ДемоН6Реквизит | catalog ДемоКатН6 (Reference11041): new catalog, tables _Reference11041
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C4A08B6523 CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference23	rows 2 / 2	only in A 0	only in B 0
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347710 347710
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 110927 -> 111725 bytes, text 565722 -> 565722 chars, sha256 4aececfb64bc -> a0568b99411f
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 20, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17313, of them NULL in the staged clone already (the drift): 17313
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   [INFO] Обновление конфигурации базы данных не требуется
+-- 9. a cluster session on both twins
+   outputs identical: True (30 lines)
+   objects: 2
+   == Справочник._ДемоСтавкиНДС
+     found by name: Да
+     found by the reference type: Справочник._ДемоСтавкиНДС
+     synonym: Демо: Ставки НДС
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 50
+     attributes: Ставка(НеИндексировать) ДемоН6Реквизит(НеИндексировать) 
+     xdto CatalogObject._ДемоСтавкиНДС: 7 properties: Ref DeletionMark Code Description PredefinedDataName Ставка ДемоН6Реквизит 
+     xdto CatalogRef._ДемоСтавкиНДС: Тип значения XDTO
+     wrote the Элемент: 2 attribute values, read back equal: 2, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject._ДемоСтавкиНДС Ref DeletionMark Code Description Ставка ДемоН6Реквизит 
+     rows: 3
+     ordered by Ставка: 3 rows
+     ordered by ДемоН6Реквизит: 3 rows
+     test objects deleted, rows left: 2
+   == Справочник.ДемоКатН6
+     found by name: Да
+     found by the reference type: Справочник.ДемоКатН6
+     synonym: Демо: каталог Н6
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 25
+     attributes: Наименование6(НеИндексировать) 
+     xdto CatalogObject.ДемоКатН6: 6 properties: Ref DeletionMark Code Description PredefinedDataName Наименование6 
+     xdto CatalogRef.ДемоКатН6: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject.ДемоКатН6 Ref DeletionMark Code Description Наименование6 
+     rows: 1
+     ordered by Наименование6: 1 rows
+     test objects deleted, rows left: 0
+-- 12. a failure before COMMIT takes everything back
+   (not run)
+
+====================================================================================================
+N7 (fn7): a new document beside a changed catalog (which gains an attribute)
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog _ДемоСтавкиНДС (Reference23): new attributes Fld11046 = ДемоН7Реквизит | document ДемоДокН7 (Document11041): new document, tables _Document11041, _Document11041_VT11043
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C45E23BDE2 CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference23	rows 2 / 2	only in A 0	only in B 0
+   _Document11041	rows 0 / 0	only in A 0	only in B 0
+   _Document11041_VT11043	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347870 347870
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 110928 -> 111756 bytes, text 565699 -> 565699 chars, sha256 9ee1bf659562 -> 270ebe0495f3
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 20, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17313, of them NULL in the staged clone already (the drift): 17313
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   [INFO] Обновление конфигурации базы данных не требуется
+-- 9. a cluster session on both twins
+   outputs identical: True (33 lines)
+   objects: 2
+   == Справочник._ДемоСтавкиНДС
+     found by name: Да
+     found by the reference type: Справочник._ДемоСтавкиНДС
+     synonym: Демо: Ставки НДС
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 50
+     attributes: Ставка(НеИндексировать) ДемоН7Реквизит(НеИндексировать) 
+     xdto CatalogObject._ДемоСтавкиНДС: 7 properties: Ref DeletionMark Code Description PredefinedDataName Ставка ДемоН7Реквизит 
+     xdto CatalogRef._ДемоСтавкиНДС: Тип значения XDTO
+     wrote the Элемент: 2 attribute values, read back equal: 2, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject._ДемоСтавкиНДС Ref DeletionMark Code Description Ставка ДемоН7Реквизит 
+     rows: 3
+     ordered by Ставка: 3 rows
+     ordered by ДемоН7Реквизит: 3 rows
+     test objects deleted, rows left: 2
+   == Документ.ДемоДокН7
+     found by name: Да
+     found by the reference type: Документ.ДемоДокН7
+     synonym: Демо: документ Н7
+     number: 11 Строка, periodicity Непериодический
+     attributes: Комментарий(НеИндексировать) 
+     tabular section Товары: Количество(НеИндексировать) 
+     xdto DocumentObject.ДемоДокН7: 7 properties: Ref DeletionMark Date Number Posted Комментарий Товары 
+     xdto DocumentRef.ДемоДокН7: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 3
+     Элемент: tabular rows read back 3
+     Элемент xdto elements: DocumentObject.ДемоДокН7 Ref DeletionMark Date Number Posted Комментарий Товары Товары Товары 
+     rows: 1
+     ordered by Комментарий: not possible ({(1, 28)}: Недопустимое поле для упорядочивания "Комментарий"
+   ВЫБРАТЬ Ссылка КАК Ссылка, <<?>>Комментарий КАК Значение ИЗ Документ.ДемоДокН7 УПОРЯДОЧИТЬ ПО Комментарий, Ссылка)
+     section Товары: 3 rows, total 7,5
+     test objects deleted, rows left: 0
+-- 12. a failure before COMMIT takes everything back
+   (not run)
+
+====================================================================================================
+N3 again (mn3): on the merge with feat/0.4 999e8fd5 (S1-E sections, S1 on 8.5): the binary of the merge commit, a fresh own twin
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog _ДемоСтавкиНДС (Reference23): new attributes Fld11044 = ДемоН3Реквизит | catalog ДемоКатН3 (Reference11041): new catalog, tables _Reference11041
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C4103CD8AC CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference23	rows 2 / 2	only in A 0	only in B 0
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347710 347710
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 111052 -> 111731 bytes, text 565722 -> 565722 chars, sha256 3a72100fc937 -> 2acaa489302d
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 20, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17313, of them NULL in the staged clone already (the drift): 17313
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   (not run)
+-- 9. a cluster session on both twins
+   outputs identical: True (30 lines)
+   objects: 2
+   == Справочник.ДемоКатН3
+     found by name: Да
+     found by the reference type: Справочник.ДемоКатН3
+     synonym: Демо: каталог Н3
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 25
+     attributes: Наименование3(НеИндексировать) 
+     xdto CatalogObject.ДемоКатН3: 6 properties: Ref DeletionMark Code Description PredefinedDataName Наименование3 
+     xdto CatalogRef.ДемоКатН3: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject.ДемоКатН3 Ref DeletionMark Code Description Наименование3 
+     rows: 1
+     ordered by Наименование3: 1 rows
+     test objects deleted, rows left: 0
+   == Справочник._ДемоСтавкиНДС
+     found by name: Да
+     found by the reference type: Справочник._ДемоСтавкиНДС
+     synonym: Демо: Ставки НДС
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 50
+     attributes: Ставка(НеИндексировать) ДемоН3Реквизит(НеИндексировать) 
+     xdto CatalogObject._ДемоСтавкиНДС: 7 properties: Ref DeletionMark Code Description PredefinedDataName Ставка ДемоН3Реквизит 
+     xdto CatalogRef._ДемоСтавкиНДС: Тип значения XDTO
+     wrote the Элемент: 2 attribute values, read back equal: 2, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject._ДемоСтавкиНДС Ref DeletionMark Code Description Ставка ДемоН3Реквизит 
+     rows: 3
+     ordered by Ставка: 3 rows
+     ordered by ДемоН3Реквизит: 3 rows
+     test objects deleted, rows left: 2
+-- 12. a failure before COMMIT takes everything back
+   (not run)
+
+====================================================================================================
+N5 again (mn5): on the merge with feat/0.4 999e8fd5, a fresh own twin
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog ДемоКатН5 (Reference11041): new catalog, tables _Reference11041 | document ДемоДокН5 (Document11042): new document, tables _Document11042, _Document11042_VT11045
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C4DCC64BEF CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+   _Document11042	rows 0 / 0	only in A 0	only in B 0
+   _Document11042_VT11045	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1768 / 1768
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347929 347929
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 111017 -> 111828 bytes, text 565871 -> 565871 chars, sha256 ff6dc6661ccf -> 45179290163a
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20694, own 20694, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 11, own 17336, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 6, own 6, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17325, of them NULL in the staged clone already (the drift): 17325
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   (not run)
+-- 9. a cluster session on both twins
+   outputs identical: True (32 lines)
+   objects: 2
+   == Справочник.ДемоКатН5
+     found by name: Да
+     found by the reference type: Справочник.ДемоКатН5
+     synonym: Демо: каталог Н5
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 25
+     attributes: Описание5(НеИндексировать) 
+     xdto CatalogObject.ДемоКатН5: 6 properties: Ref DeletionMark Code Description PredefinedDataName Описание5 
+     xdto CatalogRef.ДемоКатН5: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject.ДемоКатН5 Ref DeletionMark Code Description Описание5 
+     rows: 1
+     ordered by Описание5: 1 rows
+     test objects deleted, rows left: 0
+   == Документ.ДемоДокН5
+     found by name: Да
+     found by the reference type: Документ.ДемоДокН5
+     synonym: Демо: документ Н5
+     number: 11 Строка, periodicity Непериодический
+     attributes: Комментарий(НеИндексировать) 
+     tabular section Товары: Количество(НеИндексировать) 
+     xdto DocumentObject.ДемоДокН5: 7 properties: Ref DeletionMark Date Number Posted Комментарий Товары 
+     xdto DocumentRef.ДемоДокН5: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 3
+     Элемент: tabular rows read back 3
+     Элемент xdto elements: DocumentObject.ДемоДокН5 Ref DeletionMark Date Number Posted Комментарий Товары Товары Товары 
+     rows: 1
+     ordered by Комментарий: not possible ({(1, 28)}: Недопустимое поле для упорядочивания "Комментарий"
+   ВЫБРАТЬ Ссылка КАК Ссылка, <<?>>Комментарий КАК Значение ИЗ Документ.ДемоДокН5 УПОРЯДОЧИТЬ ПО Комментарий, Ссылка)
+     section Товары: 3 rows, total 7,5
+     test objects deleted, rows left: 0
+-- 12. a failure before COMMIT takes everything back
+   (not run)
+
+====================================================================================================
+N6 again (mn6): on the merge with feat/0.4 999e8fd5, a fresh own twin
+====================================================================================================
+-- runs
+   dry exit 0
+   rehearse exit 0
+   real exit 0
+   structure: catalog _ДемоСтавкиНДС (Reference23): new attributes Fld11043 = ДемоН6Реквизит | catalog ДемоКатН6 (Reference11041): new catalog, tables _Reference11041
+-- 10. a rehearsal changes nothing
+   added (0): 
+   removed (0): 
+   changed (0):
+   (0)
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C4A08B6523 CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created tables (EXCEPT both ways)
+   _Reference23	rows 2 / 2	only in A 0	only in B 0
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347710 347710
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 110927 -> 111725 bytes, text 565722 -> 565722 chars, sha256 4aececfb64bc -> a0568b99411f
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 20, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17313, of them NULL in the staged clone already (the drift): 17313
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- 7. a native config apply on our twin
+   (not run)
+-- 9. a cluster session on both twins
+   outputs identical: True (30 lines)
+   objects: 2
+   == Справочник._ДемоСтавкиНДС
+     found by name: Да
+     found by the reference type: Справочник._ДемоСтавкиНДС
+     synonym: Демо: Ставки НДС
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 50
+     attributes: Ставка(НеИндексировать) ДемоН6Реквизит(НеИндексировать) 
+     xdto CatalogObject._ДемоСтавкиНДС: 7 properties: Ref DeletionMark Code Description PredefinedDataName Ставка ДемоН6Реквизит 
+     xdto CatalogRef._ДемоСтавкиНДС: Тип значения XDTO
+     wrote the Элемент: 2 attribute values, read back equal: 2, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject._ДемоСтавкиНДС Ref DeletionMark Code Description Ставка ДемоН6Реквизит 
+     rows: 3
+     ordered by Ставка: 3 rows
+     ordered by ДемоН6Реквизит: 3 rows
+     test objects deleted, rows left: 2
+   == Справочник.ДемоКатН6
+     found by name: Да
+     found by the reference type: Справочник.ДемоКатН6
+     synonym: Демо: каталог Н6
+     hierarchical: Нет, kind ИерархияГруппИЭлементов, code 9 Строка, name 25
+     attributes: Наименование6(НеИндексировать) 
+     xdto CatalogObject.ДемоКатН6: 6 properties: Ref DeletionMark Code Description PredefinedDataName Наименование6 
+     xdto CatalogRef.ДемоКатН6: Тип значения XDTO
+     wrote the Элемент: 1 attribute values, read back equal: 1, tabular rows 0
+     Элемент: tabular rows read back 0
+     Элемент xdto elements: CatalogObject.ДемоКатН6 Ref DeletionMark Code Description Наименование6 
+     rows: 1
+     ordered by Наименование6: 1 rows
+     test objects deleted, rows left: 0
+-- 12. a failure before COMMIT takes everything back
+   (not run)
+
+====================================================================================================
+N3 through the drop-in: ibcmd-rs infobase config apply --recovery-backup=<file> (the same staged state as the twins of N3)
+====================================================================================================
+-- the run
+   [INFO] Обновление конфигурации базы данных...
+   [INFO] Создано поколение конфигурации: a6bea1924f5fc84c80649b4aa49cbcf700000000
+   [INFO] Обновление конфигурации базы данных успешно завершено
+-- 2. tables, columns, indexes (nat -> own)
+   added (0): 
+   removed (0): 
+   changed (1):
+     T _ConfigChngR
+        - I PK___ConfigC__AC8ED0C4103CD8AC CLUSTERED [PK UNIQUE] (_IDRRef)
+        + I PK___ConfigC__AC8ED0C49974AEC5 CLUSTERED [PK UNIQUE] (_IDRRef)
+-- 3. data of the created and the rebuilt table
+   _Reference23	rows 2 / 2	only in A 0	only in B 0
+   _Reference11041	rows 0 / 0	only in A 0	only in B 0
+-- 4. Config rows (only in A / only in B)
+   == only in A (0 rows)
+   == only in B (0 rows)
+-- 5. DBSchema entries and DBNames
+   tables: 1767 / 1767
+   only in 1: []  only in 2: []
+   entries that differ (0): []
+   order of the common entries is the same: True
+   DBNames text equal: True 347710 347710
+-- 6. the .si rows
+   -- c4629235-4823-4320-b8b5-1d08f4c6d612.si: raw 111052 -> 111731 bytes, text 565722 -> 565722 chars, sha256 3a72100fc937 -> 2acaa489302d
+   15 of 16 `.si` rows have the same text (compared after inflate)
+-- register (ConfigChngR, ExtProps)
+   rows (node, object): native 20691, own 20691, staged clone 20688; equal sets native/own: True
+   NULL _MessageNo: native 20, own 17333, staged clone 17330
+   reset or inserted by the apply (NULL now, not NULL before): native 3, own 3, equal: True
+   NULL in native, not in own: 0 (must be 0)
+   NULL in own, not in native: 17313, of them NULL in the staged clone already (the drift): 17313
+   file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+
+====================================================================================================
+11. refusals inside a stage that creates an object (dry runs on the first tries of N3, S1 gate, mssql-config-apply)
+====================================================================================================
+   changed catalog _ДемоПартнеры (an extension adopts it):
+     S1: catalog _ДемоПартнеры is adopted by the extension _ДемоРасширение (... the extension keeps no table of its own for it: the own restructure does not change an object an extension adopts, the platform's apply does
+   changed catalog _ДемоКассы (subordinate to owners):
+     S1: catalog _ДемоКассы is subordinate to owners: its owner field is not covered
+   unit tests: restructure::tests_create (gate: a file that is no module or help page, a new object the plan does not create,
+   two objects of one kind), restructure::tests_s1 (the two decoders disagree), restructure::tests_entry (the entry builder's refusals).
+

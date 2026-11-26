@@ -1,0 +1,36 @@
+[package]
+workspace = "../.."
+name = "morph1c-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+description = "Format-neutral semantic IR, the canonical entity-spec framework, the spec-driven read/write engine, the platform↔format version registry, and stable deterministic IR serialization. The single read/write path for every format (ARCHITECTURE.md §1)."
+
+# The §5 layout names the directory `crates/core`. The crate is `morph1c-core`:
+# naming the lib literally `core` would shadow std's `core` crate in the extern
+# prelude and break macros (proptest/serde) that expand to `::core::…` paths. So the
+# directory stays `core` (mirrors §5) while the importable lib is `morph1c_core`.
+[lib]
+name = "morph1c_core"
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+# Derive-based (de)serialization plumbing. The IR is a plain typed tree; serde lets
+# the stable RON serializer (golden tests / diff / decompile) and its inverse share
+# one definition instead of two hand-rolled walkers that could drift.
+serde = { version = "1", features = ["derive"] }
+# Stable human-readable IR serialization (ARCHITECTURE.md §1.5). RON encodes Rust
+# enums (the PropertyValue variants) natively and round-trips them exactly; with a
+# fixed PrettyConfig and Vec-backed (never HashMap) ordering the output is byte-deterministic.
+ron = "0.8"
+
+[build-dependencies]
+# `build.rs` генерирует since-таблицы из `inventory/{metamodel,enums}.jsonl` (§1.5).
+# Инвентарь — JSONL, и разбирать его руками в build.rs значило бы завести второй
+# (хрупкий) парсер JSON ради одного поля; serde_json здесь — только build-time.
+serde_json = "1"
+

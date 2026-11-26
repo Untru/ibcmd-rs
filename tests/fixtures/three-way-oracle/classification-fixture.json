@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "Synthetic hash-only input for offline three-way oracle classification. No application source content.",
+  "cases": [
+    { "native": "a", "edt": "a", "ours": "a", "agreement": "all_equal" },
+    { "native": "a", "edt": "a", "ours": "b", "agreement": "native_edt_not_ours" },
+    { "native": "a", "edt": "b", "ours": "a", "agreement": "native_ours_not_edt" },
+    { "native": "b", "edt": "a", "ours": "a", "agreement": "edt_ours_not_native" },
+    { "native": "a", "edt": "b", "ours": "c", "agreement": "all_different" }
+  ]
+}

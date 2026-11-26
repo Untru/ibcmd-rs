@@ -1,0 +1,100 @@
+{
+  "tag": "rem85release",
+  "database": "ibcmd_rs_04_import_rem85_release",
+  "tree": "F:\\ibcmd\\lab\\04\\import\\tree\\b85rem",
+  "exe": "F:\\ibcmd\\lab\\04\\import\\bin\\ibcmd-rs-release85.exe",
+  "platform": "8.5",
+  "apply_with": "native",
+  "import": {
+    "exit": 0,
+    "seconds": 24.3,
+    "rows": 22,
+    "tail": "model export: name index of 10640 names, 4595 types, 315 predefined items in 48 ms; object_names read 4966 rows (0 failed) of 46 kinds, 1413 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types) | model export: every descriptor through the model: true; still legacy by kind: {}; left out: recalculation refs true, root recalculation refs true, functional option refs true | model export: name index of 10640 names, 4595 types, 315 predefined items in 59 ms; object_names read 4966 rows (0 failed) of 46 kinds, 1413 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types) | [INFO] Импорт конфигурации из XML успешно завершен",
+    "overrides": {
+      "built_objects": 0,
+      "new_objects": 0,
+      "compiled_descriptors": 2,
+      "removed_rows": 5,
+      "deleted_names": 5,
+      "built_files": [],
+      "compiled_files": [
+        "Catalogs/Заметки.xml",
+        "DataProcessors/ЗаполнениеКалендарныхГрафиков.xml"
+      ],
+      "differing_files": 2,
+      "objects_left_out": 4742,
+      "rows_left_out": 1,
+      "compare_seconds": 4.3675407,
+      "all_rows_because": null
+    },
+    "verification": {
+      "checked_files": 12329,
+      "identical_files": 12329,
+      "state_rows": 9930,
+      "read_seconds": 1.445,
+      "export_seconds": 2.259,
+      "total_seconds": 3.7195979
+    },
+    "error": null
+  },
+  "configsave": {
+    "database": "ibcmd_rs_04_import_rem85_release",
+    "rows": 22,
+    "names": 22,
+    "parts_over_one": [],
+    "creation_years": {
+      "4026": 22
+    },
+    "deleted": {
+      "text_head": "5,\"0384ec55-dc18-40ae-ae83-7defc28d8f3f\",0,\"0384ec55-dc18-40ae-ae83-7defc28d8f3f",
+      "count": 5,
+      "names": [
+        [
+          "0384ec55-dc18-40ae-ae83-7defc28d8f3f",
+          "0"
+        ],
+        [
+          "0384ec55-dc18-40ae-ae83-7defc28d8f3f.0",
+          "0"
+        ],
+        [
+          "8a7546f4-bfc9-4732-bf60-43a41e2c8753",
+          "0"
+        ],
+        [
+          "8a7546f4-bfc9-4732-bf60-43a41e2c8753.0",
+          "0"
+        ],
+        [
+          "8a7546f4-bfc9-4732-bf60-43a41e2c8753.1",
+          "0"
+        ]
+      ]
+    },
+    "versions_count": 9931,
+    "versions_entries": 9930
+  },
+  "apply": {
+    "Seconds": 50.0,
+    "Exit": 0,
+    "Tail": "[INFO] Создано поколение конфигурации: 99636ccc4d76674f93408c5eab4b571b00000000 | [INFO] Построение индекса справки... | [INFO] Построение индекса справки успешно завершено | [INFO] Обновление конфигурации базы данных успешно завершено"
+  },
+  "config_rows_after": "9943,0",
+  "export": {
+    "Seconds": 17.3,
+    "Exit": 0
+  },
+  "diff_summary": {
+    "left_only": 0,
+    "right_only": 0,
+    "different": 1,
+    "unchanged": 12329
+  },
+  "differing_files": [],
+  "equal_but_dump_info": true,
+  "dump_info": {
+    "equal_except_config_version": false
+  },
+  "equal_except_config_version": false,
+  "total_seconds": 123.3
+}

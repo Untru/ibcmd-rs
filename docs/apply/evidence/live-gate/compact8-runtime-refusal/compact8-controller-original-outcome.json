@@ -1,0 +1,9 @@
+{
+  "pid": 112180,
+  "handle_birth_utc": "2026-10-02T08:32:07.1059450Z",
+  "known_exit": 1,
+  "direct_exit_proved": true,
+  "pipes_complete": true,
+  "ended_utc": "2026-10-02T08:34:34.5430225Z",
+  "automatic_retry": false
+}

@@ -1,0 +1,11 @@
+{
+  "manifest_sha256": "D26E884FB0C84580C69B03BCCAD1B867922DC5633E33A53E0EAA09BF2658C7B2",
+  "scope": "ONE root-authorized compact6 V2 life; no retry",
+  "script_head": "639bd0073a42037223535bc63650f6505030a24b",
+  "started_utc": "2026-10-01T22:01:36.2664887Z",
+  "git_clean_before": true,
+  "binary_sha256": "81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0",
+  "lifetime_sha256": "3495B1EA7E9280FA60E93528A0E725358A07FA808D7763F366AE5971F589A8B5",
+  "binary_source": "fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2",
+  "database": "ibcmd_rs_05_load_w3_compact6_20261002"
+}

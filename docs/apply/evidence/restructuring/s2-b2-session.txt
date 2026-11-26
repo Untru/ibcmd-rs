@@ -1,0 +1,13 @@
+== Справочник._ДемоПроекты
+  attributes: РегламентПроекта Организация Подразделение Ответственный 
+  deleted РеквизитДопУпорядочивания is gone: Да
+  rows: 3, digest of the kept attributes 2B BD 68 C5 44 ED 48 30 0C 5D 1C 40 2F 10 4A CB
+  xdto: no deleted attribute in the serialization: Да
+  wrote 0 attribute values, read back equal: 0
+  test object deleted
+== Документ._ДемоНачислениеЗарплаты
+  attributes: Организация Ответственный Комментарий 
+  deleted ПериодРегистрации is gone: Да
+  rows: 2, digest of the kept attributes 79 13 BF 52 0D 71 ED 85 A8 6C FF C5 DA AF 6F 85
+  ordered by date: 00000000001@20130614120000 00000000002@20140303120000 
+  in the period: 2

@@ -1,0 +1,13 @@
+[package]
+name = "ibcmd-form-schema"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Typed slot schemas of managed-form records in the 1C native form body"
+
+[dependencies]
+uuid = "1.19"
+
+[lints.rust]
+unsafe_code = "forbid"

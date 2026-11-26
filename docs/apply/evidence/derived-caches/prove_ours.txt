@@ -1,0 +1,39 @@
+prove ours on ibcmd_rs_05_trace_c2_ours at 2026-09-30T00:55:42
+== 1 stand-alone server + thin client
+  server ready in 6,2 s
+  job took 42,5 s
+  | 1 metadata catalog: Да
+  | 2 query count: 0
+  | 3 write item: cache probe 005629
+  | 4 type of the reference: Да / Справочник.ДемоНовыйСправочник
+  | 5 xdto of the reference: <CatalogRef.ДемоНовыйСправочник xmlns="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">9e68c0f5-bc50-11f1-8f5b-00e04c680093</CatalogRef.ДемоНовыйСправочник>
+  | 6 xdto of the object: 385 characters
+  | 7 query by the reference: 1
+  | 8 catalog attribute (case a2): 3 rows
+  | 9 document attribute (case b): 3 rows
+  | 10 names: Справочник.ДемоНовыйСправочник; synonym Демо: Новый справочник
+  server stopped
+== 2 cluster session
+  reg: registered: ibcmd_rs_05_trace_c2_ours in the 8.3.27 cluster; connect with Srvr="localhost:2541";Ref="ibcmd_rs_05_trace_c2_ours"
+  job took 54,0 s
+  | 1 metadata catalog: Да
+  | 2 query count: 1
+  | 3 write item: cache probe 005728
+  | 4 type of the reference: Да / Справочник.ДемоНовыйСправочник
+  | 5 xdto of the reference: <CatalogRef.ДемоНовыйСправочник xmlns="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">c1579c56-bc50-11f1-8f5b-00e04c680093</CatalogRef.ДемоНовыйСправочник>
+  | 6 xdto of the object: 385 characters
+  | 7 query by the reference: 1
+  | 8 catalog attribute (case a2): 3 rows
+  | 9 document attribute (case b): 3 rows
+  | 10 names: Справочник.ДемоНовыйСправочник; synonym Демо: Новый справочник
+  reg: unregistered: ibcmd_rs_05_trace_c2_ours from the 8.3.27 cluster (the database stays)
+== 3 native config check
+  exit=0
+  | [INFO] Проверка корректности метаданных...
+  | [INFO] Проверка корректности метаданных успешно завершена
+== 4 native config apply
+  exit=0
+  | [INFO] Обновление конфигурации базы данных...
+  | [INFO] Проверка корректности метаданных...
+  | [INFO] Обновление конфигурации базы данных не требуется
+done

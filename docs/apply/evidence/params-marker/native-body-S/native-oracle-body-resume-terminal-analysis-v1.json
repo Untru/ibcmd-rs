@@ -1,0 +1,1748 @@
+{
+  "scope": "ONE actual N1 body-only native exclusive marker observation; no full matrix or OWN/product rule admission",
+  "original_terminal": {
+    "scope": "ONE actual root-scheduled N1 body-only native oracle observer",
+    "manifest_sha256": "CBE31E438972BBCBF990DEE7202260649B59C4B998EC981DA2D9D3D46CFCE39E",
+    "controller_sha256": "F9946D271498F61DD0DE4F3949148E6AF75552333CD522A6B69B0676D8D164AA",
+    "preparation_sha256": "B41E46CD7605D4029DBAFC24924E38DBAF1AC0FA77AD70AFCC38F5A56BCB5FD7",
+    "root_review_sha256": "8CF9A5B2BAE2048AEE663EBB3AAA5948D585C43582942E5EA2EB514043619447",
+    "peer_review_sha256": "C2571951821E6A59B3C45D2226F1DB44947F56FDCD8D5E266ECE0A2D433BC746",
+    "source_head": "7260f89668020d318d8a4ce11e54adda84bb0cf2",
+    "executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    "arguments": [
+      "-NoProfile",
+      "-File",
+      "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\native_marker_n1_body_control_resume_v1.ps1",
+      "-ManifestSha",
+      "CBE31E438972BBCBF990DEE7202260649B59C4B998EC981DA2D9D3D46CFCE39E",
+      "-Execute"
+    ],
+    "maximum_observer_seconds": 28800,
+    "parent_pid": 84684,
+    "pid": 87976,
+    "birth_utc": "2026-10-02T13:51:22.6922474Z",
+    "execution_state": "known_terminal",
+    "direct_child_exit_proved": true,
+    "both_original_pipes_proved": true,
+    "exit": 1,
+    "signals": 0,
+    "release_attempted": false,
+    "retry_attempted": false,
+    "cim_birth_utc": "2026-10-02T13:51:22.6922470Z",
+    "command": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\native_marker_n1_body_control_resume_v1.ps1 -ManifestSha CBE31E438972BBCBF990DEE7202260649B59C4B998EC981DA2D9D3D46CFCE39E -Execute",
+    "command_sha256": "99837E72E21E264F2F32C57CEE27D0F9850B7416F115918A236FAED45804EDA9"
+  },
+  "final_state": {
+    "worker_used": false,
+    "restore_executed_this_run": false,
+    "bound_names": [],
+    "drop_attempted": false,
+    "uncertain": false,
+    "OWN_applied": false,
+    "database": "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+    "native_release_attempted": true,
+    "existing_DB_resume": true,
+    "restore_confirmed": true,
+    "native_potential": false
+  },
+  "known_steps": 58,
+  "child_receipts": [
+    {
+      "leaf": "001-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "002-capture-n1-identity.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; SELECT DB_NAME() AS database_name,DB_ID() AS database_id,CONVERT(varchar(27),d.create_date,121) AS created,CONVERT(varchar(36),r.database_guid) AS database_guid,CONVERT(varchar(36),r.family_guid) AS family_guid,CONVERT(varchar(36),r.recovery_fork_guid) AS fork_guid,d.state_desc,d.user_access_desc,d.recovery_model_desc FROM sys.databases d JOIN sys.database_recovery_status r ON r.database_id=d.database_id WHERE d.database_id=DB_ID() FOR JSON PATH,WITHOUT_ARRAY_WRAPPER;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "003-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "004-same-n1-identity.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; SELECT DB_NAME() AS database_name,DB_ID() AS database_id,CONVERT(varchar(27),d.create_date,121) AS created,CONVERT(varchar(36),r.database_guid) AS database_guid,CONVERT(varchar(36),r.family_guid) AS family_guid,CONVERT(varchar(36),r.recovery_fork_guid) AS fork_guid,d.state_desc,d.user_access_desc,d.recovery_model_desc FROM sys.databases d JOIN sys.database_recovery_status r ON r.database_id=d.database_id WHERE d.database_id=DB_ID() FOR JSON PATH,WITHOUT_ARRAY_WRAPPER;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "005-n1-unfinished-refusal.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF EXISTS(SELECT 1 FROM dbo.ConfigCASSave) OR EXISTS(SELECT 1 FROM dbo.SchemaStorage WHERE Status<>100) OR EXISTS(SELECT 1 FROM dbo.Config WHERE FileName IN(N'DynamicallyUpdated',N'commit',N'dynamicCommit',N'dbStruFinal',N'convertPhase',N'erase_save',N'deleted') OR FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!' OR FileName LIKE N'%.new') OR EXISTS(SELECT 1 FROM dbo.Params WHERE FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!') THROW 57510,'N1 cold storage/unfinished state changed',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "006-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "007-snapshot-n1-resume-v1-body-e-initial-v1.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\snapshot_marker_n1_body_resume_v1.py",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "n1-resume-v1-body-e-initial-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "008-natural-baseline-equality.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\compare_marker_n1_body_resume_v1.py",
+          "initial"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "009-n1-empty-stage.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF EXISTS(SELECT 1 FROM dbo.ConfigSave) THROW 57512,'N1 initial stage not empty',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "010-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "011-same-n1-identity.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; SELECT DB_NAME() AS database_name,DB_ID() AS database_id,CONVERT(varchar(27),d.create_date,121) AS created,CONVERT(varchar(36),r.database_guid) AS database_guid,CONVERT(varchar(36),r.family_guid) AS family_guid,CONVERT(varchar(36),r.recovery_fork_guid) AS fork_guid,d.state_desc,d.user_access_desc,d.recovery_model_desc FROM sys.databases d JOIN sys.database_recovery_status r ON r.database_id=d.database_id WHERE d.database_id=DB_ID() FOR JSON PATH,WITHOUT_ARRAY_WRAPPER;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "012-n1-unfinished-refusal.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF EXISTS(SELECT 1 FROM dbo.ConfigCASSave) OR EXISTS(SELECT 1 FROM dbo.SchemaStorage WHERE Status<>100) OR EXISTS(SELECT 1 FROM dbo.Config WHERE FileName IN(N'DynamicallyUpdated',N'commit',N'dynamicCommit',N'dbStruFinal',N'convertPhase',N'erase_save',N'deleted') OR FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!' OR FileName LIKE N'%.new') OR EXISTS(SELECT 1 FROM dbo.Params WHERE FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!') THROW 57510,'N1 cold storage/unfinished state changed',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "013-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "014-snapshot-n1-resume-v1-body-e-import-prequeue-v1.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\snapshot_marker_n1_body_resume_v1.py",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "n1-resume-v1-body-e-import-prequeue-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "015-body-e-import-prequeue-equality.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\compare_marker_n1_body_resume_v1.py",
+          "body-e-import-prequeue"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "016-body-e-import-acquire.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+          "acquire",
+          "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+          "-Name",
+          "native",
+          "-TimeoutMin",
+          "120"
+        ],
+        "executable": "pwsh",
+        "deadline_seconds": 7230
+      }
+    },
+    {
+      "leaf": "017-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "018-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "019-same-n1-identity.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; SELECT DB_NAME() AS database_name,DB_ID() AS database_id,CONVERT(varchar(27),d.create_date,121) AS created,CONVERT(varchar(36),r.database_guid) AS database_guid,CONVERT(varchar(36),r.family_guid) AS family_guid,CONVERT(varchar(36),r.recovery_fork_guid) AS fork_guid,d.state_desc,d.user_access_desc,d.recovery_model_desc FROM sys.databases d JOIN sys.database_recovery_status r ON r.database_id=d.database_id WHERE d.database_id=DB_ID() FOR JSON PATH,WITHOUT_ARRAY_WRAPPER;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "020-n1-unfinished-refusal.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF EXISTS(SELECT 1 FROM dbo.ConfigCASSave) OR EXISTS(SELECT 1 FROM dbo.SchemaStorage WHERE Status<>100) OR EXISTS(SELECT 1 FROM dbo.Config WHERE FileName IN(N'DynamicallyUpdated',N'commit',N'dynamicCommit',N'dbStruFinal',N'convertPhase',N'erase_save',N'deleted') OR FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!' OR FileName LIKE N'%.new') OR EXISTS(SELECT 1 FROM dbo.Params WHERE FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!') THROW 57510,'N1 cold storage/unfinished state changed',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "021-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "022-snapshot-n1-resume-v1-body-e-import-postqueue-v1.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\snapshot_marker_n1_body_resume_v1.py",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "n1-resume-v1-body-e-import-postqueue-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "023-body-e-import-postqueue-equality.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\compare_marker_n1_body_resume_v1.py",
+          "body-e-import"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "024-body-e-import.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "infobase",
+          "config",
+          "import",
+          "files",
+          "--base-dir=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\fixtures-c9e54c656b4447edb3034c20a6d1469a\\body_E",
+          "--partial",
+          "CommonModules/РаботаСКлассификаторамиКлиентСервер/Ext/Module.bsl",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "--user=Администратор"
+        ],
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "deadline_seconds": 180
+      }
+    },
+    {
+      "leaf": "025-body-e-import-release.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+          "release",
+          "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+          "-Name",
+          "native"
+        ],
+        "executable": "pwsh",
+        "deadline_seconds": 15
+      }
+    },
+    {
+      "leaf": "026-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "027-snapshot-n1-resume-v1-body-e-staged-v1.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\snapshot_marker_n1_body_resume_v1.py",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "n1-resume-v1-body-e-staged-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "028-actual-n1-five-row-stage.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\check_marker_n1_body_stage_resume_v1.py",
+          "n1-resume-v1-body-e-initial-v1",
+          "n1-resume-v1-body-e-staged-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "029-n1-bounded-stage-shape.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF (SELECT COUNT_BIG(*) FROM dbo.ConfigSave)<>5 OR (SELECT COUNT_BIG(*) FROM dbo.ConfigSave WHERE FileName=N'versions' AND PartNo=0)<>1 OR (SELECT SUM(CONVERT(bigint,DATALENGTH(BinaryData))) FROM dbo.ConfigSave)>33554432 OR EXISTS(SELECT 1 FROM dbo.ConfigSave WHERE PartNo<>0 OR Attributes<>0 OR BinaryData IS NULL OR DataSize<>DATALENGTH(BinaryData) OR DATALENGTH(BinaryData)>16777216 OR FileName NOT IN(N'root',N'version',N'versions',N'16b3681c-426d-4d6f-9ffe-588a23974222',N'16b3681c-426d-4d6f-9ffe-588a23974222.0')) THROW 57513,'Unmeasured N1 stage shape',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "030-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "031-same-n1-identity.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; SELECT DB_NAME() AS database_name,DB_ID() AS database_id,CONVERT(varchar(27),d.create_date,121) AS created,CONVERT(varchar(36),r.database_guid) AS database_guid,CONVERT(varchar(36),r.family_guid) AS family_guid,CONVERT(varchar(36),r.recovery_fork_guid) AS fork_guid,d.state_desc,d.user_access_desc,d.recovery_model_desc FROM sys.databases d JOIN sys.database_recovery_status r ON r.database_id=d.database_id WHERE d.database_id=DB_ID() FOR JSON PATH,WITHOUT_ARRAY_WRAPPER;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "032-n1-unfinished-refusal.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF EXISTS(SELECT 1 FROM dbo.ConfigCASSave) OR EXISTS(SELECT 1 FROM dbo.SchemaStorage WHERE Status<>100) OR EXISTS(SELECT 1 FROM dbo.Config WHERE FileName IN(N'DynamicallyUpdated',N'commit',N'dynamicCommit',N'dbStruFinal',N'convertPhase',N'erase_save',N'deleted') OR FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!' OR FileName LIKE N'%.new') OR EXISTS(SELECT 1 FROM dbo.Params WHERE FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!') THROW 57510,'N1 cold storage/unfinished state changed',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "033-n1-staged-copy-only.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "master",
+          "-Q",
+          "SET NOCOUNT ON; BACKUP DATABASE [ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c] TO DISK=N'F:\\ibcmd\\lab\\05\\wave3\\params-marker\\baselines\\n1-resume-body-e-staged-v1.bak' WITH COPY_ONLY,CHECKSUM,COMPRESSION,BUFFERCOUNT=4,MAXTRANSFERSIZE=1048576;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "034-n1-staged-header.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\read_marker_n1_body_header_resume_v1.py",
+          "staged"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "035-n1-staged-verify.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "master",
+          "-Q",
+          "SET NOCOUNT ON; RESTORE VERIFYONLY FROM DISK=N'F:\\ibcmd\\lab\\05\\wave3\\params-marker\\baselines\\n1-resume-body-e-staged-v1.bak' WITH CHECKSUM;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "036-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "037-snapshot-n1-resume-v1-body-e-staged-afterbackup-v1.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\snapshot_marker_n1_body_resume_v1.py",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "n1-resume-v1-body-e-staged-afterbackup-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "038-n1-preservation-equality.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\compare_marker_n1_body_resume_v1.py",
+          "preservation"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "039-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "040-same-n1-identity.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; SELECT DB_NAME() AS database_name,DB_ID() AS database_id,CONVERT(varchar(27),d.create_date,121) AS created,CONVERT(varchar(36),r.database_guid) AS database_guid,CONVERT(varchar(36),r.family_guid) AS family_guid,CONVERT(varchar(36),r.recovery_fork_guid) AS fork_guid,d.state_desc,d.user_access_desc,d.recovery_model_desc FROM sys.databases d JOIN sys.database_recovery_status r ON r.database_id=d.database_id WHERE d.database_id=DB_ID() FOR JSON PATH,WITHOUT_ARRAY_WRAPPER;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "041-n1-unfinished-refusal.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF EXISTS(SELECT 1 FROM dbo.ConfigCASSave) OR EXISTS(SELECT 1 FROM dbo.SchemaStorage WHERE Status<>100) OR EXISTS(SELECT 1 FROM dbo.Config WHERE FileName IN(N'DynamicallyUpdated',N'commit',N'dynamicCommit',N'dbStruFinal',N'convertPhase',N'erase_save',N'deleted') OR FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!' OR FileName LIKE N'%.new') OR EXISTS(SELECT 1 FROM dbo.Params WHERE FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!') THROW 57510,'N1 cold storage/unfinished state changed',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "042-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "043-snapshot-n1-resume-v1-body-e-apply-prequeue-v1.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\snapshot_marker_n1_body_resume_v1.py",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "n1-resume-v1-body-e-apply-prequeue-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "044-body-e-apply-prequeue-equality.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\compare_marker_n1_body_resume_v1.py",
+          "body-e-apply-prequeue"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "045-body-e-apply-acquire.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+          "acquire",
+          "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+          "-Name",
+          "native",
+          "-TimeoutMin",
+          "120"
+        ],
+        "executable": "pwsh",
+        "deadline_seconds": 7230
+      }
+    },
+    {
+      "leaf": "046-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "047-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "048-same-n1-identity.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; SELECT DB_NAME() AS database_name,DB_ID() AS database_id,CONVERT(varchar(27),d.create_date,121) AS created,CONVERT(varchar(36),r.database_guid) AS database_guid,CONVERT(varchar(36),r.family_guid) AS family_guid,CONVERT(varchar(36),r.recovery_fork_guid) AS fork_guid,d.state_desc,d.user_access_desc,d.recovery_model_desc FROM sys.databases d JOIN sys.database_recovery_status r ON r.database_id=d.database_id WHERE d.database_id=DB_ID() FOR JSON PATH,WITHOUT_ARRAY_WRAPPER;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "049-n1-unfinished-refusal.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF EXISTS(SELECT 1 FROM dbo.ConfigCASSave) OR EXISTS(SELECT 1 FROM dbo.SchemaStorage WHERE Status<>100) OR EXISTS(SELECT 1 FROM dbo.Config WHERE FileName IN(N'DynamicallyUpdated',N'commit',N'dynamicCommit',N'dbStruFinal',N'convertPhase',N'erase_save',N'deleted') OR FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!' OR FileName LIKE N'%.new') OR EXISTS(SELECT 1 FROM dbo.Params WHERE FileName LIKE N'%!_dynupdate!_%' ESCAPE N'!') THROW 57510,'N1 cold storage/unfinished state changed',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "050-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "051-snapshot-n1-resume-v1-body-e-apply-postqueue-v1.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\snapshot_marker_n1_body_resume_v1.py",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "n1-resume-v1-body-e-apply-postqueue-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "052-body-e-apply-postqueue-equality.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\compare_marker_n1_body_resume_v1.py",
+          "body-e-apply"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "053-n1-staged-backup-preapply.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\read_marker_n1_body_header_resume_v1.py",
+          "verify-staged"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "054-body-e-apply.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "infobase",
+          "config",
+          "apply",
+          "--force",
+          "--dynamic=disable",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "--user=Администратор"
+        ],
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "deadline_seconds": 180
+      }
+    },
+    {
+      "leaf": "055-body-e-apply-release.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+          "release",
+          "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+          "-Name",
+          "native"
+        ],
+        "executable": "pwsh",
+        "deadline_seconds": 15
+      }
+    },
+    {
+      "leaf": "056-idle.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-S",
+          "localhost",
+          "-E",
+          "-C",
+          "-b",
+          "-f",
+          "65001",
+          "-h",
+          "-1",
+          "-y",
+          "8000",
+          "-w",
+          "65535",
+          "-d",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "-Q",
+          "SET NOCOUNT ON; IF DB_NAME()<>N'ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c' OR EXISTS(SELECT 1 FROM sys.dm_exec_sessions s LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id WHERE (s.database_id=DB_ID() OR r.database_id=DB_ID()) AND s.session_id<>@@SPID) OR EXISTS(SELECT 1 FROM sys.dm_tran_database_transactions d JOIN sys.dm_tran_session_transactions t ON t.transaction_id=d.transaction_id WHERE d.database_id=DB_ID() AND t.session_id<>@@SPID AND d.database_transaction_state<>10) THROW 57500,'Cold seed is not idle',1;"
+        ],
+        "executable": "sqlcmd",
+        "deadline_seconds": 60
+      }
+    },
+    {
+      "leaf": "057-snapshot-n1-resume-v1-body-e-applied-v1.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\snapshot_marker_n1_body_resume_v1.py",
+          "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "n1-resume-v1-body-e-applied-v1"
+        ],
+        "executable": "python",
+        "deadline_seconds": 90
+      }
+    },
+    {
+      "leaf": "058-n1-marker-observation.json",
+      "exit": 1,
+      "command": {
+        "arguments": [
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\observe_marker_n1_body_resume_v1.py"
+        ],
+        "executable": "python",
+        "deadline_seconds": 60
+      }
+    }
+  ],
+  "native_writers": [
+    {
+      "leaf": "024-body-e-import.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "infobase",
+          "config",
+          "import",
+          "files",
+          "--base-dir=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\fixtures-c9e54c656b4447edb3034c20a6d1469a\\body_E",
+          "--partial",
+          "CommonModules/РаботаСКлассификаторамиКлиентСервер/Ext/Module.bsl",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "--user=Администратор"
+        ],
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "deadline_seconds": 180
+      }
+    },
+    {
+      "leaf": "054-body-e-apply.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "infobase",
+          "config",
+          "apply",
+          "--force",
+          "--dynamic=disable",
+          "--dbms=MSSQLServer",
+          "--db-server=localhost",
+          "--db-name=ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "--data=F:\\ibcmd\\lab\\05\\wave3\\params-marker\\ibdata\\ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "--user=Администратор"
+        ],
+        "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+        "deadline_seconds": 180
+      }
+    }
+  ],
+  "native_acquires": [
+    {
+      "leaf": "016-body-e-import-acquire.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+          "acquire",
+          "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+          "-Name",
+          "native",
+          "-TimeoutMin",
+          "120"
+        ],
+        "executable": "pwsh",
+        "deadline_seconds": 7230
+      }
+    },
+    {
+      "leaf": "045-body-e-apply-acquire.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+          "acquire",
+          "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+          "-Name",
+          "native",
+          "-TimeoutMin",
+          "120"
+        ],
+        "executable": "pwsh",
+        "deadline_seconds": 7230
+      }
+    }
+  ],
+  "native_releases": [
+    {
+      "leaf": "025-body-e-import-release.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+          "release",
+          "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+          "-Name",
+          "native"
+        ],
+        "executable": "pwsh",
+        "deadline_seconds": 15
+      }
+    },
+    {
+      "leaf": "055-body-e-apply-release.json",
+      "exit": 0,
+      "command": {
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\04\\tools\\heavy-lock.ps1",
+          "release",
+          "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+          "-Name",
+          "native"
+        ],
+        "executable": "pwsh",
+        "deadline_seconds": 15
+      }
+    }
+  ],
+  "captured_exact_FIFO_leases": [
+    {
+      "track": "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+      "name": "native",
+      "lease_sha256": "DD4B4585CCFB417327FB889B5E868F72E4842E72030C6928BC21117F3B9BF622",
+      "lease_base64": "dHJhY2s9bWFya2VyLW4xYm9keS1yZXN1bWUtdjEtYzllNTRjNjU2YjQ0NDdlZGIzMDM0YzIwYTZkMTQ2OWEgc2luY2U9MjAyNi0xMC0wMlQxNjo1MjoxNA0K",
+      "known_acquire_exit": 0,
+      "captured_utc": "2026-10-02T13:52:14.6491016Z"
+    },
+    {
+      "track": "marker-n1body-resume-v1-c9e54c656b4447edb3034c20a6d1469a",
+      "name": "native",
+      "lease_sha256": "EA692749C2171EF4D8BBC157A95572D057A3D9BE5E3D0FB9777D533C35FA5562",
+      "lease_base64": "dHJhY2s9bWFya2VyLW4xYm9keS1yZXN1bWUtdjEtYzllNTRjNjU2YjQ0NDdlZGIzMDM0YzIwYTZkMTQ2OWEgc2luY2U9MjAyNi0xMC0wMlQxNjo1NDowMg0K",
+      "known_acquire_exit": 0,
+      "captured_utc": "2026-10-02T13:54:02.6804870Z"
+    }
+  ],
+  "verified_snapshots": [
+    {
+      "tag": "seed-resume-after-backup-v2",
+      "rows": 23030,
+      "bytes": 104321827,
+      "groups": 23027,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "n1-resume-v1-body-e-initial-v1",
+      "rows": 23030,
+      "bytes": 104321827,
+      "groups": 23027,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "n1-resume-v1-body-e-import-prequeue-v1",
+      "rows": 23030,
+      "bytes": 104321827,
+      "groups": 23027,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "n1-resume-v1-body-e-import-postqueue-v1",
+      "rows": 23030,
+      "bytes": 104321827,
+      "groups": 23027,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "n1-resume-v1-body-e-staged-v1",
+      "rows": 23035,
+      "bytes": 104663561,
+      "groups": 23032,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "n1-resume-v1-body-e-staged-afterbackup-v1",
+      "rows": 23035,
+      "bytes": 104663561,
+      "groups": 23032,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "n1-resume-v1-body-e-apply-prequeue-v1",
+      "rows": 23035,
+      "bytes": 104663561,
+      "groups": 23032,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "n1-resume-v1-body-e-apply-postqueue-v1",
+      "rows": 23035,
+      "bytes": 104663561,
+      "groups": 23032,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    },
+    {
+      "tag": "n1-resume-v1-body-e-applied-v1",
+      "rows": 23030,
+      "bytes": 104321831,
+      "groups": 23027,
+      "full_headers_raw_ranges_whole_pack_SHA": true,
+      "auxiliary_tables": 10
+    }
+  ],
+  "exact6_plus10_comparisons": [
+    "initial",
+    "preservation",
+    "body-e-import-prequeue",
+    "body-e-import",
+    "body-e-apply-prequeue",
+    "body-e-apply"
+  ],
+  "normalizations": [],
+  "OWN_applied": false,
+  "product_rule_enabled": false,
+  "native_control_completed": true,
+  "overall_controller_pass": false,
+  "OFFLINE_readback_not_runtime_rerun": true,
+  "staged_names": [
+    "16b3681c-426d-4d6f-9ffe-588a23974222",
+    "16b3681c-426d-4d6f-9ffe-588a23974222.0",
+    "root",
+    "version",
+    "versions"
+  ],
+  "descriptor_decoded_equal": true,
+  "body_raw_changed": true,
+  "marker_observation": {
+    "scope": "ONE actual native body-only exclusive observation; not full rule or OWN parity",
+    "marker_outcome": "retained_exact_fullheader_and_payload",
+    "before_marker": [
+      {
+        "name": "DynamicallyUpdated",
+        "part": 0,
+        "creation": "4026-09-19 23:33:02",
+        "modified": "4026-10-02 13:59:40",
+        "attributes": 0,
+        "data_size": 156,
+        "byte_len": 156,
+        "sha256": "a6a4becf0894197ff52642b07a26dafd9c9b5298e084a615a031a54b4906a1e6",
+        "offset": 1189079
+      }
+    ],
+    "after_marker": [
+      {
+        "name": "DynamicallyUpdated",
+        "part": 0,
+        "creation": "4026-09-19 23:33:02",
+        "modified": "4026-10-02 13:59:40",
+        "attributes": 0,
+        "data_size": 156,
+        "byte_len": 156,
+        "sha256": "a6a4becf0894197ff52642b07a26dafd9c9b5298e084a615a031a54b4906a1e6",
+        "offset": 1189079
+      }
+    ],
+    "Params_added": [],
+    "Params_removed": [],
+    "Params_changed": [
+      {
+        "before": {
+          "name": "54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui",
+          "part": 0,
+          "creation": "4017-07-24 10:18:29",
+          "modified": "4026-10-02 14:01:20",
+          "attributes": 0,
+          "data_size": 9,
+          "byte_len": 9,
+          "sha256": "f9dcd78faa774ca90ed0e9997f8a85c236e0de5c1bbe3e266cfb29af3cc5546f"
+        },
+        "after": {
+          "name": "54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui",
+          "part": 0,
+          "creation": "4017-07-24 10:18:29",
+          "modified": "4026-10-02 16:54:32",
+          "attributes": 0,
+          "data_size": 9,
+          "byte_len": 9,
+          "sha256": "f9dcd78faa774ca90ed0e9997f8a85c236e0de5c1bbe3e266cfb29af3cc5546f"
+        }
+      },
+      {
+        "before": {
+          "name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+          "part": 0,
+          "creation": "4024-09-09 20:13:05",
+          "modified": "4026-10-02 14:01:20",
+          "attributes": 0,
+          "data_size": 24301,
+          "byte_len": 24301,
+          "sha256": "9b85b630b9bd1c4595cc53d336106809935e7e37c06d0e0a295abc02ca0d2f6d"
+        },
+        "after": {
+          "name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+          "part": 0,
+          "creation": "4024-09-09 20:13:05",
+          "modified": "4026-10-02 16:54:33",
+          "attributes": 0,
+          "data_size": 24301,
+          "byte_len": 24301,
+          "sha256": "b66d821300ad71525d4c549fba346c9476539e47659fce3fbbd244146859adbc"
+        }
+      },
+      {
+        "before": {
+          "name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+          "part": 0,
+          "creation": "4024-09-09 20:13:05",
+          "modified": "4026-10-02 14:01:20",
+          "attributes": 0,
+          "data_size": 94,
+          "byte_len": 94,
+          "sha256": "6deea0abc7a0925902327865f8e5fa1cf9cff3813021d42b0a4e111386b15fba"
+        },
+        "after": {
+          "name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+          "part": 0,
+          "creation": "4024-09-09 20:13:05",
+          "modified": "4026-10-02 16:54:33",
+          "attributes": 0,
+          "data_size": 94,
+          "byte_len": 94,
+          "sha256": "b46ecc9e0d6a9a0f2dd5a1bb8168101737c1c555634eb55df309606f4d4f38ef"
+        }
+      }
+    ],
+    "unchanged_Params_rows": 36,
+    "SI_and_siVersions_delta_included": true,
+    "all_opaque_UI_and_other_deltas_retained": true,
+    "normalizations": [],
+    "OWN_applied": false,
+    "before_marker_payload_hex": "efbbbf7b302c342c38343861306135392d383830332d343435662d623839642d3363666165346639386262642c30366362303434322d306334372d346661642d393836612d6630386632383238376331622c65373231353830362d643766632d346365302d613464642d3830616432613466396161312c39336430306238312d646163362d343936642d623466642d3531336537623435353335637d",
+    "before_marker_utf8": "﻿{0,4,848a0a59-8803-445f-b89d-3cfae4f98bbd,06cb0442-0c47-4fad-986a-f08f28287c1b,e7215806-d7fc-4ce0-a4dd-80ad2a4f9aa1,93d00b81-dac6-496d-b4fd-513e7b45535c}",
+    "after_marker_payload_hex": "efbbbf7b302c342c38343861306135392d383830332d343435662d623839642d3363666165346639386262642c30366362303434322d306334372d346661642d393836612d6630386632383238376331622c65373231353830362d643766632d346365302d613464642d3830616432613466396161312c39336430306238312d646163362d343936642d623466642d3531336537623435353335637d",
+    "after_marker_utf8": "﻿{0,4,848a0a59-8803-445f-b89d-3cfae4f98bbd,06cb0442-0c47-4fad-986a-f08f28287c1b,e7215806-d7fc-4ce0-a4dd-80ad2a4f9aa1,93d00b81-dac6-496d-b4fd-513e7b45535c}"
+  },
+  "retained_postwrite_report_failure": {
+    "leaf": "058-n1-marker-observation.json",
+    "exit": 1,
+    "saved_UTF8_report_verified": true,
+    "cause": "cp1251 console cannot encode marker U+FEFF after UTF8 report was written",
+    "skipped_runtime_steps": [
+      "n1-staged-backup-final",
+      "outcome.json"
+    ],
+    "no_actual058_PASS_claim": true
+  },
+  "preserved_staged_backup": {
+    "file": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\baselines\\n1-resume-body-e-staged-v1.bak",
+    "sha256": "84a972325b50ff6e4a4d68a82cdab16c898cca8973cee1ee3ef1b847a0a14492",
+    "bytes": 254435328,
+    "header": {
+      "scope": "readonly exact natural seed/staged twin HEADERONLY",
+      "kind": "staged",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\baselines\\n1-resume-body-e-staged-v1.bak",
+      "bytes": 254435328,
+      "sha256": "84a972325b50ff6e4a4d68a82cdab16c898cca8973cee1ee3ef1b847a0a14492",
+      "rows": [
+        {
+          "BackupName": null,
+          "BackupDescription": null,
+          "BackupType": 1,
+          "ExpirationDate": null,
+          "Compressed": 1,
+          "Position": 1,
+          "DeviceType": 2,
+          "UserName": "DESKTOP-SMI5N4O\\Pavel",
+          "ServerName": "DESKTOP-SMI5N4O",
+          "DatabaseName": "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+          "DatabaseVersion": 998,
+          "DatabaseCreationDate": "2026-10-02 16:10:14",
+          "BackupSize": 675374080,
+          "FirstLSN": "314000000112000001",
+          "LastLSN": "314000000114400001",
+          "CheckpointLSN": "314000000112000001",
+          "DatabaseBackupLSN": "313000003264000008",
+          "BackupStartDate": "2026-10-02 16:53:21",
+          "BackupFinishDate": "2026-10-02 16:53:25",
+          "SortOrder": 0,
+          "CodePage": 0,
+          "UnicodeLocaleId": 1049,
+          "UnicodeComparisonStyle": 196609,
+          "CompatibilityLevel": 170,
+          "SoftwareVendorId": 4608,
+          "SoftwareVersionMajor": 17,
+          "SoftwareVersionMinor": 0,
+          "SoftwareVersionBuild": 1135,
+          "MachineName": "DESKTOP-SMI5N4O",
+          "Flags": 1552,
+          "BindingID": "4967750D-CDDC-488E-822F-78B5D6D41823",
+          "RecoveryForkID": "2C7B0075-14EE-41A2-9052-A244AE041960",
+          "Collation": "Cyrillic_General_CI_AS",
+          "FamilyGUID": "F983A0CD-5F73-4C71-A197-CD58FB079188",
+          "HasBulkLoggedData": false,
+          "IsSnapshot": false,
+          "IsReadOnly": false,
+          "IsSingleUser": false,
+          "HasBackupChecksums": true,
+          "IsDamaged": false,
+          "BeginsLogChain": false,
+          "HasIncompleteMetaData": false,
+          "IsForceOffline": false,
+          "IsCopyOnly": true,
+          "FirstRecoveryForkID": "2C7B0075-14EE-41A2-9052-A244AE041960",
+          "ForkPointLSN": null,
+          "RecoveryModel": "SIMPLE",
+          "DifferentialBaseLSN": null,
+          "DifferentialBaseGUID": null,
+          "BackupTypeDescription": "Database",
+          "BackupSetGUID": "4EB3E3BC-8F99-4275-BF5B-A372DC06D4CE",
+          "CompressedBackupSize": 254420341,
+          "Containment": 0,
+          "KeyAlgorithm": null,
+          "EncryptorThumbprint": null,
+          "EncryptorType": null,
+          "LastValidRestoreTime": null,
+          "TimeZone": 16,
+          "CompressionAlgorithm": "MS_XPRESS"
+        }
+      ]
+    },
+    "captured_SQL_identity": {
+      "database_name": "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+      "database_id": 70,
+      "created": "2026-10-02 16:10:14.117",
+      "database_guid": "4967750D-CDDC-488E-822F-78B5D6D41823",
+      "family_guid": "F983A0CD-5F73-4C71-A197-CD58FB079188",
+      "fork_guid": "2C7B0075-14EE-41A2-9052-A244AE041960",
+      "state_desc": "ONLINE",
+      "user_access_desc": "MULTI_USER",
+      "recovery_model_desc": "SIMPLE"
+    }
+  }
+}

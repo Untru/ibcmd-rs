@@ -1,0 +1,45 @@
+{
+  "verdict": "PASS",
+  "scope": "N1 immutable actual terminal publication/scientific observation review, NOT overall controller PASS",
+  "checkpoint_sha256": "E5E357EA83FD31647D011FF69D4FF649D539F846FA36D3434DC3A7BDE7E4F518",
+  "pins_verified": 369,
+  "old169_preserved": 169,
+  "analysis_sha256": "ACD528C520F24DBE7562A7C63C4EFA1642F4F45CAFDD342367B9462510831D9D",
+  "independent_physical_report_sha256": "A9D94321482FDA8ED838A7A1F22FF18C3F7F25E4D5D56D082D14B5D869A2964B",
+  "original_controller_exit": 1,
+  "original_direct_exit_both_pipes": true,
+  "native_import_apply_acquire_release_all_known0": true,
+  "full_snapshots_recomputed": 9,
+  "storage_per_snapshot": 6,
+  "auxiliary_per_snapshot": 10,
+  "every_row_range_SHA_and_whole_pack_SHA_recomputed": true,
+  "marker": {
+    "bytes": 156,
+    "full_headers_and_payload_equal": true,
+    "sha256": "a6a4becf0894197ff52642b07a26dafd9c9b5298e084a615a031a54b4906a1e6"
+  },
+  "scientific_scope": "One measured natural-seed body-only native exclusive apply retains Params marker; descriptor decoded equal/body changed, stage5 consumed; no general collection rule or OWN parity",
+  "physical_delta": {
+    "Params_UI_changed": 3,
+    "Config_changed": 5,
+    "ConfigSave_removed": 5,
+    "Files_MobileVersions_changed": 1,
+    "SI_and_siVersions_equal": true,
+    "ConfigCAS_unchanged": 12797,
+    "Params_unchanged": 36,
+    "all10_auxiliary_multisets_equal": true
+  },
+  "staged_backup": {
+    "bytes": 254435328,
+    "full_saved_HEADER_DB70_lineage_bound": true,
+    "sha256": "84a972325b50ff6e4a4d68a82cdab16c898cca8973cee1ee3ef1b847a0a14492",
+    "current_offline_bytes_verified": true
+  },
+  "limitations": [
+    "Overall original known1 remains due step058 cp1251/U+FEFF after UTF8 report write; no fabricated058 PASS",
+    "runtime final staged-backup-final and outcome skipped; later checksum verification strictly OFFLINE, not runtime rerun",
+    "no normalization/SQL/native/resources/backup/cleanup by reviewer",
+    "old169/raw snapshot/observer bytes immutable; scientific statement only body-only native observation, not full418/OWN/product admission"
+  ],
+  "confirmed_findings": []
+}

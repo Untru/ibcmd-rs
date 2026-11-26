@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-form-dynamic-list-server-state",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": null,
+  "contract": "8.3.27-xml-2.20-dcs-form-dynamic-list-server-state-v1",
+  "body_contract": "8.3.27-xml-2.20-dcs-settings-dynamic-list-server-state-v1",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-14",
+    "platform_line": "8.3.27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_fresh_file_infobases",
+    "database_locale": "ru_RU",
+    "creation_args": "infobase create --locale=ru_RU --load <input.cf> --apply --force",
+    "patch_build_policy": "the exact build is retained as experiment provenance; this wrapper contract is 8.3.27/XML 2.20 unless a structural counterexample proves another dialect"
+  },
+  "seed": {
+    "kind": "clean_room_form_dynamic_list_delta_on_platform_authenticated_base_cf",
+    "base_fixture_id": "8.3.27.2214-xml-2.20-dcs-form-attributes-conditional-appearance",
+    "base_cf_size": 88686,
+    "base_cf_sha256": "a0ba6431996a4349b3c3336ab974e867390e3f309e6805acb82e5f0c9721a9f6",
+    "authority": "hypothesis_only",
+    "basis": "F-SERVERSTATE-DESIGN.md Probe F1: minimal DynamicList list form on a new Catalog CorpusList, added on top of the retained dcs-form-attributes-conditional-appearance base. Catalog cloned byte-for-byte from this same base's own retained Catalog.FilterProbe (uuid/Name/Synonym/GeneratedType-ids/cross-references retargeted only). Form body is this same base's own already-platform-proven seed/probe-form.xml with the ListSettings sub-block and the top-level Form ConditionalAppearance block deleted (a strict content subset of an already-accepted document) and MainTable retargeted to Catalog.CorpusList.",
+    "delta": "minimal DynamicList form on new Catalog CorpusList with ListSettings and ConditionalAppearance stripped from base probe form"
+  },
+  "rounds": {
+    "round_1": {
+      "cf_size": 94916,
+      "cf_sha256": "4a0f899a607c85b2e7b1fff9ad6717e188f761a36b54349de00c17fee1496bfa"
+    },
+    "round_2": {
+      "cf_size": 93807,
+      "cf_sha256": "10c2dc1df99de8dd23032a5cff9ef47bc6e56e5ff9c26873c772b9c3dd8e6c33"
+    },
+    "selected_native_equal_between_rounds": true,
+    "packed_rows_equal_between_rounds": true,
+    "unpacked_rows_equal_between_rounds": true
+  },
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "encoded_size": 127031,
+    "encoded_sha256": "f92364ba1cb7d75dfdae8834b24337d370d9d23bac26539f753a20dd757ef666",
+    "decoded_size": 93807,
+    "decoded_sha256": "10c2dc1df99de8dd23032a5cff9ef47bc6e56e5ff9c26873c772b9c3dd8e6c33"
+  },
+  "form": {
+    "owner": "Catalog.CorpusList",
+    "name": "ListForm",
+    "native_xml": {
+      "path": "native-form.xml.b64",
+      "encoded_size": 7305,
+      "encoded_sha256": "0e69916a9b1357abb3ae4138dd68e1e84bc2df051fabdeb3a122eafb3cf1cf07",
+      "decoded_size": 5394,
+      "sha256": "86b8aa82871e676cbfa994fb3528db914ef326f8ca27d5a1a578dad557ca8cc8"
+    },
+    "body_row": {
+      "packed_size": 2820,
+      "packed_sha256": "f186275c6765bf26993dbd5d43889139c10483665dd5f4d0342d9a51a7655bab",
+      "packed_file": {
+        "path": "form-body-packed.bin.b64",
+        "encoded_size": 3819,
+        "encoded_sha256": "59d1610af6426e74668c002297dbf55600593649eaded72940d7aa0eed1c2082"
+      },
+      "unpacked_size": 14209,
+      "unpacked_sha256": "bc2a93ea4fe9b05ae96ce1e72a4c848a5d4b636967da6bb118cf9345f23999b0",
+      "unpacked_file": {
+        "path": "form-body-unpacked.bin.b64",
+        "encoded_size": 19245,
+        "encoded_sha256": "fb2c90e1dd8fb4b25ccb11fe801257e39c01c6dcf90e67bba08898a44d6c498b"
+      }
+    },
+    "server_state": {
+      "path": "server-state-decoded.xml.b64",
+      "encoded_size": 248,
+      "encoded_sha256": "6c846e2fbb9787c726ab1e3d81e415a2b1b60122827d76590f18129e292c27a5",
+      "decoded_size": 181,
+      "sha256": "08e0e00120f703b681522b0c1ea315055f4de28e6af806983707ba9a0ec96487",
+      "deterministic_between_rounds": true,
+      "description": "self-closing empty UniversalListServerOnlyState wrapper, no Field/Parameter/valueType children"
+    }
+  },
+  "selected_native_files": [
+    {
+      "path": "Catalogs/CorpusList.xml",
+      "size": 15299,
+      "sha256": "f27dbf9a75305d0ba5486fd52093ab641b8e26fd13651d08687b11443777822f"
+    },
+    {
+      "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+      "size": 3,
+      "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+      "size": 1494,
+      "sha256": "f8e11a1cf75666c4b989ca9222cc7a816bffd2659f86d7f833518d236cde0cf8"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+      "size": 5394,
+      "sha256": "86b8aa82871e676cbfa994fb3528db914ef326f8ca27d5a1a578dad557ca8cc8"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+      "size": 492,
+      "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+    },
+    {
+      "path": "Catalogs/FilterProbe.xml",
+      "size": 15309,
+      "sha256": "b1863a5d4f6379912b1784733e09553bf4095fac7794ea65426d9de670d094bf"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+      "size": 3,
+      "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+      "size": 1494,
+      "sha256": "f8e11a1cf75666c4b989ca9222cc7a816bffd2659f86d7f833518d236cde0cf8"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+      "size": 8040,
+      "sha256": "4260e513e185a8cc09854327958a6ec39309d1a607ca2166dbc0be3e672ef23a"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+      "size": 492,
+      "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+    }
+  ],
+  "proven_shape": {
+    "catalog_name": "CorpusList",
+    "form_name": "ListForm",
+    "dynamic_list_attribute": "Список",
+    "main_table": "Catalog.CorpusList",
+    "manual_query": false,
+    "dynamic_data_read": true,
+    "list_settings_present_in_source": false
+  },
+  "proven_claims": [
+    "UniversalListServerOnlyState is never surfaced in native ibcmd config export Form.xml, even though it is always present (chunk-encoded, base64) in the raw storage property bag for a DynamicList attribute.",
+    "The empty ServerState envelope's exact bytes are identical between two independent fresh infobases -- full determinism, contrary to what the design flagged as the most likely outcome to guard against."
+  ],
+  "non_claims": [
+    "No claim about what triggers non-empty ServerState content (Field/Parameter/valueType/TypeId descriptors); the working hypothesis that this requires actual client-side list execution is offered but not tested or proven here.",
+    "No semantic parsing of ServerState content is claimed beyond the exact-opaque chunk decode already implemented in the repo.",
+    "Provenance: produced in a probe/design session (scratchpad/design/F-SERVERSTATE-DESIGN.md), not yet reviewed or integrated."
+  ]
+}

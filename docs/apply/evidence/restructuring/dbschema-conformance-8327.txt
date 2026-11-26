@@ -1,0 +1,8 @@
+{'tables': 1937, 'cols_ok': 1937, 'implicit_idx_ok': 1761, 'idx_ok': 1937, 'extra_real_idx': 296}
+extra real index kinds: [(('_Reference#_S_HPK', True, True), 90), (('_Document#_S_HPK', True, True), 25), (('PK___Enum#__AC#ED#C#D#', True, True), 7), (('_Node#_S_HPK', True, True), 5), (('_Node#_S_PK', True, False), 5), (('_Chrc#_S_HPK', True, True), 4), (('_Reference#_S_PK', True, False), 3), (('PK___Enum#__AC#ED#C#C#', True, True), 3), (('PK___Referen__AC#ED#C#', True, True), 2), (('PK___Enum#__AC#ED#C#', True, True), 2), (('PK___Enum#__AC#ED#C#B#E', True, True), 2), (('PK___Enum#__AC#ED#C#E#', True, True), 2)]
+== implicit index mismatches: 0
+== cols mismatches: 0
+== idx mismatches: 0
+
+# extension schema (SchemaStorage SchemaID=1, 243 entries, SQL names get the suffix X1; columns only)
+{cols_ok: 277}   # every physical X1 table (main and sub-tables) matches the model; 190 entries have no table (not applied / adopted-only)

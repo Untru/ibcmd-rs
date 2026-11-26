@@ -1,0 +1,51 @@
+PASS continuation warm acquire/child/release, unexpected warm exit0 remains protected
+PASS continuation continue acquire/child/release, unexpected warm exit0 remains protected
+PASS continuation noop acquire/child/release, unexpected warm exit0 remains protected
+PASS continuation failed acquire/child/release, unexpected warm exit0 remains protected
+PASS ordinary native child + bounded pipe reads
+PASS exact native timeout single-PID Kill(no args), reap5000 and retained times
+PASS timeoutbirthday refusal, signals0
+PASS timeoutexe refusal, signals0
+PASS timeoutcmd refusal, signals0
+PASS timeoutparent refusal, signals0
+PASS timeoutmissing refusal, signals0
+PASS bounded reap failure retains exact identity, no tree signal
+PASS nativeinitial-missing retains FIFO, releaseCalls0
+PASS nativebirthday retains FIFO, releaseCalls0
+PASS nativereap-fails retains FIFO, releaseCalls0
+PASS nativetimeout-complete retains FIFO, releaseCalls0
+PASS nativepipe-timeout retains FIFO, releaseCalls0
+PASS rapid native exit without CIM releases safely, signals0
+PASS unresolved descendant receipt retains FIFO despite direct native exit
+PASS actual finallyreceipt keeps native/worker; recheck after cleanup failure and before next transition; calls=
+PASS actual finallynative-exit-unproved keeps native/worker; recheck after cleanup failure and before next transition; calls=
+PASS actual finallyras keeps native/worker; recheck after cleanup failure and before next transition; calls=pure-ras-cleanup-empty
+PASS actual finallysql keeps native/worker; recheck after cleanup failure and before next transition; calls=pure-sql-cleanup-empty,pure-sql-cleanup-sql-work
+PASS actual finallyunregister keeps native/worker; recheck after cleanup failure and before next transition; calls=pure-unregister-cleanup-empty,pure-unregister-cleanup-sql-work,pure-unregister-unregister-native-acquire,pure-unregister-unregister
+PASS actual finallystop keeps native/worker; recheck after cleanup failure and before next transition; calls=pure-stop-stop
+PASS actual finallyheavy keeps native/worker; recheck after cleanup failure and before next transition; calls=release-heavy
+PASS actual clean finally keeps normal unregister/stop/native/worker release sequence
+PASS pure mocks: realStarts=realSignals=SQLcalls=registryWrites=0
+PASS actual worker acquire grants then unknown; flags set before dispatch, finally worker/native retained; heavy independent
+PASS actual heavy acquire grants then unknown; flags set before dispatch, finally worker/native retained; heavy independent
+PASS actual finally case6 writer-completion=false without sticky receipt retains worker, unregister/stop/release0
+PASS actual successful release with newly uncertain receipt retains unconfirmed lease flag before clearing
+PASS pure actual acquire/finally AST mocks; realStarts=realSignals=SQLcalls=registryWrites=0
+PASS manifest-change closure refused
+PASS file-change closure refused
+PASS reparse closure refused
+PASS manifest-reparse closure refused
+PASS actual worker grant then closure refusal blocks next archive/restore mutation
+PASS actual heavy grant then closure refusal blocks next archive/restore mutation
+PASS pure closure/hash/order tests; realStarts=realSignals=SQLcalls=registryWrites=Moves=0
+PASS actual negative block all5 unavailable endpoints/exact input refusals under FIFO; original SHA checks; realStarts=realSignals=SQLcalls=registryWrites=0
+PASS prior unknown child refuses negative execution before acquire/spawn
+RED verified original actual Header admits foreign canonical database GUID
+PASS actual Header sets=1 index=30 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=1 index=31 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=1 index=33 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=30 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=31 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=33 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header malformed/count/order/foreignDB refused; realStarts=realSignals=SQLcalls=registryWrites=Moves=0
+PASS8 V2 PowerShell files parsed; no real actions

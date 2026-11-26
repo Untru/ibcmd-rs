@@ -1,0 +1,74 @@
+{
+  "format": 1,
+  "scope": "READ ONLY existing-source diagnosis, not active DB verification or permission to borrow/add metadata",
+  "extension_catalog": {
+    "path": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-version-settled-A\\Catalogs\\сд_ПрисоединенныеФайлы.xml",
+    "sha256": "96ada130e937ad932e48dfdbc376addddcc75679e8fceb98c29e77767532d3f7",
+    "identical_in_B": true
+  },
+  "references": [
+    {
+      "attribute": "Автор",
+      "reference": "Catalog.Пользователи.EmptyRef",
+      "type_ids": [
+        "505ccdf9-91da-4c58-a4f1-a1c886651082",
+        "c54edff0-c3a1-44d7-9707-1fe05700b055"
+      ]
+    },
+    {
+      "attribute": "Изменил",
+      "reference": "Catalog.Пользователи.EmptyRef",
+      "type_ids": [
+        "505ccdf9-91da-4c58-a4f1-a1c886651082",
+        "c54edff0-c3a1-44d7-9707-1fe05700b055"
+      ]
+    },
+    {
+      "attribute": "Редактирует",
+      "reference": "Catalog.Пользователи.EmptyRef",
+      "type_ids": [
+        "505ccdf9-91da-4c58-a4f1-a1c886651082",
+        "c54edff0-c3a1-44d7-9707-1fe05700b055"
+      ]
+    },
+    {
+      "attribute": "СтатусИзвлеченияТекста",
+      "reference": "Enum.СтатусыИзвлеченияТекстаФайлов.EmptyRef",
+      "type_ids": [
+        "6ec76dd1-632c-4b95-ae9a-8279eafb445c"
+      ]
+    }
+  ],
+  "existing_base_objects": [
+    {
+      "existing_base_source": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\source-a\\Catalogs\\Пользователи.xml",
+      "sha256": "db3070d24fb8ebfb90d2f6b9440ded397ca112e114cbc29c21a25ee957f8cdcd",
+      "uuid": "579baaa4-6493-4d99-8744-6399757295c7",
+      "ref_type_id": "c54edff0-c3a1-44d7-9707-1fe05700b055",
+      "matching_unchanged_extension_attributes": [
+        "Автор",
+        "Изменил",
+        "Редактирует"
+      ],
+      "extension_descriptor_present": false
+    },
+    {
+      "existing_base_source": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\source-a\\Enums\\СтатусыИзвлеченияТекстаФайлов.xml",
+      "sha256": "d1c87885554d6eb55d3fcb8935df9afc6336f6a5ccea034d1851d27be3aa42c4",
+      "uuid": "ecd8772d-e33f-426f-a87a-e28bd94d5fdf",
+      "ref_type_id": "6ec76dd1-632c-4b95-ae9a-8279eafb445c",
+      "matching_unchanged_extension_attributes": [
+        "СтатусИзвлеченияТекста"
+      ],
+      "extension_descriptor_present": false
+    }
+  ],
+  "declared_in_extension": {
+    "Пользователи": false,
+    "СтатусыИзвлеченияТекстаФайлов": false
+  },
+  "normalization": null,
+  "source_changes": false,
+  "runtime_actions": false,
+  "conclusion": "Existing base source type IDs match all four unchanged extension reference attributes; referenced objects have no extension descriptor/declaration. Native V4 XML import reported these references unresolved. This does not prove a native parser workaround."
+}

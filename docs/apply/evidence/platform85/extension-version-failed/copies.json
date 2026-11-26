@@ -1,0 +1,150 @@
+{
+  "format": 1,
+  "scope": "Byte-exact selected evidence copies; original raw packs remain in F lab, indexed by result-checkpoint.json",
+  "runtime_source": "288193085e473c852e64cc5a86ca825bca0113b0",
+  "rust_cli_executed": false,
+  "native_import_exit": -1,
+  "native_apply_executed": false,
+  "new_observer_executed": false,
+  "cleanup_exit": 0,
+  "files": [
+    {
+      "file": "result-checkpoint.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-result-checkpoint.json",
+      "bytes": 585044,
+      "sha256": "deadb195c84bfe3eaf0061072b2339e49ada75abd5a9fec8dc4d05f0746171ca"
+    },
+    {
+      "file": "controller-frozen-v4.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-control-frozen-v4.json",
+      "bytes": 369129,
+      "sha256": "d4e662c47961b66c268bd3a2e36fee1b28ba6b2de0cb4da6d0f02e18aab30b5e"
+    },
+    {
+      "file": "cleanup-frozen-v1.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-cleanup-frozen-v1.json",
+      "bytes": 4834,
+      "sha256": "a75a435230fae3de6806465a25fa72bb580797becf2df7416d6939c9aee9e410"
+    },
+    {
+      "file": "postfailure-physical-delta.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-postfailed-full-physical-delta.json",
+      "bytes": 4004,
+      "sha256": "d2633ef4f1dfed2cc849de1a0247a92532705df14ec3fb044c78de8aad1f0c9e"
+    },
+    {
+      "file": "cleanup-postcheck.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-cleanup-postcheck.json",
+      "bytes": 345,
+      "sha256": "cf57bbb2343a909c1af9058f52251dbc480d177b9c76146d305d24a4a1d42408"
+    },
+    {
+      "file": "native-import-command.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\010-native-import.command.json",
+      "bytes": 696,
+      "sha256": "286229977f5c48542898ba5738d0c82e6dab45ec30f9228cda6a992165bcf630"
+    },
+    {
+      "file": "native-import-result.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\010-native-import.json",
+      "bytes": 1019,
+      "sha256": "3bd528bc7f35979b94f1e2f88c806df7fd496414b918094f32048ace791653f8"
+    },
+    {
+      "file": "original-failed-final-state.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\final-state.json",
+      "bytes": 379,
+      "sha256": "bbe7c7960486abed907d524e2be7458751dd93423a91364761f82bc49cb431b8"
+    },
+    {
+      "file": "cleanup-final-state.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-v4-cleanup-v1\\final-state.json",
+      "bytes": 276,
+      "sha256": "6350edef3b922af074542d01311cd5d168c1bb809962d0b3abd2bf76207184f1"
+    },
+    {
+      "file": "fixture-validation.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-settled-fixture-validation-v2.json",
+      "bytes": 117,
+      "sha256": "b0e13785e5acc9a6fa17521009cc9766503d7f9c7f36f7c9fd6657f71aac76b9"
+    },
+    {
+      "file": "fixture-delta.json",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-settled-fixture-delta-v2.json",
+      "bytes": 181303,
+      "sha256": "c5f9991bde22ae109f9279c043fb085d8aa61bab6dfd3f600f2ec9a7fa370340"
+    },
+    {
+      "file": "frozen-controller.ps1",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\extension_version_control_v2.ps1",
+      "bytes": 28773,
+      "sha256": "d5cd30786ea08b89816f712b9ac9086441372b80544f4d32542051d448b7a368"
+    },
+    {
+      "file": "frozen-cleanup.ps1",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\cleanup_extension_v4.ps1",
+      "bytes": 10295,
+      "sha256": "ffce45315c6146c3c8e1856dfe91b7d72a0431a324334b2ef6a610ed39b39eb1"
+    },
+    {
+      "file": "test-frozen-cleanup.ps1",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\test_cleanup_extension_v4.ps1",
+      "bytes": 6829,
+      "sha256": "873e3da073492bf66bc9988155de9e05f14b31bdb1a4862505f9edae482ac3c3"
+    },
+    {
+      "file": "test-frozen-postqueue.ps1",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\test_extension_v4_postqueue.ps1",
+      "bytes": 3356,
+      "sha256": "f739fd177f9d3a6ef8016b3b152eba393fc0b2fb4f57f45e27631d9a86fc0122"
+    },
+    {
+      "file": "diff-full-snapshots.py",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\diff_full_snapshots.py",
+      "bytes": 6514,
+      "sha256": "185c081c1e8175d52c8eda6548c5156c3b605f1564e166318728470293e8f406"
+    },
+    {
+      "file": "freeze-result.py",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\freeze_extension_v4_result.py",
+      "bytes": 4316,
+      "sha256": "35704d418245c6bc76aff948ed85989c294e83e8977b172e353de3eff1bd2c58"
+    },
+    {
+      "file": "postqueue-pure.log",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-postqueue-pure-repair.log",
+      "bytes": 139,
+      "sha256": "529eb5ed6ac2e944e5289e8c825721d81ee8259bbe8d92ce4fbfedee62ff09a9"
+    },
+    {
+      "file": "safety-pure.log",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-safety-pure.log",
+      "bytes": 122,
+      "sha256": "ccfddad2b64645828a0ada38f5695981547d4c5237c7b3454bb98c889ced9c66"
+    },
+    {
+      "file": "fixture-pure.log",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-fixture-pure.log",
+      "bytes": 105,
+      "sha256": "dd6f3a824d9d458f35a8acb5a4bf890d17ab255fdac8058d62d81d832552088a"
+    },
+    {
+      "file": "cleanup-pure.log",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-cleanup-pure-final.log",
+      "bytes": 103,
+      "sha256": "70ce8d45a9454ecd8ade01ca1b9457608af690dea06182800f4fd954451b7285"
+    },
+    {
+      "file": "original-execution.log",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-execution.log",
+      "bytes": 315,
+      "sha256": "edb0dafb74aae44cbb2fd909a73cdc1d9c444ef9620b7bce1ab3ceda095f2273"
+    },
+    {
+      "file": "cleanup-execution.log",
+      "original": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-cleanup-execution.log",
+      "bytes": 79,
+      "sha256": "10d395b33b917b0d84d5e8c4d0981594dbcdd314395f8b8eaff71ee1e4a989f6"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+[2026-10-01T06:54:02] restore ibcmd_rs_04_rcheck_dn_mix2_ownnew20261001 from the staged state
+ready: ibcmd_rs_04_rcheck_dn_mix2_ownnew20261001 (from F:\ibcmd\lab\04\restructure-check\dn\bak\mix2_staged.bak)
+[2026-10-01T06:54:06] drop-in apply (new20261001 build)
+exit=0 in 10,5 s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Создано поколение конфигурации: 54f119c32045534d8221a95c428669fd00000000
+[INFO] Обновление конфигурации базы данных успешно завершено
+gate: s1 (the conservative rule and the S1 restructurings); synonym_records: 3; timings: {"storage_check_ms":146,"inventory_ms":259,"gate_ms":3731,"synonyms_ms":141,"fingerprints_ms":83,"recovery_ms":189,"backup_ms":1170,"sql_ms":4353,"total_ms":10461}
+[2026-10-01T06:54:16] check 4: Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+[2026-10-01T06:54:18] check 3: the rebuilt tables
+_Reference23	rows 2 / 2	only in A 0	only in B 0
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference7444	rows 0 / 0	only in A 0	only in B 0
+_Reference3408	rows 0 / 0	only in A 0	only in B 0
+_Document1564	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT1962	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT2440	rows 1 / 1	only in A 0	only in B 0
+[2026-10-01T06:54:20] checks 5 and 6
+snapshot ibcmd_rs_04_rcheck_dn_mix2_nat20261001/after: 2234 tables, Config=9841 ConfigSave=0 Params=38
+snapshot ibcmd_rs_04_rcheck_dn_mix2_ownnew20261001/after: 2234 tables, Config=9841 ConfigSave=0 Params=38
+--- check 5
+tables: 1761 / 1761
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+order of the common entries is the same: False
+first positions that differ (1 vs 2): [('DbCopiesSettings', 'DbCopies'), ('DbCopiesTrLogs', 'DbCopiesSettings'), ('DbCopiesTablesStates', 'DbCopiesTrLogs'), ('DbCopiesInitialLast', 'DbCopiesUpdates'), ('DbCopiesTrChObj', 'DbCopiesTablesStates'), ('Ch
+DBNames text equal: True 347276 347276
+--- check 6 (exact text, then order-insensitive)
+== ibcmd_rs_04_rcheck_dn_mix2_nat20261001/after  ->  ibcmd_rs_04_rcheck_dn_mix2_ownnew20261001/after
+16 of 16 `.si` rows have the same text (compared after inflate)
+identical text: 16, same up to order: 0, different: 0
+[2026-10-01T06:54:34] check 7: the platform applies on our twin
+exit=0 seconds=2.9
+[INFO] Обновление конфигурации базы данных не требуется
+[2026-10-01T06:55:10] check 8: native exports and source-diff
+exit=0 seconds=14.2
+exit=0 seconds=17.9
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+[2026-10-01T06:58:21] done mix2 new20261001

@@ -1,0 +1,14 @@
+{
+  "tool": "unica.dcs.edit",
+  "unica_commit": "a527d40962d047c6922c903b37510b30f697da42",
+  "base_fixture": "8.3.27.2214-xml-2.20-dcs-core",
+  "operation": "add-variant",
+  "value": "Secondary Secondary",
+  "result": {
+    "variant_name": "Secondary Secondary",
+    "variant_presentation": "Secondary Secondary",
+    "selection": "Auto",
+    "structure": "details"
+  },
+  "authority": "hypothesis_only; the two pinned platform rounds are the byte authority"
+}

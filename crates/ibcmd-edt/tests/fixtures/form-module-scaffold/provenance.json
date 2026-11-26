@@ -1,0 +1,22 @@
+{
+  "scope": "Public synthetic DcsFilterEvidence empty form-module scaffold only; not executable BSL, BSP/UH or ERP",
+  "installed_edt": "2026.2.1.3",
+  "native_ibcmd": "8.5.1.1592",
+  "xml_profile": "2.21",
+  "source_captures": [
+    "issue357-current-server-dcs-002",
+    "issue356-current-server-dcs-001"
+  ],
+  "files": [
+    {
+      "fixture": "edt-lf.bsl",
+      "bytes": 471,
+      "sha256": "b38afa66c68dcb2771ba095f6a55b1030a2c32c8aad621a7f7d8c94df72e0f23"
+    },
+    {
+      "fixture": "native-crlf.bsl",
+      "bytes": 492,
+      "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+    }
+  ]
+}

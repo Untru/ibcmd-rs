@@ -1,0 +1,14 @@
+{
+  "equal": [
+    "CovActionPeriodUse_true",
+    "CovChoiceHistoryOnInput_DontUse",
+    "CovCodeLength_5",
+    "CovDescriptionLength_100",
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+    "CovIncludeHelpInContents_true",
+    "CovListPresentation_Cov",
+    "CovTemplate",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+    "configuration"
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "own_tag": "add85release",
+  "native_tag": "add85native2",
+  "own_cycle": {
+    "tag": "add85release",
+    "database": "ibcmd_rs_04_import_add85_release",
+    "tree": "F:\\ibcmd\\lab\\04\\import\\tree\\b85add",
+    "exe": "F:\\ibcmd\\lab\\04\\import\\bin\\ibcmd-rs-release85.exe",
+    "platform": "8.5",
+    "apply_with": "native",
+    "import": {
+      "exit": 0,
+      "seconds": 21.9,
+      "rows": 11,
+      "tail": "model export: name index of 10642 names, 4595 types, 315 predefined items in 50 ms; object_names read 4968 rows (0 failed) of 46 kinds, 1415 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types) | model export: every descriptor through the model: true; still legacy by kind: {}; left out: recalculation refs true, root recalculation refs true, functional option refs true | model export: name index of 10648 names, 4602 types, 315 predefined items in 53 ms; object_names read 4970 rows (0 failed) of 46 kinds, 1416 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types) | [INFO] Импорт конфигурации из XML успешно завершен",
+      "overrides": {
+        "built_objects": 2,
+        "new_objects": 2,
+        "compiled_descriptors": 4,
+        "removed_rows": 0,
+        "deleted_names": 0,
+        "built_files": [
+          "new Catalogs/_ДемоГруппыДоступаНоменклатуры/Forms/ДемоНоваяФорма.xml",
+          "new Catalogs/ДемоНовыйСправочник.xml"
+        ],
+        "compiled_files": [
+          "Catalogs/_ДемоГруппыДоступаНоменклатуры.xml",
+          "Catalogs/_ДемоКонтрагенты.xml",
+          "Catalogs/_ДемоПартнеры.xml",
+          "Configuration.xml"
+        ],
+        "differing_files": 8,
+        "objects_left_out": 4745,
+        "rows_left_out": 27,
+        "compare_seconds": 4.6059794,
+        "all_rows_because": null
+      },
+      "verification": {
+        "checked_files": 12339,
+        "identical_files": 12339,
+        "state_rows": 9938,
+        "read_seconds": 1.39,
+        "export_seconds": 2.077,
+        "total_seconds": 3.4779908
+      },
+      "error": null
+    },
+    "configsave": {
+      "database": "ibcmd_rs_04_import_add85_release",
+      "rows": 11,
+      "names": 11,
+      "parts_over_one": [],
+      "creation_years": {
+        "4026": 11
+      },
+      "deleted": null,
+      "versions_count": 9939,
+      "versions_entries": 9938
+    },
+    "apply": {
+      "Seconds": 49.5,
+      "Exit": 0,
+      "Tail": "[INFO] Объект изменен: Справочник._ДемоПартнеры | [INFO] Принятие изменений... | [INFO] Создано поколение конфигурации: 300101ce8836cd49a98fd66e475f9a5300000000 | [INFO] Обновление конфигурации базы данных успешно завершено"
+    },
+    "config_rows_after": "9951,0",
+    "export": {
+      "Seconds": 16.3,
+      "Exit": 0
+    },
+    "diff_summary": {
+      "left_only": 0,
+      "right_only": 0,
+      "different": 1,
+      "unchanged": 12339
+    },
+    "differing_files": [],
+    "equal_but_dump_info": true,
+    "dump_info": {
+      "equal_except_config_version": false
+    },
+    "equal_except_config_version": false,
+    "total_seconds": 93.2
+  },
+  "native_cycle": {
+    "database": "ibcmd_rs_04_import_add85_native2",
+    "tree": "F:\\ibcmd\\lab\\04\\import\\tree\\b85add",
+    "platform": "8.5",
+    "import_files": [
+      "Catalogs/_ДемоПартнеры.xml",
+      "Catalogs/_ДемоКонтрагенты.xml",
+      "Catalogs/ДемоНовыйСправочник.xml",
+      "Configuration.xml",
+      "Documents/_ДемоОприходованиеТоваров.xml",
+      "Catalogs/_ДемоГруппыДоступаНоменклатуры/Forms/ДемоНоваяФорма.xml",
+      "Catalogs/_ДемоГруппыДоступаНоменклатуры/Forms/ДемоНоваяФорма/Ext/Form.xml",
+      "Catalogs/_ДемоГруппыДоступаНоменклатуры.xml"
+    ],
+    "import": {
+      "Rows": 9951,
+      "Seconds": 61.1,
+      "Exit": 0,
+      "Tail": "[INFO] Импорт файлов конфигурации из XML... | [INFO] Импорт файлов конфигурации из XML успешно завершен"
+    },
+    "apply": {
+      "Seconds": 59.8,
+      "Exit": 0,
+      "Tail": "[INFO] Создано поколение конфигурации: 38e609d638be264abd06cab2918d3cab00000000 | [INFO] Построение индекса справки... | [INFO] Построение индекса справки успешно завершено | [INFO] Обновление конфигурации базы данных успешно завершено"
+    },
+    "export": {
+      "Seconds": 12.5,
+      "Exit": 0
+    }
+  },
+  "twin_diff_summary": {
+    "left_only": 0,
+    "right_only": 0,
+    "different": 1,
+    "unchanged": 12339
+  },
+  "differing_files": [],
+  "twin_dump_info": {
+    "equal_except_config_version": true
+  },
+  "equal_except_config_version": true
+}

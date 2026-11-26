@@ -1,0 +1,353 @@
+{
+  "name": "ibcmd-rs-connections",
+  "displayName": "ibcmd-rs Connections",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "ibcmd-rs",
+  "description": "Workspace connections for ibcmd-rs serve --stdio",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "main": "./dist/extension.js",
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "test": "npm run compile && node --test test/object-status.test.js test/core.test.js test/real.test.js test/import.test.js test/connection.test.js test/object-view.test.js test/configuration-tree.test.js test/database-files.test.js test/apply.test.js test/export.test.js",
+    "test:host": "npm run bundle && node test/host.js",
+    "format": "prettier --write src test scripts/*.cjs package.json tsconfig.json",
+    "format:check": "prettier --check src test scripts/*.cjs package.json tsconfig.json",
+    "test:tree-host": "npm run bundle && node test/tree-host.js",
+    "test:source-host": "npm run bundle && node test/source-host.js",
+    "bundle": "npm run compile && node scripts/build.cjs",
+    "package": "npm run bundle && node scripts/python.cjs scripts/package.py",
+    "test:package": "npm run compile && node --test test/executable.test.js test/process-watchdog.test.js && node scripts/python.cjs scripts/test_package.py",
+    "test:installed": "node test/installed.js",
+    "test:native-apply": "npm run bundle && node test/native-apply.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "ibcmd.add",
+        "title": "ibcmd-rs: Add Connection"
+      },
+      {
+        "command": "ibcmd.edit",
+        "title": "ibcmd-rs: Edit Connection"
+      },
+      {
+        "command": "ibcmd.select",
+        "title": "ibcmd-rs: Select Workspace Connection"
+      },
+      {
+        "command": "ibcmd.bind",
+        "title": "ibcmd-rs: Bind Workspace Connections"
+      },
+      {
+        "command": "ibcmd.refresh",
+        "title": "ibcmd-rs: Reload Connections and Refresh Status"
+      },
+      {
+        "command": "ibcmd.forgetPassword",
+        "title": "ibcmd-rs: Forget Connection Password"
+      },
+      {
+        "command": "ibcmd.importSelected",
+        "title": "ibcmd-rs: Загрузить в базу"
+      },
+      {
+        "command": "ibcmd.importChanged",
+        "title": "ibcmd-rs: Загрузить изменённые"
+      },
+      {
+        "command": "ibcmd.objects.refresh",
+        "title": "ibcmd-rs: Refresh Object Status"
+      },
+      {
+        "command": "ibcmd.objects.changedOnly",
+        "title": "ibcmd-rs: Toggle Changed Objects Only"
+      },
+      {
+        "command": "ibcmd.tree.xml",
+        "title": "ibcmd-rs: Открыть каталог XML"
+      },
+      {
+        "title": "ibcmd-rs: Обновить дерево",
+        "command": "ibcmd.tree.refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "title": "ibcmd-rs: Найти объект",
+        "command": "ibcmd.tree.search",
+        "icon": "$(search)"
+      },
+      {
+        "command": "ibcmd.tree.openLocal",
+        "title": "ibcmd-rs: Открыть местный файл"
+      },
+      {
+        "command": "ibcmd.source.open",
+        "title": "ibcmd-rs: Открыть из базы"
+      },
+      {
+        "command": "ibcmd.source.compare",
+        "title": "ibcmd-rs: Сравнить с базой"
+      },
+      {
+        "command": "ibcmd.apply",
+        "title": "ibcmd-rs: Apply CONFIGSAVE"
+      },
+      {
+        "command": "ibcmd.objects.export",
+        "title": "ibcmd-rs: Выгрузить из базы"
+      },
+      {
+        "command": "ibcmd.objects.exportChanged",
+        "title": "ibcmd-rs: Выгрузить изменённые из базы"
+      },
+      {
+        "command": "ibcmd.objects.exportGroup",
+        "title": "ibcmd-rs: Выгрузить группу из базы"
+      }
+    ],
+    "configuration": {
+      "title": "ibcmd-rs",
+      "properties": {
+        "ibcmd.executable": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Legacy executable override; ibcmd-rs.path takes precedence."
+        },
+        "ibcmd.connections": {
+          "type": "array",
+          "default": [],
+          "scope": "resource",
+          "items": {
+            "type": "string"
+          },
+          "description": "Infobase IDs bound to this workspace folder."
+        },
+        "ibcmd.connectionMetadata": {
+          "type": "object",
+          "default": {},
+          "scope": "resource",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "auth": {
+                "type": "string",
+                "enum": [
+                  "windows",
+                  "sql"
+                ]
+              },
+              "user": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Friendly names and authentication preferences; passwords belong in SecretStorage."
+        },
+        "ibcmd.sourceDirectory": {
+          "type": "string",
+          "default": ".",
+          "scope": "resource",
+          "description": "Configuration source directory, relative to the workspace folder."
+        },
+        "ibcmd.statusBaselineDirectory": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Read-only reference export folder (last synchronization or a separate Git checkout). Without a baseline, change direction is unknown."
+        },
+        "ibcmd.statusGitRef": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Git commit/ref used as baseline (overrides baseline directory). Snapshot is pinned to a resolved Git tree."
+        },
+        "ibcmd.statusCacheDirectory": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Absolute cache directory for inspectable Git baseline snapshots. Required for Git comparison; snapshots are retained for Trash cleanup."
+        },
+        "ibcmd.statusComparison": {
+          "type": "string",
+          "enum": [
+            "native",
+            "bytes"
+          ],
+          "default": "native",
+          "scope": "resource",
+          "description": "Native DB versions + local baseline bytes by default. Bytes is an explicit legacy preview, without native version parity."
+        },
+        "ibcmd.statusTimeoutSeconds": {
+          "type": "integer",
+          "default": 600,
+          "minimum": 30,
+          "maximum": 3600,
+          "scope": "resource",
+          "description": "Deadline per object-status read in seconds (30–3600). User cancellation remains available; other RPC timeouts are unchanged."
+        },
+        "ibcmd-rs.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Trusted executable override. Empty uses bundled binary, then ibcmd-rs on PATH. Never a shell command."
+        },
+        "ibcmd.nativeExecutables": {
+          "type": "object",
+          "default": {},
+          "scope": "machine",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Absolute native ibcmd executable paths keyed by bound platform version. File-db apply only; user must verify each executable matches the bound platform."
+        },
+        "ibcmd.exportCacheDirectory": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Absolute staging directory outside sourceDirectory. Export plans are retained for inspection and Trash cleanup."
+        }
+      }
+    },
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "ibcmd.importSelected",
+          "when": "resourceScheme == file && !explorerResourceIsFolder",
+          "group": "ibcmd@1"
+        },
+        {
+          "command": "ibcmd.importChanged",
+          "when": "resourceScheme == file",
+          "group": "ibcmd@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "ibcmd.importSelected",
+          "when": "resourceScheme == file",
+          "group": "ibcmd@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ibcmd.importSelected",
+          "when": "view == ibcmd.objects && resourceScheme == file",
+          "group": "ibcmd@1"
+        },
+        {
+          "command": "ibcmd.tree.openLocal",
+          "when": "view == ibcmd.configuration && viewItem == ibcmd.source"
+        },
+        {
+          "command": "ibcmd.source.open",
+          "when": "view == ibcmd.configuration && viewItem == ibcmd.source"
+        },
+        {
+          "command": "ibcmd.source.compare",
+          "when": "view == ibcmd.configuration && viewItem != ibcmd.property"
+        },
+        {
+          "command": "ibcmd.objects.export",
+          "when": "view == ibcmd.objects && viewItem == ibcmd.object",
+          "group": "ibcmd@1"
+        },
+        {
+          "command": "ibcmd.objects.exportGroup",
+          "when": "view == ibcmd.objects",
+          "group": "ibcmd@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "ibcmd.importChanged",
+          "when": "view == ibcmd.objects",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ibcmd.objects.refresh",
+          "when": "view == ibcmd.objects",
+          "group": "navigation"
+        },
+        {
+          "command": "ibcmd.objects.changedOnly",
+          "when": "view == ibcmd.objects",
+          "group": "navigation"
+        },
+        {
+          "group": "navigation",
+          "command": "ibcmd.tree.refresh",
+          "when": "view == ibcmd.configuration"
+        },
+        {
+          "group": "navigation",
+          "command": "ibcmd.tree.search",
+          "when": "view == ibcmd.configuration"
+        },
+        {
+          "command": "ibcmd.objects.exportChanged",
+          "when": "view == ibcmd.objects",
+          "group": "ibcmd@1"
+        },
+        {
+          "command": "ibcmd.objects.exportGroup",
+          "when": "view == ibcmd.objects",
+          "group": "ibcmd@2"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "ibcmd.objects",
+          "name": "ibcmd-rs Objects"
+        },
+        {
+          "id": "ibcmd.configuration",
+          "name": "Конфигурация 1С"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "toml-eslint-parser": "^0.10.0",
+    "@xmldom/xmldom": "0.9.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/test-electron": "^2.5.0",
+    "prettier": "3.8.4",
+    "typescript": "^5.7.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.25.12"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Untru/ibcmd-rs.git",
+    "directory": "editors/vscode"
+  }
+}

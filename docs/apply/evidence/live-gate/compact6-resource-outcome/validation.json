@@ -1,0 +1,8 @@
+{
+  "temp_cleanup": "automatic approval review blocked; exact empty owned temp retained",
+  "format_check": "PASS",
+  "diff_check": "PASS",
+  "physical_adapter_policy": "PASS",
+  "additional_library_matrix": "not run; docs-only and unchanged Rust",
+  "rust_changed": false
+}

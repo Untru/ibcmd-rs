@@ -1,0 +1,22 @@
+{
+  "source": {
+    "run": "E:/ibcmd_lab/parity/ut_ibcmd_ut_full_33a9baf_20260724_a",
+    "rawRow": "34accda9-6211-4bc3-be8d-e42a24260653.0",
+    "rawSource": "candidate_dump/Config_inflated/34accda9-6211-4bc3-be8d-e42a24260653.0__part0.txt",
+    "rawSourceSha256": "77a99cffaa0b5c81ccccafa3a5fa01dec56342b49d1cce2e56f97f28b62785b1",
+    "nativeSource": "DataProcessors/УправлениеПродажамиНаOzon/Forms/НастройкиИнтеграции/Ext/Form.xml",
+    "nativeSourceSha256": "30cf0689522d6b74408da77426a178df282361f36d3787c0cfaf456c85cb8b03",
+    "rawSlot": 27
+  },
+  "rawSlotValue": "{0,3,\"Отбор.Статус\",\n{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n{0,0,\n{\"U\"},9b0366e5-0a12-4ab4-8ebe-6959ff7fae09,981b86f1-d7d8-466e-a92f-27fc8d2dbd51,\n{1,0}\n}\n},\"Отбор.ХозяйственнаяОперация\",\n{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n{0,1,\n{\"#\",4500381b-db30-4a10-9db4-990038032acf,\n{2,\n{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n{0,0,\n{\"U\"},ae0f3889-6e23-4a7a-bf5d-cd197ab78fb7,4dec627e-3939-4191-a213-0cea734fc86c,\n{1,0}\n}\n},\n{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n{0,0,\n{\"U\"},ae0f3889-6e23-4a7a-bf5d-cd197ab78fb7,a606d3e5-4a59-4b2c-9d3d-5976f5c778cf,\n{1,0}\n}\n}\n}\n},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,\n{1,0}\n}\n},\"Отбор.ПометкаУдаления\",\n{\"#\",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,\n{0,1,\n{\"B\",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,\n{1,0}\n}\n}\n}",
+  "typeIndex": {
+    "9b0366e5-0a12-4ab4-8ebe-6959ff7fae09": "cfg:EnumRef.СтатусыДоговоровКонтрагентов",
+    "ae0f3889-6e23-4a7a-bf5d-cd197ab78fb7": "cfg:EnumRef.ХозяйственныеОперации"
+  },
+  "objectRefs": {
+    "981b86f1-d7d8-466e-a92f-27fc8d2dbd51": "Enum.СтатусыДоговоровКонтрагентов.EnumValue.Действует",
+    "4dec627e-3939-4191-a213-0cea734fc86c": "Enum.ХозяйственныеОперации.EnumValue.РеализацияКлиенту",
+    "a606d3e5-4a59-4b2c-9d3d-5976f5c778cf": "Enum.ХозяйственныеОперации.EnumValue.ПередачаНаКомиссию"
+  },
+  "expectedXml": "\t<ChoiceParameters>\r\n\t\t<app:item name=\"Отбор.Статус\">\r\n\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\t\t\t\t<Presentation/>\r\n\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.СтатусыДоговоровКонтрагентов.EnumValue.Действует</Value>\r\n\t\t\t</app:value>\r\n\t\t</app:item>\r\n\t\t<app:item name=\"Отбор.ХозяйственнаяОперация\">\r\n\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\t\t\t\t<Presentation/>\r\n\t\t\t\t<Value xsi:type=\"v8:FixedArray\">\r\n\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\t\t\t\t\t\t<Presentation/>\r\n\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.ХозяйственныеОперации.EnumValue.РеализацияКлиенту</Value>\r\n\t\t\t\t\t</v8:Value>\r\n\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\t\t\t\t\t\t<Presentation/>\r\n\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.ХозяйственныеОперации.EnumValue.ПередачаНаКомиссию</Value>\r\n\t\t\t\t\t</v8:Value>\r\n\t\t\t\t</Value>\r\n\t\t\t</app:value>\r\n\t\t</app:item>\r\n\t\t<app:item name=\"Отбор.ПометкаУдаления\">\r\n\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\t\t\t\t<Presentation/>\r\n\t\t\t\t<Value xsi:type=\"xs:boolean\">false</Value>\r\n\t\t\t</app:value>\r\n\t\t</app:item>\r\n\t</ChoiceParameters>\r\n"
+}

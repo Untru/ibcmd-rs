@@ -1,0 +1,5 @@
+=== lv5-warm: 123 lines, session 1
+  first 18:24:13.692 (  -46.58 s)
+  last  18:26:42.785 ( +102.51 s)
+  event open           18:24:13.692 (  -46.58 s) | 1 | режим=poll
+  markers client=ibcmd-live-v1          server=ibcmd-live-v3          B=нет/нет                                  18:24:13.764 (  -46.51 s) .. 18:26:42.785 ( +102.51 s)  n=122

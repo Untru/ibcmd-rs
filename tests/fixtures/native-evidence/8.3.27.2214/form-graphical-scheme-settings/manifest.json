@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-graphical-scheme-settings",
+  "scope": "regression",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "/opt/1cv8/8.3.27.2214/ibcmd",
+    "database_kind": "isolated_file_infobase",
+    "host": "macOS"
+  },
+  "seed": {
+    "generator": "kit/seed.sh (see docs/evidence/seed-configurations-method.md)",
+    "skeleton": "Web_Service (ERP УХ 3.2.12.6, cap/Web_Service/src)",
+    "authority": "platform_round_trip",
+    "note": "A minimal synthetic DataProcessor (ChartFormTest) with one Form carrying a single FlowchartContextType-typed attribute \"Схема\" and a GraphicalSchemaField bound to it, built from the shape the seven native graphical-scheme attributes of Документооборот КОРП 3.0.21.3 carry. Each variant changes exactly one element of the control and is round-tripped through ibcmd 8.3.27.2214 itself; the raw entry is the whole slot-14 field of the attribute record as the round-tripped .cf stores it."
+  },
+  "claims": [
+    "The design record is unwrapped as {0,1,\"Flowchart\",{\"#\",<type uuid>,{5,{<record>},0,0}}}.",
+    "Record member 1 is <d4p1:backColor>, 2 <d4p1:enableGrid>, 3 <d4p1:gridHorizontalStep>, 4 <d4p1:gridVerticalStep>, 5 <d4p1:drawGridMode> (0 None, 1 Dots, 3 Lines).",
+    "Record member 6 declares how many <d4p1:printPropItem> pairs trail it; the reader walks that count and refuses a record whose length disagrees."
+  ],
+  "non_claims": [
+    "<d4p1:bpUUID> and <d4p1:useOutput> are not stored: seeds gsx-bpuuid, gsx-outenable and gsx-outdisable store bytes identical to the control and the platform writes the zero UUID and Auto back on all three, so both are written as constants.",
+    "Record member 0 (1) and the holder trailer (0,0) are never varied by any observation, so they are required to read as observed rather than interpreted.",
+    "No drawGridMode ordinal other than 0, 1 and 3 is named; the XDTO enumeration GraphicalSchemaGridDrawMode rejects any other spelling the seed factory could offer."
+  ],
+  "objects": [
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "Catalogs/СхемыПроцессов/Forms/КарточкаСхемы",
+      "form": "КарточкаСхемы",
+      "attribute": "Схема",
+      "seed": null,
+      "variant": "native Документооборот КОРП 3.0.21.3 record, drawGridMode Lines",
+      "raw_entry": {
+        "path": "raw/native-do-lines.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/native-do-lines-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessors/КартаМаршрутаБизнесПроцесса/Forms/Форма",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": null,
+      "variant": "native Документооборот КОРП 3.0.21.3 record, drawGridMode None",
+      "raw_entry": {
+        "path": "raw/native-do-none.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/native-do-none-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": "gsx-base",
+      "variant": "control: backColor style:FieldBackColor, enableGrid true, drawGridMode Lines, steps 20/20, six printPropItem pairs",
+      "raw_entry": {
+        "path": "raw/lines-six-print-props.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/lines-six-print-props-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": "gsx-gridnone",
+      "variant": "drawGridMode None (member 5 = 0)",
+      "raw_entry": {
+        "path": "raw/grid-mode-none.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/grid-mode-none-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": "gsx-gridmode3",
+      "variant": "drawGridMode Dots (member 5 = 1)",
+      "raw_entry": {
+        "path": "raw/grid-mode-dots.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/grid-mode-dots-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": "gsx-gridoff",
+      "variant": "enableGrid false (member 2 = 0)",
+      "raw_entry": {
+        "path": "raw/grid-off.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/grid-off-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": "gsx-backred",
+      "variant": "backColor #FF0000 (colour tuple space 0)",
+      "raw_entry": {
+        "path": "raw/back-color-web.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/back-color-web-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": "gsx-steps",
+      "variant": "gridHorizontalStep 33, gridVerticalStep 44",
+      "raw_entry": {
+        "path": "raw/grid-steps.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/grid-steps-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": "gsx-printfew",
+      "variant": "two printPropItem pairs instead of six -- the declared count at member 6 and the record length move together",
+      "raw_entry": {
+        "path": "raw/print-props-two.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/print-props-two-settings.xml"
+        }
+      ]
+    },
+    {
+      "kind": "FormAttributeGraphicalSchemeSettings",
+      "owner": "DataProcessor.ChartFormTest",
+      "form": "Форма",
+      "attribute": "Схема",
+      "seed": "gsx-printvals",
+      "variant": "six printPropItem pairs with distinct values",
+      "raw_entry": {
+        "path": "raw/print-props-values.txt"
+      },
+      "native_outputs": [
+        {
+          "path": "native/print-props-values-settings.xml"
+        }
+      ]
+    }
+  ]
+}

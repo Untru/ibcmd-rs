@@ -1,0 +1,112 @@
+{
+  "session_id": 1,
+  "producer_pid": 44392,
+  "format": 1,
+  "scope": "ONE exact saved hibernated extension V4 session cleanup only",
+  "no_database_drop": true,
+  "base_manifest_sha256": "D4E662C47961B66C268BD3A2E36FEE1B28BA6B2DE0CB4DA6D0F02E18AAB30B5E",
+  "files": [
+    {
+      "length": 10295,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\cleanup_extension_v4.ps1",
+      "sha256": "FFCE45315C6146C3C8E1856DFE91B7D72A0431A324334B2EF6A610ED39B39EB1"
+    },
+    {
+      "length": 6829,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\test_cleanup_extension_v4.ps1",
+      "sha256": "873E3DA073492BF66BC9988155DE9E05F14B31BDB1A4862505F9EDAE482AC3C3"
+    },
+    {
+      "length": 2482,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\freeze_cleanup_extension_v4.ps1",
+      "sha256": "DCF5851823D38E5D9C8A903B279158B856488EAFF7958F98847FFE3BE5BBD61E"
+    },
+    {
+      "length": 2001,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\EXTENSION-V4-CLEANUP-PLAN.md",
+      "sha256": "D7F24D96C1B5985914DA1676612768903C1D7833EE133FF77DAB4975D916E542"
+    },
+    {
+      "length": 851,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-cleanup-original-state.json",
+      "sha256": "A4E24EED68BAB87A38ABCFD146BEA204D77A9E5BE88EDC15B31A167F77C40CFD"
+    },
+    {
+      "length": 2725,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-cleanup-rac-session-help.json",
+      "sha256": "2884670731217DB59AD38EC8F51373757F7F3EFC6E0C0AE1DE78C43D5DB03CE1"
+    },
+    {
+      "length": 369129,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-control-frozen-v4.json",
+      "sha256": "D4E662C47961B66C268BD3A2E36FEE1B28BA6B2DE0CB4DA6D0F02E18AAB30B5E"
+    },
+    {
+      "length": 7720,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\observer\\IbcmdRsObserver.epf",
+      "sha256": "49C96B0A53AEF8D75E22A3D49442D90524C00EA07085CEDF676007AFCD52F610"
+    },
+    {
+      "length": 7,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\ext-version-native-old-v2.pid",
+      "sha256": "4D6C05D1A74BE198C4EDF8B25BBFD5280329E04FED049716E70B9B910FA45774"
+    },
+    {
+      "length": 600,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\ext-version-native-old-v2.identity.json",
+      "sha256": "7BED7F7FC74CCC9134C4DC7736DC6F6B39E764672DEE1582294F6A311597A95B"
+    },
+    {
+      "length": 9398,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\ext-version-native-old-v2.log",
+      "sha256": "FB0CFEF40A11194EF9415950EA7816736366277C65023EF062420CD771F7CA7B"
+    },
+    {
+      "length": 223,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\ext-version-native-old-v2-first.json",
+      "sha256": "86E6D466A95FA94E9804392B5D6EF1DF11E46776F682054704835D250678EFC4"
+    },
+    {
+      "length": 2211,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\ext-version-native-old-v2-session-binding.log",
+      "sha256": "F5D166DCED63F73BC7CE27675EFFF99C5120D3FEDA20D4323524B05C891B06DB"
+    },
+    {
+      "length": 379,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\final-state.json",
+      "sha256": "BBE7C7960486ABED907D524E2BE7458751DD93423A91364761F82BC49CB431B8"
+    },
+    {
+      "length": 1019,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\010-native-import.json",
+      "sha256": "3BD528BC7F35979B94F1E2F88C806DF7FD496414B918094F32048ACE791653F8"
+    },
+    {
+      "length": 696,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\010-native-import.command.json",
+      "sha256": "286229977F5C48542898BA5738D0C82E6DAB45EC30F9228CDA6A992165BCF630"
+    },
+    {
+      "length": 97,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\011-native-import-release.json",
+      "sha256": "D6B8F54753496E53844B4275144FEA2BBE90AA0D9D92E41EF71D828F1AF09B50"
+    },
+    {
+      "length": 105,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\012-ext-version-native-old-v2-stop.json",
+      "sha256": "FB6A5A0EE3E8EC0E2F2258EFDEC8403699365E5FCA19203359C584838E0A8093"
+    },
+    {
+      "length": 2212,
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\ext-version-native-v2\\cleanup-sessions-29.log",
+      "sha256": "DB8621198B15C9A847152100C2DBC7C1E792BDC0713E2362F3D083A598A8D960"
+    }
+  ],
+  "no_import_retry": true,
+  "session": "a7b6996c-cf01-4cba-9016-bb32df51a3ae",
+  "infobase": "39794873-ac47-4cc7-86da-2dfb0b34a172",
+  "no_purge": true,
+  "database": "ibcmd_rs_05_p85_w3_ext_version_native_20261001",
+  "runtime_executed": false,
+  "cluster": "48225f9f-89e8-427e-aae6-36010395cfc3"
+}

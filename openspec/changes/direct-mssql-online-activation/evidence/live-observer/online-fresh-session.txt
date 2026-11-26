@@ -1,0 +1,11 @@
+platform=8.3.27.2214
+cluster_server=localhost:2541
+ras=localhost:2545
+infobase=ibcmd_rs_activation_main_20260829
+direct_generation=42aa2212-fdac-4c1f-b159-b76669e8cdf8
+fresh_observer_process_id=96456
+fresh_session_id=5
+fresh_session_uuid=a6b92887-9a96-4a7c-90d5-3470c4f7cb43
+fresh_session_started_at=2026-08-29T12:24:42
+observation=29.08.2026 12:24:43|after-server-direct-v2
+result=new session observed directly published server-module code

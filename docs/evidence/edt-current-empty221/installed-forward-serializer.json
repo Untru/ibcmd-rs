@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "mode": "offline_research_only",
+  "source_version": "2.21",
+  "tool_versions": {
+    "native_ibcmd": "8.5.1.1592",
+    "edt_import_export": "2026.2.1.3",
+    "ibcmd_rs": "ibcmd-rs 0.4.1"
+  },
+  "limits": {
+    "max_files": 100000,
+    "max_total_bytes": 4294967296,
+    "max_file_bytes": 536870912
+  },
+  "native": {
+    "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-empty221-001/native-xml",
+    "file_count": 3,
+    "total_bytes": 13009,
+    "tree_sha256": "369a59ba43fb3575c14b643523fc858ea58295d3cd0bed795b29f5a0c30fabdd"
+  },
+  "edt": {
+    "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-empty221-001/edt-xml",
+    "file_count": 2,
+    "total_bytes": 12369,
+    "tree_sha256": "8aee19185985a36712079e35e0acc06edab5dce1232ce57cc833af3744237715"
+  },
+  "ours": {
+    "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-empty221-001/installed-generated-xml",
+    "file_count": 2,
+    "total_bytes": 12369,
+    "tree_sha256": "8aee19185985a36712079e35e0acc06edab5dce1232ce57cc833af3744237715"
+  },
+  "summary": {
+    "all_equal": 1,
+    "native_edt_not_ours": 0,
+    "native_ours_not_edt": 0,
+    "edt_ours_not_native": 2,
+    "all_different": 0
+  },
+  "rows": [
+    {
+      "path": "ConfigDumpInfo.xml",
+      "native_sha256": "b0b1c4a34b1c22ef1b080e257ce253b71be717186b797cd51668c493b9131e61",
+      "native_size_bytes": 640,
+      "edt_sha256": null,
+      "edt_size_bytes": null,
+      "ours_sha256": null,
+      "ours_size_bytes": null,
+      "agreement": "edt_ours_not_native",
+      "candidate_interpretation": "candidate: native export, storage state, or version divergence; hashes alone do not prove a cause"
+    },
+    {
+      "path": "Configuration.xml",
+      "native_sha256": "325b29c3254c364afad4b8fd7de8e1db981093527e2165d9868127a4398edc33",
+      "native_size_bytes": 11063,
+      "edt_sha256": "ee1e415f8ad2b9d6d9aa136ac0cd9e9e1139a528e9168fb23c83ff3080b33342",
+      "edt_size_bytes": 11063,
+      "ours_sha256": "ee1e415f8ad2b9d6d9aa136ac0cd9e9e1139a528e9168fb23c83ff3080b33342",
+      "ours_size_bytes": 11063,
+      "agreement": "edt_ours_not_native",
+      "candidate_interpretation": "candidate: native export, storage state, or version divergence; hashes alone do not prove a cause"
+    },
+    {
+      "path": "Languages/Русский.xml",
+      "native_sha256": "fb4174613830728a1221d8e569bb02278650835732371e36c4f6fb3b60da3d43",
+      "native_size_bytes": 1306,
+      "edt_sha256": "fb4174613830728a1221d8e569bb02278650835732371e36c4f6fb3b60da3d43",
+      "edt_size_bytes": 1306,
+      "ours_sha256": "fb4174613830728a1221d8e569bb02278650835732371e36c4f6fb3b60da3d43",
+      "ours_size_bytes": 1306,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    }
+  ]
+}

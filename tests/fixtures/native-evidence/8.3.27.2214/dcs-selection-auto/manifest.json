@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-selection-auto",
+  "scope": "diagnostic_only_immutable_native_delta_evidence",
+  "issue": 283,
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-13",
+    "platform_version": "8.3.27.2214",
+    "platform_line": "8.3.27",
+    "source_version": "2.20",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_fresh_isolated_file_infobases",
+    "format_boundary": "patch build is recorded as provenance; no build-specific dialect is inferred"
+  },
+  "seed": {
+    "base_fixture": "8.3.27.2214-xml-2.20-dcs-core",
+    "patch": {
+      "path": "seed/selection-auto-patch.json",
+      "size": 541,
+      "sha256": "8684452fa36ed8ea3bf1a7d14e4d090145d3b73e9d97870b33b612fd1d51928d"
+    },
+    "cross_evidence": "Unica main a527d409 proved the SelectedItemAuto semantic shape on 8.3.27.2074; it supplied the hypothesis only",
+    "authority": "platform_8.3.27.2214_round_2"
+  },
+  "platform_attestation": {
+    "procedure": [
+      "Copy the retained dcs-core native Template.xml and append one property-free SelectedItemAuto after the three root SelectedItemField items.",
+      "Create a fresh file infobase from the retained 81 KiB dcs-core CF, partially import only the changed Template.xml, apply, save round-1 CF, recursively export Report.DcsCorpus, and extract the template .0 row.",
+      "Create a second fresh file infobase from round-1 CF, apply, save round-2 CF, repeat the recursive selected export and exact raw-deflate extraction.",
+      "Require packed body, unpacked body, and all five selected native files to be byte-identical between rounds."
+    ],
+    "round_1_cf": {
+      "sha256": "cfc6467bb1d20fb26988e1f678241e9edcaf266b44a42f48b78c985731edd515"
+    },
+    "round_2_cf": {
+      "sha256": "e3af535ee8c9016b1d3cf3c0a6b347d0d808047fd85fd7513efa1f2ee0268251"
+    },
+    "packed_equal_between_rounds": true,
+    "unpacked_equal_between_rounds": true,
+    "selected_native_tree_file_count": 5,
+    "selected_native_tree_equal_between_rounds": true,
+    "only_template_xml_and_template_body_changed_from_base_fixture": true
+  },
+  "template": {
+    "uuid": "f4db0f6c-34f4-4449-995d-6265516e5fa8",
+    "raw_entry": {
+      "compression": "raw-deflate",
+      "packed": {
+        "path": "raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate",
+        "size": 1008,
+        "sha256": "3e72735b2fbecca34bb7b8f2b183dc7de343906bd0102c104542d39dabd8cef8"
+      },
+      "unpacked": {
+        "path": "raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin",
+        "size": 4497,
+        "sha256": "c76189e324426d044b033d225913892e896a1ec5b7f68d3ae69f1df8b20a3481"
+      }
+    },
+    "native_xml": {
+      "path": "native/Reports/DcsCorpus/Templates/MainSchema/Ext/Template.xml",
+      "size": 3964,
+      "sha256": "6fab9a4ede2bd961bfc3dc9531299dceab7f0bbe066769376e844ac05a409ee5"
+    }
+  },
+  "proven_shape": {
+    "body_layout": "dcs-schema-three-document-v1",
+    "header_marker": 0,
+    "settings_document_count": 1,
+    "stored_document_lengths": [3029, 1181],
+    "trailing_document_length": 263,
+    "document_sha256": [
+      "5124cc181b46586289d2a1ff667f2e8e659c27beefcf806f1f54cc256d82be0c",
+      "9cd893784acf4164dc3423aeace9fe5abe72b05b2e7710d36c630482faf0f444",
+      "2eb60bcedf55e8ae8b6c16f862b3ed3f5dd0d2cd2306cbe02c79d69e44e65f81"
+    ],
+    "root_selection_item_order": [
+      "SelectedItemField:Name",
+      "SelectedItemField:Amount",
+      "SelectedItemField:DoubleAmount",
+      "SelectedItemAuto"
+    ],
+    "selection_placement": "before-order-and-structure-items",
+    "nested_selection_unchanged": ["SelectedItemAuto"]
+  },
+  "proven_claims": [
+    "A property-free root SelectedItemAuto is accepted and canonicalized by 8.3.27.2214 XML 2.20 after three ordered SelectedItemField values.",
+    "The delta survives two fresh platform rounds with byte-identical packed and unpacked body rows and a byte-identical five-file selected tree.",
+    "The schema and trailing documents are unchanged from dcs-core; only the Settings document grows from 1142 to 1181 bytes.",
+    "The result supports one shared 8.3.27 XML 2.20 DCS selection contract; the patch build remains provenance rather than a dialect selector."
+  ],
+  "non_claims": [
+    "No empty selection, selected-item properties, folder items, or unsupported selected-item variants are inferred.",
+    "No Form ListSettings selection is inferred; the observed Form ListSettings storage shape has no selection cohort.",
+    "Unica is not treated as the byte or platform authority.",
+    "The retained round CF files remain in the VM lab and are not production fallbacks."
+  ]
+}

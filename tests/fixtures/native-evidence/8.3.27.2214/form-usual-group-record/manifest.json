@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-usual-group-record",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_written",
+    "created_on": "2026-09-27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "note": "Config table rows of the BSP demo lab database ibcmd_rs_bsp_8327_native_20260919 (stored by platform 8.3.27.2214), read offline from the lab row cache; each `proves` property is what the native ibcmd 8.3.27.2214 export of that database writes for the form. They replace hand-made fixtures of the mssql_dump unit tests in layouts no platform writes."
+  },
+  "objects": [
+    {
+      "kind": "Form item record, one line (the body's layout line breaks removed)",
+      "form": "DataProcessors/ПанельАдминистрированияБИП/Forms/ИнтернетПоддержкаИСервисы",
+      "form_uuid": "c988cf4e-7b05-4bb9-b141-6a2b4dbe3b8e",
+      "item": {
+        "id": "1898",
+        "name": "ГруппаОбновлениеКлассификаторов"
+      },
+      "proves": "UsualGroup record (property bag {29,...}): Group Vertical, Behavior Collapsible, Collapsed true, Representation NormalSeparation, ShowTitle false",
+      "record": {
+        "path": "records/c988cf4e-7b05-4bb9-b141-6a2b4dbe3b8e.item-1898.txt",
+        "size": 10332,
+        "sha256": "56be2c65da6da5c0cc81f033f8d2e92f29570e671b7238be733ad0a4c744eba5"
+      }
+    }
+  ]
+}

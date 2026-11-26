@@ -1,0 +1,44 @@
+Synthetic SQL-only checkpoint proof; no RAS, metadata promotion or live client/session acceptance.
+Engine supported exclusively: SQL Server 17.0.1135.8; platform supported exclusively: 1C8.3.27.2214.
+Other SQL builds including16 are unmeasured and refused.
+
+sql17/native.log
+ROW 17.0.1135.8
+ROW 1|0
+PASS refused 57269 an earlier live cycle 1 is unfinished; staging/activation refused before any target write
+ROW 1|1
+ROW 2|0
+ROW 2|0
+ROW 2|0
+PASS refused 57501 target body reached
+ROW MULTI_USER|ONLINE|0
+PASS SQL17 header/append/repeated-noop proof; RAS/session acceptance not measured
+
+sql17/repeat-assert.log
+PASS original SQL17 append record exact rows
+ROW 2|0
+ROW 2|0
+ROW 2|0
+ROW MULTI_USER|ONLINE|0
+PASS current repeated no-op exact rows; no third cycle
+
+sql-guard/guards-final-assert.log
+ROW 17.0.1135.8
+ROW 1|0
+PASS refused 57269 an earlier live cycle 1 is unfinished; staging/activation refused before any target write
+ROW 313000001866400001
+PASS refused 57260 live switch is already running
+PASS refused 57260 live continuation is already running
+PASS refused 57269 an earlier live cycle 1 is unfinished; staging/activation refused before any target write
+PASS refused 57268 live log chain advanced after cycle 1
+ROW MULTI_USER|ONLINE|0
+PASS SQL17 pending/lock/foreign-backup refusal proof; no cycle 2 executed, RAS/session acceptance remains unmeasured
+
+Quick gates before last two focused review repairs:
+fmt PASS; physical policy guard PASS; workspace-layer clippy PASS; root library3611passed/0failed/10ignored.
+Final targeted live_ regressions after no-op wrapper and artifact-size repairs:49passed/0failed/1ignored.
+Final all-targets no-default-features cargo check PASS.
+Final fmt and physical policy guard: see F:/ibcmd/lab/05/wave1/live/*-last-review.log.
+Both owned clones dropped through shared guarded cleanup; no owned observer/server process remains; worker FIFO released.
+L2 active/warm readiness and L5 real idle/session/writer acceptance remain OPEN.
+Full logs and fixture scripts: F:/ibcmd/lab/05/wave1/live/STATUS.md.

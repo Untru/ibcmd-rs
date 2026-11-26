@@ -1,0 +1,24 @@
+{
+  "left": "F:\\ibcmd\\lab\\05\\wave2\\extensions\\baseline_verified\\_ДемоПустоеРасширение",
+  "right": "F:\\ibcmd\\lab\\05\\ext\\native\\8327\\_ДемоПустоеРасширение",
+  "ignored": [
+    "ConfigDumpInfo.xml"
+  ],
+  "left_files": 2,
+  "right_files": 2,
+  "equal": 2,
+  "changed": [],
+  "left_only": [],
+  "right_only": [],
+  "config_dump_info": {
+    "exact": true,
+    "equal_after_blanking_only_configVersion": true,
+    "left_configVersion_count": 2,
+    "right_configVersion_count": 2,
+    "different_configVersion_values": 0
+  },
+  "left_version": "1.0.1.1",
+  "left_configuration_sha256": "30d924f20c39da0ca2360f70ddc3a869d83942841915e56b3e2e14acc9405327",
+  "right_version": "1.0.1.1",
+  "right_configuration_sha256": "30d924f20c39da0ca2360f70ddc3a869d83942841915e56b3e2e14acc9405327"
+}

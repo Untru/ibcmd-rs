@@ -1,0 +1,18 @@
+PASS exact 613 raw/597 retained archive validation is read-only
+PASS archive-replay refusal; moves/copies/deletes/creates0
+PASS active-state refusal; moves/copies/deletes/creates0
+PASS old6-receipt refusal; moves/copies/deletes/creates0
+PASS foreign-lease refusal; moves/copies/deletes/creates0
+PASS saved-PID refusal; moves/copies/deletes/creates0
+PASS listener refusal; moves/copies/deletes/creates0
+PASS reparse refusal; moves/copies/deletes/creates0
+PASS raw-change refusal; moves/copies/deletes/creates0
+PASS archive-extra refusal; moves/copies/deletes/creates0
+PASS foreign-input refusal; moves/copies/deletes/creates0
+PASS old-restore refusal; moves/copies/deletes/creates0
+PASS unknown-child refusal; moves/copies/deletes/creates0
+ALL PASS; realStarts=realSignals=SQLcalls=registryWrites=Moves=Deletes=0
+PASS actual authority saved Case5 raw + complete synthetic foreign reused PID; no signal authority
+PASS actual prior-archive lease-drift refusal; starts/signals/moves/deletes/acquires0
+PASS actual prior-archive state-drift refusal; starts/signals/moves/deletes/acquires0
+PASS actual prior-archive late-child refusal; starts/signals/moves/deletes/acquires0

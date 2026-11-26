@@ -1,0 +1,55 @@
+{
+  "left_root": "\\\\?\\F:\\ibcmd\\lab\\04\\restructure-check\\dn\\export\\mix2_nat",
+  "right_root": "\\\\?\\F:\\ibcmd\\lab\\04\\restructure-check\\dn\\export\\mix2_ownnew20261001",
+  "summary": {
+    "left_only": 0,
+    "right_only": 0,
+    "different": 0,
+    "unchanged": 12198
+  },
+  "differences": [
+    {
+      "status": "unchanged",
+      "path": "Catalogs/Валюты.xml",
+      "left_sha256": "8e8e06c171c57ee9063ddad0f3acea1ed7c666d48e42129e53bd0419ae490da5",
+      "right_sha256": "8e8e06c171c57ee9063ddad0f3acea1ed7c666d48e42129e53bd0419ae490da5",
+      "left_size_bytes": 31913,
+      "right_size_bytes": 31913,
+      "kind": "metadata_xml",
+      "object_hint": "Catalogs/Валюты"
+    },
+    {
+      "status": "unchanged",
+      "path": "ConfigDumpInfo.xml",
+      "left_sha256": "3df32311744d55d1a288dca349e5db172fcc319246f6173407f650421782da61",
+      "right_sha256": "3df32311744d55d1a288dca349e5db172fcc319246f6173407f650421782da61",
+      "left_size_bytes": 3109441,
+      "right_size_bytes": 3109441,
+      "kind": "other_xml",
+      "object_hint": "ConfigDumpInfo"
+    },
+    {
+      "status": "unchanged",
+      "path": "Documents/_ДемоЗаказПокупателя.xml",
+      "left_sha256": "d147ae38c9a174c3bc0198147148684befe6d256ad69633b59fc276341b60146",
+      "right_sha256": "d147ae38c9a174c3bc0198147148684befe6d256ad69633b59fc276341b60146",
+      "left_size_bytes": 81164,
+      "right_size_bytes": 81164,
+      "kind": "metadata_xml",
+      "object_hint": "Documents/_ДемоЗаказПокупателя"
+    },
+    {
+      "status": "unchanged",
+      "path": "Subsystems/Администрирование.xml",
+      "left_sha256": "a0fa00025d074431b39bec35f3efa01ce86d23598c688fb9b2dd33ec2e12b910",
+      "right_sha256": "a0fa00025d074431b39bec35f3efa01ce86d23598c688fb9b2dd33ec2e12b910",
+      "left_size_bytes": 14161,
+      "right_size_bytes": 14161,
+      "kind": "metadata_xml",
+      "object_hint": "Subsystems/Администрирование"
+    }
+  ],
+  "unchanged_entries_omitted": 12194,
+  "complete_report": "F:\\ibcmd\\lab\\04\\restructure-check\\dn\\logs\\mix2_new20261001_export_diff.json",
+  "complete_report_sha256": "074a02efed204bf0f0bea4f152aa604e1b86cecb6f0aa5b500b85247373239af"
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-table-standard-command-owners",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_written",
+    "created_on": "2026-09-27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "note": "Config table rows of the BSP demo lab database ibcmd_rs_bsp_8327_native_20260919 (stored by platform 8.3.27.2214), read offline from the lab row cache; each `proves` property is what the native ibcmd 8.3.27.2214 export of that database writes for the form. They replace hand-made fixtures of the mssql_dump unit tests in layouts no platform writes."
+  },
+  "objects": [
+    {
+      "kind": "Form body (managed form, root layout 50)",
+      "form": "Catalogs/РассылкиОтчетов/Forms/ПовторнаяРассылкаОтчетов",
+      "form_uuid": "cc8cdc82-ee97-4426-b889-95d2286af37c",
+      "proves": "buttons {1,<standard command>} owned by table Получатели (id 1): Form.Item.Получатели.StandardCommand.SortListAsc, SortListDesc, OutputList",
+      "raw_entry": {
+        "path": "raw/cc8cdc82-ee97-4426-b889-95d2286af37c.deflate",
+        "compression": "raw-deflate",
+        "size": 3638,
+        "sha256": "9253d893165778c7d78ae327bea3ec2f902d1e1ba2e82dfe215b5b7170545ca3"
+      }
+    },
+    {
+      "kind": "Form body (managed form, root layout 50)",
+      "form": "CommonForms/ВводЗначенийСпискомСФлажками",
+      "form_uuid": "d2762764-b5c0-4aeb-8e89-3371972f22d8",
+      "proves": "buttons owned by table Список: Form.Item.Список.StandardCommand.MoveUp, MoveDown",
+      "raw_entry": {
+        "path": "raw/d2762764-b5c0-4aeb-8e89-3371972f22d8.deflate",
+        "compression": "raw-deflate",
+        "size": 7308,
+        "sha256": "55d8abf296cfa50cf1db792dbf9e57c048297aa02987e2ca16011e133fd9e07d"
+      }
+    },
+    {
+      "kind": "Form body (managed form, root layout 50)",
+      "form": "DataProcessors/ГрупповоеИзменениеРеквизитов/Forms/ВыборВидаОбъектов",
+      "form_uuid": "51f9aff4-71da-4b1b-b48b-04122a17d855",
+      "proves": "button ФормаСнятьФлажки {8,5048cc44-...}: owner item 8 is table ДоступныеОбъектыДляИзменения, Form.Item.ДоступныеОбъектыДляИзменения.StandardCommand.UncheckAll",
+      "raw_entry": {
+        "path": "raw/51f9aff4-71da-4b1b-b48b-04122a17d855.deflate",
+        "compression": "raw-deflate",
+        "size": 4218,
+        "sha256": "320ff585c840423394e147e9a1cd8b8592b7f9ea0193221fde88bd6b0ea1b696"
+      }
+    }
+  ]
+}

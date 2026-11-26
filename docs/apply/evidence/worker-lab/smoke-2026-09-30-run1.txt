@@ -1,0 +1,33 @@
+The smoke of the worker lab cluster (scripts/apply-lab/cluster/smoke.ps1), 2026-09-30, first green run, 13:05 (an earlier run hung in start.ps1: see docs/apply/worker-lab.md, section 4).
+Console ragent+rmngr+rphost and ras of platform 8.3.27.2214 on 5540/5541/5545/5560-5591, registry F:\ibcmd\lab\05\cluster\srvinfo, one БСП clone
+(ibcmd_rs_05_apply_wlab1_20260930) registered with register-ib.ps1 -Cluster worker, one COM session and one 1cv8c session, both listed by
+`rac localhost:5545 session list`, then unregister, stop, no process left, the other clusters unchanged. Lines cut at 400 characters.
+------------------------------------------------------------------------------------------------------------------------------------------------
+2026-09-30T13:05:05 smoke of the worker lab cluster (8.3.27.2214), clone ibcmd_rs_05_apply_wlab1_20260930
+2026-09-30T13:05:10 other clusters before: 9 server processes (+7 rphost), 8.3.27 service cluster 24c580ef-d5de-4b78-b204-b94b64eb2fae with 17 infobases
+2026-09-30T13:06:11   start: 2026-09-30T13:05:20 ragent pid 100968: -agent -port 5540 -regport 5541 -range 5560:5591 -d F:\ibcmd\lab\05\cluster\srvinfo
+2026-09-30T13:06:11   start: 2026-09-30T13:05:56 ras pid 126992: cluster --port=5545 localhost:5540
+2026-09-30T13:06:11   start: 2026-09-30T13:06:11 started: cluster eb00f098-f983-4bef-b30e-33a0ce5af41b; clients connect with Srvr="localhost:5541";Ref="<db>"; rac localhost:5545
+2026-09-30T13:06:11   start: 2026-09-30T13:06:11 processes of this cluster: rphost.exe#53688 ragent.exe#100968 rmngr.exe#115004 ras.exe#126992
+2026-09-30T13:06:11 PASS  the cluster starts (exit 0, 60 s)
+2026-09-30T13:06:13 PASS  rac sees a cluster of its own, not one of the services (eb00f098-f983-4bef-b30e-33a0ce5af41b)
+2026-09-30T13:06:25 PASS  the clone is registered in the worker cluster (registered: ibcmd_rs_05_apply_wlab1_20260930 in the worker lab cluster; connect with Srvr="localhost:5541";Ref="ibcmd_rs_05_apply_wlab1_20260930")
+2026-09-30T13:06:26 PASS  the infobase is listed by rac of the worker cluster (5487dcd9-f109-4858-9012-4fed8714f674)
+2026-09-30T13:06:28 PASS  the service cluster does not list it 
+2026-09-30T13:07:13 PASS  the COM session connects (READY config=БиблиотекаСтандартныхПодсистемДемо version=3.1.11.466 user=Администратор)
+2026-09-30T13:07:14 PASS  rac session list shows the COM session 
+2026-09-30T13:07:14   rac session list: session-id : 1; infobase : 5487dcd9-f109-4858-9012-4fed8714f674; process : 6fe8dd64-eb16-4d4b-9b16-129b754968ae; user-name : Администратор; app-id : COMConnection
+2026-09-30T13:07:17   rac process list: port : 5560 pid : 53688 running : yes use : used
+2026-09-30T13:07:45 PASS  the thin client (1cv8c) connects and rac session list shows it (session 9eac420a-508c-4233-a55c-77aa20ddd262)
+2026-09-30T13:07:59 PASS  no session is left 
+2026-09-30T13:08:18 PASS  the clone is unregistered from the worker cluster (unregistered: ibcmd_rs_05_apply_wlab1_20260930 from the worker lab cluster (the database stays))
+2026-09-30T13:08:38   stop: 2026-09-30T13:08:22 stopping: 4 process(es) of the worker lab cluster (started by apply at 09/30/2026 13:06:10)
+2026-09-30T13:08:38   stop: 2026-09-30T13:08:24 registered infobases: 0 (); sessions: 0
+2026-09-30T13:08:38   stop: 2026-09-30T13:08:38 stopped: no process of the worker lab cluster remains and none of its ports (5540, 5541, 5545, 5560-5591) is listening
+2026-09-30T13:08:39 PASS  the cluster stops and none of its processes remains (stop exit 0)
+2026-09-30T13:08:54 PASS  none of its ports is listening 
+2026-09-30T13:08:54 PASS  the state file is gone 
+2026-09-30T13:08:57 PASS  the server processes of the other clusters are the same ones (id, name, start time) (9 of 9)
+2026-09-30T13:08:57 PASS  the 8.3.27 service cluster and its infobases are unchanged (17 infobases)
+2026-09-30T13:08:57 rphost of the other clusters: 7 before, 7 after (they come and go with the users' work)
+2026-09-30T13:08:57 GREEN

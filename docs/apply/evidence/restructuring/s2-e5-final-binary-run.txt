@@ -1,0 +1,47 @@
+S1-E (#401): case e5 (five new tabular sections) once more with the binary of the last commit of feat/0.4-s1-e (feat/0.4 at 5e146f00 merged, be273bcc): the output of scripts/restructure-lab/twin_run.ps1 (checks 2-10).
+
+[2026-09-30T06:58:49] dry run
+dry exit 0
+[2026-09-30T06:59:37] rehearsal
+rehearse exit 0
+snapshot ibcmd_rs_04_ddl_s2_e5_own/e5_rehearsed: 2234 tables, Config=9847 ConfigSave=8 Params=39
+check 10 (a rehearsal changes nothing):
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (0):
+== data: tables whose rowcount/checksum changed
+(0)
+[2026-09-30T07:00:19] real run
+real exit 0
+structure: catalog _ДемоКонтактныеЛицаПартнеров (Reference14): new tabular sections VT11034 = ДемоТЧ2 (1 attribute(s)) | catalog _ДемоПодразделения (Reference21): new tabular sections VT11037 = ДемоТЧ (2 attribute(s)) | catalog _ДемоСтавкиНДС (Reference23): new tabular sections VT11041 = ДемоТЧ (4 attribute(s)) | document _ДемоОприходованиеТоваров (Document578): new tabular sections VT11047 = ДемоТЧ2 (1 attribute(s)) | document _ДемоСчетФактураПолученный (Document4883): new tabular sections VT11050 = ДемоТЧ (2 attribute(s))
+[2026-09-30T07:01:51] checks 2-6
+rebuilt tables: _Reference14,_Reference14_VT67,_Reference14_VT11034,_Reference21,_Reference21_VT960,_Reference21_VT11037,_Reference23,_Reference23_VT11041,_Document578,_Document578_VT668,_Document578_VT11047,_Document4883,_Document4883_VT11050
+2. tables, columns, indexes
+changed (3):
+3. data of the rebuilt tables (EXCEPT both ways)
+4. Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+== only in A (0 rows)
+== only in B (0 rows)
+5. DBSchema entries and DBNames
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 348240 348240
+6. the .si rows
+16 of 16 `.si` rows have the same text (compared after inflate)
+[2026-09-30T07:02:29] check 7: native config apply on our twin
+native apply exit=0 in 17,8s
+[INFO] Обновление конфигурации базы данных не требуется
+[2026-09-30T07:02:48] check 8: native exports and source-diff
+export exit=0 in 42,2s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export exit=0 in 37,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+[2026-09-30T07:04:41] check 9: cluster session
+registered: ibcmd_rs_04_ddl_s2_e5_nat in the 8.3.27 cluster; connect with Srvr="localhost:2541";Ref="ibcmd_rs_04_ddl_s2_e5_nat"
+unregistered: ibcmd_rs_04_ddl_s2_e5_nat from the 8.3.27 cluster (the database stays)
+registered: ibcmd_rs_04_ddl_s2_e5_own in the 8.3.27 cluster; connect with Srvr="localhost:2541";Ref="ibcmd_rs_04_ddl_s2_e5_own"
+unregistered: ibcmd_rs_04_ddl_s2_e5_own from the 8.3.27 cluster (the database stays)
+session outputs identical: True (90 lines)
+[2026-09-30T07:06:29] done e5

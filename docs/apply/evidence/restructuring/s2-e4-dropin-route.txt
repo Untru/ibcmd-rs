@@ -1,0 +1,51 @@
+S1-E (#401): the drop-in route once -- 'ibcmd-rs infobase config apply' (the program under the platform's command line) on our twin of case e4, first without a backup option (refused, nothing written), then with --recovery-backup=<file>; then checks 2-8 of docs/apply/restructuring.md 12.6 against the native twin. Binary of feat/0.4-s1-e after the merge of feat/0.4 (6da15c61). Made by scripts/restructure-lab/dropin_run.ps1.
+
+[2026-09-30T06:12:24] without a backup option: refused, nothing written
+[native lock] native acquired by ddl
+[native lock] native released by ddl
+exit 1; ConfigSave rows 5 -> 5
+[ERROR] Применение меняет структуру таблиц базы данных: старые таблицы удаляются внутри транзакции, а артефакт восстановления возвращает только строки Config и кэши. Нужна резервная копия SQL Server. Укажите `--recovery-backup <путь>` (рекомендуется: перед транзакцией применение само снимет копию `BACKUP DATABASE ... WITH COPY_ONLY, COMPRESSION` в этот файл и назовёт её в отчёте и в артефакте восстановления) или `--i-have-a-backup` (вы подтверждаете, что копия у вас есть; это будет записано в отчёте).
+[2026-09-30T06:13:08] with --recovery-backup=F:\ibcmd\lab\04\restructure\bak\dropin_e4_d11b253c.bak
+[native lock] native acquired by ddl
+[native lock] native released by ddl
+exit 0 in 128,5s; backup True (269 MB)
+[INFO] Обновление конфигурации базы данных...
+[INFO] Создано поколение конфигурации: fa576f5eac949d419861850f47fe60e900000000
+[INFO] Обновление конфигурации базы данных успешно завершено
+[2026-09-30T06:15:16] checks 2-6
+rebuilt tables: _Reference21,_Reference21_VT960,_Reference21_VT11036,_Document8409,_Document8409_VT8415,_Document8409_VT11041,_Document8409_VT11045
+2. tables, columns, indexes
+changed (3):
+3. data of the rebuilt tables (EXCEPT both ways)
+_Reference21	rows 4 / 4	only in A 0	only in B 0
+_Reference21_VT960	rows 4 / 4	only in A 0	only in B 0
+_Reference21_VT11036	rows 0 / 0	only in A 0	only in B 0
+_Document8409	rows 3 / 3	only in A 0	only in B 0
+_Document8409_VT8415	rows 5 / 5	only in A 0	only in B 0
+_Document8409_VT11041	rows 0 / 0	only in A 0	only in B 0
+_Document8409_VT11045	rows 0 / 0	only in A 0	only in B 0
+_Reference21	rows 4 / 4	only in A 0	only in B 0
+_Reference21_VT960	rows 4 / 4	only in A 0	only in B 0
+_Reference21_VT11036	rows 0 / 0	only in A 0	only in B 0
+_Document8409	rows 3 / 3	only in A 0	only in B 0
+_Document8409_VT8415	rows 5 / 5	only in A 0	only in B 0
+_Document8409_VT11041	rows 0 / 0	only in A 0	only in B 0
+_Document8409_VT11045	rows 0 / 0	only in A 0	only in B 0
+4. Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+== only in A (0 rows)
+== only in B (0 rows)
+5. DBSchema entries and DBNames
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+DBNames text equal: True 347918 347918
+6. the .si rows
+16 of 16 `.si` rows have the same text (compared after inflate)
+[2026-09-30T06:15:32] check 7: the platform apply on our twin
+native apply exit=0 in 11,6s
+[INFO] Обновление конфигурации базы данных не требуется
+[2026-09-30T06:15:44] check 8: exports
+export exit=0 in 43,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+[2026-09-30T06:16:43] done e4

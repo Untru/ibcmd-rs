@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-report-ut-attribute-wrapper",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20"
+  },
+  "provenance": {
+    "authority": "platform_export",
+    "configuration": "1C:Trade Management 11.5.27.75 (1cv8.cf)",
+    "elements": [
+      {
+        "storage_element": "239a7499-7805-4c1f-aed6-931b24258d02",
+        "source_path": "Reports/КнигаПокупок.xml",
+        "native_export_size": 13716,
+        "native_export_sha256": "64941cec1ed8835a0d73f92fda1171c573f04a754f87ce3fe377f88273c0e7d0"
+      }
+    ],
+    "capture": "`ibcmd infobase create --load=1cv8.cf` followed by `ibcmd config export` with 1C:Enterprise 8.3.27.2214; the storage payload is the CF element's raw-deflate body.",
+    "expectation": "Every attribute item of this report is `{{0,<code27 payload>},0}` - a two-field wrapper with no DataHistory tail - and the platform export carries no <DataHistory> element under any Report attribute."
+  },
+  "retained": {
+    "packed_body": {
+      "size": 1239,
+      "sha256": "ff640fe85962313ba09a8ce1d23c218c5cb2c601d67f4e2a72a706b198496500",
+      "unpacked_size": 5178,
+      "unpacked_sha256": "3b060c13396af443cc6f23b8ab0e5235ca89bff4ed60aa7b29c943790314f41d"
+    }
+  }
+}

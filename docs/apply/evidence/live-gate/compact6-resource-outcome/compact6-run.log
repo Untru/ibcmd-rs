@@ -1,0 +1,9 @@
+PASS exact frozen compact6 closure after queue grant
+Exception: F:\ibcmd\lab\05\wave3\load\compact6_lifetime_v2.ps1:120
+Line |
+ 120 |  … rors.Count){throw 'one or more FIFO releases failed; inspect retained …
+     |                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | one or more FIFO releases failed; inspect retained errors
+
+
+PASS exact frozen compact6 closure after queue grant

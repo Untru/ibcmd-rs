@@ -1,0 +1,13 @@
+{
+  "columns": 3,
+  "defaultWidth": 20,
+  "fonts": { "bold": { "face": "Arial", "size": 10, "bold": true } },
+  "styles": { "head": { "font": "bold", "align": "center", "border": "all" }, "cell": { "border": "all" } },
+  "areas": [
+    { "name": "Шапка", "rows": [ { "cells": [ { "col": 1, "span": 3, "style": "head", "text": "Итоги" } ] } ] },
+    { "name": "Строка", "rows": [ { "cells": [
+      { "col": 1, "style": "cell", "text": "Итог:" },
+      { "col": 2, "span": 2, "style": "cell", "param": "Итог" }
+    ] } ] }
+  ]
+}

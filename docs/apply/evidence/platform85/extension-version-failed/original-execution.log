@@ -1,0 +1,5 @@
+Exception: F:\ibcmd\lab\05\wave3\platform85\tools\extension_version_control_v2.ps1:348
+Line |
+ 348 |  … and !$clean){throw 'own lifecycle not proved clean; worker retained'}
+     |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | own lifecycle not proved clean; worker retained

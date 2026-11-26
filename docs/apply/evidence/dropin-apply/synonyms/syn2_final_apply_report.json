@@ -1,0 +1,99 @@
+{
+  "operation": "infobase config apply",
+  "ok": true,
+  "nothing_to_apply": false,
+  "apply": {
+    "schema_version": 1,
+    "database": "ibcmd_rs_04_rcheck_dn_syn2_ownfinal20261001",
+    "platform_profile": "platform-8.3.27.2214",
+    "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+    "dry_run": false,
+    "rehearsal": false,
+    "executed": true,
+    "nothing_to_apply": false,
+    "exclusivity": "sql_sessions",
+    "active_generation": "06cb0442-0c47-4fad-986a-f08f28287c1b",
+    "new_generation": "71c5fab7-f7de-4ae3-9e3f-ce606c1f247a",
+    "stage": {
+      "rows": 5,
+      "bytes": 349894,
+      "descriptors": 2,
+      "bodies": 0,
+      "service_rows": 3,
+      "new_rows": 0,
+      "identical_rows": 2,
+      "replaced_rows": 5,
+      "replaced_parts_dropped": 0,
+      "consumed_rows": 0
+    },
+    "dynamic": {
+      "generations": [
+        "06cb0442-0c47-4fad-986a-f08f28287c1b"
+      ],
+      "alias_rows": 4
+    },
+    "gate": {
+      "restructuring_required": false,
+      "blockers": [],
+      "blockers_omitted": 0,
+      "stats": {
+        "rows_identical": 0,
+        "descriptors_layout_only": 0,
+        "service_rows": 0,
+        "extra_parts": 0,
+        "new_objects": 0,
+        "bodies_by_role": {},
+        "restructure_check": {
+          "staged_rows": 5,
+          "descriptors_compared": 2,
+          "body_rows_compared": 0,
+          "objects_changed": 2,
+          "notes": 2
+        }
+      },
+      "gate": "apply-check"
+    },
+    "structure": null,
+    "backup": null,
+    "registrations": {
+      "nodes": 3,
+      "changed_objects": 2,
+      "rows_added": 0,
+      "file_rows_added": 0,
+      "objects_of_dropped_rows": 0
+    },
+    "new_objects": null,
+    "removals": null,
+    "synonym_records": 2,
+    "tables_touched": [
+      "Config",
+      "ConfigSave",
+      "Params",
+      "_ConfigChngR",
+      "Files"
+    ],
+    "not_written": [
+      "Params .ui rows (the platform's configuration-licensing records, track ui #340): never written; the native apply re-encrypts two of them on every apply",
+      "Params .si service-information rows and siVersions, except the main row, the properties row and their versions when a new or removed form or template changes the records, a restructuring changes a cache, or a synonym changes (the native apply re-encodes every .si row with a new version; the content is unchanged otherwise)",
+      "the help/search index in Files (userDocs_ru*, userPostings_ru*, userVocabulary_ru*)",
+      "the extension CAS garbage collection (ConfigCAS, Files CAS_GC_Info, extd_props_cached/gc.mrk)",
+      "scratch rows of the extension restructure (_ExtensionsRestructNGS)"
+    ],
+    "warnings": [],
+    "script_sha256": "b6ef5dc655bed82d0f19e001c7dab9cc6168de503458e2ce0bb39069fdfc5c71",
+    "script_path": null,
+    "recovery_dir": "C:\\Users\\Pavel\\AppData\\Local\\Temp\\ibcmd-rs\\config-apply-recovery\\ibcmd_rs_04_rcheck_dn_syn2_ownfinal20261001-b6ef5dc655bed82d",
+    "recovery_token": "b6ef5dc655bed82d",
+    "timings": {
+      "storage_check_ms": 77,
+      "inventory_ms": 87,
+      "gate_ms": 306,
+      "synonyms_ms": 85,
+      "fingerprints_ms": 27,
+      "recovery_ms": 60,
+      "backup_ms": 0,
+      "sql_ms": 415,
+      "total_ms": 1142
+    }
+  }
+}

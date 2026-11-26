@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+# The repository's task runner (`cargo xtask`, aliased in .cargo/config.toml).
+# Its own workspace keeps it out of the product's lockfile, release builds and
+# SBOM; it depends on nothing but std.
+[workspace]
+members = ["."]

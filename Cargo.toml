@@ -1,0 +1,218 @@
+[package]
+name = "ibcmd-rs"
+version = "0.4.1"
+edition = "2024"
+license = "MIT"
+# tests/integration.rs builds the integration suites as one binary; the
+# `[[test]]` targets below are the ones that need a process of their own.
+autotests = false
+
+[workspace]
+members = [
+    "crates/ibcmd-core",
+    "crates/ibcmd-schema",
+    "crates/ibcmd-xml",
+    "crates/ibcmd-v8",
+    "crates/ibcmd-cf",
+    "crates/ibcmd-edt",
+    "crates/ibcmd-number-format",
+    "crates/ibcmd-filedb",
+    "crates/ibcmd-postgres",
+    "crates/ibcmd-form-schema",
+    "crates/ibcmd-form-native",
+    "crates/ibcmd-moxel",
+    "crates/ibcmd-1c-text",
+    "crates/ibcmd-restructure",
+    "crates/ibcmd-restructure-engine",
+    "crates/ibcmd-1c-vocab",
+    "crates/ibcmd-form-body",
+    "crates/ibcmd-module-blob",
+    "crates/ibcmd-compiler-families",
+    "crates/ibcmd-compiler",
+    "crates/ibcmd-compiler-readiness",
+    "crates/ibcmd-parallel",
+    "crates/ibcmd-platform",
+    "crates/ibcmd-sql",
+    "crates/ibcmd-metadata-blob",
+    "crates/ibcmd-form-writer",
+    "crates/ibcmd-metadata-source",
+    "crates/ibcmd-dump-readers",
+    "crates/ibcmd-metadata-model",
+    "crates/ibcmd-mssql-live",
+    "crates/ibcmd-apply-check",
+    "crates/ibcmd-cancel",
+    "crates/ibcmd-dynamic-generation",
+    "crates/ibcmd-config-apply",
+    "crates/ibcmd-platform-spec",
+    "crates/ibcmd-mssql-extensions",
+    "crates/ibcmd-dump",
+]
+resolver = "3"
+exclude = ["crates/ibcmd-edt/vendor/morph1c"]
+
+[features]
+default = []
+# Research-only integrations that locate or execute an installed 1C platform.
+# This feature is intentionally excluded from default and release builds.
+platform-oracle = []
+mssql-live-tests = ["ibcmd-sql/mssql-live-tests", "ibcmd-dump/mssql-live-tests"]
+research-corpus-tests = ["ibcmd-dump/research-corpus-tests"]
+
+[dependencies]
+rmcp = { version = "=3.6.0", default-features = false, features = ["server", "transport-io"] }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+flate2 = "1.1"
+# SQL error classification still names tiberius directly; the database client
+# itself lives in ibcmd-sql. Tokio also serves the root MCP adapter.
+tiberius = { version = "0.13", default-features = false, features = ["tds73", "rustls", "sql-browser-tokio"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync", "macros", "rt-multi-thread"] }
+ibcmd-sql = { path = "crates/ibcmd-sql" }
+ibcmd-core = { path = "crates/ibcmd-core" }
+ibcmd-cf = { path = "crates/ibcmd-cf" }
+ibcmd-schema = { path = "crates/ibcmd-schema" }
+ibcmd-v8 = { path = "crates/ibcmd-v8" }
+ibcmd-xml = { path = "crates/ibcmd-xml" }
+ibcmd-edt = { path = "crates/ibcmd-edt" }
+ibcmd-filedb = { path = "crates/ibcmd-filedb" }
+ibcmd-postgres = { path = "crates/ibcmd-postgres" }
+ibcmd-form-schema = { path = "crates/ibcmd-form-schema" }
+ibcmd-form-native = { path = "crates/ibcmd-form-native" }
+ibcmd-moxel = { path = "crates/ibcmd-moxel" }
+ibcmd-1c-text = { path = "crates/ibcmd-1c-text" }
+ibcmd-restructure = { path = "crates/ibcmd-restructure" }
+ibcmd-restructure-engine = { path = "crates/ibcmd-restructure-engine" }
+ibcmd-1c-vocab = { path = "crates/ibcmd-1c-vocab" }
+ibcmd-form-body = { path = "crates/ibcmd-form-body" }
+ibcmd-module-blob = { path = "crates/ibcmd-module-blob" }
+ibcmd-compiler-families = { path = "crates/ibcmd-compiler-families" }
+ibcmd-compiler = { path = "crates/ibcmd-compiler" }
+ibcmd-compiler-readiness = { path = "crates/ibcmd-compiler-readiness" }
+ibcmd-parallel = { path = "crates/ibcmd-parallel" }
+ibcmd-platform = { path = "crates/ibcmd-platform" }
+ibcmd-metadata-blob = { path = "crates/ibcmd-metadata-blob" }
+ibcmd-form-writer = { path = "crates/ibcmd-form-writer" }
+ibcmd-metadata-source = { path = "crates/ibcmd-metadata-source" }
+ibcmd-dump-readers = { path = "crates/ibcmd-dump-readers" }
+ibcmd-metadata-model = { path = "crates/ibcmd-metadata-model" }
+ibcmd-mssql-live = { path = "crates/ibcmd-mssql-live" }
+ibcmd-apply-check = { path = "crates/ibcmd-apply-check" }
+ibcmd-cancel = { path = "crates/ibcmd-cancel" }
+ibcmd-dynamic-generation = { path = "crates/ibcmd-dynamic-generation" }
+ibcmd-config-apply = { path = "crates/ibcmd-config-apply" }
+ibcmd-platform-spec = { path = "crates/ibcmd-platform-spec" }
+ibcmd-mssql-extensions = { path = "crates/ibcmd-mssql-extensions" }
+ibcmd-dump = { path = "crates/ibcmd-dump" }
+# The process allocator, installed in main.rs.
+mimalloc = "0.1.52"
+quick-xml = "0.38"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha1 = "0.10"
+sha2 = "0.10"
+rayon = "1.10"
+# ibcmd-rs.toml, the settings files (src/settings.rs): reading only.
+toml = { version = "1.1", default-features = false, features = ["std", "parse", "serde"] }
+uuid = { version = "1.19", features = ["v4"] }
+walkdir = "2.5"
+# The database section of native ibcmd's YAML config (`--config`), read by
+# src/settings.rs; the maintained successor of serde_yaml.
+yaml_serde = "0.10"
+
+[dev-dependencies]
+# The body-profile fixture the root's codec tests build their profiles from.
+ibcmd-compiler-families = { path = "crates/ibcmd-compiler-families", features = ["test-fixtures"] }
+# The managed-form codec's profile fixture, for its root tests.
+ibcmd-compiler = { path = "crates/ibcmd-compiler", features = ["test-fixtures"] }
+# The export platform's per-thread override, for the exporter's form tests.
+ibcmd-platform-spec = { path = "crates/ibcmd-platform-spec", features = ["test-fixtures"] }
+# The exporter's probes, for the root's tests of the stored objects, the
+# infobase export and the form writer.
+ibcmd-dump = { path = "crates/ibcmd-dump", features = ["test-fixtures"] }
+# Substring search in tests/platform_oracle_boundary.rs; already in the
+# runtime graph (tiberius, futures-util).
+memchr = "2.8"
+rmcp = { version = "=3.6.0", default-features = false, features = ["client", "transport-child-process"] }
+
+[target.'cfg(unix)'.dependencies]
+# Original source directory-relative NOFOLLOW reads; same pinned fs package.
+rustix = { version = "1.1.5", features = ["fs"] }
+
+[target.'cfg(windows)'.dependencies]
+# Integrated (Windows) logins to SQL Server through SSPI.
+tiberius = { version = "0.13", default-features = false, features = ["winauth"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_SystemInformation"] }
+
+# Fast rebuilds while iterating on a compiler against the lab corpora:
+# `cargo build --profile iter` -> target/iter/ibcmd-rs.exe.
+[profile.iter]
+inherits = "release"
+opt-level = 1
+incremental = true
+codegen-units = 256
+
+[patch.crates-io]
+morph1c-core = { path = "crates/ibcmd-edt/vendor/morph1c/crates/core" }
+formats-xml = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats-xml" }
+morph1c-pipeline = { path = "crates/ibcmd-edt/vendor/morph1c/crates/pipeline" }
+formats-edt = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/edt" }
+formats-designer = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/designer" }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+# Suites that run engine operations in the test process itself, which keep
+# process-wide state for the one operation a process runs: cancellation
+# scopes (editor_partial_import), the once-per-process offline compile
+# (cf_load), offline rows read outside the stored-object lock
+# (native_export_status) and the stored-object views of the editor and
+# descriptor suites. Each keeps its own process, as before the merge.
+[[test]]
+name = "cf_load"
+path = "tests/cf_load.rs"
+
+[[test]]
+name = "descriptor_read"
+path = "tests/descriptor_read.rs"
+
+[[test]]
+name = "editor_export_plan"
+path = "tests/editor_export_plan.rs"
+
+[[test]]
+name = "editor_file_db"
+path = "tests/editor_file_db.rs"
+
+[[test]]
+name = "editor_partial_import"
+path = "tests/editor_partial_import.rs"
+
+[[test]]
+name = "editor_server"
+path = "tests/editor_server.rs"
+
+[[test]]
+name = "native_export_status"
+path = "tests/native_export_status.rs"
+
+# Real original-process/BOTH boundary tests, each scenario in its own process.
+[[test]]
+name = "rac_process_deadline"
+path = "tests/rac_process_deadline.rs"
+harness = false
+
+[[test]]
+name = "profile_process_deadline"
+path = "tests/profile_process_deadline.rs"
+harness = false
+
+[[test]]
+name = "managed_command_deadline"
+path = "tests/managed_command_deadline.rs"
+harness = false
+
+# tests/platform_oracle_boundary.rs searches the whole debug executable
+# (hundreds of MB) with memchr; unoptimized, that search takes about a minute.
+[profile.dev.package.memchr]
+opt-level = 3

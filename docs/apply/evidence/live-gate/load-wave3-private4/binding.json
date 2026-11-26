@@ -1,0 +1,10 @@
+{
+  "binary_sha256": "D3EC1869F3CC3BFD5250EC246153685F8632F2E15C69B0398263E0B716F8AED5",
+  "database": "ibcmd_rs_05_load_w3_private4_20261001",
+  "worker_lease": "track=load since=2026-10-01T22:52:04",
+  "cluster_uuid": "7c467d0e-d30f-4a79-9744-fbda88556b1b",
+  "binary": "F:/ibcmd/lab/05/wave3/coordinator/ibcmd-rs-426c6173-debug.exe",
+  "origin": "F:/ibcmd/lab/05/wave3/load/f5-owned-full.bak",
+  "infobase_uuid": "aa7d34b8-76c4-4401-b2cb-fdf32383ae8f",
+  "source_head": "426c61731c73f242142d4d13a7b948ac83d97d66"
+}

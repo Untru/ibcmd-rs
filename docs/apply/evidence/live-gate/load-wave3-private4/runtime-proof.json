@@ -1,0 +1,19 @@
+{
+  "kind": "actual_case4_runtime_reconciliation",
+  "preparation_manifest": "F:/ibcmd/lab/05/wave3/coordinator/private4-frozen-files-v8.json",
+  "preparation_manifest_sha256": "c08ce467855194afd87096f927c9934c898ae3005673bed5e86e8b79af5a4373",
+  "executor_proof": "private4-executor-proof.json",
+  "summary_sha256": "7500f5bba1e58b8e0cb1972ba69b0a032fb887d16dbfcc1fdabe35210a2cdb1e",
+  "historical_script_source": "8babc8b9ab49d88b722a9768e6903b49f8505e56",
+  "binary_source": "426c61731c73f242142d4d13a7b948ac83d97d66",
+  "binary_sha256": "D3EC1869F3CC3BFD5250EC246153685F8632F2E15C69B0398263E0B716F8AED5",
+  "shared_case2_untouched": true,
+  "cleanup": {
+    "resources_may_need_exact_owned_cleanup": false,
+    "guarded_stop_clean": true,
+    "registration_state": "unregistered",
+    "no_purge": true,
+    "worker_lease_held_or_unconfirmed": false,
+    "database_default60_cleanup_pending": true
+  }
+}

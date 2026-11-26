@@ -1,0 +1,74 @@
+{
+  "tag": "pal85release",
+  "database": "ibcmd_rs_04_import_pal85_release",
+  "tree": "F:\\ibcmd\\lab\\04\\import\\tree\\b85pal",
+  "exe": "F:\\ibcmd\\lab\\04\\import\\bin\\ibcmd-rs-release85.exe",
+  "platform": "8.5",
+  "apply_with": "native",
+  "import": {
+    "exit": 0,
+    "seconds": 26.3,
+    "rows": 5,
+    "tail": "model export: name index of 10642 names, 4595 types, 315 predefined items in 38 ms; object_names read 4968 rows (0 failed) of 46 kinds, 1415 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types) | model export: every descriptor through the model: true; still legacy by kind: {}; left out: recalculation refs true, root recalculation refs true, functional option refs true | model export: name index of 10642 names, 4595 types, 315 predefined items in 43 ms; object_names read 4968 rows (0 failed) of 46 kinds, 1415 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types) | [INFO] Импорт конфигурации из XML успешно завершен",
+    "overrides": {
+      "built_objects": 0,
+      "new_objects": 0,
+      "compiled_descriptors": 1,
+      "removed_rows": 0,
+      "deleted_names": 0,
+      "built_files": [],
+      "compiled_files": [
+        "PaletteColors/ВниманиеБИПЦветФона.xml"
+      ],
+      "differing_files": 2,
+      "objects_left_out": 4748,
+      "rows_left_out": 1,
+      "compare_seconds": 7.0088834,
+      "all_rows_because": null
+    },
+    "verification": {
+      "checked_files": 12336,
+      "identical_files": 12336,
+      "state_rows": 9935,
+      "read_seconds": 1.248,
+      "export_seconds": 1.996,
+      "total_seconds": 3.2511221
+    },
+    "error": null
+  },
+  "configsave": {
+    "database": "ibcmd_rs_04_import_pal85_release",
+    "rows": 5,
+    "names": 5,
+    "parts_over_one": [],
+    "creation_years": {
+      "4026": 5
+    },
+    "deleted": null,
+    "versions_count": 9936,
+    "versions_entries": 9935
+  },
+  "apply": {
+    "Exit": 0,
+    "Tail": "[INFO] Сбор служебной информации... | [INFO] Принятие изменений... | [INFO] Создано поколение конфигурации: 9b4667a2f788554bbc55ed372f4ba63400000000 | [INFO] Обновление конфигурации базы данных успешно завершено",
+    "Seconds": 41.6
+  },
+  "config_rows_after": "9948,0",
+  "export": {
+    "Exit": 0,
+    "Seconds": 12.6
+  },
+  "diff_summary": {
+    "left_only": 0,
+    "right_only": 0,
+    "different": 1,
+    "unchanged": 12336
+  },
+  "differing_files": [],
+  "equal_but_dump_info": true,
+  "dump_info": {
+    "equal_except_config_version": true
+  },
+  "equal_except_config_version": true,
+  "total_seconds": 85.4
+}

@@ -1,0 +1,33 @@
+{
+  "scope": "compact6 PREPARATION only; no process/SQL/FIFO/registry/archive runtime actions",
+  "manifest_sha256": "B6F7B923EDEC3936FFF248BC3C24A1631289EF51E05960937E39675B2E6CED85",
+  "files": 34,
+  "dependencies": 18,
+  "format_check": "PASS cargo fmt --all --check",
+  "policy_guard": "PASS validate-physical-adapter-policy",
+  "rust_changed": false,
+  "original_compact5_closure": "PASS45",
+  "original_compact5_raw": "PASS285 unchanged",
+  "validation_logs": [
+    {
+      "file": "compact6-acquire-final-v1.txt",
+      "sha256": "FF14051AE826BB213319EC27F5E625F6273EA915BBA5FDA17DE5F33CC8356EE7"
+    },
+    {
+      "file": "compact6-closure-and-originals-v1.txt",
+      "sha256": "202782CC4CE580257E860CCA0FB8F874F96974425C6FDC701C002AFF61ABE041"
+    },
+    {
+      "file": "compact6-preparation-helper-v1.txt",
+      "sha256": "D62B2D7CA67C1657A39A7482641A444D8F09AB7A925D7B3AEB03EC357B183733"
+    },
+    {
+      "file": "compact6-preparation-protocol-v1.txt",
+      "sha256": "F0002E56519D3DF0148200BB632F593F51CBE610A5F0667A98DE4A33B3F2979F"
+    },
+    {
+      "file": "compact6-preparation-reader-v1.txt",
+      "sha256": "777DCAAA92263A0A1C8A6665557075C43EE9E3033DC2E8FB3A2EBDD57895F38F"
+    }
+  ]
+}

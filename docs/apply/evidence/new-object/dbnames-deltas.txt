@@ -1,0 +1,21 @@
+DBNames deltas of the native cases (Params.DBNames: header, entries added)
+
+c: a new catalog and two attributes (ddl bsp8327_a a2_staged -> bsp8327_c2 c2_now)
+  header 10824 -> 11040 entries 6459 -> 6465
+  + 11034 Fld c60cdc87-198a-4f6e-8f17-76bcb1b1914b
+  + 11035 Fld 1a276b83-8844-418d-aae5-a004f96b992e
+  + 11036 Reference 5ff28850-03db-4a0f-b95e-c2ea4d8c516d
+  + 11037 DbCopiesInfoBaseUse 00000000-0000-0000-0000-000000000000
+  + 11038 DbCopiesUpdateTableStat 00000000-0000-0000-0000-000000000000
+  + 11039 DbCopiesUpdateStat 00000000-0000-0000-0000-000000000000
+
+d: a new document with an attribute and a tabular section with an attribute (trace d_base d_staged -> d_after)
+  header 10824 -> 11041 entries 6459 -> 6467
+  + 11034 Document 32c4ee6e-b84a-4d6c-a195-033eafd1577f
+  + 11035 Fld 80f5e700-ad15-4f01-8cc6-7af50ce1b31a
+  + 11036 VT be3686a4-41af-4a92-b4b9-a088e1c69d12
+  + 11037 LineNo be3686a4-41af-4a92-b4b9-a088e1c69d12
+  + 11038 Fld 3be439ff-11ea-4bfb-9863-fae061df5b66
+  + 11039 DbCopiesInfoBaseUse 00000000-0000-0000-0000-000000000000
+  + 11040 DbCopiesUpdateTableStat 00000000-0000-0000-0000-000000000000
+  + 11041 DbCopiesUpdateStat 00000000-0000-0000-0000-000000000000

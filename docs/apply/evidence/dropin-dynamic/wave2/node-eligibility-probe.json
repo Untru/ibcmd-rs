@@ -1,0 +1,8 @@
+{
+  "binary": "dynamic-wave2-eligible.exe",
+  "probe": "same node count, eligibility changed after plan",
+  "error": "('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Node eligibility preimage drifted (57318) (SQLMoreResults)')",
+  "publication_committed": false,
+  "node_mark_restored": true,
+  "stage_rows": 8
+}

@@ -1,0 +1,833 @@
+S1-K checkpoint 2 (#407): our import of an edited BSP 8.3.27 tree, then the drop-in ibcmd infobase config apply --recovery-backup, against the native import + native apply on a twin. Cases a1 b1 b2 c1 d0 d1 e5 e6 i1 with the binary of feat/0.4 029b4a2b plus this kit (merge aaa97b39), f1 f2 with feat/0.4 eb315250 (S1-F; merge c22d0bef). Check 4 differs in about 3 060 re-compiled rows by construction until #395 lands (recorded, not a failure).
+
+== summary
+
+-- a1
+   import  exit 0, 118.1s
+   staged  9520 rows, 3 edited staged, 3061 others differ
+   apply   ok, catalog КлючевыеОперации (Reference2598): new attributes Fld11034 = ДемоТ1Булево
+   3       checked 252 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6095; different content 3068
+   5-6     5. DBNames text equal after inflate: True (348071 / 348071 bytes) | 5. DBSchema equal but the platform's own upgrades: True | 6. 16 of 16 `.si` rows have the same text (compared after inflate)
+   7       not required
+   8       8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       identical (58 lines)
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- b1
+   import  exit 0, 36.3s
+   staged  9520 rows, 6 edited staged, 3061 others differ
+   apply   ok, catalog _ДемоСтавкиНДС (Reference23): new attributes Fld11034 = СтавкаНовая; rem
+   3       checked 254 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6092; different content 3071
+   5-6     5. DBNames text equal after inflate: True (347276 / 347276 bytes) | 5. DBSchema equal but the platform's own upgrades: True (DbCopies, DbCopiesUpdates) | 6. 16 of 16 `.si` rows have the same text (compared after inflate)
+   7       not required
+   8       8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       -
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- b2
+   import  exit 0, 45.0s
+   staged  9520 rows, 2 edited staged, 3061 others differ
+   apply   ok, catalog _ДемоПроекты (Reference22): removed attributes Fld179 = РеквизитДопУпоря
+   3       checked 250 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6096; different content 3067
+   5-6     5. DBNames text equal after inflate: True (347170 / 347170 bytes) | 5. DBSchema equal but the platform's own upgrades: True | 6. 16 of 16 `.si` rows have the same text (compared after inflate)
+   7       not required
+   8       8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       -
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- c1
+   import  exit 0, 160.0s
+   staged  9520 rows, 5 edited staged, 3061 others differ
+   apply   ok, catalog КлассификаторБанков (Reference2565): widened attributes Fld2567 = Город 
+   3       checked 256 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6093; different content 3070
+   5-6     5. DBNames text equal after inflate: True (347170 / 347170 bytes) | 5. DBSchema equal but the platform's own upgrades: True | 6. 16 of 16 `.si` rows have the same text (compared after inflate)
+   7       not required
+   8       8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       -
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- d0
+   import  exit 0, 75.8s
+   staged  9520 rows, 1 edited staged, 3061 others differ
+   apply   ok, catalog КлючевыеОперации (Reference2598): switched indexes Fld2646 = ЦелевоеВрем
+   3       checked 247 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6097; different content 3066
+   5-6     5. DBNames text equal after inflate: True (347170 / 347170 bytes) | 5. DBSchema equal but the platform's own upgrades: True | 6. 16 of 16 `.si` rows have the same text (compared after inflate)
+   7       not required
+   8       8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       -
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- d1
+   import  exit 0, 33.5s
+   staged  9520 rows, 6 edited staged, 3061 others differ
+   apply   ok, catalog _ДемоПроекты (Reference22): switched indexes Fld179 = РеквизитДопУпорядо
+   3       checked 257 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6092; different content 3071
+   5-6     5. DBNames text equal after inflate: True (347170 / 347170 bytes) | 5. DBSchema equal but the platform's own upgrades: True | 6. 16 of 16 `.si` rows have the same text (compared after inflate)
+   7       not required
+   8       8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       -
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- e5
+   import  exit 0, 13.3s
+   staged  9520 rows, 5 edited staged, 3061 others differ
+   apply   ok, catalog _ДемоКонтактныеЛицаПартнеров (Reference14): new tabular sections VT11034
+   3       checked 259 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6093; different content 3070
+   5-6     5. DBNames text equal after inflate: True (348240 / 348240 bytes) | 5. DBSchema equal but the platform's own upgrades: True | 6. 16 of 16 `.si` rows have the same text (compared after inflate)
+   7       not required
+   8       8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       -
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- e6
+   import  exit 0, 15.9s
+   staged  9520 rows, 3 edited staged, 3061 others differ
+   apply   ok, catalog _ДемоКонтактныеЛицаПартнеров (Reference14): new attributes of tabular se
+   3       checked 252 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6095; different content 3068
+   5-6     5. DBNames text equal after inflate: True (347488 / 347488 bytes) | 5. DBSchema equal but the platform's own upgrades: True (DbCopies, DbCopiesUpdates) | 6. 16 of 16 `.si` rows have the same text (compared after inflate)
+   7       not required
+   8       8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       -
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- f1
+   import  exit 0, 166.0s
+   staged  9521 rows, 2 edited staged, 3061 others differ
+   apply   ok, catalog ДемоКатФ1 (Reference11034): new catalog, tables _Reference11034
+   3       checked 247 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6097; different content 3067
+   5-6     5. DBNames text equal after inflate: False (347810 / 347600 bytes) | 5. DBNames equal after taking out the entries of the platform's own system tables (native 3, own 0 taken out): True; headers native ['{11045,', '{6470,'] own ['{11042,', '{6467,'] | 5. DBSchema equal but the platform's own upgrades: True (DbCopies, DbCopiesInfoBaseUse, DbCopiesUpdateStat, DbCopiesUpdateTableStat, DbCopiesUpdates, ...
+   7       not required
+   8       8. native export of both: 12199 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9515 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       identical (21 lines)
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- f2
+   import  exit 0, 73.3s
+   staged  9521 rows, 2 edited staged, 3061 others differ
+   apply   ok, document ДемоДокФ2 (Document11034): new document, tables _Document11034, _Docume
+   3       checked 248 tables (X1 tables: 243), differing: 0
+   4       4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6097; different content 3067
+   5-6     5. DBNames text equal after inflate: False (347758 / 347548 bytes) | 5. DBNames equal after taking out the entries of the platform's own system tables (native 3, own 0 taken out): True; headers native ['{11043,', '{6469,'] own ['{11040,', '{6466,'] | 5. DBSchema equal but the platform's own upgrades: True (DbCopies, DbCopiesInfoBaseUse, DbCopiesUpdateStat, DbCopiesUpdateTableStat, DbCopiesUpdates, ...
+   7       not required
+   8       8. native export of both: 12199 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9515 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка.Form, AccountingRegister._ДемоЖурналПроводокБ ...
+   9       -
+   10      no change
+   11      -
+   12      digest unchanged: True
+
+-- i1
+   import  exit 0, 112.0s
+   staged  9520 rows, 2 edited staged, 3061 others differ
+   apply   refused
+   3       -
+   4       -
+   5-6     -
+   7       -
+   8       -
+   9       -
+   10      -
+   11      check 11: refused with the reasons, nothing written
+   12      -
+
+==============================================================================
+== case a1: the raw lines
+-- files.txt
+   Catalogs/КлючевыеОперации.xml
+   Catalogs/Удалить_ДемоОбщиеСведения.xml
+   Documents/_ДемоЗаказПокупателя.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference2598
+   equal _Reference9367
+   equal _Document39
+   equal _Document39_VT970
+   equal _Document39_VT2148
+   equal _Document39_VT3663
+   checked 252 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9841, own 9841; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6095; different content 3068
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check56.txt
+   5. DBNames text equal after inflate: True (348071 / 348071 bytes)
+   5. DBSchema entries: native 1761, own 1761; differing: ['DbCopies', 'DbCopiesUpdates']
+   5. DBSchema equal but the platform's own upgrades: True
+   6. 16 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 239,5 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_a1_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 444 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327716630
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327716630
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case b1: the raw lines
+-- files.txt
+   Catalogs/_ДемоСтавкиНДС.xml
+   Catalogs/_ДемоСтавкиНДС/Forms/ФормаЭлемента/Ext/Form.xml
+   Catalogs/КлассификаторБанков.xml
+   Catalogs/КлассификаторБанков/Forms/ФормаВыбора/Ext/Form.xml
+   Catalogs/КлассификаторБанков/Forms/ФормаСписка/Ext/Form.xml
+   Catalogs/КлассификаторБанков/Forms/ФормаЭлемента/Ext/Form.xml
+   Catalogs/КлючевыеОперации.xml
+   Catalogs/КлючевыеОперации/Forms/ФормаВыбора/Ext/Form.xml
+   Catalogs/КлючевыеОперации/Forms/ФормаСписка/Ext/Form.xml
+   Catalogs/КлючевыеОперации/Forms/ФормаЭлемента/Ext/Form.xml
+   Catalogs/ПоставщикиУслугСервиса.xml
+   Catalogs/ШаблоныЗаданийОчереди.xml
+   Documents/ТелефонныйЗвонок.xml
+   Documents/ТелефонныйЗвонок/Forms/ФормаВыбора/Ext/Form.xml
+   Documents/ТелефонныйЗвонок/Forms/ФормаДокумента/Ext/Form.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference23
+   equal _Reference2565
+   equal _Reference2598
+   equal _Reference7444
+   equal _Reference3408
+   equal _Document1564
+   equal _Document1564_VT1962
+   equal _Document1564_VT2440
+   checked 254 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9841, own 9841; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6092; different content 3071
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check_register.txt
+   R. change register rows (node, object): native 20685, own 20685; equal sets: True
+   R. NULL _MessageNo: native 65, own 16545; NULL in native and not in own: 0 (must be 0); NULL in own and not in native: 16480 (the drift)
+   R. file lists (node, object, key, file): 21357 rows; only in native 40, only in own 40
+-- check56.txt
+   5. DBNames text equal after inflate: True (347276 / 347276 bytes)
+   5. DBSchema entries: native 1761, own 1761; differing: ['DbCopies', 'DbCopiesUpdates']
+   5. DBSchema equal but the platform's own upgrades: True (DbCopies, DbCopiesUpdates)
+   6. 16 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 161,3 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_b1_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 531 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327716814
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327716814
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case b2: the raw lines
+-- files.txt
+   Catalogs/_ДемоПроекты.xml
+   Catalogs/_ДемоПроекты/Forms/ФормаСписка/Ext/Form.xml
+   Documents/_ДемоНачислениеЗарплаты.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference22
+   equal _Document996
+   equal _Document996_VT1121
+   equal _Document996_VT2191
+   checked 250 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9841, own 9841; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6096; different content 3067
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check56.txt
+   5. DBNames text equal after inflate: True (347170 / 347170 bytes)
+   5. DBSchema entries: native 1761, own 1761; differing: ['DbCopies', 'DbCopiesUpdates']
+   5. DBSchema equal but the platform's own upgrades: True
+   6. 16 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 238,5 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_b2_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 263 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327713462
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327713462
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case c1: the raw lines
+-- files.txt
+   Catalogs/КлассификаторБанков.xml
+   Catalogs/КлючевыеОперации.xml
+   Catalogs/ШаблоныЗаданийОчереди.xml
+   Documents/_ДемоЗаказПокупателя.xml
+   Documents/ТелефонныйЗвонок.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference2565
+   equal _Reference2598
+   equal _Reference3408
+   equal _Document39
+   equal _Document39_VT970
+   equal _Document39_VT2148
+   equal _Document39_VT3663
+   equal _Document1564
+   equal _Document1564_VT1962
+   equal _Document1564_VT2440
+   checked 256 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9841, own 9841; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6093; different content 3070
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check56.txt
+   5. DBNames text equal after inflate: True (347170 / 347170 bytes)
+   5. DBSchema entries: native 1761, own 1761; differing: ['DbCopies', 'DbCopiesUpdates']
+   5. DBSchema equal but the platform's own upgrades: True
+   6. 16 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 115,5 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_c1_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 688 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327744320
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327744320
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case d0: the raw lines
+-- files.txt
+   Catalogs/КлючевыеОперации.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference2598
+   checked 247 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9841, own 9841; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6097; different content 3066
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check56.txt
+   5. DBNames text equal after inflate: True (347170 / 347170 bytes)
+   5. DBSchema entries: native 1761, own 1761; differing: ['DbCopies', 'DbCopiesUpdates']
+   5. DBSchema equal but the platform's own upgrades: True
+   6. 16 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 73,0 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_d0_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 146 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327713667
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327713667
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case d1: the raw lines
+-- files.txt
+   Catalogs/_ДемоПроекты.xml
+   Catalogs/КлассификаторБанков.xml
+   Catalogs/КлючевыеОперации.xml
+   Catalogs/ТомаХраненияФайлов.xml
+   Documents/_ДемоЗаказПокупателя.xml
+   Documents/_ДемоНачислениеЗарплаты.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference22
+   equal _Reference2565
+   equal _Reference2598
+   equal _Reference576
+   equal _Document39
+   equal _Document39_VT970
+   equal _Document39_VT2148
+   equal _Document39_VT3663
+   equal _Document996
+   equal _Document996_VT1121
+   equal _Document996_VT2191
+   checked 257 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9841, own 9841; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6092; different content 3071
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check56.txt
+   5. DBNames text equal after inflate: True (347170 / 347170 bytes)
+   5. DBSchema entries: native 1761, own 1761; differing: ['DbCopies', 'DbCopiesUpdates']
+   5. DBSchema equal but the platform's own upgrades: True
+   6. 16 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 222,9 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_d1_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 717 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327713744
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327713744
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case e5: the raw lines
+-- files.txt
+   Catalogs/_ДемоКонтактныеЛицаПартнеров.xml
+   Catalogs/_ДемоПодразделения.xml
+   Catalogs/_ДемоСтавкиНДС.xml
+   Documents/_ДемоОприходованиеТоваров.xml
+   Documents/_ДемоСчетФактураПолученный.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference14
+   equal _Reference14_VT67
+   equal _Reference14_VT11034
+   equal _Reference21
+   equal _Reference21_VT960
+   equal _Reference21_VT11037
+   equal _Reference23
+   equal _Reference23_VT11041
+   equal _Document578
+   equal _Document578_VT668
+   equal _Document578_VT11047
+   equal _Document4883
+   equal _Document4883_VT11050
+   checked 259 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9841, own 9841; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6093; different content 3070
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check56.txt
+   5. DBNames text equal after inflate: True (348240 / 348240 bytes)
+   5. DBSchema entries: native 1761, own 1761; differing: ['DbCopies', 'DbCopiesUpdates']
+   5. DBSchema equal but the platform's own upgrades: True
+   6. 16 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 209,4 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_e5_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 575 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327720301
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327720301
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case e6: the raw lines
+-- files.txt
+   Catalogs/_ДемоКонтактныеЛицаПартнеров.xml
+   Catalogs/_ДемоПодразделения.xml
+   Documents/_ДемоОприходованиеТоваров.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference14
+   equal _Reference14_VT67
+   equal _Reference21
+   equal _Reference21_VT960
+   equal _Document578
+   equal _Document578_VT668
+   checked 252 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9841, own 9841; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6095; different content 3068
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check_register.txt
+   R. change register rows (node, object): native 20685, own 20685; equal sets: True
+   R. NULL _MessageNo: native 13, own 16545; NULL in native and not in own: 0 (must be 0); NULL in own and not in native: 16532 (the drift)
+   R. file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- check56.txt
+   5. DBNames text equal after inflate: True (347488 / 347488 bytes)
+   5. DBSchema entries: native 1761, own 1761; differing: ['DbCopies', 'DbCopiesUpdates']
+   5. DBSchema equal but the platform's own upgrades: True (DbCopies, DbCopiesUpdates)
+   6. 16 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12198 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9514 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 274,5 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_e6_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 388 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327713538
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9520
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|327713538
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case f1: the raw lines
+-- files.txt
+   Catalogs/ДемоКатФ1.xml
+   Configuration.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Reference11034
+   checked 247 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9842, own 9842; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6097; different content 3067
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check_register.txt
+   R. change register rows (node, object): native 20688, own 20688; equal sets: True
+   R. NULL _MessageNo: native 8, own 16548; NULL in native and not in own: 0 (must be 0); NULL in own and not in native: 16540 (the drift)
+   R. file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- check56.txt
+   5. DBNames text equal after inflate: False (347810 / 347600 bytes)
+   5. DBNames equal after taking out the entries of the platform's own system tables (native 3, own 0 taken out): True; headers native ['{11045,', '{6470,'] own ['{11042,', '{6467,']
+   5. DBSchema entries: native 1766, own 1762; differing: ['DbCopies', 'DbCopiesInfoBaseUse', 'DbCopiesUpdateStat', 'DbCopiesUpdateTableStat', 'DbCopiesUpdates', 'WebSocketClients']
+   5. DBSchema equal but the platform's own upgrades: True (DbCopies, DbCopiesInfoBaseUse, DbCopiesUpdateStat, DbCopiesUpdateTableStat, DbCopiesUpdates, WebSocketClients)
+   6. 15 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12199 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9515 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 441,0 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_f1_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 171 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9521
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|1730789061
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9521
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|1730789061
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case f2: the raw lines
+-- files.txt
+   Configuration.xml
+   Documents/ДемоДокФ2.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check3.txt
+   equal _Document11034
+   equal _Document11034_VT11038
+   checked 248 tables (X1 tables: 243), differing: 0
+-- check4.txt
+   4. Config rows: native 9842, own 9842; only in native 0, only in own 0
+   4. common rows: identical in every column 321; identical bytes, other dates 357; equal after inflate 6097; different content 3067
+   4. rows that differ in content: 00153d46-0bd0-4c55-bcba-c101b6f15a6d.0, 00418e6c-77b2-4753-b9ff-3a8013436f8a.0, 006cb169-055c-4f47-bdc9-0de36d6a4b7d.0, 0080c29d-ec54-43a8-aab8-c67e0279b6b7.0, 00bf04d6-6a8e-4b13-94cf-36c1c6090cd8.0, 00dcfeab-7ba1-4a50-996e-4fd693dd0514.0, 01197556-355c-4c85-9af2-605b ...
+-- check_register.txt
+   R. change register rows (node, object): native 20688, own 20688; equal sets: True
+   R. NULL _MessageNo: native 8, own 16548; NULL in native and not in own: 0 (must be 0); NULL in own and not in native: 16540 (the drift)
+   R. file lists (node, object, key, file): 21357 rows; only in native 0, only in own 0
+-- check56.txt
+   5. DBNames text equal after inflate: False (347758 / 347548 bytes)
+   5. DBNames equal after taking out the entries of the platform's own system tables (native 3, own 0 taken out): True; headers native ['{11043,', '{6469,'] own ['{11040,', '{6466,']
+   5. DBSchema entries: native 1766, own 1762; differing: ['DbCopies', 'DbCopiesInfoBaseUse', 'DbCopiesUpdateStat', 'DbCopiesUpdateTableStat', 'DbCopiesUpdates', 'WebSocketClients']
+   5. DBSchema equal but the platform's own upgrades: True (DbCopies, DbCopiesInfoBaseUse, DbCopiesUpdateStat, DbCopiesUpdateTableStat, DbCopiesUpdates, WebSocketClients)
+   6. 15 of 16 `.si` rows have the same text (compared after inflate)
+-- check8.txt
+   8. native export of both: 12199 files; only native 0, only own 0, different 0; ConfigDumpInfo.xml equal but the configVersion of 9515 object(s): AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета, AccountingRegister._ДемоЖурналПроводокБухгалтерскогоУчета.Form.ФормаСписка, AccountingRegister._ ...
+-- check12.txt
+   the script ran for 329,5 s and said: Контекст базы данных изменен на "ibcmd_rs_05_ext_s1k_f2_inj". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 184 | injected failure before COMMIT
+   before:
+   Config rows|9841
+   ConfigSave rows|9521
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|-1793491886
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   after:
+   Config rows|9841
+   ConfigSave rows|9521
+   Params rows|38
+   Config checksum|1430675021
+   ConfigSave checksum|-1793491886
+   Params checksum|-1807290130
+   SchemaStorage 0 status|100
+   SchemaStorage 0 schema|-970237343
+   DBSchema|-970237343
+   DBNames|-2047740313
+   columns|188573852
+   indexes|-428845192
+   tables *NG|0
+   tables|2234
+   digest unchanged: True
+
+==============================================================================
+== case i1: the raw lines
+-- files.txt
+   Catalogs/_ДемоНоменклатура.xml
+   Catalogs/_ДемоПартнеры.xml
+-- import.out
+   [INFO] Импорт конфигурации из XML...
+   [INFO] Импорт конфигурации из XML успешно завершен
+-- check11.txt
+   our apply, dry run: exit 1
+     names _ДемоПартнеры: True
+     says the object is adopted by an extension: True
+   our apply, real run: exit 1
+     names _ДемоПартнеры: True
+     says the object is adopted by an extension: True
+   drop-in infobase config apply --recovery-backup: exit 1
+     says «требуется штатный config apply»: True
+     names the object: True
+   digest unchanged after the real runs: True
+   check 11: refused with the reasons, nothing written

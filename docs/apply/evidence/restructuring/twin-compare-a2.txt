@@ -1,0 +1,149 @@
+# Case a2: the native twin against ours (checkpoint 2, final run)
+
+Both twins were restored from the same backup of the staged image (bak/ibcmd_rs_04_ddl_bsp8327_a_a2_staged.bak: a native
+`import files --partial` of the edited catalog, 9842 ConfigSave rows, nothing applied):
+  native: ibcmd_rs_04_ddl_a2_nat  -- native `ibcmd infobase config apply --force --dynamic=disable` (8.3.27.2214)
+  ours:   ibcmd_rs_04_ddl_a2_fin  -- `ibcmd-rs mssql-restructure` (one transaction, apply 7.3 s; report: prototype-apply-report-a2.json)
+Both then went through the same sessions/exports below. Machine: SQL Server 2025 on the same host, other tracks running.
+
+## 1. Snapshot diff, native (before) -> ours (after)   [snapdiff.py a2_nat/a2n_after a2_fin/fin_after]
+Tables: 2234 in both. Structure identical but three items that are not ours to reproduce: the auto-named primary key of _ConfigChngR
+(a random name), and the two system tables _DbCopies / _DbCopiesUpdates that the 8.3.27.2214 platform upgraded on its own (build drift of the
+backup; a native apply does it as a side effect: columns _StorageVariant, _UpdateId, _LastUpdateResult, _LastUpdateError).
+The "changed data" lines: DBSchema/SchemaStorage differ by the drift of those two tables and the random parts; Params/Files are the derived
+state (section 3 of the doc, 9.6); _ConfigChngR (+_ExtProps) is rebuilt by native with new keys; _Reference20 differs in its row versions
+(the checksum includes the timestamp column _Version; the data comparison of section 2 excludes it).
+
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (3):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C44776EEBD CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C4D6B2ECA7 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     - C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     - C _UpdateId binary(16) NULL
+     - C _LastUpdateResult numeric(2,0) NULL
+     - C _LastUpdateError varbinary(max) NULL
+== data: tables whose rowcount/checksum changed
+(7)
+  DBSchema: (1, '1599274845') -> (1, '1641952310')
+  Files: (44, '-996905871') -> (44, '1446202570')
+  Params: (38, '35940821') -> (38, '1109392991')
+  SchemaStorage: (2, '864621849') -> (2, '-1086161369')
+  _ConfigChngR: (20685, '1958077969') -> (20685, '1954558430')
+  _ConfigChngR_ExtProps: (21357, '-236398624') -> (21357, '-233154080')
+  _Reference20: (14, '1477738788') -> (14, '1444184356')
+== service blobs
+DBSchema same: False ['02ac4540dff6bbfe2383bc81f42957d68d6e7cf1d370a718c39e812b6d8dc316'] ['839aa6272ab485ba2a037c71087c23ad2b4ccf827ffaf4bb36cdc284d744a7ea']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 8 meta-only 14
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 447590 -> 447544 bytes  6bc77afe -> f362a522
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  fc9ee29a -> 8ca2d36c
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  07a0fa69 -> 58a55719
+    ~ DBNames [0] 143646 -> 144945 bytes  1640686e -> 4b9fff86
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  d516886c -> 3d68ebf5
+    ~ c77bc206-5935-48ea-b32e-508a572d94f4.si [0] 24143 -> 24397 bytes  02bad6cf -> 1f2a5de6
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2998675 -> 2977849 bytes  3c11bd46 -> 12c5e6bf
+    ~ siVersions [0] 1273 -> 1273 bytes  eed5baf3 -> 2c99fe68
+    m 0b698dcd-501d-42d9-892d-5a9157bc996a.si [0] 4026-09-29 11:46:18 -> 4026-09-29 09:37:57
+    m 215d232c-9c9e-4f7c-8a87-142cd3797264.si [0] 4026-09-29 11:46:18 -> 4026-09-29 09:37:57
+    m 2203278d-ef4f-4f68-98f1-feb257d53ecc.si [0] 4026-09-29 11:46:18 -> 4026-09-29 09:37:57
+    m 42ed49cc-765d-4314-bc2d-af425af7bf13.si [0] 4026-09-29 11:46:18 -> 4026-09-29 09:37:57
+    m 54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui [0] 4026-09-29 11:45:41 -> 4026-09-29 09:37:24
+    m 59274b8d-4447-4bf4-9d29-bfa099a1de37.si [0] 4026-09-29 11:46:18 -> 4026-09-29 09:37:57
+    m a07b62f0-1f01-484a-93d9-d42764cedac0.si [0] 4026-09-29 11:46:18 -> 4026-09-29 09:37:57
+    m c40aafd6-c889-4229-807a-851d0bc5bc97.si [0] 4026-09-29 11:46:19 -> 4026-09-29 09:37:58
+    m c4629235-4823-4320-b8b5-1d08f4c6d612.si [0] 4026-09-29 11:46:18 -> 4026-09-29 09:37:57
+    m cf8b5e0f-5e46-4cf4-bc6f-204eae2c4e8a.si [0] 4026-09-29 11:46:19 -> 4026-09-29 09:37:58
+Config: rows 9841 -> 9841; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+ConfigCAS: rows 636 -> 636; added 0 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 44; added 0 removed 0 changed 5 meta-only 0
+    ~ MobileVersions.dat [0] 37009 -> 37009 bytes  739ff5c1 -> 7af00a4f
+    ~ extd_props_cached/gc.mrk [0] 9 -> 9 bytes  7ed9aef9 -> efa188cc
+    ~ userDocs_ru.bin [0] 2 -> 2255 bytes  9b4fb24e -> 12145c82
+    ~ userPostings_ru.bin [0] 2 -> 5057 bytes  9b4fb24e -> 1d2d752e
+    ~ userVocabulary_ru.bin [0] 2 -> 8795 bytes  9b4fb24e -> eb8662e7
+
+## 2. Data comparison with EXCEPT in both directions (compare_twins_fin.sql; the databases are on one server)
+Rebuilt tables: all columns but the timestamp _Version. Config/ConfigCAS: all columns. _ConfigChngR: every row differs because native
+rebuilds it with new _IDRRef keys on every apply (and registers 782 more objects as changed for the exchange nodes: _MessageNo NULL 17327 vs 16545).
+Params: rows whose bytes differ (all derived: the two version rows are random per apply, .ui = licensing, 3 x .si caches; the `ecsreg_*` row is a
+session-state row that the first server start removes: it is gone from a2_nat and is removed from a2_fin by the first session, see sessions-a2.md).
+
+k|n
+-|-
+ref20 native-minus-ours|0
+ref20 ours-minus-native|0
+vt155 native-minus-ours|0
+vt155 ours-minus-native|0
+vt159 native-minus-ours|0
+vt159 ours-minus-native|0
+db|_Folder|_Fld11034|n
+--|-------|---------|-
+native|0x00|NULL|1
+native|0x01||13
+ours|0x00|NULL|1
+ours|0x01||13
+k|n
+-|-
+chngr native-minus-ours|20685
+chngr ours-minus-native|20685
+chngr native null MessageNo|17327
+chngr ours null MessageNo|16545
+extprops native-minus-ours|21357
+extprops ours-minus-native|21357
+k|n
+-|-
+config native-minus-ours|0
+config ours-minus-native|0
+configcas native-minus-ours|0
+configcas ours-minus-native|0
+params_row|native_size|ours_size
+----------|-----------|---------
+1a621f0f-5568-4183-bd9f-f6ef670e7090.si|447590|447544
+789702c6-d272-4008-9e55-db6f10687ae0.ui|24301|24301
+97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui|94|94
+c77bc206-5935-48ea-b32e-508a572d94f4.si|24143|24397
+DBNames|143646|144945
+DBNamesVersion-DBNames|43|43
+ea13a2c9-0c2f-40fa-b855-710387e3271d.si|2998675|2977849
+ecsreg_FZK78m2MVVNEneTkF26Pk9zLToEg|NULL|306
+siVersions|1273|1273
+tbl|columns_check
+---|-------------
+_Reference20|columns identical (names, types, order)
+_Reference20_VT155|columns identical (names, types, order)
+_Reference20_VT159|columns identical (names, types, order)
+
+## 3. The XDTO model row (Params ea13a2c9-...si), after inflate
+  native  25 173 494 bytes (BOM included), sha256 ecce11525fe134c9...
+  ours    25 173 494 bytes,               sha256 ecce11525fe134c9...   -> EQUAL.  (before: 25 173 368 bytes; the difference of 126 bytes is one line:
+  `<property name="ДемоНовыйРеквизит" type="xs:string" lowerBound="0"/>`). The deflated rows differ in size (native 2 998 675, ours 2 977 849 bytes):
+  a different deflate implementation of the same text. Details: xdto-model-a2.txt.
+
+## 4. Native `config apply` on ours, nothing staged (apply_only.ps1, native lock)
+    ConfigSave rows before: 0
+    native apply exit=0 in 240,4s
+    [INFO] Обновление конфигурации базы данных...
+    [INFO] Проверка корректности метаданных...
+    [INFO] Обновление конфигурации базы данных не требуется
+    ConfigSave rows after: 0
+
+## 5. Native `config export` of both twins (export_tree.ps1), compared with `ibcmd-rs source-diff`
+  native twin vs ours:  left_only 0, right_only 0, different 0, unchanged 12198   (ConfigDumpInfo.xml included)
+  reference tree (the same БСП exported before the edit) vs ours: different 2, unchanged 12196:
+    Catalogs/_ДемоПартнеры.xml  59290 -> 60715 bytes -- sha256 57B9B2E2BF09... = the case-a edit tree/patches/a/after/Catalogs/_ДемоПартнеры.xml, byte for byte
+    ConfigDumpInfo.xml          3110746 -> 3110455 bytes -- the new attribute is in; configVersion differs; two empty module entries of
+                                Catalog.НастройкиАвторизацииИнтернетСервисов are absent (the native import dropped them; the native twin has the same)
+  (the exported trees, 244 MB each, were deleted after the comparison)
+
+## 6. Sessions
+See sessions-a2.md: the catalog reads with the new attribute (13 items the empty string, the folder NULL), XDTO serialization of an object carries
+the attribute, a write / query by the attribute / a change of an existing item work -- in a real 1C server cluster session.

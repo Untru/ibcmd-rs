@@ -1,0 +1,45 @@
+{
+  "left_root": "\\\\?\\F:\\ibcmd\\lab\\04\\restructure-check\\dn\\export\\alias2_nat",
+  "right_root": "\\\\?\\F:\\ibcmd\\lab\\04\\restructure-check\\dn\\export\\alias2_ownnew20261001",
+  "summary": {
+    "left_only": 0,
+    "right_only": 0,
+    "different": 0,
+    "unchanged": 12198
+  },
+  "differences": [
+    {
+      "status": "unchanged",
+      "path": "Catalogs/Валюты.xml",
+      "left_sha256": "9705504fcdbceaa1052935f08c0f40aec6a1f534730e2e6c53de79337853719f",
+      "right_sha256": "9705504fcdbceaa1052935f08c0f40aec6a1f534730e2e6c53de79337853719f",
+      "left_size_bytes": 31894,
+      "right_size_bytes": 31894,
+      "kind": "metadata_xml",
+      "object_hint": "Catalogs/Валюты"
+    },
+    {
+      "status": "unchanged",
+      "path": "ConfigDumpInfo.xml",
+      "left_sha256": "e3c0bb16292686fb83732a7d71f25c1acb3ac15e95b4574e1f78adb17b14c182",
+      "right_sha256": "e3c0bb16292686fb83732a7d71f25c1acb3ac15e95b4574e1f78adb17b14c182",
+      "left_size_bytes": 3110746,
+      "right_size_bytes": 3110746,
+      "kind": "other_xml",
+      "object_hint": "ConfigDumpInfo"
+    },
+    {
+      "status": "unchanged",
+      "path": "Documents/_ДемоЗаказПокупателя.xml",
+      "left_sha256": "0d7a9b053587928ba6e1b32e3a9a3de67ee64a25cf266c47e42b69d1eb584e49",
+      "right_sha256": "0d7a9b053587928ba6e1b32e3a9a3de67ee64a25cf266c47e42b69d1eb584e49",
+      "left_size_bytes": 81145,
+      "right_size_bytes": 81145,
+      "kind": "metadata_xml",
+      "object_hint": "Documents/_ДемоЗаказПокупателя"
+    }
+  ],
+  "unchanged_entries_omitted": 12195,
+  "complete_report": "F:\\ibcmd\\lab\\04\\restructure-check\\dn\\logs\\alias2_new20261001_export_diff.json",
+  "complete_report_sha256": "40ea78b38c9a0ea77c1451e8dc8c82e7b52c3278b3b5fc9925ba9c10b306d44a"
+}

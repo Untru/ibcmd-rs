@@ -1,0 +1,7 @@
+Config      root                                                       part=0 size=45 text={2,66193438-abc5-410b-a1f1-a204102d1a62,}
+Config      version                                                    part=0 size=28 text={ {216,0, {80324,0} } }
+Config      versions                                                   part=0 size=344221 gen=edf6117c-d4a8-421d-84c8-c7bb6378ef4e rows=9839
+Config      versions_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b    part=0 size=340598 gen=06cb0442-0c47-4fad-986a-f08f28287c1b rows=9839
+Config      rows= alias_rows=
+ConfigSave  rows= alias_rows=
+Params      rows= alias_rows=

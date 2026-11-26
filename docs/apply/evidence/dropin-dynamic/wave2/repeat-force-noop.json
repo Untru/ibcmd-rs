@@ -1,0 +1,9 @@
+{
+  "command": "drop-in infobase config apply --force --dynamic=force",
+  "exit": 0,
+  "all_six_table_inventories_equal": true,
+  "all_saved_blobs_equal": true,
+  "stage_rows": 0,
+  "new_generation_created": false,
+  "repeated_helper_zero_twice": true
+}

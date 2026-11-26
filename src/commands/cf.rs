@@ -1,0 +1,2717 @@
+//! Offline `cf inspect`, `verify`, `extract`, `export`, and `overlay` commands.
+//!
+//! The command layer opens files directly, relies on the bounded streaming V8
+//! reader, and decodes only selected payloads. It never probes `PATH`, starts a
+//! 1C process, or guesses payload compression from bytes or names.
+
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+    fs::{self, File, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+};
+
+use ibcmd_cf::{
+    archive::{decode_archive_uniform, decode_packed_archive},
+    bootstrap::{BootstrapCfProfile, publish_bootstrap_patch_new},
+    overlay::{OverlayCodec, OverlayReport, PublishOverlayError, publish_overlay_new},
+    payload::{PayloadDecoder, PayloadEncoding, decode_payload},
+};
+use ibcmd_core::{
+    artifact::{ProfileId, StorageProfileId},
+    family::FamilyId,
+    limits::ResourceLimits,
+    storage::{
+        MultipartIdentity, Sha256Digest, StorageEntry, StorageKey, StoragePatchTarget,
+        StorageProvenance,
+    },
+    version::XmlDialect,
+};
+use ibcmd_v8::{
+    format::Revision,
+    reader::{ContainerIndex, EntryIndex, StreamingReader},
+};
+use serde::Serialize;
+
+use crate::{
+    cli::{
+        CfArgs, CfBootstrapArgs, CfCommands, CfCompression, CfExportArgs, CfExtractArgs,
+        CfInspectArgs, CfLoadArgs, CfOverlayArgs, CfRevision, CfVerifyArgs,
+    },
+    commands::platform::PlatformFlag,
+    compiler::{
+        CompileAxes, CompileRequest, PrepackedSource, SourcePayload,
+        bootstrap::{BootstrapCompileError, compile_bootstrap_source_tree},
+        overlay::compile_overlay_with_retained_budget,
+    },
+    module_blob::{
+        pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
+        pack_form_body_blob_from_form_xml, pack_simple_metadata_blob_from_xml,
+        patch_versions_blob_bytes_allowing_additions,
+    },
+    mssql_dump::StorageImageSourceExportReport,
+    profile_registry::{BUNDLED_PROFILES, ProfileRegistryLimits, load_profile_registry},
+};
+
+const REPORT_SCHEMA_VERSION: u32 = 1;
+
+/// Explicit operator override for the aggregate memory-budget base, in bytes.
+///
+/// Budgets normally follow the size of the input the operator named, which is
+/// the right answer for a CLI reading one local file. The override exists so
+/// that the one case the derivation cannot see — an input whose aggregate
+/// expansion legitimately exceeds `MAX_AGGREGATE_EXPANSION` — is a supported
+/// operator decision rather than a source edit and a rebuild. It can only
+/// raise the base, and an unparsable value fails the command closed instead of
+/// being silently ignored.
+const MEMORY_BUDGET_ENV: &str = "IBCMD_MEMORY_BUDGET_BYTES";
+
+/// Derives this command's resource limits from the input it was pointed at.
+///
+/// The shape defences (nesting depth, entry count, per-payload compression
+/// ratio, per-entry payload size) are identical at every input scale; only the
+/// aggregate byte budgets follow the input.
+fn input_limits(path: &Path) -> Result<ResourceLimits, String> {
+    let input_bytes = fs::metadata(path)
+        .map_err(|source| format!("failed to read the size of `{}`: {source}", path.display()))?
+        .len();
+    Ok(ResourceLimits::for_input_bytes(
+        input_bytes.max(memory_budget_override()?),
+    ))
+}
+
+/// Derives resource limits from an already-loaded input of known length.
+fn limits_for_len(input_bytes: usize) -> Result<ResourceLimits, String> {
+    let input_bytes = u64::try_from(input_bytes).unwrap_or(u64::MAX);
+    Ok(ResourceLimits::for_input_bytes(
+        input_bytes.max(memory_budget_override()?),
+    ))
+}
+
+fn memory_budget_override() -> Result<u64, String> {
+    match std::env::var(MEMORY_BUDGET_ENV) {
+        Err(std::env::VarError::NotPresent) => Ok(0),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
+            "{MEMORY_BUDGET_ENV} must be a positive whole number of bytes"
+        )),
+        Ok(raw) => raw
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                format!("{MEMORY_BUDGET_ENV} must be a positive whole number of bytes, got `{raw}`")
+            }),
+    }
+}
+
+/// Family recorded for `--compiled-asset` payloads crossing the prepacked seam.
+const COMPILED_ASSET_FAMILY: &str = "cf-cli-compiled-asset";
+
+/// Diagnostic code for `--compiled-asset` bytes that are not one complete
+/// raw-deflate stream.
+const INVALID_COMPILED_ASSET: &str = "invalid_compiled_asset";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub input: String,
+    pub profile: CfProfileReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<CfLayoutReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<CfSelectionReport>,
+    pub elements: Vec<CfElementReport>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CfExportReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub input: String,
+    pub output_dir: String,
+    pub source_version: &'static str,
+    pub profile: CfProfileReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub export: Option<StorageImageSourceExportReport>,
+    /// With `--update`: how the tree was brought up to the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<crate::update::UpdateSummary>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CfExtractReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub input: String,
+    pub output_dir: String,
+    pub element: String,
+    pub profile: CfProfileReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packed: Option<CfExtractArtifactReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unpacked: Option<CfExtractArtifactReport>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfExtractArtifactReport {
+    pub path: String,
+    pub bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CfOverlayReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub base: String,
+    pub output: String,
+    pub source_version: &'static str,
+    pub profile: CfProfileReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<OverlayReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication: Option<CfOverlayPublicationReport>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfOverlayPublicationReport {
+    pub revision: &'static str,
+    pub bytes_written: u64,
+    pub entries_written: usize,
+    pub entries_validated: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CfBootstrapReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub source_dir: String,
+    pub output: String,
+    pub source_version: &'static str,
+    pub target_profile: String,
+    pub revision: &'static str,
+    pub storage_version: u32,
+    pub page_size: Option<u32>,
+    pub reserved: u32,
+    pub source_files: usize,
+    pub metadata_files: usize,
+    pub asset_files: usize,
+    /// Source-tree files excluded from CF construction because they are
+    /// export-side manifests, not source documents.  `source_files` equals
+    /// `metadata_files + asset_files + non_source_files` on success.
+    pub non_source_files: usize,
+    pub storage_entries: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication: Option<CfBootstrapPublicationReport>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfBootstrapPublicationReport {
+    pub bytes_written: u64,
+    pub entries_written: usize,
+    pub entries_validated: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum CfCommandReport {
+    Archive(CfReport),
+    Bootstrap(CfBootstrapReport),
+    Extract(CfExtractReport),
+    Export(CfExportReport),
+    Overlay(CfOverlayReport),
+    Load(CfLoadReport),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfLoadReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub source_dir: String,
+    pub output: String,
+    pub base: String,
+    pub source_version: &'static str,
+    /// `index` when the tree's own index stood in for exporting the base,
+    /// `full` when the base was exported again.
+    pub base_export: &'static str,
+    pub modules: usize,
+    pub forms: usize,
+    /// The tree's files whose text was loaded.
+    pub applied: Vec<String>,
+    /// Objects compiled from the tree (edits beyond module text).
+    pub compiled_objects: Vec<String>,
+    /// Objects the tree lost whole, removed from the file.
+    pub removed_objects: Vec<String>,
+    /// Loaded, but worth a look (an object the base changed since export).
+    pub warnings: Vec<String>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+impl CfCommandReport {
+    #[must_use]
+    pub const fn ok(&self) -> bool {
+        match self {
+            Self::Archive(report) => report.ok,
+            Self::Bootstrap(report) => report.ok,
+            Self::Extract(report) => report.ok,
+            Self::Export(report) => report.ok,
+            Self::Overlay(report) => report.ok,
+            Self::Load(report) => report.ok,
+        }
+    }
+
+    #[must_use]
+    pub fn errors(&self) -> &[CfDiagnostic] {
+        match self {
+            Self::Archive(report) => &report.errors,
+            Self::Bootstrap(report) => &report.errors,
+            Self::Extract(report) => &report.errors,
+            Self::Export(report) => &report.errors,
+            Self::Overlay(report) => &report.errors,
+            Self::Load(report) => &report.errors,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfProfileReport {
+    pub id: String,
+    pub compression: &'static str,
+    pub compression_source: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfLayoutReport {
+    pub revision: &'static str,
+    pub base_offset: u64,
+    pub stream_length: u64,
+    pub preamble_bytes: u64,
+    pub page_size: Option<u32>,
+    pub storage_version: u32,
+    pub reserved: Option<u32>,
+    pub element_count: usize,
+    pub indexed_pages: usize,
+    pub encoded_payload_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfSelectionReport {
+    pub requested: Vec<String>,
+    pub selected_count: usize,
+    pub archive_element_count: usize,
+    pub list_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfElementReport {
+    pub index: usize,
+    pub name: String,
+    pub data_state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compression: Option<&'static str>,
+    pub header_bytes: u64,
+    pub header_pages: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packed_bytes: Option<u64>,
+    pub data_pages: usize,
+    pub payload_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unpacked_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packed_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unpacked_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfDiagnostic {
+    pub code: &'static str,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub element: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct CfCommandError {
+    report: Box<CfCommandReport>,
+}
+
+impl CfCommandError {
+    #[must_use]
+    pub const fn report(&self) -> &CfCommandReport {
+        &self.report
+    }
+}
+
+impl fmt::Display for CfCommandError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.report.errors().first() {
+            Some(error) => formatter.write_str(&error.message),
+            None => formatter.write_str("CF command failed"),
+        }
+    }
+}
+
+impl Error for CfCommandError {}
+
+#[derive(Debug)]
+struct RunOptions {
+    command: &'static str,
+    input: PathBuf,
+    profile: String,
+    compression: CfCompression,
+    requested: Vec<String>,
+    list_only: bool,
+    expected_sha256: Vec<String>,
+}
+
+/// Executes one offline CF command and returns a stable JSON-serializable report.
+pub fn run(args: CfArgs) -> Result<CfCommandReport, CfCommandError> {
+    match args.command {
+        CfCommands::Inspect(args) => execute(inspect_options(args)).map(CfCommandReport::Archive),
+        CfCommands::Verify(args) => execute(verify_options(args)).map(CfCommandReport::Archive),
+        CfCommands::Extract(args) => extract(args),
+        CfCommands::Export(mut args) => {
+            args.apply_platform_flag();
+            export(args)
+        }
+        CfCommands::Overlay(mut args) => {
+            args.apply_platform_flag();
+            overlay(args)
+        }
+        CfCommands::Bootstrap(mut args) => {
+            args.apply_platform_flag();
+            bootstrap(args)
+        }
+        CfCommands::Load(mut args) => {
+            args.apply_platform_flag();
+            load(args)
+        }
+    }
+}
+
+fn load(args: CfLoadArgs) -> Result<CfCommandReport, CfCommandError> {
+    let mut report = CfLoadReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "load",
+        ok: false,
+        source_dir: display_path(&args.source_dir),
+        output: display_path(&args.output),
+        base: display_path(&args.base),
+        source_version: args.source_version.as_str(),
+        base_export: "",
+        modules: 0,
+        forms: 0,
+        applied: Vec::new(),
+        warnings: Vec::new(),
+        compiled_objects: Vec::new(),
+        removed_objects: Vec::new(),
+        errors: Vec::new(),
+    };
+    if args.output.exists() {
+        report.errors.push(diagnostic(
+            "output_exists",
+            format!("`{}` already exists", args.output.display()),
+        ));
+        return Err(CfCommandError {
+            report: Box::new(CfCommandReport::Load(report)),
+        });
+    }
+    match crate::load::load_onto_base(
+        &args.source_dir,
+        &args.base,
+        &args.output,
+        args.source_version,
+    ) {
+        Ok(loaded) => {
+            report.ok = true;
+            report.base_export = loaded.base_export;
+            report.modules = loaded.modules;
+            report.forms = loaded.forms;
+            report.applied = loaded.applied;
+            report.compiled_objects = loaded.compiled_objects;
+            report.removed_objects = loaded.removed_objects;
+            report.warnings = loaded.warnings;
+            Ok(CfCommandReport::Load(report))
+        }
+        Err(error) => {
+            report
+                .errors
+                .push(diagnostic(error.code(), error.to_string()));
+            Err(CfCommandError {
+                report: Box::new(CfCommandReport::Load(report)),
+            })
+        }
+    }
+}
+
+fn extract(args: CfExtractArgs) -> Result<CfCommandReport, CfCommandError> {
+    let profile = profile_report_values(&args.profile, args.compression);
+    if let Err(source) = StorageProfileId::parse(&args.profile) {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "invalid_profile",
+            format!("invalid storage profile `{}`: {source}", args.profile),
+        ));
+    }
+    if args.element.is_empty() {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "invalid_element",
+            "element name cannot be empty".to_owned(),
+        ));
+    }
+    if args.output_dir.exists() {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "output_exists",
+            format!(
+                "output directory already exists: `{}`",
+                args.output_dir.display()
+            ),
+        ));
+    }
+    let parent = args
+        .output_dir
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if !parent.is_dir() {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "output_parent_missing",
+            format!("output parent is not a directory: `{}`", parent.display()),
+        ));
+    }
+
+    let limits = input_limits(&args.input)
+        .map_err(|message| extract_failure(&args, profile.clone(), "open_failed", message))?;
+    let source = File::open(&args.input).map_err(|source| {
+        extract_failure(
+            &args,
+            profile.clone(),
+            "open_failed",
+            format!("failed to open `{}`: {source}", args.input.display()),
+        )
+    })?;
+    let mut reader = StreamingReader::open(source, limits).map_err(|source| {
+        extract_failure(
+            &args,
+            profile.clone(),
+            "invalid_archive",
+            format!("failed to index CF archive: {source}"),
+        )
+    })?;
+    if let Some(error) = duplicate_name_diagnostic(reader.index()) {
+        return Err(extract_failure(&args, profile, error.code, error.message));
+    }
+    let Some(index) = reader
+        .index()
+        .entries
+        .iter()
+        .position(|entry| entry.name == args.element)
+    else {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "element_not_found",
+            format!("CF element `{}` was not found", args.element),
+        ));
+    };
+    let packed = reader
+        .read_entry_data(index)
+        .map_err(|source| {
+            extract_failure(
+                &args,
+                profile.clone(),
+                "payload_read_failed",
+                format!(
+                    "failed to read element `{}` payload: {source}",
+                    args.element
+                ),
+            )
+        })?
+        .ok_or_else(|| {
+            extract_failure(
+                &args,
+                profile.clone(),
+                "payload_absent",
+                format!("CF element `{}` has no payload", args.element),
+            )
+        })?;
+    let encoding = payload_encoding(args.compression);
+    let mut decoder = PayloadDecoder::new(limits);
+    let unpacked = decoder.decode(encoding, &packed).map_err(|source| {
+        extract_failure(
+            &args,
+            profile.clone(),
+            "payload_decode_failed",
+            format!(
+                "failed to decode element `{}` as {}: {source}",
+                args.element,
+                encoding_name(encoding)
+            ),
+        )
+    })?;
+    let packed_path = args.output_dir.join("packed.bin");
+    let unpacked_path = args.output_dir.join("unpacked.bin");
+    let packed_report = CfExtractArtifactReport {
+        path: display_path(&packed_path),
+        bytes: u64::try_from(packed.len()).unwrap_or(u64::MAX),
+        sha256: Sha256Digest::for_bytes(&packed).to_string(),
+    };
+    let unpacked_report = CfExtractArtifactReport {
+        path: display_path(&unpacked_path),
+        bytes: u64::try_from(unpacked.bytes().len()).unwrap_or(u64::MAX),
+        sha256: Sha256Digest::for_bytes(unpacked.bytes()).to_string(),
+    };
+
+    fs::create_dir(&args.output_dir).map_err(|source| {
+        extract_failure(
+            &args,
+            profile.clone(),
+            "output_create_failed",
+            format!(
+                "failed to create output directory `{}`: {source}",
+                args.output_dir.display()
+            ),
+        )
+    })?;
+    if let Err(source) = write_new_file(&packed_path, &packed) {
+        rollback_extraction_output(&args.output_dir, &packed_path, &unpacked_path);
+        return Err(extract_failure(
+            &args,
+            profile,
+            "output_write_failed",
+            format!("failed to write `{}`: {source}", packed_path.display()),
+        ));
+    }
+    if let Err(source) = write_new_file(&unpacked_path, unpacked.bytes()) {
+        rollback_extraction_output(&args.output_dir, &packed_path, &unpacked_path);
+        return Err(extract_failure(
+            &args,
+            profile,
+            "output_write_failed",
+            format!("failed to write `{}`: {source}", unpacked_path.display()),
+        ));
+    }
+
+    Ok(CfCommandReport::Extract(CfExtractReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "extract",
+        ok: true,
+        input: display_path(&args.input),
+        output_dir: display_path(&args.output_dir),
+        element: args.element,
+        profile,
+        packed: Some(packed_report),
+        unpacked: Some(unpacked_report),
+        errors: Vec::new(),
+    }))
+}
+
+fn write_new_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(bytes)
+}
+
+fn rollback_extraction_output(output_dir: &Path, packed_path: &Path, unpacked_path: &Path) {
+    let _ = fs::remove_file(unpacked_path);
+    let _ = fs::remove_file(packed_path);
+    let _ = fs::remove_dir(output_dir);
+}
+
+fn extract_failure(
+    args: &CfExtractArgs,
+    profile: CfProfileReport,
+    code: &'static str,
+    message: String,
+) -> CfCommandError {
+    CfCommandError {
+        report: Box::new(CfCommandReport::Extract(CfExtractReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: "extract",
+            ok: false,
+            input: display_path(&args.input),
+            output_dir: display_path(&args.output_dir),
+            element: args.element.clone(),
+            profile,
+            packed: None,
+            unpacked: None,
+            errors: vec![diagnostic(code, message)],
+        })),
+    }
+}
+
+fn bootstrap(mut args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
+    // An omitted target may follow the source platform. An explicitly named
+    // target, including the ordinary default's id, must never be substituted.
+    let target_unspecified = args.target_profile.is_empty();
+    if target_unspecified {
+        args.target_profile = DEFAULT_BOOTSTRAP_TARGET_PROFILE.to_owned();
+    }
+    let package =
+        crate::compiler::artifact::discover_source_package(&args.source_dir).map_err(|source| {
+            bootstrap_failure(&args, "bootstrap_package_invalid", format!("{source:#}"))
+        })?;
+    if args.base_free
+        && matches!(
+            package.intent,
+            crate::compiler::artifact::PackageIntent::ExternalDataProcessor
+                | crate::compiler::artifact::PackageIntent::ExternalReport
+        )
+    {
+        crate::compiler::artifact::validate_output_intent(package.intent, &args.output).map_err(
+            |source| bootstrap_failure(&args, "bootstrap_package_invalid", format!("{source:#}")),
+        )?;
+        return bootstrap_external(args, target_unspecified);
+    }
+    let extension = package.intent == crate::compiler::artifact::PackageIntent::Extension;
+    if !extension && package.intent != crate::compiler::artifact::PackageIntent::Configuration {
+        return Err(bootstrap_failure(
+            &args,
+            "bootstrap_package_not_supported",
+            format!(
+                "{:?} source `{}` is built by `cf bootstrap --base-free --platform 8.3.27` (.epf/.erf); refusing ordinary CF publication",
+                package.intent,
+                package.root_xml.display(),
+            ),
+        ));
+    }
+    crate::compiler::artifact::validate_output_intent(package.intent, &args.output).map_err(
+        |source| bootstrap_failure(&args, "bootstrap_package_invalid", format!("{source:#}")),
+    )?;
+    if args.source_dir.is_file() {
+        return Err(bootstrap_failure(
+            &args,
+            "bootstrap_package_root_file_not_supported",
+            format!(
+                "Configuration XML `{}` was identified; the current CF compiler requires its complete source directory",
+                package.root_xml.display(),
+            ),
+        ));
+    }
+    let profiles = load_profile_registry(
+        BUNDLED_PROFILES,
+        args.profile_dir.as_deref(),
+        ProfileRegistryLimits::default(),
+    )
+    .map_err(|source| {
+        bootstrap_failure(
+            &args,
+            "profile_registry_failed",
+            format!("failed to load target profiles: {source:#}"),
+        )
+    })?;
+    let source_platform = args.platform.or_else(|| {
+        extension
+            .then(|| crate::platform::for_xml_version(args.source_version).ok())
+            .flatten()
+    });
+    if (args.base_free || extension)
+        && target_unspecified
+        && let Some(platform) = source_platform
+        && let Some(profile) = platform_target_profile(&profiles, platform)
+    {
+        // `--platform 8.5.1.1150` names the platform the file is for; the
+        // report names its profile instead of the 8.3.27 default.
+        args.target_profile = profile;
+    }
+    let profile_id = ProfileId::parse(&args.target_profile).map_err(|source| {
+        bootstrap_failure(
+            &args,
+            "invalid_target_profile",
+            format!("invalid target profile `{}`: {source}", args.target_profile),
+        )
+    })?;
+    let target = profiles.get(&profile_id).ok_or_else(|| {
+        bootstrap_failure(
+            &args,
+            "target_profile_not_found",
+            format!("target profile `{profile_id}` was not found"),
+        )
+    })?;
+    if extension {
+        let target_xml = target
+            .constants
+            .get(crate::platform::CONSTANT_XML_FORMAT)
+            .ok_or_else(|| {
+                bootstrap_failure(
+                    &args,
+                    "invalid_target_profile",
+                    format!("target profile `{profile_id}` names no platform XML format"),
+                )
+            })?;
+        if target_xml.value != args.source_version.as_str() {
+            return Err(bootstrap_failure(
+                &args,
+                "extension_target_dialect_mismatch",
+                format!(
+                    "CFE source XML {} differs from target profile `{profile_id}` XML {}; cross-profile CFE compilation is not supported",
+                    args.source_version.as_str(),
+                    target_xml.value,
+                ),
+            ));
+        }
+        let storage_profile = target
+            .storage_profile
+            .as_ref()
+            .map(|coordinate| coordinate.value.clone())
+            .ok_or_else(|| {
+                bootstrap_failure(
+                    &args,
+                    "invalid_target_profile",
+                    format!("target profile `{profile_id}` names no storage profile"),
+                )
+            })?;
+        return bootstrap_extension(args, storage_profile);
+    }
+    if args.base_free {
+        let Some(storage_profile) = target
+            .storage_profile
+            .as_ref()
+            .map(|coordinate| coordinate.value.clone())
+        else {
+            return Err(bootstrap_failure(
+                &args,
+                "invalid_target_profile",
+                format!("target profile `{profile_id}` names no storage profile"),
+            ));
+        };
+        return bootstrap_base_free(args, storage_profile);
+    }
+    let tree = ibcmd_xml::source_tree::read_source_tree(&args.source_dir).map_err(|source| {
+        bootstrap_failure(
+            &args,
+            "source_tree_invalid",
+            format!(
+                "failed to read source tree `{}`: {source}",
+                args.source_dir.display()
+            ),
+        )
+    })?;
+    let source_bytes = tree
+        .entries()
+        .iter()
+        .map(|entry| entry.bytes().len())
+        .sum::<usize>();
+    let limits = limits_for_len(source_bytes)
+        .map_err(|message| bootstrap_failure(&args, "source_tree_invalid", message))?;
+    let axes = args.source_version.version_axes();
+    let compilation = compile_bootstrap_source_tree(&tree, axes.xml_dialect().clone(), target)
+        .map_err(|source| bootstrap_compile_failure(&args, &source))?;
+    let source_files = compilation.source_files();
+    let metadata_files = compilation.metadata_files();
+    let asset_files = compilation.asset_files();
+    let non_source_files = compilation.non_source_files();
+    let storage_entries = compilation.patch().len();
+    let revision = match args.revision {
+        CfRevision::Format15 => Revision::Format15,
+        CfRevision::Format16 => Revision::Format16,
+    };
+    let mut cf_profile = BootstrapCfProfile::new(
+        revision,
+        args.storage_version,
+        compilation.storage_profile().clone(),
+    )
+    .with_reserved(args.reserved);
+    if let Some(page_size) = args.page_size {
+        cf_profile = cf_profile.with_page_size(page_size);
+    }
+    let publication =
+        publish_bootstrap_patch_new(compilation.into_patch(), cf_profile, &args.output, limits)
+            .map_err(|source| {
+                bootstrap_failure(
+                    &args,
+                    "bootstrap_publish_failed",
+                    format!("failed to publish bootstrap CF: {source}"),
+                )
+            })?;
+
+    Ok(CfCommandReport::Bootstrap(CfBootstrapReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "bootstrap",
+        ok: true,
+        source_dir: display_path(&args.source_dir),
+        output: display_path(&args.output),
+        source_version: args.source_version.as_str(),
+        target_profile: args.target_profile,
+        revision: revision_name(revision),
+        storage_version: args.storage_version,
+        page_size: args.page_size,
+        reserved: args.reserved,
+        source_files,
+        metadata_files,
+        asset_files,
+        non_source_files,
+        storage_entries,
+        publication: Some(CfBootstrapPublicationReport {
+            bytes_written: publication.write.bytes_written,
+            entries_written: publication.write.entries_written,
+            entries_validated: publication.validation.entries_validated,
+        }),
+        errors: Vec::new(),
+    }))
+}
+
+/// `cf bootstrap --target-profile`'s default (`crate::cli::CfBootstrapArgs`).
+const DEFAULT_BOOTSTRAP_TARGET_PROFILE: &str = "platform-8.3.27.1989";
+
+/// The platform profile with a storage profile that `--platform` names: the
+/// exact build's when it has one, otherwise the oldest build of the release
+/// that has one (`8.5.1` and `8.5.1.1529` → `platform-8.5.1.1150`, as
+/// `--platform 8.5.1` stands for 8.5.1.1150 elsewhere).
+fn platform_target_profile(
+    profiles: &ibcmd_core::profile::ProfileRegistry,
+    platform: crate::platform::PlatformSpec,
+) -> Option<String> {
+    let release = platform.release().map(|part| part.to_string()).join(".");
+    let builds = profiles
+        .profiles()
+        .values()
+        .filter(|profile| profile.storage_profile.is_some())
+        .filter_map(|profile| {
+            let build = profile.platform_build.as_ref()?.value.to_string();
+            let number = build
+                .strip_prefix(&format!("{release}."))?
+                .parse::<u32>()
+                .ok()?;
+            Some((number, build, profile.id.to_string()))
+        })
+        .collect::<Vec<_>>();
+    builds
+        .iter()
+        .find(|(_, build, _)| build == platform.display())
+        .or_else(|| builds.iter().min())
+        .map(|(_, _, id)| id.clone())
+}
+
+/// CFE always uses an unpaged format15 container, as the native file API
+/// accepts on both supported platform families. The source-only extension
+/// compiler proves byte parity before this atomic publication step.
+fn bootstrap_extension(
+    args: CfBootstrapArgs,
+    storage_profile: StorageProfileId,
+) -> Result<CfCommandReport, CfCommandError> {
+    let compilation = crate::extension::build::patch(&args.source_dir, args.source_version)
+        .map_err(|source| {
+            bootstrap_failure(&args, "extension_compile_failed", format!("{source:#}"))
+        })?;
+    let storage_entries = compilation.patch.len();
+    let limits = limits_for_len(compilation.retained)
+        .map_err(|message| bootstrap_failure(&args, "source_tree_invalid", message))?;
+    let mut profile =
+        BootstrapCfProfile::new(Revision::Format15, args.storage_version, storage_profile)
+            .with_extension()
+            .with_reserved(args.reserved);
+    if let Some(page_size) = args.page_size {
+        profile = profile.with_page_size(page_size);
+    }
+    let publication = publish_bootstrap_patch_new(compilation.patch, profile, &args.output, limits)
+        .map_err(|source| {
+            bootstrap_failure(&args, "extension_publish_failed", format!("{source:#}"))
+        })?;
+    Ok(CfCommandReport::Bootstrap(CfBootstrapReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "bootstrap",
+        ok: true,
+        source_dir: display_path(&args.source_dir),
+        output: display_path(&args.output),
+        source_version: args.source_version.as_str(),
+        target_profile: args.target_profile,
+        revision: revision_name(Revision::Format15),
+        storage_version: args.storage_version,
+        page_size: args.page_size,
+        reserved: args.reserved,
+        source_files: compilation.source_files,
+        metadata_files: compilation.metadata_files,
+        asset_files: compilation.asset_files,
+        non_source_files: compilation.non_source_files,
+        storage_entries,
+        publication: Some(CfBootstrapPublicationReport {
+            bytes_written: publication.write.bytes_written,
+            entries_written: publication.write.entries_written,
+            entries_validated: publication.validation.entries_validated,
+        }),
+        errors: Vec::new(),
+    }))
+}
+
+/// `cf bootstrap --base-free`: the tree's rows from the base-free stage, as
+/// they are, in a new container (Untru/ibcmd-rs#351).
+fn bootstrap_base_free(
+    args: CfBootstrapArgs,
+    storage_profile: StorageProfileId,
+) -> Result<CfCommandReport, CfCommandError> {
+    let (patch, retained) =
+        crate::mssql::base_free_cf::base_free_patch(&args.source_dir, args.source_version)
+            .map_err(|source| {
+                bootstrap_failure(&args, "base_free_compile_failed", format!("{source:#}"))
+            })?;
+    let storage_entries = patch.len();
+    let limits = limits_for_len(retained)
+        .map_err(|message| bootstrap_failure(&args, "source_tree_invalid", message))?;
+    // Always the unpaged format15: 8.3.27.2214 refuses the bootstrap
+    // writer's paged format16 (`/LoadCfg`: stream format error) and loads the
+    // format15 one, dumping back the tree it was built from.
+    let revision = Revision::Format15;
+    let mut cf_profile = BootstrapCfProfile::new(revision, args.storage_version, storage_profile)
+        .with_reserved(args.reserved);
+    if let Some(page_size) = args.page_size {
+        cf_profile = cf_profile.with_page_size(page_size);
+    }
+    let publication = publish_bootstrap_patch_new(patch, cf_profile, &args.output, limits)
+        .map_err(|source| {
+            bootstrap_failure(
+                &args,
+                "bootstrap_publish_failed",
+                format!("failed to publish bootstrap CF: {source}"),
+            )
+        })?;
+    Ok(CfCommandReport::Bootstrap(CfBootstrapReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "bootstrap",
+        ok: true,
+        source_dir: display_path(&args.source_dir),
+        output: display_path(&args.output),
+        source_version: args.source_version.as_str(),
+        target_profile: args.target_profile,
+        revision: revision_name(revision),
+        storage_version: args.storage_version,
+        page_size: args.page_size,
+        reserved: args.reserved,
+        source_files: 0,
+        metadata_files: 0,
+        asset_files: 0,
+        non_source_files: 0,
+        storage_entries,
+        publication: Some(CfBootstrapPublicationReport {
+            bytes_written: publication.write.bytes_written,
+            entries_written: publication.write.entries_written,
+            entries_validated: publication.validation.entries_validated,
+        }),
+        errors: Vec::new(),
+    }))
+}
+
+/// The platform whose packages seed an external build (`load::seed`).
+const EXTERNAL_TARGET_PROFILE: &str = "platform-8.3.27.2214";
+
+/// `.epf`/`.erf` from the external tree alone (issue #438): the compiled
+/// load onto a seed package given the tree's identities
+/// (`crate::load::build_external`), verified by exporting it back.
+fn bootstrap_external(
+    mut args: CfBootstrapArgs,
+    target_unspecified: bool,
+) -> Result<CfCommandReport, CfCommandError> {
+    // The seeds are 8.3.27.2214 packages and the load keeps their container:
+    // nothing else was measured, so nothing else is offered.
+    let unmeasured = [
+        (
+            args.source_version != crate::legacy_version::InfobaseConfigSourceVersion::V2_20,
+            "8.5 XML (2.21)",
+        ),
+        (
+            !target_unspecified && args.target_profile != EXTERNAL_TARGET_PROFILE,
+            "--target-profile",
+        ),
+        (args.profile_dir.is_some(), "--profile-dir"),
+        (args.revision != CfRevision::Format16, "--revision"),
+        (args.storage_version != 5, "--storage-version"),
+        (args.page_size.is_some(), "--page-size"),
+        (args.reserved != 0, "--reserved"),
+    ]
+    .into_iter()
+    .filter_map(|(given, option)| given.then_some(option))
+    .collect::<Vec<_>>();
+    if !unmeasured.is_empty() {
+        return Err(bootstrap_failure(
+            &args,
+            "bootstrap_option_not_supported",
+            format!(
+                "an .epf/.erf is built from XML 2.20 into the container 8.3.27.2214 writes; \
+                 not supported for external objects: {}",
+                unmeasured.join(", ")
+            ),
+        ));
+    }
+    args.target_profile = EXTERNAL_TARGET_PROFILE.to_owned();
+    if args.output.exists() {
+        return Err(bootstrap_failure(
+            &args,
+            "output_exists",
+            format!("`{}` already exists", args.output.display()),
+        ));
+    }
+    let loaded = crate::load::build_external(&args.source_dir, &args.output, args.source_version)
+        .map_err(|error| bootstrap_failure(&args, "base_free_compile_failed", error.to_string()))?
+        .ok_or_else(|| {
+            bootstrap_failure(
+                &args,
+                "bootstrap_package_invalid",
+                "the source holds no external data processor or report root".to_owned(),
+            )
+        })?;
+    let bytes_written = fs::metadata(&args.output)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    Ok(CfCommandReport::Bootstrap(CfBootstrapReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "bootstrap",
+        ok: true,
+        source_dir: display_path(&args.source_dir),
+        output: display_path(&args.output),
+        source_version: args.source_version.as_str(),
+        target_profile: args.target_profile,
+        revision: "external",
+        storage_version: args.storage_version,
+        page_size: args.page_size,
+        reserved: args.reserved,
+        source_files: loaded.applied.len(),
+        metadata_files: 0,
+        asset_files: 0,
+        non_source_files: 0,
+        storage_entries: loaded.compiled_objects.len(),
+        publication: Some(CfBootstrapPublicationReport {
+            bytes_written,
+            entries_written: 0,
+            entries_validated: 0,
+        }),
+        errors: Vec::new(),
+    }))
+}
+
+fn bootstrap_failure(
+    args: &CfBootstrapArgs,
+    code: &'static str,
+    message: String,
+) -> CfCommandError {
+    bootstrap_failure_many(args, vec![diagnostic(code, message)])
+}
+
+/// Renders a [`BootstrapCompileError`] as two report entries: the stable
+/// `bootstrap_compile_failed` umbrella every consumer already keys on, followed
+/// by the typed record naming the structural rule that rejected the tree, the
+/// exact source file, and — where the rule compares two sets — what was
+/// required against what was found.  Without the second entry the report only
+/// says that compilation failed, not what or where.
+fn bootstrap_compile_failure(
+    args: &CfBootstrapArgs,
+    error: &BootstrapCompileError,
+) -> CfCommandError {
+    bootstrap_failure_many(
+        args,
+        vec![
+            diagnostic(
+                "bootstrap_compile_failed",
+                format!(
+                    "source tree cannot be bootstrapped: {error}. \
+                     This command used the limited legacy bootstrap compiler. \
+                     For native XML trees, try \
+                     ibcmd-rs cf bootstrap --base-free --platform <version> <source-dir> <output.cf>. \
+                     The --base-free option requires a build from sources newer than v0.4.0; \
+                     published v0.4.0 lacks this option. \
+                     The following diagnostics retain the exact rejected file and rule."
+                ),
+            ),
+            CfDiagnostic {
+                code: error.code(),
+                message: error.to_string(),
+                element: error.source_path().map(str::to_owned),
+                expected: error.expected(),
+                actual: error.actual(),
+            },
+        ],
+    )
+}
+
+fn bootstrap_failure_many(args: &CfBootstrapArgs, errors: Vec<CfDiagnostic>) -> CfCommandError {
+    let revision = match args.revision {
+        CfRevision::Format15 => Revision::Format15,
+        CfRevision::Format16 => Revision::Format16,
+    };
+    CfCommandError {
+        report: Box::new(CfCommandReport::Bootstrap(CfBootstrapReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: "bootstrap",
+            ok: false,
+            source_dir: display_path(&args.source_dir),
+            output: display_path(&args.output),
+            source_version: args.source_version.as_str(),
+            target_profile: args.target_profile.clone(),
+            revision: revision_name(revision),
+            storage_version: args.storage_version,
+            page_size: args.page_size,
+            reserved: args.reserved,
+            source_files: 0,
+            metadata_files: 0,
+            asset_files: 0,
+            non_source_files: 0,
+            storage_entries: 0,
+            publication: None,
+            errors,
+        })),
+    }
+}
+
+fn export(args: CfExportArgs) -> Result<CfCommandReport, CfCommandError> {
+    let profile = profile_report_values(&args.profile, args.compression);
+    let source_profile = StorageProfileId::parse(&args.profile).map_err(|source| {
+        export_failure(
+            &args,
+            profile.clone(),
+            "invalid_profile",
+            format!("invalid storage profile `{}`: {source}", args.profile),
+        )
+    })?;
+    let limits = input_limits(&args.input)
+        .map_err(|message| export_failure(&args, profile.clone(), "open_failed", message))?;
+    let source = File::open(&args.input).map_err(|source| {
+        export_failure(
+            &args,
+            profile.clone(),
+            "open_failed",
+            format!("failed to open `{}`: {source}", args.input.display()),
+        )
+    })?;
+    if args.update && crate::load::index::update_interrupted(&args.output_dir) {
+        return Err(export_failure(
+            &args,
+            profile.clone(),
+            "update_refused",
+            crate::update::interrupted(&args.output_dir),
+        ));
+    }
+    if args.update
+        && !args.fail_on_opaque
+        && let Some(summary) =
+            crate::update::already_current(&args.output_dir, &args.input, args.source_version)
+    {
+        return Ok(CfCommandReport::Export(CfExportReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: "export",
+            ok: true,
+            input: display_path(&args.input),
+            output_dir: display_path(&args.output_dir),
+            source_version: args.source_version.as_str(),
+            profile,
+            export: None,
+            update: Some(summary),
+            errors: Vec::new(),
+        }));
+    }
+    let archive = decode_packed_archive(source, limits, source_profile).map_err(|source| {
+        export_failure(
+            &args,
+            profile.clone(),
+            "invalid_archive",
+            format!("failed to read packed CF archive: {source}"),
+        )
+    })?;
+    let overwrite = args.overwrite || args.update;
+    let write_index = args.index || args.update;
+    let mut update = None;
+    // A full update of an existing tree exports here first, then replaces
+    // the tree's exported files (`update::replace_tree`).
+    let mut aside = None;
+    if args.update {
+        let fresh = crate::update::preflight(&args.output_dir)
+            .map_err(|reason| export_failure(&args, profile.clone(), "update_refused", reason))?;
+        let entries = crate::external::export::entries_of(&archive);
+        let planned = if args.fail_on_opaque {
+            Err("--fail-on-opaque checks every entry of the current image".to_owned())
+        } else if fresh {
+            Err("the directory holds no tree yet".to_owned())
+        } else if crate::external::export::detect_in_archive(&archive)
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            Err("an external object keeps no versions".to_owned())
+        } else {
+            crate::update::plan(&args.output_dir, &entries, args.source_version)
+        };
+        match planned {
+            Ok(changed) => {
+                let scratch = std::env::temp_dir().join(format!(
+                    "ibcmd-update-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos())
+                        .unwrap_or_default()
+                ));
+                let result = crate::update::update_incrementally(
+                    &args.input,
+                    &args.output_dir,
+                    archive.source_profile().as_str(),
+                    entries,
+                    &changed,
+                    args.source_version,
+                    &scratch,
+                );
+                let _ = std::fs::remove_dir_all(&scratch);
+                let (partial, summary) = result.map_err(|source| {
+                    export_failure(
+                        &args,
+                        profile.clone(),
+                        "update_failed",
+                        format!("failed to update the tree: {source:#}"),
+                    )
+                })?;
+                return Ok(CfCommandReport::Export(CfExportReport {
+                    schema_version: REPORT_SCHEMA_VERSION,
+                    command: "export",
+                    ok: true,
+                    input: display_path(&args.input),
+                    output_dir: display_path(&args.output_dir),
+                    source_version: args.source_version.as_str(),
+                    profile,
+                    export: partial,
+                    update: Some(summary),
+                    errors: Vec::new(),
+                }));
+            }
+            Err(reason) => {
+                update = Some(crate::update::UpdateSummary {
+                    mode: "full",
+                    reason: Some(reason),
+                    ..crate::update::UpdateSummary::default()
+                });
+                if !fresh {
+                    aside = Some(std::env::temp_dir().join(format!(
+                        "ibcmd-update-full-{}-{}",
+                        std::process::id(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos())
+                            .unwrap_or_default()
+                    )));
+                }
+            }
+        }
+    }
+    let target = aside.clone().unwrap_or_else(|| args.output_dir.clone());
+    let versions = if write_index {
+        crate::load::archive_versions(&archive)
+    } else {
+        Default::default()
+    };
+    // An external data processor/report (.epf/.erf) is the same container
+    // family; the adapter answers `None` for configurations and extensions.
+    let external = crate::external::export::export_if_external(
+        &archive,
+        &target,
+        overwrite,
+        args.source_version,
+    )
+    .map_err(|source| {
+        export_failure(
+            &args,
+            profile.clone(),
+            "export_failed",
+            format!("failed to export external object: {source:#}"),
+        )
+    })?;
+    let export = match external {
+        Some(report) => report,
+        None => crate::extension::export_packed_cf_archive_to_source(
+            archive,
+            &target,
+            overwrite,
+            args.source_version,
+        )
+        .map_err(|source| {
+            export_failure(
+                &args,
+                profile.clone(),
+                "export_failed",
+                format!("failed to export CF storage image: {source:#}"),
+            )
+        })?,
+    };
+
+    let mut export = export;
+    if args.fail_on_opaque && (export.storage.opaque > 0 || export.storage.failed > 0) {
+        // Full update exports are still isolated here: neither the original
+        // tree nor its index has changed. Keep every per-entry reason in the
+        // report even when the rejected temporary export is removed.
+        if let Some(aside) = &aside {
+            let _ = std::fs::remove_dir_all(aside);
+        }
+        export.output_dir = args.output_dir.clone();
+        let mut errors = Vec::new();
+        if export.storage.opaque > 0 {
+            errors.push(diagnostic(
+                "opaque_export_refused",
+                format!(
+                    "--fail-on-opaque refused {} opaque CF storage entries; see export.storage.entries for names and reasons; no index was published",
+                    export.storage.opaque
+                ),
+            ));
+        }
+        if export.storage.failed > 0 {
+            errors.push(diagnostic(
+                "entry_export_failed",
+                format!(
+                    "{} CF storage entries could not be exported",
+                    export.storage.failed
+                ),
+            ));
+        }
+        return Err(CfCommandError {
+            report: Box::new(CfCommandReport::Export(CfExportReport {
+                schema_version: REPORT_SCHEMA_VERSION,
+                command: "export",
+                ok: false,
+                input: display_path(&args.input),
+                output_dir: display_path(&args.output_dir),
+                source_version: args.source_version.as_str(),
+                profile,
+                export: Some(export),
+                update,
+                errors,
+            })),
+        });
+    }
+    if let Some(aside) = &aside {
+        let replaced = replace_from_aside(&args.output_dir, aside, &export);
+        let _ = std::fs::remove_dir_all(aside);
+        replaced
+            .map_err(|message| export_failure(&args, profile.clone(), "update_failed", message))?;
+        export.output_dir = args.output_dir.clone();
+    }
+    if write_index
+        && let Err(source) = crate::load::write_tree_index(
+            &args.output_dir,
+            &args.input,
+            &export,
+            args.source_version,
+            &versions,
+        )
+    {
+        return Err(export_failure(
+            &args,
+            profile.clone(),
+            "index_failed",
+            format!("failed to write the tree index: {source:#}"),
+        ));
+    }
+    if aside.is_some()
+        && let Err(source) = crate::load::index::finish_update(&args.output_dir)
+    {
+        return Err(export_failure(
+            &args,
+            profile.clone(),
+            "update_failed",
+            format!("{source:#}"),
+        ));
+    }
+    let failed = export.storage.failed;
+    let mut report = CfExportReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "export",
+        ok: failed == 0,
+        input: display_path(&args.input),
+        output_dir: display_path(&args.output_dir),
+        source_version: args.source_version.as_str(),
+        profile,
+        export: Some(export),
+        update,
+        errors: Vec::new(),
+    };
+    if failed > 0 {
+        report.errors.push(diagnostic(
+            "entry_export_failed",
+            format!("{failed} CF storage entries could not be exported"),
+        ));
+        return Err(CfCommandError {
+            report: Box::new(CfCommandReport::Export(report)),
+        });
+    }
+    Ok(CfCommandReport::Export(report))
+}
+
+/// A full update's tree replaced by the export made aside; refused, the tree
+/// untouched, when any entry failed to export.
+fn replace_from_aside(
+    tree: &Path,
+    aside: &Path,
+    export: &crate::mssql_dump::StorageImageSourceExportReport,
+) -> std::result::Result<(), String> {
+    if export.storage.failed > 0 {
+        return Err(format!(
+            "{} entries of the new file failed to export, the tree is unchanged; export it \
+             with --overwrite to take the partial export",
+            export.storage.failed
+        ));
+    }
+    let index = crate::load::index::read_tree_index(tree).ok_or("the tree index went away")?;
+    crate::update::replace_tree(tree, aside, &index).map_err(|source| format!("{source:#}"))
+}
+
+fn export_failure(
+    args: &CfExportArgs,
+    profile: CfProfileReport,
+    code: &'static str,
+    message: String,
+) -> CfCommandError {
+    CfCommandError {
+        report: Box::new(CfCommandReport::Export(CfExportReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: "export",
+            ok: false,
+            input: display_path(&args.input),
+            output_dir: display_path(&args.output_dir),
+            source_version: args.source_version.as_str(),
+            profile,
+            export: None,
+            update: None,
+            errors: vec![diagnostic(code, message)],
+        })),
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum OverlaySourceFamily {
+    Module,
+    RawAsset,
+    CompiledAsset,
+    MetadataXml,
+    CommonModuleXml,
+    CommandInterface,
+    FormXml,
+}
+
+impl OverlaySourceFamily {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Module => "module",
+            Self::RawAsset => "raw-asset",
+            Self::CompiledAsset => "compiled-asset",
+            Self::MetadataXml => "metadata-xml",
+            Self::CommonModuleXml => "common-module-xml",
+            Self::CommandInterface => "command-interface",
+            Self::FormXml => "form-xml",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct OverlaySource {
+    key: StorageKey,
+    path: PathBuf,
+    family: OverlaySourceFamily,
+    bytes: Vec<u8>,
+}
+
+struct CliOverlayCodec<'a> {
+    sources: BTreeMap<&'a str, &'a OverlaySource>,
+}
+
+impl OverlayCodec for CliOverlayCodec<'_> {
+    fn resolve_needs_base(
+        &mut self,
+        target: &StoragePatchTarget,
+        _required: &StorageKey,
+        base: &StorageEntry,
+    ) -> Result<Vec<u8>, String> {
+        let key = target.key().as_str();
+        let source = self
+            .sources
+            .get(key)
+            .copied()
+            .ok_or_else(|| format!("no source was retained for `{key}`"))?;
+        let packed = match source.family {
+            OverlaySourceFamily::MetadataXml => {
+                pack_simple_metadata_blob_from_xml(base.packed_payload(), &source.bytes)
+                    .map(|packed| packed.blob)
+            }
+            OverlaySourceFamily::CommonModuleXml => {
+                pack_common_module_metadata_blob_from_xml(base.packed_payload(), &source.bytes)
+                    .map(|packed| packed.blob)
+            }
+            OverlaySourceFamily::CommandInterface => {
+                pack_command_interface_blob_from_xml(base.packed_payload(), &source.bytes)
+                    .map(|packed| packed.blob)
+            }
+            OverlaySourceFamily::FormXml => {
+                pack_form_body_blob_from_form_xml(base.packed_payload(), &source.bytes, None)
+                    .map(|packed| packed.blob)
+            }
+            OverlaySourceFamily::Module
+            | OverlaySourceFamily::RawAsset
+            | OverlaySourceFamily::CompiledAsset => Err(anyhow::anyhow!(
+                "{} source unexpectedly requested a base entry",
+                source.family.label()
+            )),
+        };
+        packed.map_err(|error| format!("{error:#}"))
+    }
+
+    fn update_versions(
+        &mut self,
+        base: &StorageEntry,
+        changed_keys: &[String],
+    ) -> Result<Vec<u8>, String> {
+        patch_versions_blob_bytes_allowing_additions(base.packed_payload(), changed_keys, true)
+            .map(|patched| patched.blob)
+            .map_err(|error| format!("{error:#}"))
+    }
+}
+
+fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
+    let profile = profile_report_values(&args.profile, args.compression);
+    let source_profile = StorageProfileId::parse(&args.profile).map_err(|source| {
+        overlay_failure(
+            &args,
+            profile.clone(),
+            "invalid_profile",
+            format!("invalid storage profile `{}`: {source}", args.profile),
+        )
+    })?;
+    let sources = load_overlay_sources(&args)
+        .map_err(|message| overlay_failure(&args, profile.clone(), "invalid_sources", message))?;
+    if sources.is_empty() {
+        return Err(overlay_failure(
+            &args,
+            profile,
+            "invalid_sources",
+            "at least one --module, --raw-asset, --compiled-asset or XML source is required"
+                .to_owned(),
+        ));
+    }
+    for source in &sources {
+        if source.family == OverlaySourceFamily::CompiledAsset {
+            validate_compiled_asset_stream(source).map_err(|message| {
+                overlay_failure(&args, profile.clone(), INVALID_COMPILED_ASSET, message)
+            })?;
+        }
+    }
+
+    let axes = CompileAxes::new(
+        XmlDialect::parse(args.source_version.as_str()).expect("CLI XML dialect is valid"),
+        None,
+        None,
+        source_profile.clone(),
+        None,
+    );
+    let requests = sources.iter().map(|source| {
+        let provenance = StorageProvenance::new(&format!(
+            "cf-overlay:{}:{}",
+            source.family.label(),
+            source.path.display()
+        ));
+        let provenance = provenance.map_err(|error| {
+            format!(
+                "invalid provenance for overlay source `{}`: {error}",
+                source.path.display()
+            )
+        })?;
+        let target =
+            StoragePatchTarget::new(source.key.clone(), MultipartIdentity::single(), provenance);
+        let payload = match source.family {
+            OverlaySourceFamily::Module => SourcePayload::ModuleText {
+                text: &source.bytes,
+                info: None,
+            },
+            OverlaySourceFamily::RawAsset => SourcePayload::RawDeflated {
+                bytes: &source.bytes,
+            },
+            OverlaySourceFamily::CompiledAsset => {
+                SourcePayload::Prepacked(PrepackedSource::base_free(
+                    FamilyId::new(COMPILED_ASSET_FAMILY)
+                        .expect("static compiled-asset family id is valid"),
+                    target.provenance().clone(),
+                    &source.bytes,
+                ))
+            }
+            OverlaySourceFamily::MetadataXml => SourcePayload::MetadataXml { xml: &source.bytes },
+            OverlaySourceFamily::CommonModuleXml => {
+                SourcePayload::CommonModuleMetadataXml { xml: &source.bytes }
+            }
+            OverlaySourceFamily::CommandInterface => {
+                SourcePayload::CommandInterfaceXml { xml: &source.bytes }
+            }
+            OverlaySourceFamily::FormXml => SourcePayload::NeedsBase {
+                required: source.key.clone(),
+                reason: "managed Form.xml requires its existing native body row",
+            },
+        };
+        Ok(CompileRequest::new(target, payload))
+    });
+    let requests = requests
+        .collect::<Result<Vec<_>, String>>()
+        .map_err(|message| overlay_failure(&args, profile.clone(), "invalid_sources", message))?;
+    let source_bytes = sources
+        .iter()
+        .map(|source| source.bytes.len())
+        .sum::<usize>();
+    let patch = compile_overlay_with_retained_budget(
+        &axes,
+        requests,
+        limits_for_len(source_bytes)
+            .map_err(|message| overlay_failure(&args, profile.clone(), "invalid_sources", message))?
+            .max_retained_bytes_usize(),
+    )
+    .map_err(|source| {
+        overlay_failure(
+            &args,
+            profile.clone(),
+            "compile_failed",
+            format!("failed to compile overlay sources: {source}"),
+        )
+    })?;
+
+    let limits = input_limits(&args.base)
+        .map_err(|message| overlay_failure(&args, profile.clone(), "open_failed", message))?;
+    let input = File::open(&args.base).map_err(|source| {
+        overlay_failure(
+            &args,
+            profile.clone(),
+            "open_failed",
+            format!("failed to open `{}`: {source}", args.base.display()),
+        )
+    })?;
+    let provenance = StorageProvenance::new("offline CF CLI overlay base")
+        .expect("static CF overlay provenance is valid");
+    let archive = decode_archive_uniform(
+        input,
+        limits,
+        source_profile,
+        provenance,
+        payload_encoding(args.compression),
+    )
+    .map_err(|source| {
+        overlay_failure(
+            &args,
+            profile.clone(),
+            "invalid_archive",
+            format!("failed to decode base CF archive: {source}"),
+        )
+    })?;
+    let mut codec = CliOverlayCodec {
+        sources: sources
+            .iter()
+            .map(|source| (source.key.as_str(), source))
+            .collect(),
+    };
+    let published = publish_overlay_new(&archive, &patch, &mut codec, &args.output, limits)
+        .map_err(|source| overlay_publish_failure(&args, profile.clone(), &source))?;
+
+    let publication = CfOverlayPublicationReport {
+        revision: match published.publication.write.revision {
+            Revision::Format15 => "format15",
+            Revision::Format16 => "format16",
+        },
+        bytes_written: published.publication.published_bytes,
+        entries_written: published.publication.write.entries_written,
+        entries_validated: published.publication.validation.entries_validated,
+    };
+    Ok(CfCommandReport::Overlay(CfOverlayReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "overlay",
+        ok: true,
+        base: display_path(&args.base),
+        output: display_path(&args.output),
+        source_version: args.source_version.as_str(),
+        profile,
+        overlay: Some(published.overlay),
+        publication: Some(publication),
+        errors: Vec::new(),
+    }))
+}
+
+/// Fail-closed check that `--compiled-asset` bytes are one complete raw-deflate
+/// stream, using the same strict payload decoder the CF reader applies:
+/// `StreamEnd` must be reached and the whole input must be consumed, so plain
+/// source bytes (or double-compressed bodies) can never be stored verbatim.
+fn validate_compiled_asset_stream(source: &OverlaySource) -> Result<(), String> {
+    let limits = limits_for_len(source.bytes.len())?;
+    decode_payload(PayloadEncoding::RawDeflate, &source.bytes, limits)
+        .map(|_| ())
+        .map_err(|error| {
+        format!(
+            "--compiled-asset source `{}` for `{}` is not one complete raw-deflate stream: {error}; \
+             --compiled-asset stores the file verbatim as the final physical payload, so plain \
+             source bytes must be passed via --raw-asset instead, which deflates them exactly once",
+            source.path.display(),
+            source.key.as_str()
+        )
+    })
+}
+
+fn load_overlay_sources(args: &CfOverlayArgs) -> Result<Vec<OverlaySource>, String> {
+    let groups = [
+        (OverlaySourceFamily::Module, args.modules.as_slice()),
+        (OverlaySourceFamily::RawAsset, args.raw_assets.as_slice()),
+        (
+            OverlaySourceFamily::CompiledAsset,
+            args.compiled_assets.as_slice(),
+        ),
+        (
+            OverlaySourceFamily::MetadataXml,
+            args.metadata_xml.as_slice(),
+        ),
+        (
+            OverlaySourceFamily::CommonModuleXml,
+            args.common_module_xml.as_slice(),
+        ),
+        (
+            OverlaySourceFamily::CommandInterface,
+            args.command_interfaces.as_slice(),
+        ),
+        (OverlaySourceFamily::FormXml, args.form_xml.as_slice()),
+    ];
+    let mut sources = Vec::new();
+    let mut keys = BTreeSet::new();
+    for (family, values) in groups {
+        for value in values {
+            let (key, raw_path) = value.split_once('=').ok_or_else(|| {
+                format!(
+                    "invalid --{} value `{value}`: expected STORAGE_KEY=FILE",
+                    family.label()
+                )
+            })?;
+            if raw_path.is_empty() {
+                return Err(format!(
+                    "invalid --{} value `{value}`: FILE is empty",
+                    family.label()
+                ));
+            }
+            let key = StorageKey::new(key).map_err(|error| {
+                format!("invalid --{} storage key `{key}`: {error}", family.label())
+            })?;
+            if !keys.insert(key.as_str().to_owned()) {
+                return Err(format!(
+                    "overlay storage key `{}` was specified more than once",
+                    key.as_str()
+                ));
+            }
+            let path = PathBuf::from(raw_path);
+            let bytes = fs::read(&path).map_err(|error| {
+                format!(
+                    "failed to read --{} source `{}`: {error}",
+                    family.label(),
+                    path.display()
+                )
+            })?;
+            sources.push(OverlaySource {
+                key,
+                path,
+                family,
+                bytes,
+            });
+        }
+    }
+    Ok(sources)
+}
+
+fn overlay_failure(
+    args: &CfOverlayArgs,
+    profile: CfProfileReport,
+    code: &'static str,
+    message: String,
+) -> CfCommandError {
+    overlay_failure_many(args, profile, vec![diagnostic(code, message)])
+}
+
+/// Renders a publication failure as the stable `overlay_failed` umbrella
+/// followed by one typed record per structural preflight blocker.
+///
+/// `OverlayPreflightError`'s own `Display` renders only "found N blocker(s)",
+/// so without this expansion the report told a reader that something is wrong
+/// but never which target or why — the blockers were already typed and
+/// serializable, they simply never reached the report.
+fn overlay_publish_failure(
+    args: &CfOverlayArgs,
+    profile: CfProfileReport,
+    error: &PublishOverlayError,
+) -> CfCommandError {
+    let mut errors = vec![diagnostic(
+        "overlay_failed",
+        format!("failed to publish CF overlay: {error}"),
+    )];
+    if let Some(preflight) = error.preflight() {
+        errors.extend(preflight.blockers().iter().map(|blocker| CfDiagnostic {
+            code: blocker.code(),
+            message: blocker.to_string(),
+            element: blocker.logical_key().map(str::to_owned),
+            expected: blocker.expected_part_count().map(|parts| parts.to_string()),
+            actual: blocker.actual_part_count().map(|parts| parts.to_string()),
+        }));
+    }
+    overlay_failure_many(args, profile, errors)
+}
+
+fn overlay_failure_many(
+    args: &CfOverlayArgs,
+    profile: CfProfileReport,
+    errors: Vec<CfDiagnostic>,
+) -> CfCommandError {
+    CfCommandError {
+        report: Box::new(CfCommandReport::Overlay(CfOverlayReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: "overlay",
+            ok: false,
+            base: display_path(&args.base),
+            output: display_path(&args.output),
+            source_version: args.source_version.as_str(),
+            profile,
+            overlay: None,
+            publication: None,
+            errors,
+        })),
+    }
+}
+
+fn inspect_options(args: CfInspectArgs) -> RunOptions {
+    RunOptions {
+        command: "inspect",
+        input: args.input,
+        profile: args.profile,
+        compression: args.compression,
+        requested: args.elements,
+        list_only: false,
+        expected_sha256: Vec::new(),
+    }
+}
+
+fn verify_options(args: CfVerifyArgs) -> RunOptions {
+    RunOptions {
+        command: "verify",
+        input: args.input,
+        profile: args.profile,
+        compression: args.compression,
+        requested: args.elements,
+        list_only: args.list_only,
+        expected_sha256: args.expected_sha256,
+    }
+}
+
+fn execute(options: RunOptions) -> Result<CfReport, CfCommandError> {
+    let profile = profile_report(&options);
+    if let Err(source) = StorageProfileId::parse(&options.profile) {
+        return Err(failure(
+            &options,
+            profile,
+            None,
+            None,
+            Vec::new(),
+            diagnostic(
+                "invalid_profile",
+                format!("invalid storage profile `{}`: {source}", options.profile),
+            ),
+        ));
+    }
+
+    let expected = parse_expectations(&options)
+        .map_err(|error| failure(&options, profile.clone(), None, None, Vec::new(), error))?;
+    if options.list_only && !expected.is_empty() {
+        return Err(failure(
+            &options,
+            profile,
+            None,
+            None,
+            Vec::new(),
+            diagnostic(
+                "invalid_options",
+                "--list-only cannot be combined with --expect-sha256".to_owned(),
+            ),
+        ));
+    }
+
+    let limits = input_limits(&options.input).map_err(|message| {
+        failure(
+            &options,
+            profile.clone(),
+            None,
+            None,
+            Vec::new(),
+            diagnostic("open_failed", message),
+        )
+    })?;
+    let source = File::open(&options.input).map_err(|source| {
+        failure(
+            &options,
+            profile.clone(),
+            None,
+            None,
+            Vec::new(),
+            diagnostic(
+                "open_failed",
+                format!("failed to open `{}`: {source}", options.input.display()),
+            ),
+        )
+    })?;
+    let mut reader = StreamingReader::open(source, limits).map_err(|source| {
+        failure(
+            &options,
+            profile.clone(),
+            None,
+            None,
+            Vec::new(),
+            diagnostic(
+                "invalid_archive",
+                format!("failed to index CF archive: {source}"),
+            ),
+        )
+    })?;
+
+    let layout = layout_report(reader.index());
+    if let Some(error) = duplicate_name_diagnostic(reader.index()) {
+        return Err(failure(
+            &options,
+            profile,
+            Some(layout),
+            None,
+            Vec::new(),
+            error,
+        ));
+    }
+
+    let requested = effective_selection(&options.requested, &expected);
+    let selected = select_indices(reader.index(), &requested);
+    let missing = missing_diagnostics(reader.index(), &requested);
+    let selection = CfSelectionReport {
+        requested,
+        selected_count: selected.len(),
+        archive_element_count: reader.index().entries.len(),
+        list_only: options.list_only,
+    };
+    if !missing.is_empty() {
+        return Err(failure_many(
+            &options,
+            profile,
+            Some(layout),
+            Some(selection),
+            Vec::new(),
+            missing,
+        ));
+    }
+
+    let encoding = payload_encoding(options.compression);
+    let mut decoder = PayloadDecoder::new(limits);
+    let mut elements = Vec::with_capacity(selected.len());
+    let mut errors = Vec::new();
+    for index in selected {
+        let native = reader.index().entries[index].clone();
+        match inspect_element(
+            &mut reader,
+            &mut decoder,
+            index,
+            &native,
+            encoding,
+            options.list_only,
+        ) {
+            Ok(element) => {
+                if let Some(expected_digest) = expected.get(&native.name) {
+                    let actual = element.unpacked_sha256.as_deref();
+                    if actual != Some(expected_digest.as_str()) {
+                        errors.push(CfDiagnostic {
+                            code: "digest_mismatch",
+                            message: format!(
+                                "element `{}` unpacked SHA-256 does not match expectation",
+                                native.name
+                            ),
+                            element: Some(native.name.clone()),
+                            expected: Some(expected_digest.clone()),
+                            actual: actual.map(str::to_owned),
+                        });
+                    }
+                }
+                elements.push(element);
+            }
+            Err(error) => {
+                errors.push(error);
+                return Err(failure_many(
+                    &options,
+                    profile,
+                    Some(layout),
+                    Some(selection),
+                    elements,
+                    errors,
+                ));
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(failure_many(
+            &options,
+            profile,
+            Some(layout),
+            Some(selection),
+            elements,
+            errors,
+        ));
+    }
+
+    Ok(CfReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: options.command,
+        ok: true,
+        input: display_path(&options.input),
+        profile,
+        layout: Some(layout),
+        selection: Some(selection),
+        elements,
+        errors: Vec::new(),
+    })
+}
+
+fn inspect_element(
+    reader: &mut StreamingReader<File>,
+    decoder: &mut PayloadDecoder,
+    index: usize,
+    native: &EntryIndex,
+    encoding: PayloadEncoding,
+    list_only: bool,
+) -> Result<CfElementReport, CfDiagnostic> {
+    let packed_bytes = native.data.as_ref().map(|chain| chain.data_size);
+    let mut report = CfElementReport {
+        index,
+        name: native.name.clone(),
+        data_state: if native.data.is_some() {
+            "present"
+        } else {
+            "absent"
+        },
+        compression: native.data.as_ref().map(|_| encoding_name(encoding)),
+        header_bytes: native.header.data_size,
+        header_pages: native.header.pages.len(),
+        packed_bytes,
+        data_pages: native.data.as_ref().map_or(0, |chain| chain.pages.len()),
+        payload_verified: false,
+        unpacked_bytes: None,
+        packed_sha256: None,
+        unpacked_sha256: None,
+    };
+    if list_only || native.data.is_none() {
+        report.payload_verified = native.data.is_none();
+        return Ok(report);
+    }
+
+    let packed = reader
+        .read_entry_data(index)
+        .map_err(|source| CfDiagnostic {
+            code: "payload_read_failed",
+            message: format!("failed to read element `{}` payload: {source}", native.name),
+            element: Some(native.name.clone()),
+            expected: None,
+            actual: None,
+        })?
+        .expect("present entry index must yield a payload");
+    let decoded = decoder
+        .decode(encoding, &packed)
+        .map_err(|source| CfDiagnostic {
+            code: "payload_decode_failed",
+            message: format!(
+                "failed to decode element `{}` as {}: {source}",
+                native.name,
+                encoding_name(encoding)
+            ),
+            element: Some(native.name.clone()),
+            expected: None,
+            actual: None,
+        })?;
+    report.payload_verified = true;
+    report.unpacked_bytes = u64::try_from(decoded.bytes().len()).ok();
+    report.packed_sha256 = Some(Sha256Digest::for_bytes(&packed).to_string());
+    report.unpacked_sha256 = Some(Sha256Digest::for_bytes(decoded.bytes()).to_string());
+    Ok(report)
+}
+
+fn parse_expectations(options: &RunOptions) -> Result<BTreeMap<String, String>, CfDiagnostic> {
+    let mut expectations = BTreeMap::new();
+    for value in &options.expected_sha256 {
+        let Some((name, digest)) = value.split_once('=') else {
+            return Err(diagnostic(
+                "invalid_expectation",
+                format!("invalid SHA-256 expectation `{value}`; expected NAME=SHA256"),
+            ));
+        };
+        if name.is_empty() {
+            return Err(diagnostic(
+                "invalid_expectation",
+                format!("invalid SHA-256 expectation `{value}`; element name is empty"),
+            ));
+        }
+        Sha256Digest::parse(digest).map_err(|source| {
+            diagnostic(
+                "invalid_expectation",
+                format!("invalid SHA-256 expectation for `{name}`: {source}"),
+            )
+        })?;
+        if expectations
+            .insert(name.to_owned(), digest.to_owned())
+            .is_some()
+        {
+            return Err(CfDiagnostic {
+                code: "duplicate_expectation",
+                message: format!("element `{name}` has more than one SHA-256 expectation"),
+                element: Some(name.to_owned()),
+                expected: None,
+                actual: None,
+            });
+        }
+    }
+    Ok(expectations)
+}
+
+fn effective_selection(requested: &[String], expected: &BTreeMap<String, String>) -> Vec<String> {
+    let mut selection = Vec::new();
+    let mut seen = BTreeSet::new();
+    for name in requested.iter().chain(expected.keys()) {
+        if seen.insert(name.clone()) {
+            selection.push(name.clone());
+        }
+    }
+    selection
+}
+
+fn select_indices(index: &ContainerIndex, requested: &[String]) -> Vec<usize> {
+    if requested.is_empty() {
+        return (0..index.entries.len()).collect();
+    }
+    let requested = requested
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    index
+        .entries
+        .iter()
+        .enumerate()
+        .filter_map(|(entry_index, entry)| {
+            requested
+                .contains(entry.name.as_str())
+                .then_some(entry_index)
+        })
+        .collect()
+}
+
+fn missing_diagnostics(index: &ContainerIndex, requested: &[String]) -> Vec<CfDiagnostic> {
+    let available = index
+        .entries
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect::<BTreeSet<_>>();
+    requested
+        .iter()
+        .filter(|name| !available.contains(name.as_str()))
+        .map(|name| CfDiagnostic {
+            code: "element_not_found",
+            message: format!("CF archive has no top-level element named `{name}`"),
+            element: Some(name.clone()),
+            expected: None,
+            actual: None,
+        })
+        .collect()
+}
+
+fn duplicate_name_diagnostic(index: &ContainerIndex) -> Option<CfDiagnostic> {
+    let mut first = BTreeMap::new();
+    for (entry_index, entry) in index.entries.iter().enumerate() {
+        if let Some(first_index) = first.insert(entry.name.as_str(), entry_index) {
+            return Some(CfDiagnostic {
+                code: "duplicate_element",
+                message: format!(
+                    "CF element `{}` occurs at indices {first_index} and {entry_index}",
+                    entry.name
+                ),
+                element: Some(entry.name.clone()),
+                expected: None,
+                actual: None,
+            });
+        }
+    }
+    None
+}
+
+fn layout_report(index: &ContainerIndex) -> CfLayoutReport {
+    let (revision, page_offset, reserved_offset) = match index.revision {
+        Revision::Format15 => ("format15", 4, 12),
+        Revision::Format16 => ("format16", 8, 16),
+    };
+    CfLayoutReport {
+        revision,
+        base_offset: index.base_offset,
+        stream_length: index.stream_length,
+        preamble_bytes: index.base_offset,
+        page_size: read_u32(&index.raw_file_header, page_offset),
+        storage_version: index.storage_version,
+        reserved: read_u32(&index.raw_file_header, reserved_offset),
+        element_count: index.entries.len(),
+        indexed_pages: index.indexed_pages,
+        encoded_payload_bytes: index.encoded_payload_bytes,
+    }
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    bytes
+        .get(offset..offset + 4)
+        .and_then(|value| value.try_into().ok())
+        .map(u32::from_le_bytes)
+}
+
+fn payload_encoding(compression: CfCompression) -> PayloadEncoding {
+    match compression {
+        CfCompression::RawDeflate => PayloadEncoding::RawDeflate,
+        CfCompression::Stored => PayloadEncoding::Stored,
+    }
+}
+
+fn encoding_name(encoding: PayloadEncoding) -> &'static str {
+    match encoding {
+        PayloadEncoding::RawDeflate => "raw-deflate",
+        PayloadEncoding::Stored => "stored",
+    }
+}
+
+fn revision_name(revision: Revision) -> &'static str {
+    match revision {
+        Revision::Format15 => "format15",
+        Revision::Format16 => "format16",
+    }
+}
+
+fn profile_report(options: &RunOptions) -> CfProfileReport {
+    profile_report_values(&options.profile, options.compression)
+}
+
+fn profile_report_values(profile: &str, compression: CfCompression) -> CfProfileReport {
+    CfProfileReport {
+        id: profile.to_owned(),
+        compression: encoding_name(payload_encoding(compression)),
+        compression_source: "explicit_cli_contract",
+    }
+}
+
+fn diagnostic(code: &'static str, message: String) -> CfDiagnostic {
+    CfDiagnostic {
+        code,
+        message,
+        element: None,
+        expected: None,
+        actual: None,
+    }
+}
+
+fn failure(
+    options: &RunOptions,
+    profile: CfProfileReport,
+    layout: Option<CfLayoutReport>,
+    selection: Option<CfSelectionReport>,
+    elements: Vec<CfElementReport>,
+    error: CfDiagnostic,
+) -> CfCommandError {
+    failure_many(options, profile, layout, selection, elements, vec![error])
+}
+
+fn failure_many(
+    options: &RunOptions,
+    profile: CfProfileReport,
+    layout: Option<CfLayoutReport>,
+    selection: Option<CfSelectionReport>,
+    elements: Vec<CfElementReport>,
+    errors: Vec<CfDiagnostic>,
+) -> CfCommandError {
+    CfCommandError {
+        report: Box::new(CfCommandReport::Archive(CfReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: options.command,
+            ok: false,
+            input: display_path(&options.input),
+            profile,
+            layout,
+            selection,
+            elements,
+            errors,
+        })),
+    }
+}
+
+fn display_path(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use ibcmd_cf::payload::encode_payload;
+    use ibcmd_v8::writer::{Format15Document, Format15Element, write_format15_to_vec};
+
+    use super::*;
+
+    // The wall clock alone can collide when parallel tests hit the same
+    // timer tick; a per-process sequence keeps the names unique.
+    fn temp_nonce() -> String {
+        static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+        format!(
+            "{}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
+    struct TempFile(PathBuf);
+
+    impl TempFile {
+        fn new(bytes: &[u8]) -> Self {
+            let nonce = temp_nonce();
+            let path = std::env::temp_dir().join(format!(
+                "ibcmd-rs-cf-command-{}-{nonce}.cf",
+                std::process::id()
+            ));
+            fs::write(&path, bytes).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    struct TempDirectory(PathBuf);
+
+    impl TempDirectory {
+        fn new(label: &str) -> Self {
+            let nonce = temp_nonce();
+            let path = std::env::temp_dir().join(format!(
+                "ibcmd-rs-cf-command-{label}-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn source_tree(&self) -> PathBuf {
+            const CONFIGURATION: &str = r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20"><Configuration uuid="10000000-0000-4000-8000-000000000001"><Properties><Name>CliBootstrap</Name><Synonym/><Comment/><DefaultRunMode>ManagedApplication</DefaultRunMode><ScriptVariant>English</ScriptVariant><CompatibilityMode>Version8_3_24</CompatibilityMode></Properties><ChildObjects><CommonModule>Portable</CommonModule></ChildObjects></Configuration></MetaDataObject>"#;
+            const MODULE: &str = r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20"><CommonModule uuid="20000000-0000-4000-8000-000000000001"><Properties><Name>Portable</Name><Synonym/><Comment/><Global>false</Global><ClientManagedApplication>false</ClientManagedApplication><Server>true</Server><ExternalConnection>false</ExternalConnection><ClientOrdinaryApplication>false</ClientOrdinaryApplication><ServerCall>false</ServerCall><Privileged>false</Privileged><ReturnValuesReuse>DontUse</ReturnValuesReuse></Properties></CommonModule></MetaDataObject>"#;
+            let source = self.0.join("source");
+            fs::create_dir_all(source.join("CommonModules/Portable/Ext")).unwrap();
+            fs::write(source.join("Configuration.xml"), CONFIGURATION).unwrap();
+            fs::write(source.join("CommonModules/Portable.xml"), MODULE).unwrap();
+            fs::write(
+                source.join("CommonModules/Portable/Ext/Module.bsl"),
+                "Procedure Smoke() Export\nEndProcedure",
+            )
+            .unwrap();
+            source
+        }
+    }
+
+    impl Drop for TempDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn archive() -> (TempFile, String) {
+        let unpacked = b"offline payload";
+        let packed = encode_payload(
+            PayloadEncoding::RawDeflate,
+            unpacked,
+            ResourceLimits::default(),
+        )
+        .unwrap();
+        let bytes = write_format15_to_vec(&Format15Document::new(
+            7,
+            vec![
+                Format15Element::named("root", Some(packed)),
+                Format15Element::named("absent", None),
+            ],
+        ))
+        .unwrap();
+        (
+            TempFile::new(&bytes),
+            Sha256Digest::for_bytes(unpacked).to_string(),
+        )
+    }
+
+    fn archive_report(report: CfCommandReport) -> CfReport {
+        match report {
+            CfCommandReport::Archive(report) => report,
+            CfCommandReport::Bootstrap(_)
+            | CfCommandReport::Extract(_)
+            | CfCommandReport::Export(_)
+            | CfCommandReport::Overlay(_)
+            | CfCommandReport::Load(_) => {
+                panic!("expected archive command report")
+            }
+        }
+    }
+
+    fn archive_error(report: &CfCommandReport) -> &CfReport {
+        match report {
+            CfCommandReport::Archive(report) => report,
+            CfCommandReport::Bootstrap(_)
+            | CfCommandReport::Extract(_)
+            | CfCommandReport::Export(_)
+            | CfCommandReport::Overlay(_)
+            | CfCommandReport::Load(_) => {
+                panic!("expected archive command error")
+            }
+        }
+    }
+
+    fn bootstrap_report(report: CfCommandReport) -> CfBootstrapReport {
+        match report {
+            CfCommandReport::Bootstrap(report) => report,
+            _ => panic!("expected bootstrap command report"),
+        }
+    }
+
+    fn extract_report(report: CfCommandReport) -> CfExtractReport {
+        match report {
+            CfCommandReport::Extract(report) => report,
+            _ => panic!("expected extract command report"),
+        }
+    }
+
+    #[test]
+    fn inspect_reports_layout_and_verified_payloads() {
+        let (archive, _) = archive();
+        let report = run(CfArgs {
+            command: CfCommands::Inspect(CfInspectArgs {
+                input: archive.0.clone(),
+                profile: "storage:cf-test".to_owned(),
+                compression: CfCompression::RawDeflate,
+                elements: Vec::new(),
+            }),
+        })
+        .unwrap();
+        let report = archive_report(report);
+        assert!(report.ok);
+        assert_eq!(report.layout.unwrap().revision, "format15");
+        assert_eq!(report.elements.len(), 2);
+        assert!(report.elements[0].payload_verified);
+        assert_eq!(report.elements[1].data_state, "absent");
+    }
+
+    #[test]
+    fn verify_selects_one_element_and_checks_digest() {
+        let (archive, digest) = archive();
+        let report = run(CfArgs {
+            command: CfCommands::Verify(CfVerifyArgs {
+                input: archive.0.clone(),
+                profile: "storage:cf-test".to_owned(),
+                compression: CfCompression::RawDeflate,
+                elements: vec!["root".to_owned()],
+                list_only: false,
+                expected_sha256: vec![format!("root={digest}")],
+            }),
+        })
+        .unwrap();
+        let report = archive_report(report);
+        assert!(report.ok);
+        assert_eq!(report.elements.len(), 1);
+        assert_eq!(report.elements[0].name, "root");
+    }
+
+    #[test]
+    fn wrong_digest_is_a_machine_readable_failure() {
+        let (archive, _) = archive();
+        let error = run(CfArgs {
+            command: CfCommands::Verify(CfVerifyArgs {
+                input: archive.0.clone(),
+                profile: "storage:cf-test".to_owned(),
+                compression: CfCompression::RawDeflate,
+                elements: vec!["root".to_owned()],
+                list_only: false,
+                expected_sha256: vec![format!("root={}", "0".repeat(64))],
+            }),
+        })
+        .unwrap_err();
+        let report = archive_error(error.report());
+        assert!(!report.ok);
+        assert_eq!(report.errors[0].code, "digest_mismatch");
+    }
+
+    #[test]
+    fn list_only_does_not_read_or_decode_selected_payload() {
+        let bytes = write_format15_to_vec(&Format15Document::new(
+            7,
+            vec![Format15Element::named(
+                "opaque",
+                Some(b"not a deflate stream".to_vec()),
+            )],
+        ))
+        .unwrap();
+        let archive = TempFile::new(&bytes);
+        let report = run(CfArgs {
+            command: CfCommands::Verify(CfVerifyArgs {
+                input: archive.0.clone(),
+                profile: "storage:cf-test".to_owned(),
+                compression: CfCompression::RawDeflate,
+                elements: vec!["opaque".to_owned()],
+                list_only: true,
+                expected_sha256: Vec::new(),
+            }),
+        })
+        .unwrap();
+        let report = archive_report(report);
+        assert!(report.ok);
+        assert!(!report.elements[0].payload_verified);
+        assert!(report.elements[0].unpacked_sha256.is_none());
+    }
+
+    #[test]
+    fn extract_publishes_exact_packed_and_unpacked_bytes_into_new_directory() {
+        let (archive, digest) = archive();
+        let temp = TempDirectory::new("extract");
+        let output = temp.0.join("root-evidence");
+        let report = extract_report(
+            run(CfArgs {
+                command: CfCommands::Extract(CfExtractArgs {
+                    input: archive.0.clone(),
+                    element: "root".to_owned(),
+                    output_dir: output.clone(),
+                    profile: "storage:cf-test".to_owned(),
+                    compression: CfCompression::RawDeflate,
+                }),
+            })
+            .unwrap(),
+        );
+
+        assert!(report.ok);
+        assert_eq!(report.unpacked.as_ref().unwrap().sha256, digest);
+        assert_eq!(
+            fs::read(output.join("unpacked.bin")).unwrap(),
+            b"offline payload"
+        );
+        let packed = fs::read(output.join("packed.bin")).unwrap();
+        assert_eq!(
+            Sha256Digest::for_bytes(&packed).to_string(),
+            report.packed.as_ref().unwrap().sha256
+        );
+    }
+
+    #[test]
+    fn extract_refuses_existing_output_without_modifying_it() {
+        let (archive, _) = archive();
+        let temp = TempDirectory::new("extract-existing");
+        let output = temp.0.join("root-evidence");
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("sentinel"), b"keep").unwrap();
+
+        let error = run(CfArgs {
+            command: CfCommands::Extract(CfExtractArgs {
+                input: archive.0.clone(),
+                element: "root".to_owned(),
+                output_dir: output.clone(),
+                profile: "storage:cf-test".to_owned(),
+                compression: CfCompression::RawDeflate,
+            }),
+        })
+        .unwrap_err();
+        let CfCommandReport::Extract(report) = error.report() else {
+            panic!("expected extract error report");
+        };
+        assert_eq!(report.errors[0].code, "output_exists");
+        assert_eq!(fs::read(output.join("sentinel")).unwrap(), b"keep");
+        assert!(!output.join("packed.bin").exists());
+        assert!(!output.join("unpacked.bin").exists());
+    }
+
+    #[test]
+    fn extraction_rollback_removes_only_its_new_partial_publication() {
+        let temp = TempDirectory::new("extract-rollback");
+        let output = temp.0.join("partial-evidence");
+        fs::create_dir(&output).unwrap();
+        let packed = output.join("packed.bin");
+        let unpacked = output.join("unpacked.bin");
+        fs::write(&packed, b"partial packed").unwrap();
+        fs::write(&unpacked, b"partial unpacked").unwrap();
+
+        rollback_extraction_output(&output, &packed, &unpacked);
+
+        assert!(!output.exists());
+        assert!(temp.0.exists());
+    }
+
+    #[test]
+    fn bootstrap_command_builds_without_base_and_blocks_unconsumed_sources() {
+        let temp = TempDirectory::new("bootstrap");
+        let source = temp.source_tree();
+        let output = temp.0.join("configuration.cf");
+        let args = || CfBootstrapArgs {
+            source_dir: source.clone(),
+            output: output.clone(),
+            platform: None,
+            source_version: crate::legacy_version::InfobaseConfigSourceVersion::V2_20,
+            target_profile: "platform-8.3.27.1989".to_owned(),
+            profile_dir: None,
+            revision: CfRevision::Format16,
+            storage_version: 5,
+            page_size: None,
+            reserved: 0,
+            base_free: false,
+        };
+        let report = bootstrap_report(
+            run(CfArgs {
+                command: CfCommands::Bootstrap(args()),
+            })
+            .unwrap(),
+        );
+        assert!(report.ok);
+        assert_eq!(report.source_files, 3);
+        assert_eq!(report.storage_entries, 6);
+        assert_eq!(
+            report.publication.as_ref().unwrap().entries_validated,
+            report.storage_entries
+        );
+        assert!(output.is_file());
+        let index =
+            StreamingReader::open(File::open(&output).unwrap(), ResourceLimits::default()).unwrap();
+        assert_eq!(index.index().revision, Revision::Format16);
+        assert_eq!(index.index().entries.len(), 6);
+
+        let blocked_output = temp.0.join("blocked.cf");
+        fs::write(source.join("unknown.dat"), b"must not disappear").unwrap();
+        let mut blocked_args = args();
+        blocked_args.output = blocked_output.clone();
+        let error = run(CfArgs {
+            command: CfCommands::Bootstrap(blocked_args),
+        })
+        .unwrap_err();
+        let CfCommandReport::Bootstrap(report) = error.report() else {
+            panic!("expected bootstrap error report");
+        };
+        assert_eq!(report.errors[0].code, "bootstrap_compile_failed");
+        assert!(!blocked_output.exists());
+    }
+}

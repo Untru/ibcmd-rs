@@ -1,0 +1,10 @@
+[package]
+name = "ibcmd-1c-text"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Primitives of the 1C braced-value text: splitting, strings, scalar fields and XML escaping"
+
+[lints.rust]
+unsafe_code = "forbid"

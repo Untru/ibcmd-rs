@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "1C:EDT",
+    "release": "2025.2.3+30",
+    "derivation": "deterministic runtime projection of the verified Xcore feature semantics corpus"
+  },
+  "summary": {
+    "packages": 1,
+    "classifiers": 1,
+    "features": 1
+  },
+  "packages": [
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/settings.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.settings",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/settings",
+      "classifiers": [
+        {
+          "name": "DataCompositionSettings",
+          "kind": "class",
+          "features": [
+            {
+              "name": "itemsViewMode",
+              "kind": "attribute",
+              "qualifiers": [],
+              "modelType": "DataCompositionSettingsItemViewMode",
+              "lowerBound": 0,
+              "upperBound": 1,
+              "defaultValue": "QuickAccess",
+              "modelEvidence": {
+                "kind": "xcore",
+                "status": "verified",
+                "sources": [
+                  "model/settings.xcore"
+                ],
+                "note": "structural feature declaration in model/settings.xcore"
+              },
+              "xml": {
+                "qname": null,
+                "order": null,
+                "emitDefault": null,
+                "versionGate": {
+                  "status": "pending"
+                },
+                "delegate": {
+                  "status": "pending"
+                },
+                "evidence": {
+                  "kind": "writer-inspection",
+                  "status": "pending",
+                  "sources": [],
+                  "note": "XML behaviour has not been verified"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

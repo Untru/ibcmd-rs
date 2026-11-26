@@ -1,0 +1,30 @@
+prove ours_all on ibcmd_rs_05_trace_n_ours at 2026-09-30T03:37:52
+== 1 stand-alone server + thin client
+  server ready in 8,2 s
+  job took 15,7 s
+  | 1 metadata catalog: Да
+  | 2 query count: 0
+  | 3 write item: cache probe 033814
+  | 4 type of the reference: Да / Справочник.ДемоНовыйСправочник
+  | 5 xdto of the reference: <CatalogRef.ДемоНовыйСправочник xmlns="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">34589d93-bc67-11f1-8f5b-00e04c680093</CatalogRef.ДемоНовыйСправочник>
+  | 6 xdto of the object: 385 characters
+  | 7 query by the reference: 1
+  | 8 catalog attribute (case a2): 3 rows
+  | 9 document attribute (case b): 3 rows
+  | 10 names: Справочник.ДемоНовыйСправочник; synonym Демо: Новый справочник
+  server stopped
+== 2 cluster session
+  reg: registered: ibcmd_rs_05_trace_n_ours in the 8.3.27 cluster; connect with Srvr="localhost:2541";Ref="ibcmd_rs_05_trace_n_ours"
+  job took 24,5 s
+  | 1 metadata catalog: Да
+  | 2 query count: 1
+  | 3 write item: cache probe 033846
+  | 4 type of the reference: Да / Справочник.ДемоНовыйСправочник
+  | 5 xdto of the reference: <CatalogRef.ДемоНовыйСправочник xmlns="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">48f77e66-bc67-11f1-8f5b-00e04c680093</CatalogRef.ДемоНовыйСправочник>
+  | 6 xdto of the object: 385 characters
+  | 7 query by the reference: 1
+  | 8 catalog attribute (case a2): 3 rows
+  | 9 document attribute (case b): 3 rows
+  | 10 names: Справочник.ДемоНовыйСправочник; synonym Демо: Новый справочник
+  reg: unregistered: ibcmd_rs_05_trace_n_ours from the 8.3.27 cluster (the database stays)
+done

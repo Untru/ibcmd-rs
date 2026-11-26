@@ -1,0 +1,1 @@
+PASS 27 pure identity cases; starts/signals/moves/deletes/acquires=0

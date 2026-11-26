@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-typeid-reference",
+  "platform": {
+    "line": "8.3.27",
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "generator": "Unica native dcs.compile",
+    "commit": "a527d40962d047c6922c903b37510b30f697da42",
+    "authority": "hypothesis_only",
+    "template_path": "seed/Template.xml",
+    "template_size": 2392,
+    "template_sha256": "88a5e42672923c9908654dad21bc5ce9833a486bed379cd8fee5a56669dc7080",
+    "objects_path": "seed/unica-main-objects.json",
+    "objects_size": 167,
+    "objects_sha256": "89505883ea0f16b1090c493b683d84e69861b01305885bae55ea64873c3e6754",
+    "base_fixture": "8.3.27.2214-xml-2.20-dcs-filter",
+    "operation": "add DataSetObject field Owner with source value type CatalogRef.FilterProbe"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "10e812cd1bbedba323e13c74a44b2c2f808a8dbaf2b16b3f459a7946f348ca4e",
+    "round_2_cf_sha256": "2698d5e411c914f8c460516f59dbff477a294133ca502c2972fcbfe5bfb85ecd",
+    "native_template_sha256": "3a42405b2c790b00953984acd4340d2c66a23deee88592ca27ccc6f7ecddc1b0",
+    "packed_body_sha256": "3edb0f46155b238c68f2b3879e25695ca148b197e6e706f7719a41953ac51ff5",
+    "unpacked_body_sha256": "14bc430e2f284e08759a94f6e4cd78d344cfcc524281f979b16c8db03c7a0b90",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": { "path": "configuration.cf.b64", "decoded_size": 87700, "sha256": "2698d5e411c914f8c460516f59dbff477a294133ca502c2972fcbfe5bfb85ecd" },
+    "native_template": { "path": "native-template.xml.b64", "decoded_size": 2447, "sha256": "3a42405b2c790b00953984acd4340d2c66a23deee88592ca27ccc6f7ecddc1b0" },
+    "packed_body": { "path": "raw-packed.bin.b64", "decoded_size": 780, "sha256": "3edb0f46155b238c68f2b3879e25695ca148b197e6e706f7719a41953ac51ff5" },
+    "unpacked_body": { "path": "raw-unpacked.bin.b64", "decoded_size": 2849, "sha256": "14bc430e2f284e08759a94f6e4cd78d344cfcc524281f979b16c8db03c7a0b90" }
+  },
+  "mapping": {
+    "context": "direct DataSetObject/DataSetFieldField/valueType",
+    "source_qname": "{http://v8.1c.ru/8.1/data/core}Type",
+    "source_namespace": "http://v8.1c.ru/8.1/data/enterprise/current-config",
+    "source_value": "CatalogRef.FilterProbe",
+    "storage_qname": "{http://v8.1c.ru/8.1/data/core}TypeId",
+    "storage_value": "488c0ffa-ef24-480c-a420-3bd2736317f9",
+    "source_prefix_observed": "d5p1"
+  },
+  "compiler_acceptance": {
+    "candidate_cf_size": 26362,
+    "candidate_cf_sha256": "485b71e5e42622a563c0551241b464b219e8c939b2dd285b4babfc231e28d377",
+    "compiled_body_size": 3272,
+    "compiled_body_sha256": "099c803efaa22422914bb32f7a8214cf1bd4c2c7b2c73ec155b8b6f73f173f45",
+    "platform_saved_cf_size": 87724,
+    "platform_saved_cf_sha256": "b91cf001cbe8991155e68919c26d304e3da220e20abed17df88bbc4a9651cd30",
+    "reexported_native_template_size": 2447,
+    "reexported_native_template_sha256": "3a42405b2c790b00953984acd4340d2c66a23deee88592ca27ccc6f7ecddc1b0",
+    "result": "fresh ru_RU infobase load, apply, save and recursive Report.FilterProbeReport export succeeded",
+    "semantic_token_retained": "CatalogRef.FilterProbe"
+  },
+  "selected_native_tree": [
+    { "path": "Reports/FilterProbeReport.xml", "size": 2229, "sha256": "d75ebaf21c9ee4e9482552e8b92b7a4225c453451f312b32d372b1fa0ac75e1b" },
+    { "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl", "size": 3, "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5" },
+    { "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl", "size": 3, "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5" },
+    { "path": "Reports/FilterProbeReport/Templates/MainSchema.xml", "size": 1262, "sha256": "a18fda8c76a551fd89d7ddbf8fcd0b947606a380459b8e8e22eaeed946c3614c" },
+    { "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml", "size": 2447, "sha256": "3a42405b2c790b00953984acd4340d2c66a23deee88592ca27ccc6f7ecddc1b0" }
+  ],
+  "non_claims": [
+    "No TypeSet, DefinedType, characteristic, generic reference-family or AnyIBRef mapping is inferred.",
+    "No parameter, calculatedField, nestedSchema, query, union or Form context is inferred.",
+    "The d5p1 prefix spelling is observed output formatting; semantic policy is the expanded current-config QName.",
+    "No other platform patch build, EDT round trip, AreaTemplate or unknown TypeId behavior is inferred."
+  ]
+}

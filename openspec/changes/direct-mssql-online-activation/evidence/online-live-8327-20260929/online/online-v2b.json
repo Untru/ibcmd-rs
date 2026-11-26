@@ -1,0 +1,35 @@
+{
+  "database": "ibcmd_rs_05_online_a1",
+  "claimed_platform_profile": "platform-8.3.27.2214",
+  "verified_platform_profile": "platform-8.3.27.2214",
+  "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+  "dry_run": false,
+  "executed": true,
+  "activation": {
+    "mode": "online",
+    "old_generation": "4832dd20-0b9e-45e3-a3e7-095525bf9b3f",
+    "new_generation": "96eee589-ca6c-4269-8b14-1ca1ee9b69ed",
+    "changed_targets": [
+      "16b3681c-426d-4d6f-9ffe-588a23974222",
+      "16b3681c-426d-4d6f-9ffe-588a23974222.0"
+    ],
+    "touched_tables": [
+      "Config",
+      "ConfigSave",
+      "Params"
+    ],
+    "staged_rows": 5,
+    "staged_bytes": 345390,
+    "no_op": false,
+    "online_protocol_verified": true,
+    "existing_sessions_retain_generation": true,
+    "live_session_switch_expected": false,
+    "requires_tail_log_artifact": false,
+    "recovery_token": "D8986A7270A411CC435F2B2D57D1DFEC39D6D3532E368590427A9897BBA534FC"
+  },
+  "script": "F:\\ibcmd\\lab\\05\\online\\runs\\online\\online-v2b.sql",
+  "recovery": "F:\\ibcmd\\lab\\05\\online\\runs\\online\\online-v2b.recovery.json",
+  "tail_log_output": null,
+  "live_recovery_command": null,
+  "worker_switch": null
+}

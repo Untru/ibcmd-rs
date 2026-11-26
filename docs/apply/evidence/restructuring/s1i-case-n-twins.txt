@@ -1,0 +1,110 @@
+# S1-I case n (Catalog._ДемоСтавкиНДС, Reference23, adopted by no extension): the twins on the БСП 8.3.27 clone after a native baseline apply
+# 1. ours before -> ours after (mssql-restructure, extension fingerprint: 253 parts as they were)
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (1):
+  T _Reference23
+     + C _Fld11034 nvarchar(50) NOT NULL COLLATE Cyrillic_General_CI_AS
+== data: tables whose rowcount/checksum changed
+(6)
+  Config: (9841, '-1231797199') -> (9841, '888519023')
+  ConfigSave: (4, '1384958348') -> (0, 'None')
+  DBSchema: (1, '-1619277553') -> (1, '-2112997926')
+  Params: (38, '25617645') -> (38, '-1400622799')
+  SchemaStorage: (2, '448743385') -> (2, '1866699460')
+  _Reference23: (2, '-401396840') -> (2, '-2127382130')
+== service blobs
+DBSchema same: False ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['a8bb72e2ecb0aaba6a73d70309f85ae3f837526f76829eed61083933f2ca6e58']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 3 meta-only 0
+    ~ DBNames [0] 143619 -> 144945 bytes  e1d48608 -> b70c0202
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  ac10b5b7 -> 8f4c6bab
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2996649 -> 2976566 bytes  b1697b60 -> f9dbc952
+Config: rows 9841 -> 9841; added 0 removed 0 changed 2 meta-only 2
+    ~ b78a9e4c-2486-4e73-81ed-3ee6ad7e3055 [0] 2135 -> 2220 bytes  ac34d117 -> 7fd1c50c
+    ~ versions [0] 340597 -> 340597 bytes  044feaf1 -> 94da0a04
+ConfigSave: rows 4 -> 0; added 0 removed 4 changed 0 meta-only 0
+    - b78a9e4c-2486-4e73-81ed-3ee6ad7e3055 [0] 2220 bytes
+    - root [0] 45 bytes
+    - version [0] 28 bytes
+    - versions [0] 340597 bytes
+ConfigCAS: rows 636 -> 636; added 0 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 44; added 0 removed 0 changed 0 meta-only 0
+
+# 2. native after -> ours after
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (3):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C494851F96 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C4F2762179 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     - C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     - C _UpdateId binary(16) NULL
+     - C _LastUpdateResult numeric(2,0) NULL
+     - C _LastUpdateError varbinary(max) NULL
+== data: tables whose rowcount/checksum changed
+(7)
+  DBSchema: (1, '538813404') -> (1, '-2112997926')
+  Files: (44, '-1369943544') -> (44, '-496982297')
+  Params: (38, '1417634055') -> (38, '-1400622799')
+  SchemaStorage: (2, '2094371942') -> (2, '1866699460')
+  _ConfigChngR: (20685, '-1860931724') -> (20685, '-1860742680')
+  _ConfigChngR_ExtProps: (21357, '-22899488') -> (21357, '-1669447419')
+  _Reference23: (2, '-1590511218') -> (2, '-2127382130')
+== service blobs
+DBSchema same: False ['69e836f3ea9d24dcef4b9c0c49fa59e67be9b273195d4cfa63a9b9b3224aa1ba'] ['a8bb72e2ecb0aaba6a73d70309f85ae3f837526f76829eed61083933f2ca6e58']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 7 meta-only 15
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 447588 -> 447544 bytes  596354c5 -> f362a522
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  c258447b -> b9b7f2cb
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  949ff1d4 -> 8b522a9c
+    ~ DBNames [0] 143646 -> 144945 bytes  bde95cdc -> b70c0202
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  802e28e7 -> 8f4c6bab
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2998539 -> 2976566 bytes  39b3e15e -> f9dbc952
+    ~ siVersions [0] 1273 -> 1273 bytes  1cbfd124 -> 7d2660fa
+Config: rows 9841 -> 9841; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+ConfigCAS: rows 636 -> 636; added 0 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 44; added 0 removed 0 changed 2 meta-only 0
+    ~ MobileVersions.dat [0] 37009 -> 37009 bytes  3a554b88 -> bf14437d
+    ~ extd_props_cached/gc.mrk [0] 9 -> 9 bytes  5a827e9b -> 984c6850
+
+# 3. the .si rows, native -> ours (compared after inflate)
+== ibcmd_rs_05_ext_s1i_n2_nat/after  ->  ibcmd_rs_05_ext_s1i_n2_own/after
+-- 1a621f0f-5568-4183-bd9f-f6ef670e7090.si: raw 447588 -> 447544 bytes, text 1613278 -> 1613134 chars, sha256 408015146cbc -> 272c4386dcc0
+  diff lines: 7
+  --- before
+  +++ after
+  -{10808,66193438-abc5-410b-a1f1-a204102d1a62,00000000-0000-0000-0000-000000000000,0,"БиблиотекаСтандартныхПодсистемДемо",
+  +{10807,66193438-abc5-410b-a1f1-a204102d1a62,00000000-0000-0000-0000-000000000000,0,"БиблиотекаСтандартныхПодсистемДемо",
+  -},0,0,c2592060-cd60-441c-b8ab-5abc5983cea5,b78a9e4c-2486-4e73-81ed-3ee6ad7e3055,36,"ДемоНовыйРеквизитСИ",
+  -{1,1,
+  -{"ru","ДемоНовыйРеквизитСИ"}
+-- ea13a2c9-0c2f-40fa-b855-710387e3271d.si: raw 2998539 -> 2976566 bytes, text 25173475 -> 25173495 chars, sha256 153eaecf13b9 -> 2d5cea28dde4
+  (the base64 block decoded: the XDTO model XML)
+  diff lines: 4
+  --- before
+  +++ after
+  -			<property name="ДемоНовыйРеквизитСИ" type="xs:string"/>
+  +			<property name="ДемоНовыйРеквизитСИ" type="xs:string" lowerBound="0"/>
+14 of 16 `.si` rows have the same text (compared after inflate)
+
+# 4. native apply after ours: nothing changed
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (0):
+== data: tables whose rowcount/checksum changed
+(0)
+== service blobs
+DBSchema same: True ['a8bb72e2ecb0aaba6a73d70309f85ae3f837526f76829eed61083933f2ca6e58'] ['a8bb72e2ecb0aaba6a73d70309f85ae3f837526f76829eed61083933f2ca6e58']

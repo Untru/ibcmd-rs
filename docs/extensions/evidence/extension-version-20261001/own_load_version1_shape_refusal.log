@@ -1,0 +1,4 @@
+Error: failed to load the tree of extension "ServiceDesk"
+
+Caused by:
+    unsupported extension root properties payload

@@ -1,0 +1,24 @@
+{
+  "equal": [
+    "CovDataLockControlMode_Automatic",
+    "CovEditType_BothWays",
+    "CovEditType_InList",
+    "CovEnableTotalsSliceFirst_true",
+    "CovEnableTotalsSliceLast_true",
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+    "CovExplanation_Cov",
+    "CovExtendedListPresentation_Cov",
+    "CovExtendedRecordPresentation_Cov",
+    "CovFullTextSearch_Use",
+    "CovIncludeHelpInContents_true",
+    "CovInformationRegisterPeriodicity_Day",
+    "CovInformationRegisterPeriodicity_Second",
+    "CovListPresentation_Cov",
+    "CovMainFilterOnPeriod_true",
+    "CovRecordPresentation_Cov",
+    "CovTemplate",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

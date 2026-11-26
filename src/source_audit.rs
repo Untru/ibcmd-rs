@@ -1,0 +1,3928 @@
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, anyhow};
+use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
+use rayon::prelude::*;
+use serde::Serialize;
+use walkdir::WalkDir;
+
+use crate::module_blob::{
+    MetadataSourceContext, pack_moxel_spreadsheet_blob_from_xml_with_source,
+    parse_simple_metadata_xml_properties, parse_template_type_from_xml,
+};
+use crate::mssql_dump::extract_moxel_spreadsheet_xml;
+use crate::parallel;
+use crate::source::{SourceKind, SourceManifest, scan_sources};
+
+#[derive(Debug, Serialize)]
+pub struct SpreadsheetTemplateAuditReport {
+    pub root: PathBuf,
+    pub template_xml_files: usize,
+    pub spreadsheet_templates: usize,
+    pub packed: usize,
+    pub failed: usize,
+    pub errors: Vec<SpreadsheetTemplateAuditError>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SpreadsheetTemplateAuditError {
+    pub metadata_xml: String,
+    pub template_xml: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SpreadsheetTemplateRoundTripAuditReport {
+    pub root: PathBuf,
+    pub template_xml_files: usize,
+    pub spreadsheet_templates: usize,
+    pub packed: usize,
+    pub extracted: usize,
+    pub repacked: usize,
+    pub matched: usize,
+    pub different: usize,
+    pub failed: usize,
+    pub errors: Vec<SpreadsheetTemplateRoundTripAuditError>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SpreadsheetTemplateRoundTripAuditError {
+    pub metadata_xml: String,
+    pub template_xml: String,
+    pub phase: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FormSourceAuditReport {
+    pub root: PathBuf,
+    pub form_xml_files: usize,
+    pub parsed: usize,
+    pub failed: usize,
+    pub total_xml_bytes: u64,
+    pub max_xml_bytes: u64,
+    pub max_xml_path: Option<String>,
+    pub forms_with_module: usize,
+    pub total_module_bytes: u64,
+    pub forms_with_ext_form_files: usize,
+    pub ext_form_files: usize,
+    pub ext_form_bytes: u64,
+    pub forms_stageable_by_current_loader: usize,
+    pub forms_without_stageable_body: usize,
+    pub unsupported_form_xml_files: usize,
+    pub unsupported_form_xml_bytes: u64,
+    pub forms_with_ignored_ext_form_files: usize,
+    pub ignored_ext_form_files: usize,
+    pub ignored_ext_form_bytes: u64,
+    pub top_level_elements: Vec<FormElementCount>,
+    pub elements: Vec<FormElementCount>,
+    pub child_item_elements: Vec<FormElementCount>,
+    pub child_item_properties: Vec<FormElementCount>,
+    pub child_item_property_contexts: Vec<FormElementCount>,
+    pub child_item_property_value_contexts: Vec<FormElementCount>,
+    pub errors: Vec<FormSourceAuditError>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct FormElementCount {
+    pub name: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FormSourceAuditError {
+    pub form_xml: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SourceLoadCoverageAuditReport {
+    pub root: PathBuf,
+    pub total_files: usize,
+    pub total_bytes: u64,
+    pub files_by_kind: Vec<SourceKindCount>,
+    pub stage_entry_files: usize,
+    pub stage_metadata_xml_files: usize,
+    pub stage_common_module_xml_files: usize,
+    pub potentially_stageable_body_files: usize,
+    pub module_files: usize,
+    pub supported_module_files: usize,
+    pub supported_ext_body_files: usize,
+    pub partially_supported_form_xml_files: usize,
+    pub partially_supported_form_xml_bytes: u64,
+    pub unsupported_form_xml_files: usize,
+    pub unsupported_form_xml_bytes: u64,
+    pub form_xml_stageable_by_module: usize,
+    pub form_xml_without_stageable_module: usize,
+    pub ignored_form_ext_files: usize,
+    pub ignored_form_ext_bytes: u64,
+    pub known_uncovered_files: usize,
+    pub known_uncovered_bytes: u64,
+    pub top_known_uncovered: Vec<SourceLoadCoverageItem>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct SourceKindCount {
+    pub kind: String,
+    pub count: usize,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct SourceLoadCoverageItem {
+    pub path: String,
+    pub bytes: u64,
+    pub reason: String,
+}
+
+#[derive(Debug, Default)]
+struct FormXmlShape {
+    top_level_elements: BTreeMap<String, usize>,
+    elements: BTreeMap<String, usize>,
+    child_item_elements: BTreeMap<String, usize>,
+    child_item_properties: BTreeMap<String, usize>,
+    child_item_property_contexts: BTreeMap<String, usize>,
+    child_item_property_value_contexts: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Default)]
+struct SpreadsheetTemplateRoundTripItemAudit {
+    packed: usize,
+    extracted: usize,
+    repacked: usize,
+    matched: usize,
+    different: usize,
+    errors: Vec<SpreadsheetTemplateRoundTripAuditError>,
+}
+
+pub fn audit_source_load_coverage(root: &Path) -> Result<SourceLoadCoverageAuditReport> {
+    let manifest = scan_sources(root)?;
+    audit_source_load_coverage_from_manifest(&manifest)
+}
+
+pub fn audit_source_load_coverage_from_manifest(
+    manifest: &SourceManifest,
+) -> Result<SourceLoadCoverageAuditReport> {
+    let mut files_by_kind = BTreeMap::<String, (usize, u64)>::new();
+    let mut stage_metadata_xml_files = 0usize;
+    let mut stage_common_module_xml_files = 0usize;
+    let mut module_files = 0usize;
+    let mut supported_module_files = 0usize;
+    let mut supported_ext_body_files = 0usize;
+    let mut partially_supported_form_xml_files = 0usize;
+    let mut partially_supported_form_xml_bytes = 0u64;
+    let mut unsupported_form_xml_files = 0usize;
+    let mut unsupported_form_xml_bytes = 0u64;
+    let mut form_xml_stageable_by_module = 0usize;
+    let mut ignored_form_ext_files = 0usize;
+    let mut ignored_form_ext_bytes = 0u64;
+    let mut known_uncovered = Vec::new();
+
+    for file in &manifest.files {
+        let kind = source_kind_name(&file.kind).to_string();
+        let entry = files_by_kind.entry(kind).or_default();
+        entry.0 += 1;
+        entry.1 += file.size_bytes;
+
+        if is_stage_metadata_xml_path(&file.path) {
+            stage_metadata_xml_files += 1;
+        }
+        if is_root_common_module_xml_path(&file.path) {
+            stage_common_module_xml_files += 1;
+        }
+
+        if file.kind == SourceKind::Module {
+            module_files += 1;
+            if is_supported_module_file(&file.path) {
+                supported_module_files += 1;
+            }
+        }
+        if is_supported_ext_body_file(&file.path) {
+            supported_ext_body_files += 1;
+        }
+
+        if is_form_ext_xml_path(&file.path) {
+            partially_supported_form_xml_files += 1;
+            partially_supported_form_xml_bytes += file.size_bytes;
+            unsupported_form_xml_files += 1;
+            unsupported_form_xml_bytes += file.size_bytes;
+            if form_module_path_exists(&manifest.files, &file.path) {
+                form_xml_stageable_by_module += 1;
+            }
+            known_uncovered.push(SourceLoadCoverageItem {
+                path: file.path.clone(),
+                bytes: file.size_bytes,
+                reason: "Form.xml body is partially compiled; full ibcmd parity is not complete"
+                    .to_string(),
+            });
+        } else if is_form_ext_non_module_file(&file.path)
+            && !is_supported_form_item_asset_file(&file.path)
+        {
+            ignored_form_ext_files += 1;
+            ignored_form_ext_bytes += file.size_bytes;
+            known_uncovered.push(SourceLoadCoverageItem {
+                path: file.path.clone(),
+                bytes: file.size_bytes,
+                reason: "non-module file under Ext/Form is not loaded by current form body packer"
+                    .to_string(),
+            });
+        }
+    }
+
+    known_uncovered.sort_by(|left, right| {
+        right
+            .bytes
+            .cmp(&left.bytes)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    let known_uncovered_files = known_uncovered.len();
+    let known_uncovered_bytes = known_uncovered.iter().map(|item| item.bytes).sum();
+    known_uncovered.truncate(50);
+
+    let stage_entry_files = stage_metadata_xml_files + stage_common_module_xml_files;
+    let potentially_stageable_body_files =
+        supported_module_files + supported_ext_body_files + partially_supported_form_xml_files;
+    let form_xml_without_stageable_module =
+        unsupported_form_xml_files.saturating_sub(form_xml_stageable_by_module);
+
+    Ok(SourceLoadCoverageAuditReport {
+        root: manifest.root.clone(),
+        total_files: manifest.files.len(),
+        total_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
+        files_by_kind: sorted_source_kind_counts(files_by_kind),
+        stage_entry_files,
+        stage_metadata_xml_files,
+        stage_common_module_xml_files,
+        potentially_stageable_body_files,
+        module_files,
+        supported_module_files,
+        supported_ext_body_files,
+        partially_supported_form_xml_files,
+        partially_supported_form_xml_bytes,
+        unsupported_form_xml_files,
+        unsupported_form_xml_bytes,
+        form_xml_stageable_by_module,
+        form_xml_without_stageable_module,
+        ignored_form_ext_files,
+        ignored_form_ext_bytes,
+        known_uncovered_files,
+        known_uncovered_bytes,
+        top_known_uncovered: known_uncovered,
+    })
+}
+
+pub fn audit_spreadsheet_templates(root: &Path) -> Result<SpreadsheetTemplateAuditReport> {
+    if !root.is_dir() {
+        return Err(anyhow!(
+            "source root is not a directory: {}",
+            root.display()
+        ));
+    }
+
+    let root = fs::canonicalize(root)
+        .with_context(|| format!("failed to canonicalize {}", root.display()))?;
+    let source = MetadataSourceContext::new(root.clone());
+    let mut template_xml_files = 0usize;
+    let mut spreadsheet_templates = 0usize;
+    let mut packed = 0usize;
+    let mut errors = Vec::new();
+
+    for entry in WalkDir::new(&root)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry?;
+        if !entry.file_type().is_file() || entry.file_name() != "Template.xml" {
+            continue;
+        }
+        let template_xml = entry.path();
+        let Some(metadata_xml) = template_metadata_xml_path(template_xml) else {
+            continue;
+        };
+        template_xml_files += 1;
+        let metadata = fs::read(&metadata_xml)
+            .with_context(|| format!("failed to read {}", metadata_xml.display()))?;
+        if parse_template_type_from_xml(&metadata)?.as_deref() != Some("SpreadsheetDocument") {
+            continue;
+        }
+        spreadsheet_templates += 1;
+
+        let xml = fs::read(template_xml)
+            .with_context(|| format!("failed to read {}", template_xml.display()))?;
+        match pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, Some(&source)) {
+            Ok(_) => packed += 1,
+            Err(error) => errors.push(SpreadsheetTemplateAuditError {
+                metadata_xml: relative_path_string(&root, &metadata_xml),
+                template_xml: relative_path_string(&root, template_xml),
+                message: error.to_string(),
+            }),
+        }
+    }
+
+    errors.sort_by(|left, right| left.template_xml.cmp(&right.template_xml));
+    Ok(SpreadsheetTemplateAuditReport {
+        root,
+        template_xml_files,
+        spreadsheet_templates,
+        packed,
+        failed: errors.len(),
+        errors,
+    })
+}
+
+fn sorted_source_kind_counts(counts: BTreeMap<String, (usize, u64)>) -> Vec<SourceKindCount> {
+    let mut counts = counts
+        .into_iter()
+        .map(|(kind, (count, bytes))| SourceKindCount { kind, count, bytes })
+        .collect::<Vec<_>>();
+    counts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.kind.cmp(&right.kind))
+    });
+    counts
+}
+
+fn source_kind_name(kind: &SourceKind) -> &'static str {
+    match kind {
+        SourceKind::ConfigurationRoot => "configuration_root",
+        SourceKind::MetadataXml => "metadata_xml",
+        SourceKind::Module => "module",
+        SourceKind::Form => "form",
+        SourceKind::Template => "template",
+        SourceKind::Binary => "binary",
+        SourceKind::OtherXml => "other_xml",
+        SourceKind::Other => "other",
+    }
+}
+
+fn is_stage_metadata_xml_path(path: &str) -> bool {
+    is_configuration_metadata_xml_path(path)
+        || is_root_metadata_xml_path(path)
+        || is_template_metadata_xml_path(path)
+        || is_form_metadata_xml_path(path)
+}
+
+fn is_configuration_metadata_xml_path(path: &str) -> bool {
+    normalize_source_path(path).eq_ignore_ascii_case("Configuration.xml")
+}
+
+fn is_root_metadata_xml_path(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.ends_with(".xml") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() == 2 && is_stage_root_metadata_collection(parts[0])
+}
+
+fn is_root_common_module_xml_path(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.ends_with(".xml") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() == 2 && parts[0] == "commonmodules"
+}
+
+fn is_template_metadata_xml_path(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.ends_with(".xml") || lower.contains("/ext/") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() >= 4 && parts[parts.len() - 2] == "templates"
+}
+
+fn is_form_metadata_xml_path(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.ends_with(".xml") || lower.contains("/ext/") {
+        return false;
+    }
+    let parts = lower.split('/').collect::<Vec<_>>();
+    parts.len() >= 4 && parts[parts.len() - 2] == "forms"
+}
+
+fn is_stage_root_metadata_collection(value: &str) -> bool {
+    matches!(
+        value,
+        "catalogs"
+            | "documents"
+            | "informationregisters"
+            | "accumulationregisters"
+            | "accountingregisters"
+            | "calculationregisters"
+            | "chartsofcharacteristictypes"
+            | "chartsofaccounts"
+            | "chartsofcalculationtypes"
+            | "chartsofcalculationregisters"
+            | "commonforms"
+            | "commonpictures"
+            | "commontemplates"
+            | "commonattributes"
+            | "commandgroups"
+            | "documentjournals"
+            | "reports"
+            | "dataprocessors"
+            | "enums"
+            | "exchangeplans"
+            | "eventsubscriptions"
+            | "filtercriteria"
+            | "functionaloptions"
+            | "functionaloptionsparameters"
+            | "httpservices"
+            | "languages"
+            | "scheduledjobs"
+            | "sessionparameters"
+            | "settingsstorages"
+            | "styleitems"
+            | "styles"
+            | "subsystems"
+            | "roles"
+            | "commoncommands"
+            | "businessprocesses"
+            | "bots"
+            | "definedtypes"
+            | "tasks"
+            | "constants"
+            | "documentnumerators"
+            | "integrationservices"
+            | "sequences"
+            | "webservices"
+            | "wsreferences"
+            | "xdtopackages"
+    )
+}
+
+fn is_supported_module_file(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    matches!(
+        lower.rsplit('/').next(),
+        Some("module.bsl")
+            | Some("managermodule.bsl")
+            | Some("objectmodule.bsl")
+            | Some("recordsetmodule.bsl")
+            | Some("valuemanagermodule.bsl")
+            | Some("commandmodule.bsl")
+            | Some("ordinaryapplicationmodule.bsl")
+            | Some("externalconnectionmodule.bsl")
+            | Some("managedapplicationmodule.bsl")
+            | Some("sessionmodule.bsl")
+    )
+}
+
+fn is_supported_ext_body_file(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    lower.ends_with("/ext/rights.xml")
+        || lower.ends_with("/ext/schedule.xml")
+        || lower.ends_with("/ext/template.xml")
+        || lower.ends_with("/ext/template.txt")
+        || lower.ends_with("/ext/template.bin")
+        || lower.ends_with("/ext/picture.xml")
+        || lower.ends_with("/ext/predefined.xml")
+        || lower.ends_with("/ext/content.xml")
+        || lower.ends_with("/ext/flowchart.xml")
+        || lower.ends_with("/ext/help.xml")
+        || (lower.starts_with("xdtopackages/") && lower.ends_with("/ext/package.bin"))
+        || lower.ends_with("/ext/commandinterface.xml")
+        || is_supported_additional_indexes_file(&lower)
+        || lower.ends_with("/ext/style.xml")
+        || lower == "ext/commandinterface.xml"
+        || lower == "ext/splash.xml"
+        || lower == "ext/parentconfigurations.bin"
+        || lower == "ext/homepageworkarea.xml"
+        || lower == "ext/mobileclientsignature.bin"
+        || lower == "ext/mainsectioncommandinterface.xml"
+        || lower == "ext/clientapplicationinterface.xml"
+        || lower == "ext/mainsectionpicture.xml"
+        || lower == "ext/standaloneconfigurationcontent.bin"
+        || is_supported_form_item_asset_file(&lower)
+}
+
+fn is_supported_additional_indexes_file(lower_path: &str) -> bool {
+    lower_path.ends_with("/ext/additionalindexes.xml")
+        && (lower_path.starts_with("documents/")
+            || lower_path.starts_with("accumulationregisters/"))
+}
+
+fn is_form_ext_xml_path(path: &str) -> bool {
+    normalize_source_path(path)
+        .to_ascii_lowercase()
+        .ends_with("/ext/form.xml")
+}
+
+fn is_form_ext_non_module_file(path: &str) -> bool {
+    let normalized = normalize_source_path(path);
+    let lower = normalized.to_ascii_lowercase();
+    lower.contains("/ext/form/")
+        && !lower.ends_with("/ext/form/module.bsl")
+        && !lower.ends_with("/ext/form.xml")
+}
+
+fn is_supported_form_item_asset_file(path: &str) -> bool {
+    let lower = normalize_source_path(path).to_ascii_lowercase();
+    if !lower.contains("/ext/form/items/") {
+        return false;
+    }
+    let Some(name) = lower.rsplit('/').next() else {
+        return false;
+    };
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return false;
+    };
+    matches!(
+        stem,
+        "picture" | "rowspicture" | "valuespicture" | "headerpicture"
+    ) && matches!(
+        extension,
+        "png" | "bmp" | "gif" | "svg" | "jpg" | "jpeg" | "ico"
+    )
+}
+
+fn form_module_path_exists(files: &[crate::source::SourceFile], form_xml_path: &str) -> bool {
+    let module_path = normalize_source_path(form_xml_path)
+        .trim_end_matches("Form.xml")
+        .to_string()
+        + "Form/Module.bsl";
+    files
+        .iter()
+        .any(|file| normalize_source_path(&file.path).eq_ignore_ascii_case(&module_path))
+}
+
+fn normalize_source_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+pub fn audit_spreadsheet_template_roundtrip(
+    root: &Path,
+) -> Result<SpreadsheetTemplateRoundTripAuditReport> {
+    if !root.is_dir() {
+        return Err(anyhow!(
+            "source root is not a directory: {}",
+            root.display()
+        ));
+    }
+
+    let root = fs::canonicalize(root)
+        .with_context(|| format!("failed to canonicalize {}", root.display()))?;
+    let source = MetadataSourceContext::new(root.clone());
+    let object_refs = common_picture_object_refs(&root)?;
+    let mut template_xml_files = 0usize;
+    let mut templates = Vec::new();
+
+    for entry in WalkDir::new(&root)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry?;
+        if !entry.file_type().is_file() || entry.file_name() != "Template.xml" {
+            continue;
+        }
+        let template_xml = entry.path();
+        let Some(metadata_xml) = template_metadata_xml_path(template_xml) else {
+            continue;
+        };
+        template_xml_files += 1;
+        let metadata = fs::read(&metadata_xml)
+            .with_context(|| format!("failed to read {}", metadata_xml.display()))?;
+        if parse_template_type_from_xml(&metadata)?.as_deref() != Some("SpreadsheetDocument") {
+            continue;
+        }
+        templates.push((metadata_xml, template_xml.to_path_buf()));
+    }
+
+    let item_reports = parallel::install(|| {
+        templates
+            .par_iter()
+            .map(|(metadata_xml, template_xml)| {
+                audit_one_spreadsheet_template_roundtrip(
+                    &root,
+                    &source,
+                    &object_refs,
+                    metadata_xml,
+                    template_xml,
+                )
+            })
+            .collect::<Vec<_>>()
+    })?;
+    let spreadsheet_templates = templates.len();
+    let mut packed = 0usize;
+    let mut extracted = 0usize;
+    let mut repacked = 0usize;
+    let mut matched = 0usize;
+    let mut different = 0usize;
+    let mut errors = Vec::new();
+    for report in item_reports {
+        packed += report.packed;
+        extracted += report.extracted;
+        repacked += report.repacked;
+        matched += report.matched;
+        different += report.different;
+        errors.extend(report.errors);
+    }
+
+    errors.sort_by(|left, right| {
+        left.template_xml
+            .cmp(&right.template_xml)
+            .then(left.phase.cmp(&right.phase))
+    });
+    Ok(SpreadsheetTemplateRoundTripAuditReport {
+        root,
+        template_xml_files,
+        spreadsheet_templates,
+        packed,
+        extracted,
+        repacked,
+        matched,
+        different,
+        failed: errors.len(),
+        errors,
+    })
+}
+
+pub fn audit_form_sources(root: &Path) -> Result<FormSourceAuditReport> {
+    if !root.is_dir() {
+        return Err(anyhow!(
+            "source root is not a directory: {}",
+            root.display()
+        ));
+    }
+
+    let root = fs::canonicalize(root)
+        .with_context(|| format!("failed to canonicalize {}", root.display()))?;
+    let mut top_level_elements = BTreeMap::new();
+    let mut elements = BTreeMap::new();
+    let mut child_item_elements = BTreeMap::new();
+    let mut child_item_properties = BTreeMap::new();
+    let mut child_item_property_contexts = BTreeMap::new();
+    let mut child_item_property_value_contexts = BTreeMap::new();
+    let mut report = FormSourceAuditReport {
+        root: root.clone(),
+        form_xml_files: 0,
+        parsed: 0,
+        failed: 0,
+        total_xml_bytes: 0,
+        max_xml_bytes: 0,
+        max_xml_path: None,
+        forms_with_module: 0,
+        total_module_bytes: 0,
+        forms_with_ext_form_files: 0,
+        ext_form_files: 0,
+        ext_form_bytes: 0,
+        forms_stageable_by_current_loader: 0,
+        forms_without_stageable_body: 0,
+        unsupported_form_xml_files: 0,
+        unsupported_form_xml_bytes: 0,
+        forms_with_ignored_ext_form_files: 0,
+        ignored_ext_form_files: 0,
+        ignored_ext_form_bytes: 0,
+        top_level_elements: Vec::new(),
+        elements: Vec::new(),
+        child_item_elements: Vec::new(),
+        child_item_properties: Vec::new(),
+        child_item_property_contexts: Vec::new(),
+        child_item_property_value_contexts: Vec::new(),
+        errors: Vec::new(),
+    };
+
+    for entry in WalkDir::new(&root)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry?;
+        if !entry.file_type().is_file() || entry.file_name() != "Form.xml" {
+            continue;
+        }
+        let form_xml = entry.path();
+        if !is_form_ext_xml(form_xml) {
+            continue;
+        }
+        report.form_xml_files += 1;
+        let metadata = entry.metadata()?;
+        let xml_len = metadata.len();
+        report.total_xml_bytes += xml_len;
+        if xml_len > report.max_xml_bytes {
+            report.max_xml_bytes = xml_len;
+            report.max_xml_path = Some(relative_path_string(&root, form_xml));
+        }
+
+        let form_ext_dir = form_xml.with_extension("");
+        let module_path = form_ext_dir.join("Module.bsl");
+        if let Ok(module_metadata) = fs::metadata(&module_path)
+            && module_metadata.is_file()
+        {
+            report.forms_with_module += 1;
+            report.total_module_bytes += module_metadata.len();
+        }
+        let (ext_files, ext_bytes, ignored_ext_files, ignored_ext_bytes) =
+            count_form_ext_files(&form_ext_dir)?;
+        if ext_files > 0 {
+            report.forms_with_ext_form_files += 1;
+            report.ext_form_files += ext_files;
+            report.ext_form_bytes += ext_bytes;
+        }
+        if ignored_ext_files > 0 {
+            report.forms_with_ignored_ext_form_files += 1;
+            report.ignored_ext_form_files += ignored_ext_files;
+            report.ignored_ext_form_bytes += ignored_ext_bytes;
+        }
+
+        let xml =
+            fs::read(form_xml).with_context(|| format!("failed to read {}", form_xml.display()))?;
+        match parse_form_xml_shape(&xml) {
+            Ok(shape) => {
+                report.parsed += 1;
+                merge_counts(&mut top_level_elements, shape.top_level_elements);
+                merge_counts(&mut elements, shape.elements);
+                merge_counts(&mut child_item_elements, shape.child_item_elements);
+                merge_counts(&mut child_item_properties, shape.child_item_properties);
+                merge_counts(
+                    &mut child_item_property_contexts,
+                    shape.child_item_property_contexts,
+                );
+                merge_counts(
+                    &mut child_item_property_value_contexts,
+                    shape.child_item_property_value_contexts,
+                );
+            }
+            Err(error) => {
+                report.failed += 1;
+                report.errors.push(FormSourceAuditError {
+                    form_xml: relative_path_string(&root, form_xml),
+                    message: error.to_string(),
+                });
+            }
+        }
+    }
+
+    report
+        .errors
+        .sort_by(|left, right| left.form_xml.cmp(&right.form_xml));
+    report.forms_stageable_by_current_loader = report.forms_with_module;
+    report.forms_without_stageable_body = report
+        .form_xml_files
+        .saturating_sub(report.forms_stageable_by_current_loader);
+    report.unsupported_form_xml_files = report.form_xml_files;
+    report.unsupported_form_xml_bytes = report.total_xml_bytes;
+    report.top_level_elements = sorted_element_counts(top_level_elements);
+    report.elements = sorted_element_counts(elements);
+    report.child_item_elements = sorted_element_counts(child_item_elements);
+    report.child_item_properties = sorted_element_counts(child_item_properties);
+    report.child_item_property_contexts = sorted_element_counts(child_item_property_contexts);
+    report.child_item_property_value_contexts =
+        sorted_element_counts(child_item_property_value_contexts);
+    Ok(report)
+}
+
+fn is_form_ext_xml(path: &Path) -> bool {
+    path.file_name().and_then(|name| name.to_str()) == Some("Form.xml")
+        && path.parent().and_then(|parent| parent.file_name()) == Some(std::ffi::OsStr::new("Ext"))
+}
+
+fn count_form_ext_files(form_ext_dir: &Path) -> Result<(usize, u64, usize, u64)> {
+    if !form_ext_dir.is_dir() {
+        return Ok((0, 0, 0, 0));
+    }
+    let mut files = 0usize;
+    let mut bytes = 0u64;
+    let mut ignored_files = 0usize;
+    let mut ignored_bytes = 0u64;
+    for entry in WalkDir::new(form_ext_dir)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry?;
+        if entry.file_type().is_file() {
+            let len = entry.metadata()?.len();
+            files += 1;
+            bytes += len;
+            if !is_form_module_file(form_ext_dir, entry.path()) {
+                ignored_files += 1;
+                ignored_bytes += len;
+            }
+        }
+    }
+    Ok((files, bytes, ignored_files, ignored_bytes))
+}
+
+fn is_form_module_file(form_ext_dir: &Path, path: &Path) -> bool {
+    path.parent() == Some(form_ext_dir)
+        && path.file_name().and_then(|name| name.to_str()) == Some("Module.bsl")
+}
+
+fn parse_form_xml_shape(xml: &[u8]) -> Result<FormXmlShape> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut path = Vec::<String>::new();
+    let mut text_value = String::new();
+    let mut shape = FormXmlShape::default();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(event)) => {
+                let name = push_form_element(&mut shape, &event, &path)?;
+                path.push(name);
+                text_value.clear();
+            }
+            Ok(Event::Empty(event)) => {
+                push_form_element(&mut shape, &event, &path)?;
+            }
+            Ok(Event::End(_)) => {
+                count_form_child_item_value_context(&mut shape, &path, text_value.trim());
+                path.pop();
+                text_value.clear();
+            }
+            Ok(Event::Text(text)) => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::CData(text)) => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::Eof) => break,
+            Err(error) => return Err(anyhow!("invalid Form.xml: {error}")),
+            _ => {}
+        }
+    }
+    Ok(shape)
+}
+
+fn push_form_element(
+    shape: &mut FormXmlShape,
+    event: &BytesStart<'_>,
+    path: &[String],
+) -> Result<String> {
+    let name = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+    *shape.elements.entry(name.clone()).or_insert(0) += 1;
+    if path.len() == 1 {
+        *shape.top_level_elements.entry(name.clone()).or_insert(0) += 1;
+    }
+    let is_child_item = is_form_child_item_xml_tag(&name);
+    let parent_is_child_items = path.last().is_some_and(|parent| parent == "ChildItems");
+    let parent_is_child_item = path
+        .last()
+        .is_some_and(|parent| is_form_child_item_xml_tag(parent));
+    if is_child_item && (parent_is_child_items || parent_is_child_item) {
+        *shape.child_item_elements.entry(name.clone()).or_insert(0) += 1;
+    }
+    if parent_is_child_item && !is_child_item {
+        *shape.child_item_properties.entry(name.clone()).or_insert(0) += 1;
+        if let Some(parent) = path.last() {
+            *shape
+                .child_item_property_contexts
+                .entry(format!("{parent}/{name}"))
+                .or_insert(0) += 1;
+        }
+    }
+    Ok(name)
+}
+
+fn count_form_child_item_value_context(shape: &mut FormXmlShape, path: &[String], value: &str) {
+    if value.is_empty() || value.len() > 120 {
+        return;
+    }
+    if value.chars().any(char::is_whitespace) {
+        return;
+    }
+    let Some(property) = path.last().map(String::as_str) else {
+        return;
+    };
+    if !is_form_child_item_scalar_property(property) {
+        return;
+    }
+    let Some((child_index, child_item)) = path
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, part)| is_form_child_item_xml_tag(part))
+    else {
+        return;
+    };
+    if child_index + 1 >= path.len() {
+        return;
+    }
+    let property_path = path[child_index + 1..].join("/");
+    *shape
+        .child_item_property_value_contexts
+        .entry(format!("{child_item}/{property_path}/{value}"))
+        .or_insert(0) += 1;
+}
+
+fn is_form_child_item_scalar_property(property: &str) -> bool {
+    matches!(
+        property,
+        "Group"
+            | "Behavior"
+            | "Representation"
+            | "ShowTitle"
+            | "Type"
+            | "DefaultButton"
+            | "EditMode"
+            | "AutoEditMode"
+            | "TitleLocation"
+            | "HorizontalStretch"
+            | "ReadOnly"
+            | "SkipOnInput"
+            | "AutoMaxWidth"
+            | "AutoMaxHeight"
+            | "LocationInCommandBar"
+    )
+}
+
+fn is_form_child_item_xml_tag(tag: &str) -> bool {
+    matches!(
+        tag,
+        "UsualGroup"
+            | "CommandBar"
+            | "Popup"
+            | "ButtonGroup"
+            | "Button"
+            | "Table"
+            | "InputField"
+            | "LabelField"
+            | "SearchStringAddition"
+            | "ViewStatusAddition"
+            | "SearchControlAddition"
+    )
+}
+
+fn merge_counts(target: &mut BTreeMap<String, usize>, source: BTreeMap<String, usize>) {
+    for (key, count) in source {
+        *target.entry(key).or_insert(0) += count;
+    }
+}
+
+fn sorted_element_counts(counts: BTreeMap<String, usize>) -> Vec<FormElementCount> {
+    let mut counts = counts
+        .into_iter()
+        .map(|(name, count)| FormElementCount { name, count })
+        .collect::<Vec<_>>();
+    counts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    counts
+}
+
+fn audit_one_spreadsheet_template_roundtrip(
+    root: &Path,
+    source: &MetadataSourceContext,
+    object_refs: &BTreeMap<String, String>,
+    metadata_xml: &Path,
+    template_xml: &Path,
+) -> SpreadsheetTemplateRoundTripItemAudit {
+    let mut report = SpreadsheetTemplateRoundTripItemAudit::default();
+    let xml = match fs::read(template_xml) {
+        Ok(xml) => xml,
+        Err(error) => {
+            push_roundtrip_error(
+                root,
+                metadata_xml,
+                template_xml,
+                "read",
+                error,
+                &mut report.errors,
+            );
+            return report;
+        }
+    };
+    let first = match pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, Some(source)) {
+        Ok(blob) => {
+            report.packed += 1;
+            blob
+        }
+        Err(error) => {
+            push_roundtrip_error(
+                root,
+                metadata_xml,
+                template_xml,
+                "pack",
+                error,
+                &mut report.errors,
+            );
+            return report;
+        }
+    };
+    let extracted_xml = match extract_moxel_spreadsheet_xml(&first.blob, object_refs) {
+        Some(xml) => {
+            report.extracted += 1;
+            xml
+        }
+        None => {
+            report.errors.push(SpreadsheetTemplateRoundTripAuditError {
+                metadata_xml: relative_path_string(root, metadata_xml),
+                template_xml: relative_path_string(root, template_xml),
+                phase: "extract".to_string(),
+                message: "failed to extract SpreadsheetDocument XML from packed MOXCEL blob"
+                    .to_string(),
+            });
+            return report;
+        }
+    };
+    let second = match pack_moxel_spreadsheet_blob_from_xml_with_source(
+        extracted_xml.as_bytes(),
+        Some(source),
+    ) {
+        Ok(blob) => {
+            report.repacked += 1;
+            blob
+        }
+        Err(error) => {
+            push_roundtrip_error(
+                root,
+                metadata_xml,
+                template_xml,
+                "repack",
+                error,
+                &mut report.errors,
+            );
+            return report;
+        }
+    };
+    let second_extracted_xml = match extract_moxel_spreadsheet_xml(&second.blob, object_refs) {
+        Some(xml) => xml,
+        None => {
+            report.errors.push(SpreadsheetTemplateRoundTripAuditError {
+                metadata_xml: relative_path_string(root, metadata_xml),
+                template_xml: relative_path_string(root, template_xml),
+                phase: "extract-repacked".to_string(),
+                message: "failed to extract SpreadsheetDocument XML from repacked MOXCEL blob"
+                    .to_string(),
+            });
+            return report;
+        }
+    };
+    if extracted_xml == second_extracted_xml {
+        report.matched += 1;
+    } else {
+        report.different += 1;
+        report.errors.push(SpreadsheetTemplateRoundTripAuditError {
+            metadata_xml: relative_path_string(root, metadata_xml),
+            template_xml: relative_path_string(root, template_xml),
+            phase: "compare".to_string(),
+            message: roundtrip_difference_message(&extracted_xml, &second_extracted_xml),
+        });
+    }
+    report
+}
+
+fn template_metadata_xml_path(template_xml: &Path) -> Option<PathBuf> {
+    if template_xml.file_name()? != "Template.xml" {
+        return None;
+    }
+    let ext_dir = template_xml.parent()?;
+    if ext_dir.file_name()? != "Ext" {
+        return None;
+    }
+    let template_dir = ext_dir.parent()?;
+    Some(template_dir.with_extension("xml"))
+}
+
+fn relative_path_string(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn is_ignored(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == ".git" || name == ".vscode" || name == "target")
+}
+
+fn common_picture_object_refs(root: &Path) -> Result<BTreeMap<String, String>> {
+    let mut refs = BTreeMap::new();
+    let common_pictures = root.join("CommonPictures");
+    if !common_pictures.is_dir() {
+        return Ok(refs);
+    }
+    for entry in fs::read_dir(&common_pictures)
+        .with_context(|| format!("failed to read {}", common_pictures.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
+            continue;
+        }
+        let xml = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let properties = parse_simple_metadata_xml_properties(&xml)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        if properties.kind == "CommonPicture" {
+            refs.insert(
+                properties.uuid,
+                format!("CommonPicture.{}", properties.name),
+            );
+        }
+    }
+    Ok(refs)
+}
+
+fn roundtrip_difference_message(first: &str, second: &str) -> String {
+    let first_diff = first
+        .bytes()
+        .zip(second.bytes())
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| first.len().min(second.len()));
+    format!(
+        "round-trip SpreadsheetDocument XML differs: first_bytes={}, second_bytes={}, first_diff_offset={first_diff}, first_context=\"{}\", second_context=\"{}\"",
+        first.len(),
+        second.len(),
+        diff_context(first, first_diff),
+        diff_context(second, first_diff)
+    )
+}
+
+#[cfg(all(test, feature = "research-corpus-tests"))]
+fn spreadsheet_top_level_format_summaries(xml: &str) -> Result<Vec<String>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut current_summary = Vec::<String>::new();
+    let mut summaries = Vec::<String>::new();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                path.push(local.clone());
+                if path == ["document", "format"] {
+                    current_summary.clear();
+                }
+                text.clear();
+            }
+            Ok(Event::Text(event)) => {
+                text.push_str(&event.decode()?);
+            }
+            Ok(Event::End(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                if path.len() == 3
+                    && path.first().map(String::as_str) == Some("document")
+                    && path.get(1).map(String::as_str) == Some("format")
+                    && path.get(2).map(String::as_str) == Some(local.as_str())
+                {
+                    current_summary.push(format!("{local}={}", text.trim()));
+                }
+                if path == ["document", "format"] && local == "format" {
+                    summaries.push(current_summary.join(";"));
+                }
+                text.clear();
+                let _ = path.pop();
+            }
+            Ok(Event::Empty(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                path.push(local.clone());
+                if path == ["document", "format"] {
+                    summaries.push(String::new());
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(summaries)
+}
+
+#[cfg(all(test, feature = "research-corpus-tests"))]
+fn spreadsheet_column_format_indexes(xml: &str) -> Result<Vec<usize>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text = String::new();
+    let mut indexes = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(String::from_utf8_lossy(event.local_name().as_ref()).to_string());
+                text.clear();
+            }
+            Ok(Event::Text(event)) => {
+                text.push_str(&event.decode()?);
+            }
+            Ok(Event::End(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                if path
+                    == [
+                        "document",
+                        "columns",
+                        "columnsItem",
+                        "column",
+                        "formatIndex",
+                    ]
+                    && let Ok(index) = text.trim().parse::<usize>()
+                {
+                    indexes.push(index);
+                }
+                text.clear();
+                let _ = path.pop();
+                if local == "document" {
+                    break;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(indexes)
+}
+
+#[cfg(all(test, feature = "research-corpus-tests"))]
+fn spreadsheet_format_layout_stats(xml: &str) -> Result<(usize, Option<usize>, usize, usize)> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text = String::new();
+    let mut format_count = 0usize;
+    let mut default_format_index = None::<usize>;
+    let mut max_row_or_cell_format = 0usize;
+    let mut min_column_format = usize::MAX;
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                path.push(String::from_utf8_lossy(event.local_name().as_ref()).to_string());
+                text.clear();
+            }
+            Ok(Event::Empty(event)) => {
+                path.push(String::from_utf8_lossy(event.local_name().as_ref()).to_string());
+                if path == ["document", "format"] {
+                    format_count += 1;
+                }
+                let _ = path.pop();
+            }
+            Ok(Event::Text(event)) => {
+                text.push_str(&event.decode()?);
+            }
+            Ok(Event::End(event)) => {
+                let local = String::from_utf8_lossy(event.local_name().as_ref()).to_string();
+                if path == ["document", "format"] && local == "format" {
+                    format_count += 1;
+                } else if path == ["document", "defaultFormatIndex"]
+                    && local == "defaultFormatIndex"
+                {
+                    default_format_index = text.trim().parse::<usize>().ok();
+                } else if path == ["document", "rowsItem", "row", "formatIndex"]
+                    && local == "formatIndex"
+                {
+                    if let Ok(index) = text.trim().parse::<usize>() {
+                        max_row_or_cell_format = max_row_or_cell_format.max(index);
+                    }
+                } else if path == ["document", "rowsItem", "row", "c", "c", "f"] && local == "f" {
+                    if let Ok(index) = text.trim().parse::<usize>() {
+                        max_row_or_cell_format = max_row_or_cell_format.max(index);
+                    }
+                } else if path
+                    == [
+                        "document",
+                        "columns",
+                        "columnsItem",
+                        "column",
+                        "formatIndex",
+                    ]
+                    && local == "formatIndex"
+                    && let Ok(index) = text.trim().parse::<usize>()
+                {
+                    min_column_format = min_column_format.min(index);
+                }
+                text.clear();
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok((
+        format_count,
+        default_format_index,
+        if min_column_format == usize::MAX {
+            0
+        } else {
+            min_column_format
+        },
+        max_row_or_cell_format,
+    ))
+}
+
+fn diff_context(text: &str, byte_offset: usize) -> String {
+    let center = floor_char_boundary(text, byte_offset.min(text.len()));
+    let start = text[..center]
+        .char_indices()
+        .rev()
+        .nth(80)
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+    let end = text[center..]
+        .char_indices()
+        .nth(80)
+        .map(|(index, _)| center + index)
+        .unwrap_or(text.len());
+    text[start..end]
+        .chars()
+        .flat_map(|ch| ch.escape_default())
+        .collect()
+}
+
+fn floor_char_boundary(text: &str, mut offset: usize) -> usize {
+    offset = offset.min(text.len());
+    while offset > 0 && !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
+fn push_roundtrip_error(
+    root: &Path,
+    metadata_xml: &Path,
+    template_xml: &Path,
+    phase: &str,
+    error: impl std::fmt::Display,
+    errors: &mut Vec<SpreadsheetTemplateRoundTripAuditError>,
+) {
+    errors.push(SpreadsheetTemplateRoundTripAuditError {
+        metadata_xml: relative_path_string(root, metadata_xml),
+        template_xml: relative_path_string(root, template_xml),
+        phase: phase.to_string(),
+        message: error.to_string(),
+    });
+}
+
+/// Why one `Form.xml` of a source tree cannot be compiled back into the body
+/// blob the platform stores.
+#[derive(Debug, Serialize)]
+pub struct FormBodyBlockerEntry {
+    pub path: String,
+    pub bytes: u64,
+    /// The blocker the model reports, or the error the reader raised.
+    pub reason: String,
+    /// `parse` when the Form XML reader itself refused, `model` when it read
+    /// the document and the base-free model refused the shape.
+    pub phase: &'static str,
+}
+
+/// What a whole source tree's form bodies would cost to load.
+#[derive(Debug, Serialize)]
+pub struct FormBodyBlockerAuditReport {
+    pub root: PathBuf,
+    pub form_xml_files: usize,
+    pub compilable_form_xml_files: usize,
+    pub blocked_form_xml_files: usize,
+    pub blocked_form_xml_bytes: u64,
+    /// Every distinct reason with the number of forms that raise it. A form
+    /// raising several reasons counts once per distinct reason.
+    pub reasons: Vec<FormBodyBlockerReason>,
+    /// The first forms of each reason, for a starting point.
+    pub examples: Vec<FormBodyBlockerEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FormBodyBlockerReason {
+    pub reason: String,
+    pub phase: &'static str,
+    pub forms: usize,
+    pub bytes: u64,
+}
+
+/// Collapses a blocker message to the shape it shares with every other form
+/// that raises it: the object names a message quotes are evidence, not a
+/// category, so they are replaced by a placeholder.
+fn form_blocker_reason_shape(message: &str) -> String {
+    let mut shaped = String::with_capacity(message.len());
+    let mut chars = message.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '`' {
+            shaped.push(ch);
+            continue;
+        }
+        shaped.push_str("`…`");
+        for inner in chars.by_ref() {
+            if inner == '`' {
+                break;
+            }
+        }
+    }
+    shaped
+}
+
+/// How many forms the native body writer reproduces, and why the rest are not.
+///
+/// This is the end-to-end load-parity measurement: it reads each `Form.xml` of
+/// a source tree, writes the body the platform would store, and compares it to
+/// the body the platform actually stored -- the inflated dump of the same
+/// database. A form the writer refuses is counted as refused, never as wrong.
+#[derive(Debug, Serialize)]
+pub struct NativeFormWriterReport {
+    pub root: PathBuf,
+    pub bodies: PathBuf,
+    pub forms: usize,
+    /// Forms whose stored body was found in the dump.
+    pub compared: usize,
+    /// Forms the writer reproduced byte for byte.
+    pub exact: usize,
+    /// Forms the writer refused, by their first reason. A form with three
+    /// blockers is counted once, under the first, so a count here is what
+    /// removing that reason *starts* to unblock, not what it finishes.
+    pub refused: BTreeMap<String, usize>,
+    /// Every differing form, not the twelve the examples keep: the form's
+    /// path, the offset of the first divergence and both lengths. The
+    /// 34-character shape key groups the families but does not identify a
+    /// record -- a measurement pass searching the corpus for one landed on an
+    /// unrelated item the writer reproduces correctly -- so a reader needs
+    /// the form to go back to.
+    pub differences: Vec<NativeFormWriterRow>,
+    /// Forms whose stored body carries neither of the two facts the source
+    /// does not determine, and so could in principle be written byte for
+    /// byte; and how many of those are. Both are properties of the database
+    /// the body came from rather than of the form: a navigator and a settings
+    /// document that is not the empty constant appear on Designer-saved
+    /// bodies and on none of the bodies of a configuration that was loaded.
+    /// Measuring against `compared` hides that; this is the denominator that
+    /// says how much of the gap is writer work.
+    pub achievable: usize,
+    pub achievable_exact: usize,
+    /// How far a differing form is from exact, as `"<runs> runs"` when the
+    /// two bodies are the same length and `"length differs"` when they are
+    /// not. A form in `1 runs` is one member away; the ones in `length
+    /// differs` are missing or carrying a whole record. Removing a blocker
+    /// moves a form into `different`, never into `exact`, so this is the
+    /// histogram that says what the exact count is actually waiting on.
+    pub near_exact: BTreeMap<String, usize>,
+    /// The same forms keyed by their whole blocker set, joined as the writer
+    /// joined it. A reason that is the only entry of its key is a sole
+    /// blocker -- removing it frees those forms outright -- and one that
+    /// always shares its key frees none on its own. Ordering the work by
+    /// `refused` alone over-counts every reason that travels with another.
+    pub refused_sets: BTreeMap<String, usize>,
+    /// Every refused form with its reasons, which is what a refusal that
+    /// names no path is traced back by.
+    pub refused_forms: BTreeMap<String, String>,
+    /// Forms the writer wrote but got wrong, with one example each.
+    pub different: usize,
+    /// The differing forms clustered by what the divergence looks like, so a
+    /// systematic cause shows up as one large bucket rather than many
+    /// examples.
+    pub shapes: BTreeMap<String, usize>,
+    pub examples: Vec<NativeFormWriterDifference>,
+}
+
+/// One differing form, by path and size, for every one of them.
+#[derive(Debug, Serialize)]
+pub struct NativeFormWriterRow {
+    pub form: String,
+    pub at: usize,
+    pub wrote: usize,
+    pub stored: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NativeFormWriterDifference {
+    pub form: String,
+    /// Where the two bodies first disagree.
+    pub at: usize,
+    pub wrote: String,
+    pub stored: String,
+}
+
+/// A window of `text` around `at`, as the audit prints a divergence.
+fn divergence_window(text: &str, at: usize, before: usize, after: usize) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    let start = at.saturating_sub(before);
+    let end = (at + after).min(chars.len());
+    chars[start..end].iter().collect()
+}
+
+/// The uuid a holder's XML gives the form beside it.
+///
+/// A form a metadata object owns is declared `<Form uuid="…">`, but a common
+/// form is `<CommonForm uuid="…">`. Looking only for the first spelling left
+/// every common form without a uuid, and the audit counted those as "no
+/// stored body in the dump" although the dump holds one for all 121 of BSP's.
+fn form_uuid_of(form_path: &Path) -> Option<String> {
+    // .../Forms/<name>/Ext/Form.xml, and the holder is .../Forms/<name>.xml;
+    // .../CommonForms/<name>/Ext/Form.xml beside .../CommonForms/<name>.xml
+    // is the same shape.
+    let holder = form_path.parent()?.parent()?.with_extension("xml");
+    let text = fs::read_to_string(&holder).ok()?;
+    for marker in ["<Form uuid=\"", "<CommonForm uuid=\""] {
+        let Some(at) = text.find(marker) else {
+            continue;
+        };
+        let rest = &text[at + marker.len()..];
+        if let Some(end) = rest.find('"') {
+            return Some(rest[..end].to_string());
+        }
+    }
+    None
+}
+
+/// Text as the comparison sees it: the dump wraps long base64, the writer does
+/// not, and neither difference is in the body the platform stores.
+fn native_body_for_comparison(text: &str) -> String {
+    text.replace('\r', "").replace('\n', "")
+}
+
+pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeFormWriterReport> {
+    let mut form_paths = Vec::new();
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if entry.file_type().is_file() && entry.file_name() == "Form.xml" {
+            form_paths.push(entry.into_path());
+        }
+    }
+    form_paths.sort();
+
+    // The writer resolves configuration types and pictures against the tree it
+    // is reading, the way the loader does.
+    let source = MetadataSourceContext::new(root.to_path_buf());
+    let outcomes = parallel::install(|| {
+        form_paths
+            .par_iter()
+            .map(|path| {
+                let relative = relative_path_string(root, path);
+                let form_xml = match fs::read(path) {
+                    Ok(bytes) => bytes,
+                    Err(error) => return (relative, Err(error.to_string()), None),
+                };
+                let module_path = path.with_file_name("Form").join("Module.bsl");
+                let module = fs::read(&module_path).ok();
+                let stored = form_uuid_of(path).and_then(|uuid| {
+                    fs::read_to_string(bodies.join(format!("{uuid}.0__part0.txt"))).ok()
+                });
+                // An `<xr:Abs>` picture is a file the export carries beside
+                // the form, under `Ext/Form/Items/<item name>/`, and its bytes
+                // go into the record. The writer needs the directory to read
+                // them from.
+                let items_root = path.with_file_name("Form").join("Items");
+                // Diagnostic: the 8.3.27 reading of a 2.21 form, mirrored
+                // under `IBCMD_RS_WRITE_X20_DIR` by the form's relative path.
+                if let Some(dir) = std::env::var_os("IBCMD_RS_WRITE_X20_DIR")
+                    && crate::mssql_dump::is_xml_2_21_form(&form_xml)
+                    && let Ok(text) = std::str::from_utf8(&form_xml)
+                {
+                    let target = Path::new(&dir).join(&relative);
+                    let written = match crate::mssql_dump::down_convert_xml_2_21_form(
+                        text,
+                        Some(&source),
+                        Some(items_root.as_path()),
+                    ) {
+                        Ok((xml20, _)) => xml20,
+                        Err(error) => format!("ERROR {error:#}"),
+                    };
+                    if let Some(parent) = target.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = fs::write(target, written);
+                }
+                let wrote = crate::module_blob::compile_native_form_body(
+                    &form_xml,
+                    module.as_deref(),
+                    Some(&source),
+                    Some(items_root.as_path()),
+                )
+                .map_err(|error| error.to_string());
+                // The round-trip instrument's other half: every body the
+                // writer compiles is kept, named the way the exporter's
+                // override looks it up, so a full export can be run with the
+                // compiled bodies in place of the stored ones.
+                // A body the exporter cannot parse would make it fall back to
+                // the stored one and pass the round trip for nothing, so such
+                // a body is recorded as a failure instead of being written.
+                let wrote = match wrote {
+                    Ok(body) if crate::module_blob::parse_form_body_plain(&body).is_err() => {
+                        Err("the compiled body does not parse back".to_string())
+                    }
+                    other => other,
+                };
+                if let (Ok(body), Some(dir), Some(uuid)) = (
+                    wrote.as_ref(),
+                    std::env::var_os("IBCMD_RS_WRITE_BODIES_DIR"),
+                    form_uuid_of(path),
+                ) {
+                    let _ = fs::write(Path::new(&dir).join(format!("{uuid}.0.txt")), body);
+                }
+                (relative, wrote, stored)
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = NativeFormWriterReport {
+        root: root.to_path_buf(),
+        bodies: bodies.to_path_buf(),
+        forms: form_paths.len(),
+        compared: 0,
+        exact: 0,
+        refused: BTreeMap::new(),
+        refused_sets: BTreeMap::new(),
+        refused_forms: BTreeMap::new(),
+        achievable: 0,
+        achievable_exact: 0,
+        differences: Vec::new(),
+        near_exact: BTreeMap::new(),
+        different: 0,
+        shapes: BTreeMap::new(),
+        examples: Vec::new(),
+    };
+    for (form, wrote, stored) in outcomes {
+        match wrote {
+            Err(reason) => {
+                let first = reason
+                    .split(';')
+                    .next()
+                    .unwrap_or(&reason)
+                    .trim()
+                    .to_string();
+                *report.refused.entry(first).or_insert(0) += 1;
+                *report.refused_sets.entry(reason.clone()).or_insert(0) += 1;
+                report.refused_forms.insert(form.clone(), reason);
+            }
+            Ok(wrote) => {
+                let Some(stored) = stored else {
+                    *report
+                        .refused
+                        .entry("no stored body in the dump".to_string())
+                        .or_insert(0) += 1;
+                    *report
+                        .refused_sets
+                        .entry("no stored body in the dump".to_string())
+                        .or_insert(0) += 1;
+                    continue;
+                };
+                report.compared += 1;
+                let stored = native_body_for_comparison(stored.trim_start_matches('\u{feff}'));
+                let achievable = !stored.contains("\"Navigator\"")
+                    && stored.contains(crate::module_blob::NATIVE_EMPTY_SETTINGS);
+                if achievable {
+                    report.achievable += 1;
+                }
+                let candidate = native_body_for_comparison(&wrote);
+                if candidate == stored.trim() {
+                    report.exact += 1;
+                    if achievable {
+                        report.achievable_exact += 1;
+                    }
+                } else {
+                    let stored = stored.trim();
+                    report.different += 1;
+                    let at = candidate
+                        .chars()
+                        .zip(stored.chars())
+                        .position(|(left, right)| left != right)
+                        .unwrap_or_else(|| candidate.chars().count().min(stored.chars().count()));
+                    let shape = format!(
+                        "wrote {} | stored {}",
+                        divergence_window(&candidate, at, 0, 34),
+                        divergence_window(stored, at, 0, 34),
+                    );
+                    *report.shapes.entry(shape).or_insert(0) += 1;
+                    let distance = if candidate.chars().count() == stored.chars().count() {
+                        let mut runs = 0usize;
+                        let mut inside = false;
+                        for (left, right) in candidate.chars().zip(stored.chars()) {
+                            if left == right {
+                                inside = false;
+                            } else if !inside {
+                                inside = true;
+                                runs += 1;
+                            }
+                        }
+                        format!("{runs:03} runs")
+                    } else {
+                        // Which way, and by how much: a body that is short by
+                        // a tenth is missing a record, one short by a few
+                        // characters is missing a member. Ninety per cent of
+                        // the differing forms land here, so "one member off"
+                        // is not what the exact count is waiting on.
+                        let wrote = candidate.chars().count() as i64;
+                        let stored = stored.chars().count() as i64;
+                        let percent = (wrote - stored) * 100 / stored.max(1);
+                        let bucket = match percent {
+                            ..=-50 => "shorter by half or more",
+                            -49..=-10 => "shorter by 10-50%",
+                            -9..=-1 => "shorter by under 10%",
+                            0 => "shorter or longer by under 1%",
+                            1..=9 => "longer by under 10%",
+                            10..=49 => "longer by 10-50%",
+                            _ => "longer by half or more",
+                        };
+                        format!("length differs: {bucket}")
+                    };
+                    *report.near_exact.entry(distance).or_insert(0) += 1;
+                    report.differences.push(NativeFormWriterRow {
+                        form: form.clone(),
+                        at,
+                        wrote: candidate.chars().count(),
+                        stored: stored.chars().count(),
+                    });
+                    if report.examples.len() < 12 {
+                        report.examples.push(NativeFormWriterDifference {
+                            form,
+                            at,
+                            wrote: divergence_window(&candidate, at, 110, 140),
+                            stored: divergence_window(stored, at, 110, 140),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// How far the base-free interface writers reproduce the rows the platform
+/// stored, one family at a time.
+///
+/// Every `Ext/CommandInterface.xml` (a subsystem's, a common command's, the
+/// configuration's), `Ext/MainSectionCommandInterface.xml`,
+/// `Ext/HomePageWorkArea.xml`, `Ext/ClientApplicationInterface.xml` and
+/// `Ext/StandaloneConfigurationContent.bin` is compiled from the source tree
+/// alone; the body is compared with the stored row's plain text, and read back
+/// by the exporter's own reader and formatter into the file the platform
+/// exported. `stored_round_trip` runs the stored row through the same reader: a
+/// file it misses is a gap of the harness or the exporter, not of the writer.
+#[derive(Debug, Serialize)]
+pub struct InterfaceWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub families: BTreeMap<String, InterfaceWriterFamilyReport>,
+    /// Every file that is not reproduced, with its first difference or the
+    /// writer's refusal.
+    pub differences: Vec<InterfaceWriterDifference>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct InterfaceWriterFamilyReport {
+    pub files: usize,
+    pub compiled: usize,
+    /// Refusals by reason, with the names a reason quotes folded away.
+    pub refused: BTreeMap<String, usize>,
+    pub no_stored_row: usize,
+    pub plain_identical: usize,
+    pub round_trip_identical: usize,
+    pub stored_round_trip_identical: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InterfaceWriterDifference {
+    pub family: String,
+    pub file: String,
+    pub row: String,
+    /// `refused`, `plain`, `round_trip` or `stored_round_trip`.
+    pub check: &'static str,
+    pub detail: String,
+}
+
+/// One file of the family, where the platform stores it and how the exporter
+/// reads it back.
+struct InterfaceWriterTarget {
+    family: &'static str,
+    path: PathBuf,
+    row: String,
+    source: crate::module_blob::InterfaceAssetSource,
+    render: crate::mssql_dump::interface_audit::InterfaceAssetKind,
+}
+
+fn interface_writer_targets(root: &Path) -> Result<Vec<InterfaceWriterTarget>> {
+    use crate::module_blob::InterfaceAssetSource as Source;
+    use crate::mssql_dump::interface_audit::InterfaceAssetKind as Render;
+
+    let mut targets = Vec::new();
+    let configuration = root.join("Configuration.xml");
+    if let Some(owner) = crate::mssql::configuration_asset_owner_uuid(&configuration) {
+        for (file, suffix, family, source, render) in [
+            (
+                "CommandInterface.xml",
+                "a",
+                "configuration CommandInterface",
+                Source::CommandInterface,
+                Render::ConfigurationCommandInterface,
+            ),
+            (
+                "MainSectionCommandInterface.xml",
+                "9",
+                "MainSectionCommandInterface",
+                Source::CommandInterface,
+                Render::ConfigurationCommandInterface,
+            ),
+            (
+                "HomePageWorkArea.xml",
+                "8",
+                "HomePageWorkArea",
+                Source::HomePageWorkArea,
+                Render::HomePageWorkArea,
+            ),
+            (
+                "ClientApplicationInterface.xml",
+                "b",
+                "ClientApplicationInterface",
+                Source::ClientApplicationInterface,
+                Render::ClientApplicationInterface,
+            ),
+            (
+                "StandaloneConfigurationContent.bin",
+                "f",
+                "StandaloneConfigurationContent",
+                Source::StandaloneContent,
+                Render::StandaloneContent,
+            ),
+        ] {
+            let path = root.join("Ext").join(file);
+            if path.is_file() {
+                targets.push(InterfaceWriterTarget {
+                    family,
+                    path,
+                    row: format!("{owner}.{suffix}"),
+                    source,
+                    render,
+                });
+            }
+        }
+    }
+    for folder in ["Subsystems", "CommonCommands"] {
+        let base = root.join(folder);
+        if !base.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(&base).follow_links(false) {
+            let entry = entry.with_context(|| format!("failed to walk {}", base.display()))?;
+            if !entry.file_type().is_file() || entry.file_name() != "CommandInterface.xml" {
+                continue;
+            }
+            let path = entry.into_path();
+            let Some(holder) = path
+                .parent()
+                .and_then(Path::parent)
+                .map(|object| object.with_extension("xml"))
+            else {
+                continue;
+            };
+            let properties = fs::read(&holder)
+                .with_context(|| format!("failed to read {}", holder.display()))
+                .and_then(|xml| parse_simple_metadata_xml_properties(&xml))?;
+            let suffix = match properties.kind.as_str() {
+                "Subsystem" => "1",
+                "CommonCommand" => "0",
+                _ => continue,
+            };
+            targets.push(InterfaceWriterTarget {
+                family: if suffix == "1" {
+                    "subsystem CommandInterface"
+                } else {
+                    "common command CommandInterface"
+                },
+                path,
+                row: format!("{}.{suffix}", properties.uuid),
+                source: Source::CommandInterface,
+                render: Render::ObjectCommandInterface,
+            });
+        }
+    }
+    targets.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(targets)
+}
+
+/// Where two byte strings first differ, as a window of each.
+fn first_byte_difference(wrote: &[u8], expected: &[u8]) -> String {
+    let at = wrote
+        .iter()
+        .zip(expected)
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| wrote.len().min(expected.len()));
+    let window = |bytes: &[u8]| {
+        let start = at.saturating_sub(60);
+        let end = (at + 120).min(bytes.len());
+        String::from_utf8_lossy(&bytes[start.min(end)..end]).to_string()
+    };
+    format!(
+        "at byte {at} (wrote {} bytes, expected {}): wrote `{}` | expected `{}`",
+        wrote.len(),
+        expected.len(),
+        window(wrote),
+        window(expected)
+    )
+}
+
+pub fn audit_interface_writer(
+    root: &Path,
+    inflated: &Path,
+    source_version: crate::cli::InfobaseConfigSourceVersion,
+) -> Result<InterfaceWriterReport> {
+    let started = std::time::Instant::now();
+    let targets = interface_writer_targets(root)?;
+    let context =
+        crate::mssql_dump::interface_audit::OfflineInterfaceContext::from_inflated_dir(inflated)?;
+    eprintln!(
+        "{} files; the exporter's indexes read in {:.1}s",
+        targets.len(),
+        started.elapsed().as_secs_f64()
+    );
+    let source = MetadataSourceContext::new(root.to_path_buf());
+
+    struct Outcome {
+        refused: Option<String>,
+        stored: bool,
+        plain: Option<String>,
+        round_trip: Option<String>,
+        stored_round_trip: Option<String>,
+    }
+
+    let outcomes = parallel::install(|| {
+        targets
+            .par_iter()
+            .map(|target| {
+                let native = fs::read(&target.path).unwrap_or_default();
+                let stored = fs::read(inflated.join(format!("{}__part0.txt", target.row))).ok();
+                let stored_round_trip = stored.as_ref().map(|stored| {
+                    match context.render(target.render, stored, source_version) {
+                        Ok(xml) if xml == native => None,
+                        Ok(xml) => Some(first_byte_difference(&xml, &native)),
+                        Err(error) => Some(format!("{error:#}")),
+                    }
+                });
+                let wrote = crate::module_blob::interface_asset_plaintext(
+                    target.source,
+                    &native,
+                    Some(&source),
+                );
+                let mut outcome = Outcome {
+                    refused: None,
+                    stored: stored.is_some(),
+                    plain: None,
+                    round_trip: None,
+                    stored_round_trip: stored_round_trip.flatten(),
+                };
+                match wrote {
+                    Err(error) => outcome.refused = Some(format!("{error:#}")),
+                    Ok(plain) => {
+                        if let Some(stored) = &stored
+                            && &plain != stored
+                        {
+                            outcome.plain = Some(first_byte_difference(&plain, stored));
+                        }
+                        outcome.round_trip =
+                            match context.render(target.render, &plain, source_version) {
+                                Ok(xml) if xml == native => None,
+                                Ok(xml) => Some(first_byte_difference(&xml, &native)),
+                                Err(error) => Some(format!("{error:#}")),
+                            };
+                    }
+                }
+                outcome
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = InterfaceWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        families: BTreeMap::new(),
+        differences: Vec::new(),
+    };
+    for (target, outcome) in targets.iter().zip(outcomes) {
+        let file = relative_path_string(root, &target.path);
+        let family = report
+            .families
+            .entry(target.family.to_string())
+            .or_default();
+        family.files += 1;
+        if !outcome.stored {
+            family.no_stored_row += 1;
+        }
+        let mut differ = |check: &'static str, detail: String| {
+            report.differences.push(InterfaceWriterDifference {
+                family: target.family.to_string(),
+                file: file.clone(),
+                row: target.row.clone(),
+                check,
+                detail,
+            });
+        };
+        match &outcome.stored_round_trip {
+            None if outcome.stored => family.stored_round_trip_identical += 1,
+            None => {}
+            Some(detail) => differ("stored_round_trip", detail.clone()),
+        }
+        if let Some(reason) = outcome.refused {
+            *family
+                .refused
+                .entry(form_blocker_reason_shape(&reason))
+                .or_insert(0) += 1;
+            differ("refused", reason);
+            continue;
+        }
+        family.compiled += 1;
+        match outcome.plain {
+            None if outcome.stored => family.plain_identical += 1,
+            None => {}
+            Some(detail) => differ("plain", detail),
+        }
+        match outcome.round_trip {
+            None => family.round_trip_identical += 1,
+            Some(detail) => differ("round_trip", detail),
+        }
+    }
+    Ok(report)
+}
+
+/// How far the loader's help writer reproduces the rows the platform stored.
+///
+/// Every `Ext/Help.xml` of the tree (an object's, a form's, the
+/// configuration's) and every `HTMLDocument` template's `Ext/Template.xml` is
+/// compiled by the loader's own function, its row compared with the stored
+/// row's plain text byte for byte, and read back by the exporter's reader into
+/// the files the platform exported. `stored_round_trip` runs the stored row
+/// through the same reader: a file it misses is a gap of the harness or the
+/// exporter, not of the writer.
+#[derive(Debug, Serialize)]
+pub struct HelpWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub families: BTreeMap<String, InterfaceWriterFamilyReport>,
+    /// Every help that is not reproduced, with its first difference or the
+    /// writer's refusal.
+    pub differences: Vec<InterfaceWriterDifference>,
+}
+
+struct HelpWriterTarget {
+    /// The metadata XML that declares the help's owner.
+    owner_xml: PathBuf,
+    /// `Ext/Help.xml` or `Ext/Template.xml`.
+    body: PathBuf,
+    template: bool,
+}
+
+fn help_writer_targets(root: &Path) -> Result<Vec<HelpWriterTarget>> {
+    let mut targets = Vec::new();
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let template = match entry.file_name().to_str() {
+            Some("Help.xml") => false,
+            Some("Template.xml") => true,
+            _ => continue,
+        };
+        let path = entry.into_path();
+        let Some(owner_dir) = path
+            .parent()
+            .filter(|ext| ext.file_name().is_some_and(|name| name == "Ext"))
+            .and_then(Path::parent)
+        else {
+            continue;
+        };
+        let owner_xml = if owner_dir == root {
+            root.join("Configuration.xml")
+        } else {
+            owner_dir.with_extension("xml")
+        };
+        if template {
+            let xml = fs::read(&owner_xml)
+                .with_context(|| format!("failed to read {}", owner_xml.display()))?;
+            if parse_template_type_from_xml(&xml)?.as_deref() != Some("HTMLDocument") {
+                continue;
+            }
+        }
+        targets.push(HelpWriterTarget {
+            owner_xml,
+            body: path,
+            template,
+        });
+    }
+    targets.sort_by(|left, right| left.body.cmp(&right.body));
+    Ok(targets)
+}
+
+/// The shape of a refusal, for the histogram: the chain under the first
+/// context (which names the page), with quoted names and paths folded away.
+fn help_refusal_shape(error: &anyhow::Error) -> String {
+    let chain = error.chain().map(ToString::to_string).collect::<Vec<_>>();
+    let tail = if chain.len() > 1 {
+        &chain[1..]
+    } else {
+        &chain[..]
+    };
+    tail.iter()
+        .map(|part| {
+            form_blocker_reason_shape(part)
+                .split_whitespace()
+                .map(|word| if word.contains(":\\") { "<path>" } else { word })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
+/// Where the files the exporter writes for a row differ from the native ones:
+/// the XML beside the help, each page and each attachment, and a native file
+/// the row does not produce at all.
+fn rendered_help_difference(
+    rendered: &crate::mssql_dump::help_audit::RenderedHelp,
+    body: &Path,
+) -> Option<String> {
+    let native_xml = fs::read(body).unwrap_or_default();
+    if rendered.xml != native_xml {
+        return Some(format!(
+            "{}: {}",
+            body.file_name().unwrap_or_default().to_string_lossy(),
+            first_byte_difference(&rendered.xml, &native_xml)
+        ));
+    }
+    let dir = body.with_extension("");
+    let files_dir = dir.join("_files");
+    let mut produced = std::collections::BTreeSet::new();
+    for (name, content, path) in rendered
+        .pages
+        .iter()
+        .map(|(name, content)| (name, content, dir.join(name)))
+        .chain(
+            rendered
+                .files
+                .iter()
+                .map(|(name, content)| (name, content, files_dir.join(name))),
+        )
+    {
+        // Windows drops a trailing dot or space from a file name: a stored
+        // `Картинка1.` is exported as `Картинка1`.
+        let on_disk = path
+            .file_name()
+            .map(|name| path.with_file_name(name.to_string_lossy().trim_end_matches(['.', ' '])))
+            .unwrap_or_else(|| path.clone());
+        produced.insert(on_disk);
+        match fs::read(&path) {
+            Ok(native) if &native == content => {}
+            Ok(native) => {
+                return Some(format!(
+                    "{name}: {}",
+                    first_byte_difference(content, &native)
+                ));
+            }
+            Err(_) => return Some(format!("{name}: the export has no such file")),
+        }
+    }
+    for folder in [&dir, &files_dir] {
+        let Ok(entries) = fs::read_dir(folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && !produced.contains(&path) {
+                return Some(format!(
+                    "{}: the row does not produce this file",
+                    relative_path_string(&dir, &path)
+                ));
+            }
+        }
+    }
+    None
+}
+
+pub fn audit_help_writer(
+    root: &Path,
+    inflated: &Path,
+    source_version: crate::cli::InfobaseConfigSourceVersion,
+) -> Result<HelpWriterReport> {
+    let started = std::time::Instant::now();
+    let targets = help_writer_targets(root)?;
+    let context = crate::mssql_dump::help_audit::OfflineHelpContext::from_inflated_dir(inflated)?;
+    eprintln!(
+        "{} helps and HTML templates; the exporter's index read in {:.1}s",
+        targets.len(),
+        started.elapsed().as_secs_f64()
+    );
+    let source = MetadataSourceContext::new(root.to_path_buf());
+
+    struct Outcome {
+        family: &'static str,
+        row: String,
+        refused: Option<(String, String)>,
+        stored: bool,
+        plain: Option<String>,
+        round_trip: Option<String>,
+        stored_round_trip: Option<String>,
+    }
+
+    let outcomes = parallel::install(|| {
+        targets
+            .par_iter()
+            .map(|target| {
+                let properties = fs::read(&target.owner_xml)
+                    .with_context(|| format!("failed to read {}", target.owner_xml.display()))
+                    .and_then(|xml| parse_simple_metadata_xml_properties(&xml));
+                let properties = match properties {
+                    Ok(properties) => properties,
+                    Err(error) => {
+                        return Outcome {
+                            family: "unreadable owner",
+                            row: String::new(),
+                            refused: Some((help_refusal_shape(&error), format!("{error:#}"))),
+                            stored: false,
+                            plain: None,
+                            round_trip: None,
+                            stored_round_trip: None,
+                        };
+                    }
+                };
+                let family = if target.template {
+                    "HTML template"
+                } else {
+                    match properties.kind.as_str() {
+                        "Configuration" => "configuration help",
+                        "Form" | "CommonForm" => "form help",
+                        _ => "object help",
+                    }
+                };
+                let row = if target.template {
+                    format!("{}.0", properties.uuid)
+                } else {
+                    crate::mssql::object_help_body_id(&target.owner_xml, &properties)
+                };
+                let stored = fs::read(inflated.join(format!("{row}__part0.txt"))).ok();
+                let stored_round_trip =
+                    stored
+                        .as_ref()
+                        .map(|stored| match context.render(stored, source_version) {
+                            Ok(rendered) => rendered_help_difference(&rendered, &target.body),
+                            Err(error) => Some(format!("{error:#}")),
+                        });
+                let compiled = if target.template {
+                    crate::mssql::html_template_source_row(
+                        &target.owner_xml,
+                        &properties,
+                        Some(&source),
+                    )
+                } else {
+                    crate::mssql::object_help_source_row(
+                        &target.owner_xml,
+                        &properties,
+                        Some(&source),
+                    )
+                };
+                let mut outcome = Outcome {
+                    family,
+                    refused: None,
+                    stored: stored.is_some(),
+                    plain: None,
+                    round_trip: None,
+                    stored_round_trip: stored_round_trip.flatten(),
+                    row,
+                };
+                let compiled = compiled.and_then(|compiled| {
+                    let compiled = compiled
+                        .ok_or_else(|| anyhow!("the loader writes no row for this help"))?;
+                    if compiled.body_id != outcome.row {
+                        return Err(anyhow!(
+                            "the loader writes row {} where the audit expects {}",
+                            compiled.body_id,
+                            outcome.row
+                        ));
+                    }
+                    crate::compiler::families::native::inflate(&compiled.blob)
+                        .map_err(|error| anyhow!("the loader's row does not inflate: {error}"))
+                });
+                match compiled {
+                    Err(error) => {
+                        outcome.refused = Some((help_refusal_shape(&error), format!("{error:#}")));
+                    }
+                    Ok(plain) => {
+                        if let Some(stored) = &stored
+                            && &plain != stored
+                        {
+                            outcome.plain = Some(first_byte_difference(&plain, stored));
+                        }
+                        outcome.round_trip = match context.render(&plain, source_version) {
+                            Ok(rendered) => rendered_help_difference(&rendered, &target.body),
+                            Err(error) => Some(format!("{error:#}")),
+                        };
+                    }
+                }
+                outcome
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = HelpWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        families: BTreeMap::new(),
+        differences: Vec::new(),
+    };
+    for (target, outcome) in targets.iter().zip(outcomes) {
+        let file = relative_path_string(root, &target.body);
+        let family = report
+            .families
+            .entry(outcome.family.to_string())
+            .or_default();
+        family.files += 1;
+        if !outcome.stored {
+            family.no_stored_row += 1;
+        }
+        let mut differ = |check: &'static str, detail: String| {
+            report.differences.push(InterfaceWriterDifference {
+                family: outcome.family.to_string(),
+                file: file.clone(),
+                row: outcome.row.clone(),
+                check,
+                detail,
+            });
+        };
+        match &outcome.stored_round_trip {
+            None if outcome.stored => family.stored_round_trip_identical += 1,
+            None => {}
+            Some(detail) => differ("stored_round_trip", detail.clone()),
+        }
+        if let Some((shape, reason)) = outcome.refused {
+            *family.refused.entry(shape).or_insert(0) += 1;
+            differ("refused", reason);
+            continue;
+        }
+        family.compiled += 1;
+        match outcome.plain {
+            None if outcome.stored => family.plain_identical += 1,
+            None => {}
+            Some(detail) => differ("plain", detail),
+        }
+        match outcome.round_trip {
+            None => family.round_trip_identical += 1,
+            Some(detail) => differ("round_trip", detail),
+        }
+    }
+    Ok(report)
+}
+
+/// How many spreadsheet templates the template writer reproduces.
+///
+/// Every `Templates/<Name>/Ext/Template.xml` and `CommonTemplates/<Name>/Ext/
+/// Template.xml` whose holder declares `SpreadsheetDocument` is compiled the
+/// way the loader compiles it, base-free. The compiled row is compared with
+/// the row the platform stored (the inflated dump of the same database), and
+/// it is read back through the exporter's own MOXCEL reader and XML writer --
+/// the round trip, which has to give the native `Template.xml` byte for byte.
+#[derive(Debug, Serialize)]
+pub struct MxlWriterReport {
+    pub root: PathBuf,
+    pub bodies: PathBuf,
+    pub templates: usize,
+    pub compiled: usize,
+    /// Templates the writer refused, by the first reason, digits folded.
+    pub refused: BTreeMap<String, usize>,
+    pub refused_templates: BTreeMap<String, String>,
+    /// Compiled templates whose stored row the dump does not hold.
+    pub no_stored_row: usize,
+    /// The compiled plain text equals the stored one, byte for byte.
+    pub plain_identical: usize,
+    /// ... and once line breaks are ignored.
+    pub plain_identical_ignoring_breaks: usize,
+    /// ... and once the language record's two load-dependent members are
+    /// folded as well (see `normalize_moxel_plain`).
+    pub plain_identical_normalized: usize,
+    /// The compiled row reads back into the native `Template.xml`.
+    pub round_trip_identical: usize,
+    pub round_trip_unreadable: usize,
+    pub round_trip_different: usize,
+    /// The stored row itself reads back into the native `Template.xml` -- the
+    /// check that this audit's reference indexes are the dump's.
+    pub stored_round_trip_identical: usize,
+    /// Templates whose stored row does not read back into the native file.
+    pub stored_round_trip_failures: Vec<String>,
+    /// The differing templates by their first differing line pair, digits
+    /// folded, so a systematic cause shows up as one bucket.
+    pub shapes: BTreeMap<String, usize>,
+    pub differences: Vec<MxlWriterDifference>,
+    /// Templates whose normalized plain text differs from the stored one, by
+    /// the context of the first differing position.
+    pub plain_shapes: BTreeMap<String, usize>,
+    /// Those templates, as `<uuid> <path>`.
+    pub plain_different: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MxlWriterDifference {
+    pub template: String,
+    pub uuid: String,
+    /// 1-based line of the first difference.
+    pub line: usize,
+    pub ours: String,
+    pub native: String,
+    pub ours_lines: usize,
+    pub native_lines: usize,
+}
+
+fn fold_digits(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_digits = false;
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            if !in_digits {
+                out.push('#');
+            }
+            in_digits = true;
+        } else {
+            in_digits = false;
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// The generated reference types of a source tree, as the dump's MOXCEL
+/// reader receives them: `TypeId` (lowercase) to `CatalogRef.<Name>` and the
+/// like, read from every root object's `<xr:GeneratedType category="Ref">`.
+fn moxel_generated_types_from_tree(root: &Path) -> BTreeMap<String, String> {
+    const HEAD: &str = "<xr:GeneratedType name=\"";
+    let mut types = BTreeMap::new();
+    let Ok(families) = fs::read_dir(root) else {
+        return types;
+    };
+    for family in families.flatten() {
+        let family = family.path();
+        if !family.is_dir() {
+            continue;
+        }
+        let Ok(objects) = fs::read_dir(&family) else {
+            continue;
+        };
+        for object in objects.flatten() {
+            let path = object.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("xml") {
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find(HEAD) {
+                rest = &rest[at + HEAD.len()..];
+                let Some(end) = rest.find('"') else {
+                    break;
+                };
+                let name = &rest[..end];
+                let head_end = rest.find('>').unwrap_or(rest.len());
+                let is_ref = rest[..head_end].contains("category=\"Ref\"");
+                let Some(type_at) = rest.find("<xr:TypeId>") else {
+                    break;
+                };
+                let type_rest = &rest[type_at + "<xr:TypeId>".len()..];
+                let Some(type_end) = type_rest.find("</xr:TypeId>") else {
+                    break;
+                };
+                let type_id = type_rest[..type_end].trim().to_ascii_lowercase();
+                if is_ref
+                    && name
+                        .split_once('.')
+                        .is_some_and(|(kind, _)| kind.ends_with("Ref"))
+                {
+                    types.insert(type_id, name.to_string());
+                }
+            }
+        }
+    }
+    types
+}
+
+/// `(holder, Template.xml, template uuid)` for every spreadsheet template.
+fn collect_spreadsheet_templates(root: &Path) -> Result<Vec<(PathBuf, PathBuf, String)>> {
+    let mut templates = Vec::new();
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if !entry.file_type().is_file() || entry.file_name() != "Template.xml" {
+            continue;
+        }
+        let template_xml = entry.path();
+        let Some(metadata_xml) = template_metadata_xml_path(template_xml) else {
+            continue;
+        };
+        let Ok(metadata) = fs::read(&metadata_xml) else {
+            continue;
+        };
+        if parse_template_type_from_xml(&metadata)?.as_deref() != Some("SpreadsheetDocument") {
+            continue;
+        }
+        let properties = parse_simple_metadata_xml_properties(&metadata)
+            .with_context(|| format!("failed to parse {}", metadata_xml.display()))?;
+        templates.push((metadata_xml, template_xml.to_path_buf(), properties.uuid));
+    }
+    templates.sort();
+    Ok(templates)
+}
+
+/// One template's verdict, reduced where it is computed so that a corpus of
+/// fourteen thousand templates never holds their texts at once.
+enum MxlWriterOutcome {
+    Refused(String),
+    Compiled(MxlTemplateSummary),
+}
+
+struct MxlTemplateSummary {
+    has_stored: bool,
+    plain_identical: bool,
+    plain_identical_ignoring_breaks: bool,
+    plain_identical_normalized: bool,
+    /// The first plain divergence (normalized), where the round trip holds.
+    plain_shape: Option<String>,
+    stored_round_trip_ok: bool,
+    round_trip: MxlRoundTrip,
+}
+
+enum MxlRoundTrip {
+    Identical,
+    Unreadable,
+    Different {
+        line: usize,
+        ours: String,
+        native: String,
+        ours_lines: usize,
+        native_lines: usize,
+    },
+}
+
+/// The body text as the plain comparison reads it: line breaks dropped, and
+/// the two language-record members no source spells -- the third, which a
+/// load from XML writes as 1 and a Designer save as 0, and the last -- folded
+/// to `_`.
+fn normalize_moxel_plain(plain: &[u8]) -> String {
+    let text = String::from_utf8_lossy(plain).replace(['\r', '\n'], "");
+    let Some(start) = text.find("{8,1,12,{") else {
+        return text;
+    };
+    let record_start = start + "{8,1,12,".len();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut commas = Vec::new();
+    let mut record_end = None;
+    for (offset, ch) in text[record_start..].char_indices() {
+        let at = record_start + offset;
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    record_end = Some(at);
+                    break;
+                }
+            }
+            ',' if depth == 1 => commas.push(at),
+            _ => {}
+        }
+    }
+    let (Some(end), true) = (record_end, commas.len() >= 3) else {
+        return text;
+    };
+    let third = (commas[1] + 1, commas[2]);
+    let last = (commas[commas.len() - 1] + 1, end);
+    format!(
+        "{}_{}_{}",
+        &text[..third.0],
+        &text[third.1..last.0],
+        &text[last.1..]
+    )
+}
+
+fn audit_one_mxl_template(
+    template_xml: &Path,
+    uuid: &str,
+    bodies: &Path,
+    source: &MetadataSourceContext,
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+    write_dir: Option<&Path>,
+) -> MxlWriterOutcome {
+    use crate::compiler::bodies::template::{
+        TemplateKind, TemplateSource, compile_evidenced_template,
+    };
+    use std::io::Read;
+
+    let native = match fs::read(template_xml) {
+        Ok(bytes) => bytes,
+        Err(error) => return MxlWriterOutcome::Refused(error.to_string()),
+    };
+    let blob = match compile_evidenced_template(
+        TemplateKind::SpreadsheetDocument,
+        TemplateSource::Spreadsheet {
+            xml: &native,
+            source: Some(source),
+            number_format_hint: None,
+        },
+    ) {
+        Ok(blob) => blob,
+        Err(error) => return MxlWriterOutcome::Refused(error.to_string()),
+    };
+    let mut plain = Vec::new();
+    if let Err(error) = flate2::read::DeflateDecoder::new(blob.as_slice()).read_to_end(&mut plain) {
+        return MxlWriterOutcome::Refused(format!("the compiled row does not inflate: {error}"));
+    }
+    if let Some(dir) = write_dir {
+        let _ = fs::write(dir.join(format!("{uuid}.0__part0.txt")), &plain);
+    }
+    let native_text = String::from_utf8_lossy(&native);
+    let round_trip = match crate::mssql_dump::try_extract_moxel_spreadsheet_xml_with_generated_types(
+        &blob,
+        object_refs,
+        generated_types,
+    ) {
+        Err(_) => MxlRoundTrip::Unreadable,
+        Ok(ours) if ours == native_text => MxlRoundTrip::Identical,
+        Ok(ours) => {
+            let ours_lines = ours.split("\r\n").collect::<Vec<_>>();
+            let native_lines = native_text.split("\r\n").collect::<Vec<_>>();
+            let line = ours_lines
+                .iter()
+                .zip(native_lines.iter())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| ours_lines.len().min(native_lines.len()));
+            MxlRoundTrip::Different {
+                line: line + 1,
+                ours: ours_lines
+                    .get(line)
+                    .copied()
+                    .unwrap_or("<end>")
+                    .trim()
+                    .to_string(),
+                native: native_lines
+                    .get(line)
+                    .copied()
+                    .unwrap_or("<end>")
+                    .trim()
+                    .to_string(),
+                ours_lines: ours_lines.len(),
+                native_lines: native_lines.len(),
+            }
+        }
+    };
+    let stored = fs::read(bodies.join(format!("{uuid}.0__part0.txt"))).ok();
+    let mut summary = MxlTemplateSummary {
+        has_stored: stored.is_some(),
+        plain_identical: false,
+        plain_identical_ignoring_breaks: false,
+        plain_identical_normalized: false,
+        plain_shape: None,
+        stored_round_trip_ok: false,
+        round_trip,
+    };
+    if let Some(stored) = stored {
+        summary.plain_identical = stored == plain;
+        let strip = |bytes: &[u8]| {
+            bytes
+                .iter()
+                .copied()
+                .filter(|byte| *byte != b'\r' && *byte != b'\n')
+                .collect::<Vec<_>>()
+        };
+        summary.plain_identical_ignoring_breaks = strip(&stored) == strip(&plain);
+        let ours = normalize_moxel_plain(&plain);
+        let theirs = normalize_moxel_plain(&stored);
+        summary.plain_identical_normalized = ours == theirs;
+        if !summary.plain_identical_normalized {
+            let at = ours
+                .chars()
+                .zip(theirs.chars())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| ours.chars().count().min(theirs.chars().count()));
+            summary.plain_shape = Some(format!(
+                "ours {} | stored {}",
+                fold_digits(&divergence_window(&ours, at, 12, 24)),
+                fold_digits(&divergence_window(&theirs, at, 12, 24)),
+            ));
+        }
+        summary.stored_round_trip_ok = crate::compiler::families::native::deflate_bytes(&stored)
+            .ok()
+            .and_then(|stored_blob| {
+                crate::mssql_dump::try_extract_moxel_spreadsheet_xml_with_generated_types(
+                    &stored_blob,
+                    object_refs,
+                    generated_types,
+                )
+                .ok()
+            })
+            .is_some_and(|xml| xml == native_text);
+    }
+    MxlWriterOutcome::Compiled(summary)
+}
+
+pub fn audit_mxl_writer(root: &Path, bodies: &Path) -> Result<MxlWriterReport> {
+    let mut templates = collect_spreadsheet_templates(root)?;
+    // `IBCMD_RS_MXL_AUDIT_FILTER=a|b` keeps the templates whose path contains
+    // one of the substrings -- a quick rerun of the ones a change touches.
+    if let Some(filter) = std::env::var_os("IBCMD_RS_MXL_AUDIT_FILTER") {
+        let filter = filter.to_string_lossy().to_string();
+        let needles = filter
+            .split('|')
+            .filter(|needle| !needle.is_empty())
+            .collect::<Vec<_>>();
+        templates.retain(|(_, template_xml, _)| {
+            let relative = relative_path_string(root, template_xml);
+            needles.iter().any(|needle| relative.contains(needle))
+        });
+    }
+    let source = MetadataSourceContext::new(root.to_path_buf());
+    let object_refs = source.moxel_object_refs()?;
+    let generated_types = moxel_generated_types_from_tree(root);
+    let write_dir = std::env::var_os("IBCMD_RS_WRITE_MXL_DIR").map(PathBuf::from);
+    let outcomes = parallel::install(|| {
+        templates
+            .par_iter()
+            .map(|(_, template_xml, uuid)| {
+                (
+                    relative_path_string(root, template_xml),
+                    uuid.clone(),
+                    audit_one_mxl_template(
+                        template_xml,
+                        uuid,
+                        bodies,
+                        &source,
+                        &object_refs,
+                        &generated_types,
+                        write_dir.as_deref(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = MxlWriterReport {
+        root: root.to_path_buf(),
+        bodies: bodies.to_path_buf(),
+        templates: templates.len(),
+        compiled: 0,
+        refused: BTreeMap::new(),
+        refused_templates: BTreeMap::new(),
+        no_stored_row: 0,
+        plain_identical: 0,
+        plain_identical_ignoring_breaks: 0,
+        plain_identical_normalized: 0,
+        round_trip_identical: 0,
+        round_trip_unreadable: 0,
+        round_trip_different: 0,
+        stored_round_trip_identical: 0,
+        stored_round_trip_failures: Vec::new(),
+        shapes: BTreeMap::new(),
+        differences: Vec::new(),
+        plain_shapes: BTreeMap::new(),
+        plain_different: Vec::new(),
+    };
+    for (template, uuid, outcome) in outcomes {
+        let summary = match outcome {
+            MxlWriterOutcome::Refused(reason) => {
+                let first = reason.split(';').next().unwrap_or(&reason).trim();
+                *report.refused.entry(fold_digits(first)).or_insert(0) += 1;
+                report.refused_templates.insert(template, reason);
+                continue;
+            }
+            MxlWriterOutcome::Compiled(summary) => summary,
+        };
+        report.compiled += 1;
+        if summary.stored_round_trip_ok {
+            report.stored_round_trip_identical += 1;
+        } else if summary.has_stored {
+            report.stored_round_trip_failures.push(template.clone());
+        }
+        if !summary.has_stored {
+            report.no_stored_row += 1;
+        }
+        report.plain_identical += usize::from(summary.plain_identical);
+        report.plain_identical_ignoring_breaks +=
+            usize::from(summary.plain_identical_ignoring_breaks);
+        report.plain_identical_normalized += usize::from(summary.plain_identical_normalized);
+        if let Some(shape) = summary.plain_shape {
+            *report.plain_shapes.entry(shape).or_insert(0) += 1;
+            report.plain_different.push(format!("{uuid} {template}"));
+        }
+        match summary.round_trip {
+            MxlRoundTrip::Identical => report.round_trip_identical += 1,
+            MxlRoundTrip::Unreadable => {
+                report.round_trip_unreadable += 1;
+                *report
+                    .shapes
+                    .entry("the compiled row does not read back".to_string())
+                    .or_insert(0) += 1;
+            }
+            MxlRoundTrip::Different {
+                line,
+                ours,
+                native,
+                ours_lines,
+                native_lines,
+            } => {
+                report.round_trip_different += 1;
+                let shape = format!(
+                    "ours {} | native {}",
+                    fold_digits(&ours),
+                    fold_digits(&native)
+                );
+                *report.shapes.entry(shape).or_insert(0) += 1;
+                report.differences.push(MxlWriterDifference {
+                    template,
+                    uuid,
+                    line,
+                    ours,
+                    native,
+                    ours_lines,
+                    native_lines,
+                });
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// Audits every `Form.xml` of a source tree against the base-free form body
+/// model, and reports what stands between the tree and a load.
+pub fn audit_form_body_blockers(root: &Path) -> Result<FormBodyBlockerAuditReport> {
+    let mut form_paths = Vec::new();
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if entry.file_type().is_file() && entry.file_name() == "Form.xml" {
+            form_paths.push(entry.into_path());
+        }
+    }
+    form_paths.sort();
+
+    let audited = parallel::install(|| {
+        form_paths
+            .par_iter()
+            .map(|path| {
+                let bytes = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+                let relative = relative_path_string(root, path);
+                let form_xml = match fs::read(path) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        return (relative, bytes, vec![(error.to_string(), "read")]);
+                    }
+                };
+                let module_path = path.with_file_name("Form").join("Module.bsl");
+                let asset_files =
+                    count_form_item_asset_files(&path.with_file_name("Form").join("Items"))
+                        .unwrap_or(0);
+                match crate::module_blob::form_body_base_free_blockers(
+                    &form_xml,
+                    module_path.exists(),
+                    asset_files,
+                ) {
+                    Ok(blockers) => (
+                        relative,
+                        bytes,
+                        blockers
+                            .into_iter()
+                            .map(|blocker| (blocker, "model"))
+                            .collect(),
+                    ),
+                    Err(error) => (relative, bytes, vec![(format!("{error:#}"), "parse")]),
+                }
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut reasons = BTreeMap::<(String, &'static str), (usize, u64)>::new();
+    let mut examples = BTreeMap::<(String, &'static str), FormBodyBlockerEntry>::new();
+    let mut blocked_form_xml_files = 0usize;
+    let mut blocked_form_xml_bytes = 0u64;
+    for (path, bytes, blockers) in &audited {
+        if blockers.is_empty() {
+            continue;
+        }
+        blocked_form_xml_files += 1;
+        blocked_form_xml_bytes += bytes;
+        let mut seen = BTreeMap::<(String, &'static str), ()>::new();
+        for (message, phase) in blockers {
+            let key = (form_blocker_reason_shape(message), *phase);
+            if seen.insert(key.clone(), ()).is_some() {
+                continue;
+            }
+            let entry = reasons.entry(key.clone()).or_default();
+            entry.0 += 1;
+            entry.1 += bytes;
+            examples.entry(key).or_insert_with(|| FormBodyBlockerEntry {
+                path: path.clone(),
+                bytes: *bytes,
+                reason: message.clone(),
+                phase: *phase,
+            });
+        }
+    }
+
+    let mut reasons = reasons
+        .into_iter()
+        .map(|((reason, phase), (forms, bytes))| FormBodyBlockerReason {
+            reason,
+            phase,
+            forms,
+            bytes,
+        })
+        .collect::<Vec<_>>();
+    reasons.sort_by(|left, right| {
+        right
+            .forms
+            .cmp(&left.forms)
+            .then_with(|| left.reason.cmp(&right.reason))
+    });
+
+    Ok(FormBodyBlockerAuditReport {
+        root: root.to_path_buf(),
+        form_xml_files: audited.len(),
+        compilable_form_xml_files: audited.len() - blocked_form_xml_files,
+        blocked_form_xml_files,
+        blocked_form_xml_bytes,
+        reasons,
+        examples: examples.into_values().collect(),
+    })
+}
+
+fn count_form_item_asset_files(path: &Path) -> Result<usize> {
+    if !path.is_dir() {
+        return Ok(0);
+    }
+    let mut count = 0usize;
+    for entry in WalkDir::new(path).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", path.display()))?;
+        if entry.file_type().is_file() {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// What the base-free role rights writer does with every role of a source
+/// tree, measured two ways against the database the tree was exported from:
+/// the **round trip** (the exporter reads our row back into exactly the
+/// native `Rights.xml`) and **digest parity** (our plain text equals the row
+/// the platform stored).
+#[derive(Debug, Serialize)]
+pub struct RoleRightsWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub roles: usize,
+    pub without_rights_xml: usize,
+    pub compiled: usize,
+    /// Refusals by class, and every refused role with its reason.
+    pub refused: BTreeMap<String, usize>,
+    pub refused_roles: BTreeMap<String, String>,
+    pub round_trip_identical: usize,
+    pub round_trip_different: usize,
+    pub round_trip_differences: Vec<RoleRightsWriterDifference>,
+    /// Compiled roles the loader's entry point accepts too: it repeats the
+    /// write and reads the row back through the exporter before staging it.
+    pub loader_accepted: usize,
+    pub loader_refused: BTreeMap<String, String>,
+    /// Compiled roles whose stored row is in the dump.
+    pub stored_rows: usize,
+    pub plain_identical: usize,
+    /// Stored rows that reference uuids the source tree no longer declares:
+    /// the export drops those objects, so no XML can bring them back.
+    pub stored_with_dangling: usize,
+    pub plain_identical_without_dangling: usize,
+    /// Rows whose object entries equal ours once the dangling ones are
+    /// dropped -- as a multiset, and then also in order -- and whose
+    /// templates and flags equal ours.
+    pub entries_identical: usize,
+    pub order_identical: usize,
+    pub tail_identical: usize,
+    /// First divergences of the rows that are not plain-identical, clustered
+    /// by what they look like, and the first divergence of every such role.
+    pub plain_shapes: BTreeMap<String, usize>,
+    pub plain_differences: Vec<RoleRightsWriterDifference>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoleRightsWriterDifference {
+    pub role: String,
+    pub at: usize,
+    pub wrote: String,
+    pub expected: String,
+}
+
+enum RoleRightsAuditOutcome {
+    WithoutRightsXml,
+    Refused(String, String),
+    Compiled(Box<RoleRightsAuditCompiled>),
+}
+
+struct RoleRightsAuditCompiled {
+    round_trip: std::result::Result<(), Option<RoleRightsWriterDifference>>,
+    loader: std::result::Result<(), String>,
+    stored: Option<RoleRightsAuditStored>,
+}
+
+struct RoleRightsAuditStored {
+    plain_identical: bool,
+    dangling: bool,
+    entries_identical: bool,
+    order_identical: bool,
+    tail_identical: bool,
+    difference: Option<RoleRightsWriterDifference>,
+}
+
+pub fn audit_role_rights_writer(root: &Path, inflated: &Path) -> Result<RoleRightsWriterReport> {
+    let roles_dir = root.join("Roles");
+    let mut roles = Vec::new();
+    for entry in fs::read_dir(&roles_dir)
+        .with_context(|| format!("failed to read {}", roles_dir.display()))?
+    {
+        let path = entry?.path();
+        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let text = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let uuid = text.find("<Role uuid=\"").and_then(|at| {
+            let rest = &text[at + "<Role uuid=\"".len()..];
+            rest.find('"').map(|end| rest[..end].to_ascii_lowercase())
+        });
+        roles.push((name.to_string(), uuid));
+    }
+    roles.sort();
+    let known = source_tree_uuids(root)?;
+    let source = MetadataSourceContext::new(root.to_path_buf());
+    let outcomes = parallel::install(|| {
+        roles
+            .par_iter()
+            .map(|(name, uuid)| {
+                (
+                    name.clone(),
+                    audit_one_role_rights(root, inflated, &source, &known, name, uuid.as_deref()),
+                )
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = RoleRightsWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        roles: roles.len(),
+        without_rights_xml: 0,
+        compiled: 0,
+        refused: BTreeMap::new(),
+        refused_roles: BTreeMap::new(),
+        round_trip_identical: 0,
+        round_trip_different: 0,
+        round_trip_differences: Vec::new(),
+        loader_accepted: 0,
+        loader_refused: BTreeMap::new(),
+        stored_rows: 0,
+        plain_identical: 0,
+        stored_with_dangling: 0,
+        plain_identical_without_dangling: 0,
+        entries_identical: 0,
+        order_identical: 0,
+        tail_identical: 0,
+        plain_shapes: BTreeMap::new(),
+        plain_differences: Vec::new(),
+    };
+    for (role, outcome) in outcomes {
+        match outcome {
+            RoleRightsAuditOutcome::WithoutRightsXml => report.without_rights_xml += 1,
+            RoleRightsAuditOutcome::Refused(class, detail) => {
+                *report.refused.entry(class.clone()).or_default() += 1;
+                report
+                    .refused_roles
+                    .insert(role, format!("{class}: {detail}"));
+            }
+            RoleRightsAuditOutcome::Compiled(compiled) => {
+                report.compiled += 1;
+                match compiled.loader {
+                    Ok(()) => report.loader_accepted += 1,
+                    Err(reason) => {
+                        report.loader_refused.insert(role.clone(), reason);
+                    }
+                }
+                match compiled.round_trip {
+                    Ok(()) => report.round_trip_identical += 1,
+                    Err(difference) => {
+                        report.round_trip_different += 1;
+                        report.round_trip_differences.push(difference.unwrap_or(
+                            RoleRightsWriterDifference {
+                                role: role.clone(),
+                                at: 0,
+                                wrote: "the exporter refused the written row".to_string(),
+                                expected: String::new(),
+                            },
+                        ));
+                    }
+                }
+                if let Some(stored) = compiled.stored {
+                    report.stored_rows += 1;
+                    if stored.dangling {
+                        report.stored_with_dangling += 1;
+                    }
+                    if stored.plain_identical {
+                        report.plain_identical += 1;
+                        if !stored.dangling {
+                            report.plain_identical_without_dangling += 1;
+                        }
+                    }
+                    if stored.entries_identical {
+                        report.entries_identical += 1;
+                    }
+                    if stored.order_identical {
+                        report.order_identical += 1;
+                    }
+                    if stored.tail_identical {
+                        report.tail_identical += 1;
+                    }
+                    if let Some(difference) = stored.difference {
+                        let shape = format!(
+                            "wrote {} | stored {}",
+                            difference.wrote, difference.expected
+                        );
+                        *report.plain_shapes.entry(shape).or_default() += 1;
+                        report.plain_differences.push(difference);
+                    }
+                }
+            }
+        }
+    }
+    Ok(report)
+}
+
+fn audit_one_role_rights(
+    root: &Path,
+    inflated: &Path,
+    source: &MetadataSourceContext,
+    known: &std::collections::HashSet<String>,
+    role: &str,
+    uuid: Option<&str>,
+) -> RoleRightsAuditOutcome {
+    use crate::compiler::bodies::role_rights_writer::write_role_rights;
+
+    let rights_path = root.join("Roles").join(role).join("Ext").join("Rights.xml");
+    let Ok(xml) = fs::read(&rights_path) else {
+        return RoleRightsAuditOutcome::WithoutRightsXml;
+    };
+    let written = match write_role_rights(&xml, source.role_rights_source()) {
+        Ok(written) => written,
+        Err(refusal) => {
+            return RoleRightsAuditOutcome::Refused(refusal.class.to_string(), refusal.detail);
+        }
+    };
+    let native = String::from_utf8_lossy(&xml);
+    let round_trip = match crate::compiler::families::native::deflate_bytes(&written.plain)
+        .ok()
+        .and_then(|blob| {
+            crate::mssql_dump::role_rights_xml_from_blob(
+                &blob,
+                &written.object_refs,
+                &written.field_refs,
+            )
+        }) {
+        None => Err(None),
+        Some(exported) if exported == native => Ok(()),
+        Some(exported) => Err(Some(first_difference(role, &exported, &native))),
+    };
+    let stored = uuid
+        .and_then(|uuid| fs::read(inflated.join(format!("{uuid}.0__part0.txt"))).ok())
+        .map(|stored| compare_role_rights_rows(role, &written.plain, &stored, known));
+    let loader = crate::module_blob::pack_role_rights_blob_base_free(&xml, source)
+        .map(|_| ())
+        .map_err(|error| format!("{error:#}"));
+    RoleRightsAuditOutcome::Compiled(Box::new(RoleRightsAuditCompiled {
+        round_trip,
+        loader,
+        stored,
+    }))
+}
+
+fn compare_role_rights_rows(
+    role: &str,
+    ours: &[u8],
+    stored: &[u8],
+    known: &std::collections::HashSet<String>,
+) -> RoleRightsAuditStored {
+    let plain_identical = ours == stored;
+    let ours_parts = role_rights_row_parts(ours);
+    let stored_parts = role_rights_row_parts(stored);
+    let (dangling, entries_identical, order_identical, tail_identical) =
+        match (&ours_parts, &stored_parts) {
+            (Some((ours_entries, ours_tail)), Some((stored_entries, stored_tail))) => {
+                let kept = stored_entries
+                    .iter()
+                    .filter(|(uuid, _)| known.contains(uuid))
+                    .map(|(_, text)| text.clone())
+                    .collect::<Vec<_>>();
+                let dangling = kept.len() != stored_entries.len();
+                let ours = ours_entries
+                    .iter()
+                    .map(|(_, text)| text.clone())
+                    .collect::<Vec<_>>();
+                let order_identical = ours == kept;
+                let mut ours_sorted = ours;
+                let mut kept_sorted = kept;
+                ours_sorted.sort();
+                kept_sorted.sort();
+                (
+                    dangling,
+                    ours_sorted == kept_sorted,
+                    order_identical,
+                    ours_tail == stored_tail,
+                )
+            }
+            _ => (false, false, false, false),
+        };
+    let difference = (!plain_identical).then(|| {
+        first_difference(
+            role,
+            &String::from_utf8_lossy(ours),
+            &String::from_utf8_lossy(stored),
+        )
+    });
+    RoleRightsAuditStored {
+        plain_identical,
+        dangling,
+        entries_identical,
+        order_identical,
+        tail_identical,
+        difference,
+    }
+}
+
+/// A row's object entries (uuid, text) in order, and the text of everything
+/// after the object table (templates and flags).
+type RoleRightsRowParts = (Vec<(String, String)>, String);
+
+fn role_rights_row_parts(plain: &[u8]) -> Option<RoleRightsRowParts> {
+    use crate::compiler::families::native::{parse, parse_without_bom, serialize_without_bom};
+
+    let root = if plain.starts_with(b"\xef\xbb\xbf") {
+        parse(plain).ok()?
+    } else {
+        parse_without_bom(plain).ok()?
+    };
+    let fields = root.as_list()?;
+    let objects = fields.get(1)?.as_list()?;
+    let mut entries = Vec::with_capacity(objects.len().saturating_sub(1));
+    for entry in objects.iter().skip(1) {
+        let uuid = entry
+            .as_list()?
+            .first()?
+            .as_list()?
+            .get(1)?
+            .as_token()?
+            .to_ascii_lowercase();
+        let text = String::from_utf8(serialize_without_bom(entry).ok()?).ok()?;
+        entries.push((uuid, text));
+    }
+    let mut tail = String::new();
+    for field in fields.iter().skip(2) {
+        tail.push_str(&String::from_utf8(serialize_without_bom(field).ok()?).ok()?);
+        tail.push(',');
+    }
+    Some((entries, tail))
+}
+
+fn first_difference(role: &str, wrote: &str, expected: &str) -> RoleRightsWriterDifference {
+    let at = wrote
+        .chars()
+        .zip(expected.chars())
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| wrote.chars().count().min(expected.chars().count()));
+    RoleRightsWriterDifference {
+        role: role.to_string(),
+        at,
+        wrote: divergence_window(wrote, at, 0, 60),
+        expected: divergence_window(expected, at, 0, 60),
+    }
+}
+
+/// Every `uuid="…"` a metadata file of the tree declares (the `Ext` folders
+/// hold bodies, not declarations, and are skipped).
+fn source_tree_uuids(root: &Path) -> Result<std::collections::HashSet<String>> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| entry.file_name() != "Ext")
+    {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if entry.file_type().is_file()
+            && entry.path().extension().and_then(|value| value.to_str()) == Some("xml")
+        {
+            files.push(entry.into_path());
+        }
+    }
+    let sets = parallel::install(|| {
+        files
+            .par_iter()
+            .map(|path| {
+                let mut uuids = Vec::new();
+                if let Ok(bytes) = fs::read(path) {
+                    let marker = b"uuid=\"";
+                    let mut at = 0usize;
+                    while let Some(found) = bytes[at..]
+                        .windows(marker.len())
+                        .position(|window| window == marker)
+                    {
+                        let start = at + found + marker.len();
+                        if let Some(value) = bytes.get(start..start + 36)
+                            && let Ok(text) = std::str::from_utf8(value)
+                        {
+                            uuids.push(text.to_ascii_lowercase());
+                        }
+                        at = start;
+                    }
+                }
+                uuids
+            })
+            .collect::<Vec<_>>()
+    })?;
+    Ok(sets.into_iter().flatten().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audits_spreadsheet_templates_and_reports_errors() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-audit-spreadsheet-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let _scratch = crate::test_scratch::TestScratch::adopt(&root);
+        fs::create_dir_all(root.join("CommonTemplates/Good/Ext"))?;
+        fs::create_dir_all(root.join("CommonTemplates/Broken/Ext"))?;
+        fs::write(
+            root.join("CommonTemplates/Good.xml"),
+            br#"
+<MetaDataObject>
+  <CommonTemplate uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Good</Name>
+      <Synonym/>
+      <Comment/>
+      <TemplateType>SpreadsheetDocument</TemplateType>
+    </Properties>
+  </CommonTemplate>
+</MetaDataObject>
+"#,
+        )?;
+        fs::write(
+            root.join("CommonTemplates/Good/Ext/Template.xml"),
+            br#"
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
+  <columns><size>1</size></columns>
+  <rowsItem>
+    <index>0</index>
+    <row><empty>true</empty></row>
+  </rowsItem>
+</document>
+"#,
+        )?;
+        fs::write(
+            root.join("CommonTemplates/Broken.xml"),
+            br#"
+<MetaDataObject>
+  <CommonTemplate uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb">
+    <Properties>
+      <Name>Broken</Name>
+      <Synonym/>
+      <Comment/>
+      <TemplateType>SpreadsheetDocument</TemplateType>
+    </Properties>
+  </CommonTemplate>
+</MetaDataObject>
+"#,
+        )?;
+        fs::write(
+            root.join("CommonTemplates/Broken/Ext/Template.xml"),
+            br#"<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet"/>"#,
+        )?;
+
+        let report = audit_spreadsheet_templates(&root)?;
+
+        assert_eq!(report.template_xml_files, 2);
+        assert_eq!(report.spreadsheet_templates, 2);
+        assert_eq!(report.packed, 1);
+        assert_eq!(report.failed, 1);
+        assert_eq!(
+            report.errors[0].template_xml,
+            "CommonTemplates/Broken/Ext/Template.xml"
+        );
+        assert!(
+            report.errors[0]
+                .message
+                .contains("the document spells no default <columns>")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn audits_spreadsheet_template_roundtrip_matches_stable_moxel() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-audit-spreadsheet-roundtrip-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let _scratch = crate::test_scratch::TestScratch::adopt(&root);
+        fs::create_dir_all(root.join("CommonTemplates/Good/Ext"))?;
+        fs::write(
+            root.join("CommonTemplates/Good.xml"),
+            br#"
+<MetaDataObject>
+  <CommonTemplate uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Good</Name>
+      <Synonym/>
+      <Comment/>
+      <TemplateType>SpreadsheetDocument</TemplateType>
+    </Properties>
+  </CommonTemplate>
+</MetaDataObject>
+"#,
+        )?;
+        fs::write(
+            root.join("CommonTemplates/Good/Ext/Template.xml"),
+            br#"
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+  <columns><size>1</size></columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>0</f>
+					<tl>
+						<v8:item>
+							<v8:lang>ru</v8:lang>
+							<v8:content>Hello</v8:content>
+						</v8:item>
+					</tl>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
+</document>
+"#,
+        )?;
+
+        let report = audit_spreadsheet_template_roundtrip(&root)?;
+
+        assert_eq!(report.template_xml_files, 1);
+        assert_eq!(report.spreadsheet_templates, 1);
+        assert_eq!(report.packed, 1);
+        assert_eq!(report.extracted, 1);
+        assert_eq!(report.repacked, 1);
+        assert_eq!(report.matched, 1);
+        assert_eq!(report.different, 0);
+        assert_eq!(report.failed, 0);
+        assert!(report.errors.is_empty());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "research-corpus-tests")]
+    #[test]
+    #[ignore = "requires external research corpus"]
+    fn live_roundtrip_repro_reports_first_diverging_avansovy_template_format_slot()
+    -> anyhow::Result<()> {
+        let root = PathBuf::from(
+            r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет",
+        );
+        if !root.is_dir() {
+            return Ok(());
+        }
+        let source = MetadataSourceContext::new(root.clone());
+        let object_refs = common_picture_object_refs(&root)?;
+        let template_xml = root
+            .join("Templates")
+            .join("ПФ_MXL_АвансовыйОтчет_ru")
+            .join("Ext")
+            .join("Template.xml");
+        let xml = fs::read(&template_xml)?;
+        let first = pack_moxel_spreadsheet_blob_from_xml_with_source(&xml, Some(&source))?;
+        let first_extracted = extract_moxel_spreadsheet_xml(&first.blob, &object_refs)
+            .ok_or_else(|| anyhow!("failed to extract first MOXCEL"))?;
+        let second = pack_moxel_spreadsheet_blob_from_xml_with_source(
+            first_extracted.as_bytes(),
+            Some(&source),
+        )?;
+        let second_extracted = extract_moxel_spreadsheet_xml(&second.blob, &object_refs)
+            .ok_or_else(|| anyhow!("failed to extract repacked MOXCEL"))?;
+        if first_extracted == second_extracted {
+            return Ok(());
+        }
+        let first_column_indexes = spreadsheet_column_format_indexes(&first_extracted)?;
+        let second_column_indexes = spreadsheet_column_format_indexes(&second_extracted)?;
+        let first_formats = spreadsheet_top_level_format_summaries(&first_extracted)?;
+        let second_formats = spreadsheet_top_level_format_summaries(&second_extracted)?;
+        let first_stats = spreadsheet_format_layout_stats(&first_extracted)?;
+        let second_stats = spreadsheet_format_layout_stats(&second_extracted)?;
+        let mismatch_index = first_formats
+            .iter()
+            .zip(second_formats.iter())
+            .position(|(left, right)| left != right)
+            .unwrap_or_else(|| first_formats.len().min(second_formats.len()));
+        let first_summary = first_formats
+            .get(mismatch_index)
+            .cloned()
+            .unwrap_or_default();
+        let second_summary = second_formats
+            .get(mismatch_index)
+            .cloned()
+            .unwrap_or_default();
+        let first_summary_in_second = second_formats
+            .iter()
+            .position(|value| value == &first_summary)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let second_summary_in_first = first_formats
+            .iter()
+            .position(|value| value == &second_summary)
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let first_head = first_formats
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let second_head = second_formats
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" | ");
+        panic!(
+            "{} | first_format_index={} first_summary=\"{}\" second_summary=\"{}\" | first_summary_in_second={} second_summary_in_first={} | first_columns={:?} second_columns={:?} | first_stats={:?} second_stats={:?} | first_head=\"{}\" | second_head=\"{}\"",
+            roundtrip_difference_message(&first_extracted, &second_extracted),
+            mismatch_index + 1,
+            first_summary,
+            second_summary,
+            first_summary_in_second,
+            second_summary_in_first,
+            first_column_indexes,
+            second_column_indexes,
+            first_stats,
+            second_stats,
+            first_head,
+            second_head
+        );
+    }
+
+    #[test]
+    fn audits_form_sources_counts_modules_assets_and_xml_shape() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-audit-forms-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let _scratch = crate::test_scratch::TestScratch::adopt(&root);
+        fs::create_dir_all(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon"))?;
+        fs::create_dir_all(root.join("CommonForms/Broken/Ext"))?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form.xml"),
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+  <Attributes>
+    <Attribute name="Item"/>
+  </Attributes>
+  <Items>
+    <Item name="List"/>
+  </Items>
+  <ChildItems>
+    <UsualGroup name="Page" id="1">
+      <Group>Vertical</Group>
+      <Behavior>Collapsible</Behavior>
+      <Representation>WeakSeparation</Representation>
+      <ShowTitle>false</ShowTitle>
+      <ChildItems>
+        <Table name="Rows" id="2">
+          <DataPath>Items.Rows</DataPath>
+          <SearchStringAddition name="RowsSearch" id="5">
+            <AdditionSource>
+              <Item>Rows</Item>
+              <Type>SearchStringRepresentation</Type>
+            </AdditionSource>
+          </SearchStringAddition>
+          <ChildItems>
+            <InputField name="Name" id="3">
+              <DataPath>Items.Rows.CurrentData.Name</DataPath>
+              <Title/>
+            </InputField>
+          </ChildItems>
+        </Table>
+        <Button name="Open" id="4">
+          <CommandName>Form.Command.Open</CommandName>
+          <DefaultButton>true</DefaultButton>
+        </Button>
+      </ChildItems>
+    </UsualGroup>
+  </ChildItems>
+  <Commands/>
+</Form>
+"#,
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl"),
+            b"\xef\xbb\xbf&AtClient\nProcedure Open(Command)\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon/Picture.png"),
+            b"\x89PNG\r\n\x1a\n",
+        )?;
+        fs::write(
+            root.join("CommonForms/Broken/Ext/Form.xml"),
+            br#"<Form><Items></Form>"#,
+        )?;
+
+        let report = audit_form_sources(&root)?;
+
+        assert_eq!(report.form_xml_files, 2);
+        assert_eq!(report.parsed, 1);
+        assert_eq!(report.failed, 1);
+        assert_eq!(report.forms_with_module, 1);
+        assert_eq!(report.forms_with_ext_form_files, 1);
+        assert_eq!(report.ext_form_files, 2);
+        assert_eq!(report.forms_stageable_by_current_loader, 1);
+        assert_eq!(report.forms_without_stageable_body, 1);
+        assert_eq!(report.unsupported_form_xml_files, 2);
+        assert!(report.unsupported_form_xml_bytes > 0);
+        assert_eq!(report.forms_with_ignored_ext_form_files, 1);
+        assert_eq!(report.ignored_ext_form_files, 1);
+        assert_eq!(report.ignored_ext_form_bytes, 8);
+        assert!(report.top_level_elements.contains(&FormElementCount {
+            name: "Attributes".to_string(),
+            count: 1
+        }));
+        assert!(report.top_level_elements.contains(&FormElementCount {
+            name: "Items".to_string(),
+            count: 1
+        }));
+        assert!(report.top_level_elements.contains(&FormElementCount {
+            name: "Commands".to_string(),
+            count: 1
+        }));
+        assert!(report.elements.contains(&FormElementCount {
+            name: "Item".to_string(),
+            count: 2
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "UsualGroup".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "Table".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "InputField".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "SearchStringAddition".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_elements.contains(&FormElementCount {
+            name: "Button".to_string(),
+            count: 1
+        }));
+        assert!(!report.child_item_properties.contains(&FormElementCount {
+            name: "SearchStringAddition".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "ChildItems".to_string(),
+            count: 2
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "DataPath".to_string(),
+            count: 2
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "CommandName".to_string(),
+            count: 1
+        }));
+        assert!(report.child_item_properties.contains(&FormElementCount {
+            name: "DefaultButton".to_string(),
+            count: 1
+        }));
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Table/DataPath".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "InputField/DataPath".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "SearchStringAddition/AdditionSource".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Button/CommandName".to_string(),
+                    count: 1
+                })
+        );
+        assert!(
+            report
+                .child_item_property_contexts
+                .contains(&FormElementCount {
+                    name: "Button/DefaultButton".to_string(),
+                    count: 1
+                })
+        );
+        for name in [
+            "UsualGroup/Group/Vertical",
+            "UsualGroup/Behavior/Collapsible",
+            "UsualGroup/Representation/WeakSeparation",
+            "UsualGroup/ShowTitle/false",
+            "SearchStringAddition/AdditionSource/Type/SearchStringRepresentation",
+            "Button/DefaultButton/true",
+        ] {
+            assert!(
+                report
+                    .child_item_property_value_contexts
+                    .contains(&FormElementCount {
+                        name: name.to_string(),
+                        count: 1
+                    }),
+                "missing {name}"
+            );
+        }
+        assert_eq!(report.errors[0].form_xml, "CommonForms/Broken/Ext/Form.xml");
+
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn audits_source_load_coverage_marks_stage_entries_and_uncovered_forms() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-audit-load-coverage-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let _scratch = crate::test_scratch::TestScratch::adopt(&root);
+        fs::create_dir_all(root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon"))?;
+        fs::create_dir_all(root.join("Catalogs/Products/Ext"))?;
+        fs::create_dir_all(root.join("CommonModules/Foo/Ext"))?;
+        fs::create_dir_all(root.join("Documents/Order/Ext"))?;
+        fs::create_dir_all(root.join("XDTOPackages/Exchange/Ext"))?;
+        fs::create_dir_all(root.join("Ext"))?;
+        fs::write(
+            root.join("Catalogs/Products.xml"),
+            br#"<MetaDataObject><Catalog uuid="11111111-1111-4111-8111-111111111111"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm.xml"),
+            br#"<MetaDataObject><Form uuid="22222222-2222-4222-8222-222222222222"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form.xml"),
+            br#"<Form><Attributes/></Form>"#,
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl"),
+            b"Procedure Open(Command)\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/Icon/Picture.png"),
+            b"\x89PNG\r\n\x1a\n",
+        )?;
+        fs::write(
+            root.join("Catalogs/Products/Ext/Predefined.xml"),
+            b"<Data/>",
+        )?;
+        fs::write(
+            root.join("CommonModules/Foo.xml"),
+            br#"<MetaDataObject><CommonModule uuid="33333333-3333-4333-8333-333333333333"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("CommonModules/Foo/Ext/Module.bsl"),
+            b"Procedure Run()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Documents/Order.xml"),
+            br#"<MetaDataObject><Document uuid="44444444-4444-4444-8444-444444444444"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("Documents/Order/Ext/AdditionalIndexes.xml"),
+            b"<AdditionalIndexes/>",
+        )?;
+        fs::write(
+            root.join("XDTOPackages/Exchange.xml"),
+            br#"<MetaDataObject><XDTOPackage uuid="55555555-5555-4555-8555-555555555555"/></MetaDataObject>"#,
+        )?;
+        fs::write(
+            root.join("XDTOPackages/Exchange/Ext/Package.bin"),
+            b"raw-package-body",
+        )?;
+        fs::write(
+            root.join("Ext/OrdinaryApplicationModule.bsl"),
+            b"Procedure OnStart()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/ExternalConnectionModule.bsl"),
+            b"Procedure OnConnect()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/ManagedApplicationModule.bsl"),
+            b"Procedure BeforeStart()\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/SessionModule.bsl"),
+            b"Procedure SetSessionParameters(Names)\nEndProcedure\n",
+        )?;
+        fs::write(
+            root.join("Ext/CommandInterface.xml"),
+            b"<CommandInterface/>",
+        )?;
+        fs::write(root.join("Ext/Splash.xml"), b"<Picture/>")?;
+        fs::write(root.join("Ext/ParentConfigurations.bin"), b"parent-configs")?;
+        fs::write(
+            root.join("Ext/MobileClientSignature.bin"),
+            b"{2,\"\",\"\",{0},0}",
+        )?;
+        fs::write(
+            root.join("Ext/MainSectionCommandInterface.xml"),
+            b"<CommandInterface/>",
+        )?;
+        fs::write(
+            root.join("Ext/HomePageWorkArea.xml"),
+            b"<HomePageWorkArea/>",
+        )?;
+        fs::write(
+            root.join("Ext/ClientApplicationInterface.xml"),
+            b"<ClientApplicationInterface/>",
+        )?;
+        fs::write(root.join("Ext/MainSectionPicture.xml"), b"<Picture/>")?;
+        fs::write(
+            root.join("Ext/StandaloneConfigurationContent.bin"),
+            b"<StandaloneContent/>",
+        )?;
+
+        let report = audit_source_load_coverage(&root)?;
+
+        assert_eq!(report.total_files, 25);
+        assert_eq!(report.stage_metadata_xml_files, 4);
+        assert_eq!(report.stage_common_module_xml_files, 1);
+        assert_eq!(report.stage_entry_files, 5);
+        assert_eq!(report.module_files, 6);
+        assert_eq!(report.supported_module_files, 6);
+        assert_eq!(report.supported_ext_body_files, 13);
+        assert_eq!(report.potentially_stageable_body_files, 20);
+        assert_eq!(report.partially_supported_form_xml_files, 1);
+        assert_eq!(report.partially_supported_form_xml_bytes, 26);
+        assert_eq!(report.unsupported_form_xml_files, 1);
+        assert_eq!(report.form_xml_stageable_by_module, 1);
+        assert_eq!(report.form_xml_without_stageable_module, 0);
+        assert_eq!(report.ignored_form_ext_files, 0);
+        assert_eq!(report.known_uncovered_files, 1);
+        assert!(report.top_known_uncovered.iter().any(|item| item.path
+            == "Catalogs/Products/Forms/ListForm/Ext/Form.xml"
+            && item.reason.contains("partially compiled")));
+
+        let _ = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_difference_message_handles_utf8_offsets() {
+        let message =
+            roundtrip_difference_message("prefix Привет suffix", "prefix Проверка suffix");
+
+        assert!(message.contains("first_diff_offset="));
+        assert!(message.contains("first_context="));
+        assert!(message.contains("second_context="));
+    }
+}

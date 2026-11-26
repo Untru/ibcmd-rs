@@ -1,0 +1,8 @@
+- [x] Staged objects/exportPlan RPC and selected/group/multiselection commands
+- [x] Dirty editor buffers, staged/modified/untracked/ignored Git checks and retained original bytes
+- [x] Native version changed selection, deletion/rename fallback and selective inventory reconciliation
+- [x] Focused Rust native-fixture matrix, JS regressions and actual VS Code host acceptance
+- [x] Fresh native platform oracle comparison on disposable fixtures
+- [x] Independent review and findings addressed
+- [ ] Exact-head remote CI
+- [ ] ERP UH document latency acceptance on an approved disposable representative fixture

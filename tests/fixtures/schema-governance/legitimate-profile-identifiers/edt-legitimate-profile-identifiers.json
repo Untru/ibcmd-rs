@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "1C:Enterprise Development Tools",
+    "release": "2025.1",
+    "derivation": "Curated public schema facts"
+  },
+  "identifiers": {
+    "profile": "profile:value",
+    "urn": "urn:profile:test",
+    "uri": "http://example.test/profile:value",
+    "unicodePrefix": "профильfile:value"
+  }
+}

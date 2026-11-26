@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-configuration-property-use-ordinary-form-managed",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "Session-7 coordinator spec (SP3): single-field isolation of UseOrdinaryFormInManagedApplication = true, the exact value already accepted as part of session 6's configuration-properties-boolean-group group probe.",
+    "path": "seed/Configuration.xml",
+    "note": "Delta is confined to exactly one element text-node change inside <Properties>; everything else in the wrapper tree is the real platform's own config export output of the retained base CF, unmodified.",
+    "size": 10496,
+    "sha256": "2d5aced879c73365010ffe2cf633b5a4145b9b83b93012b0e1c7ea221ac68cb6"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "6b230b2bb827be3b352b3c6d1815786f6937a50d264c36ed552b110a1acbc0d7",
+    "round_2_cf_sha256": "9607ad19f1b034e05bef383954eab12e318ee360a7074e246f0c8cd00210c464",
+    "native_configuration_sha256": "2d5aced879c73365010ffe2cf633b5a4145b9b83b93012b0e1c7ea221ac68cb6",
+    "packed_body_round1_sha256": null,
+    "packed_body_round2_sha256": null,
+    "unpacked_body_round1_sha256": "b4edd960f46b3e82517f807238c87bbe569ba64c2b778da0493ba0df6d58c9f1",
+    "unpacked_body_round2_sha256": "b17000ab3a02ef9121b8eb6b0f6facacbe2b767fa9ffa3cfcec45931bb466b1c",
+    "native_configuration_equal": true,
+    "content_equal_excl_footer_noise": true,
+    "packed_body_byte_equal": false,
+    "packed_body_note": null,
+    "round_trips": 2,
+    "import_attempts_used": 1,
+    "import_attempts_allowed": 3
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 81740,
+      "sha256": "9607ad19f1b034e05bef383954eab12e318ee360a7074e246f0c8cd00210c464"
+    },
+    "native_configuration": {
+      "path": "native-configuration.xml.b64",
+      "decoded_size": 10496,
+      "sha256": "2d5aced879c73365010ffe2cf633b5a4145b9b83b93012b0e1c7ea221ac68cb6"
+    },
+    "packed_body": {
+      "path": "config-body-packed.bin.b64",
+      "decoded_size": 1807,
+      "sha256": "3f2a6c154060c4f436143d5fa31a71fd79a77208037d012eb6380addde64d9dc"
+    },
+    "unpacked_body": {
+      "path": "config-body-unpacked.bin.b64",
+      "decoded_size": 6513,
+      "sha256": "b17000ab3a02ef9121b8eb6b0f6facacbe2b767fa9ffa3cfcec45931bb466b1c"
+    }
+  },
+  "cohort": {
+    "changed_property": "UseOrdinaryFormInManagedApplication",
+    "changed_property_value": "false -> true",
+    "unpacked_body_diff_vs_base_offset": 625,
+    "single_field_isolation": true,
+    "resolves_group_offset_ambiguity_for": "configuration-properties-boolean-group"
+  },
+  "negative_observations": [],
+  "proven_facts": [
+    "single-field-map.md: offset 625 -> UseOrdinaryFormInManagedApplication (unambiguous, single-property probe)"
+  ],
+  "non_claims": [
+    "compiler_acceptance is intentionally omitted from this probe; not part of this probe session.",
+    "Template and document_topology not applicable -- Configuration-level probe, not template-based.",
+    "Provenance: produced in a chip-fix / session-7 single-field probe session, not yet reviewed or integrated."
+  ]
+}

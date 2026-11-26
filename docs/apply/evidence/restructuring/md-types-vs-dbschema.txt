@@ -1,0 +1,57 @@
+problems {}
+== type descriptor -> DBSchema type entries (distinct mappings per descriptor)
+descriptors: 231 with more than one mapping: 4
+305 ('Attribute', 'Type=xs:boolean') -> {'L:0:0::0': 305}
+228 ('Attribute', 'Type=xs:string|S(0,Variable)') -> {'S:2147483648:0::0': 228}
+201 ('Attribute', 'Type=cfg:CatalogRef.*') -> {'R:ref:3': 201}
+165 ('Resource', 'Type=xs:boolean') -> {'L:0:0::0': 165}
+125 ('Attribute', 'Type=xs:dateTime|D(DateTime)') -> {'T:0:0::0': 125}
+103 ('Dimension', 'Type=cfg:CatalogRef.*') -> {'R:ref:3': 103}
+93 ('Attribute', 'Type=v8:ValueStorage') -> {'B:2147483648:0::0': 93}
+92 ('Attribute', 'Type=cfg:EnumRef.*') -> {'R:ref:3': 92}
+92 ('Resource', 'Type=xs:dateTime|D(DateTime)') -> {'T:0:0::0': 92}
+73 ('Dimension', 'Type=v8:UUID') -> {'B:16:0::0': 73}
+67 ('Resource', 'Type=v8:ValueStorage') -> {'B:2147483648:0::0': 67}
+58 ('Resource', 'Type=xs:string|S(0,Variable)') -> {'S:2147483648:0::0': 58}
+52 ('Dimension', 'TypeSet=TypeSet:cfg:DefinedType') -> {'E:0:0::0/R:T:4': 39, 'R:ref:3': 13}
+45 ('Attribute', 'Type=xs:decimal|N(10,0,Any)') -> {'N:10:0::0': 45}
+44 ('Attribute', 'Type=xs:string|S(100,Variable)') -> {'S:2147483748:0::0': 44}
+43 ('Attribute', 'TypeSet=TypeSet:cfg:DefinedType') -> 4 variants e.g. ['N:15:2::0', 'E:0:0::0/R:T:4', 'R:ref:3']
+39 ('Attribute', 'Type=cfg:CatalogRef.*|Type=cfg:CatalogRef.*') -> {'E:0:0::0/R:T:4': 39}
+38 ('Resource', 'Type=cfg:EnumRef.*') -> {'R:ref:3': 38}
+36 ('Resource', 'Type=cfg:CatalogRef.*') -> {'R:ref:3': 36}
+35 ('Attribute', 'Type=xs:string|S(10,Variable)') -> {'S:2147483658:0::0': 35}
+32 ('Attribute', 'Type=xs:string|S(255,Variable)') -> {'S:2147483903:0::0': 32}
+31 ('Resource', 'Type=xs:decimal|N(10,0,Nonnegative)') -> {'N:10:0::0': 31}
+29 ('Attribute', 'Type=xs:dateTime|D(Date)') -> {'T:0:0::0': 29}
+28 ('Attribute', 'Type=xs:string|S(1024,Variable)') -> {'S:2147484672:0::0': 28}
+28 ('Dimension', 'Type=cfg:CatalogRef.*|Type=cfg:CatalogRef.*') -> {'E:0:0::0/R:T:4': 28}
+24 ('Attribute', 'Type=xs:string|S(50,Variable)') -> {'S:2147483698:0::0': 24}
+22 ('Attribute', 'Type=xs:string|S(150,Variable)') -> {'S:2147483798:0::0': 22}
+22 ('Attribute', 'Type=v8:UUID') -> {'B:16:0::0': 22}
+22 ('Dimension', 'TypeSet=cfg:ExchangePlanRef') -> {'E:0:0::0/R:T:4': 22}
+20 ('Resource', 'Type=xs:decimal|N(10,0,Any)') -> {'N:10:0::0': 20}
+19 ('Dimension', 'Type=xs:string|S(100,Variable)') -> {'S:2147483748:0::0': 19}
+17 ('Attribute', 'Type=xs:string|S(20,Variable)') -> {'S:2147483668:0::0': 17}
+17 ('Attribute', 'Type=xs:string|S(250,Variable)') -> {'S:2147483898:0::0': 17}
+17 ('Attribute', 'Type=xs:string|S(200,Variable)') -> {'S:2147483848:0::0': 17}
+17 ('Dimension', 'Type=xs:dateTime|D(DateTime)') -> {'T:0:0::0': 17}
+17 ('Dimension', 'Type=xs:string|S(36,Variable)') -> {'S:2147483684:0::0': 17}
+17 ('Resource', 'Type=v8:UUID') -> {'B:16:0::0': 17}
+16 ('Resource', 'TypeSet=TypeSet:cfg:DefinedType') -> 5 variants e.g. ['N:15:2::0', 'E:0:0::0/L:0:0::0/S:2147483768:0::0', 'N:10:4::0']
+15 ('Attribute', 'Type=cfg:CatalogRef.*|Type=cfg:CatalogRef.*|Type=cfg:CatalogRef.*') -> {'E:0:0::0/R:T:4': 15}
+15 ('Resource', 'Type=xs:string|S(50,Variable)') -> {'S:2147483698:0::0': 15}
+15 ('Resource', 'Type=xs:string|S(255,Variable)') -> {'S:2147483903:0::0': 15}
+14 ('Resource', 'Type=xs:string|S(100,Variable)') -> {'S:2147483748:0::0': 14}
+14 ('Resource', 'Type=xs:dateTime|D(Date)') -> {'T:0:0::0': 14}
+13 ('Dimension', 'Type=xs:decimal|N(2,0,Any)') -> {'N:2:0::0': 13}
+12 ('Attribute', 'Type=cfg:DocumentRef.*') -> {'R:ref:3': 12}
+== nullable flag by (object kind, hierarchy, Use)
+6 ('AccumulationRegisters', 'flat', None, '0')
+36 ('Catalogs', 'HierarchyFoldersAndItems', 'ForFolderAndItem', '0')
+229 ('Catalogs', 'HierarchyFoldersAndItems', 'ForItem', '1')
+116 ('Catalogs', 'HierarchyOfItems', 'ForItem', '0')
+8 ('Catalogs', 'flat', 'ForFolderAndItem', '0')
+719 ('Catalogs', 'flat', 'ForItem', '0')
+271 ('Documents', 'flat', None, '0')
+1595 ('InformationRegisters', 'flat', None, '0')

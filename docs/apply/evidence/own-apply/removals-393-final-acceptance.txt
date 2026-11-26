@@ -1,0 +1,48 @@
+The acceptance of #393 on the merged build (feat/0.4-apply3 after the merge of feat/0.4 029b4a2b): scripts/apply-lab/final_acceptance.ps1
+tree: the import lab tree rem2 (form ВсеЗаметки and template ДатыПасха removed); our import = ibcmd-rs infobase config import, our apply = ibcmd-rs infobase config apply (drop-in), the twin = the platform apply of a restored copy of the same stage
+
+2026-09-30T08:50:33 restore ibcmd_rs_04_apply_f1o_20260930
+2026-09-30T08:50:41 ready: ibcmd_rs_04_apply_f1o_20260930 (from F:\ibcmd\lab\dbbak\bsp_native_20260923.bak)
+2026-09-30T08:52:40 our import: exit 0, 119.1 s ; [INFO] Импорт конфигурации из XML успешно завершен
+2026-09-30T08:55:03 snapshot ibcmd_rs_04_apply_f1o_20260930/staged: 2234 tables, Config=9847 ConfigSave=9516 Params=39
+2026-09-30T08:55:09 BACKUP DATABASE успешно обработал 108996 страниц за 4.011 секунд (212.298 MБ/сек).
+2026-09-30T08:55:09 restore ibcmd_rs_04_apply_f1n_20260930 (the same stage)
+2026-09-30T08:55:17 ready: ibcmd_rs_04_apply_f1n_20260930 (from F:\ibcmd\lab\04\apply\bak\final_f1_staged.bak)
+2026-09-30T08:59:58 our apply (drop-in): exit 0, 280.1 s ; [INFO] Обновление конфигурации базы данных... | [INFO] Создано поколение конфигурации: ade16f25f46db047a563b5c51e1fbf4600000000 | [INFO] Обновление конфигурации базы данных успешно завершено
+2026-09-30T09:00:39 snapshot ibcmd_rs_04_apply_f1o_20260930/own_after: 2234 tables, Config=9836 ConfigSave=0 Params=38
+2026-09-30T09:16:30 native apply on the twin: exit=0 elapsed=331.9 s
+2026-09-30T09:17:21 snapshot ibcmd_rs_04_apply_f1n_20260930/nat_after: 2234 tables, Config=9836 ConfigSave=0 Params=38
+2026-09-30T09:23:59 native apply again on our result: [INFO] Обновление конфигурации базы данных... | [INFO] Проверка корректности метаданных... | [INFO] Обновление конфигурации базы данных не требуется
+2026-09-30T09:24:26 export against the tree: left_only 0, right_only 0, different 1 (ConfigDumpInfo.xml), unchanged 12190
+2026-09-30T09:24:26 snapdiff native -> ours (Config, Params, tables):
+2026-09-30T09:24:26 == schema: tables added / removed / changed
+2026-09-30T09:24:26 added (0): 
+2026-09-30T09:24:26 removed (0): 
+2026-09-30T09:24:26 changed (1):
+2026-09-30T09:24:26   T _ConfigChngR
+2026-09-30T09:24:26 == data: tables whose rowcount/checksum changed
+2026-09-30T09:24:26 (6)
+2026-09-30T09:24:26   ConfigCAS: (636, '1634444173') -> (12797, '-472238273')
+2026-09-30T09:24:26   Files: (44, '-1117084462') -> (353, '2127820307')
+2026-09-30T09:24:26   Params: (38, '-1466012289') -> (38, '733372861')
+2026-09-30T09:24:26   _ConfigChngR: (20685, '-1860460296') -> (20685, '-1354141076')
+2026-09-30T09:24:26   _ConfigChngR_ExtProps: (21365, '1445288042') -> (21365, '-1566056783')
+2026-09-30T09:24:26   _ExtensionsRestructNGS: (3, '2045766927') -> (0, 'None')
+2026-09-30T09:24:26 == service blobs
+2026-09-30T09:24:26 DBSchema same: True ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef']
+2026-09-30T09:24:26 Params: rows 38 -> 38; added 0 removed 0 changed 6 meta-only 14
+2026-09-30T09:24:26 Config: rows 9836 -> 9836; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T09:24:26 ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T09:24:26 ConfigCAS: rows 636 -> 12797; added 12161 removed 0 changed 0 meta-only 0
+2026-09-30T09:24:26 ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+2026-09-30T09:24:27   ...
+2026-09-30T09:24:27 15 of 16 `.si` rows have the same text (compared after inflate)
+2026-09-30T09:24:27 done
+
+The same on the merge of feat/0.4 fe57154c (the newest, with #416 F-18): our import and our apply as above (f2); the platform's apply of the twin was not run (the native lock queue was long), the result is compared with the twin of the run above, whose stage has the same rows:
+2026-09-30T09:33:35 our import: exit 0, 129 s ; [INFO] Импорт конфигурации из XML успешно завершен
+2026-09-30T09:36:08 snapshot ibcmd_rs_04_apply_f2o_20260930/staged: 2234 tables, Config=9847 ConfigSave=9516 Params=39
+2026-09-30T09:41:34 our apply (drop-in): exit 0, 313.8 s ; [INFO] Обновление конфигурации базы данных... | [INFO] Создано поколение конфигурации: a1e858c03de5c54da5847cf0c744777f00000000 | [INFO] Обновление конфигурации базы данных успешно завершено
+2026-09-30T09:41:59 snapshot ibcmd_rs_04_apply_f2o_20260930/own_after: 2234 tables, Config=9836 ConfigSave=0 Params=38
+stage f1 against stage f2 (snapdiff of the ddl kit): ConfigSave rows 9516 -> 9516, changed 1 (the versions row, a new generation), meta-only 9515 (dates); Config 9847 -> 9847, 0 changed
+result f2 (ours) against the native apply of the stage f1: Config 9836 -> 9836, changed 1 (versions), meta-only 9514 (dates); 15 of 16 .si texts equal (c77bc206 permuted); the same differences as for f1 in Params, Files, ConfigCAS, the register

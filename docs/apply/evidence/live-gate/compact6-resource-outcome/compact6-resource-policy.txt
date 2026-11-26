@@ -1,0 +1,1 @@
+Physical-adapter policy guard passed.

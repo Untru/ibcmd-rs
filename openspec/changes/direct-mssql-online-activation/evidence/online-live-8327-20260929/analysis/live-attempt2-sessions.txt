@@ -1,0 +1,11 @@
+=== lv-probe1: 193 lines, session 1
+  first 18:06:27.614 ( -114.74 s)
+  last  18:10:29.580 ( +127.22 s)
+  event open           18:06:27.614 ( -114.74 s) | 1 | режим=poll
+  markers client=ibcmd-live-v1          server=ibcmd-live-v1          B=нет/нет                                  18:06:27.747 ( -114.61 s) .. 18:08:25.639 (   +3.28 s)  n=98
+  markers client=ibcmd-live-v1          server=ibcmd-live-v2          B=нет/нет                                  18:08:29.785 (   +7.43 s) .. 18:10:29.580 ( +127.22 s)  n=94
+=== lv2-new1: 99 lines, session 5
+  first 18:08:35.148 (  +12.79 s)
+  last  18:10:33.190 ( +130.83 s)
+  event open           18:08:35.148 (  +12.79 s) | 5 | режим=poll
+  markers client=ibcmd-live-v1          server=ibcmd-live-v2          B=нет/нет                                  18:08:35.233 (  +12.88 s) .. 18:10:33.190 ( +130.83 s)  n=98

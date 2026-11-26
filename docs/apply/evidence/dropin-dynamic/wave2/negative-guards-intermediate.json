@@ -1,0 +1,50 @@
+{
+  "binary": "dynamic-wave2-recovery.exe",
+  "scope": "owned clone only; pre-final intermediate build; every SQL probe forced rollback",
+  "baseline_sha256": "07901e2fd5fe4bf0590195dca5326ce7cef916e81ebb6e95c37eb58c9fcdb9a7",
+  "final_sha256": "07901e2fd5fe4bf0590195dca5326ce7cef916e81ebb6e95c37eb58c9fcdb9a7",
+  "results": [
+    {
+      "probe": "changed_deleted_after_plan",
+      "expected_sql_error": 57201,
+      "actual_error": "('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]ConfigSave exact snapshot drifted (57201) (SQLMoreResults)')",
+      "publication_committed": false
+    },
+    {
+      "probe": "stale_service_blob",
+      "expected_sql_error": 57209,
+      "actual_error": "('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Pending Params row drifted (57209) (SQLMoreResults)')",
+      "publication_committed": false
+    },
+    {
+      "probe": "unfinished_new_phantom",
+      "expected_sql_error": 57307,
+      "actual_error": "('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Unfinished operation appeared (57307) (SQLMoreResults)')",
+      "publication_committed": false
+    },
+    {
+      "probe": "stale_prior_alias",
+      "expected_sql_error": 57209,
+      "actual_error": "('42000', '[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Pending Config row drifted (57209) (SQLMoreResults)')",
+      "publication_committed": false
+    },
+    {
+      "probe": "structural_deleted",
+      "exit": 1,
+      "expected_context": "unmeasured removal",
+      "publication_committed": false
+    },
+    {
+      "probe": "ordinary_noop_absent_deleted",
+      "exit": 1,
+      "expected_context": "pending-generation revert",
+      "publication_committed": false
+    },
+    {
+      "probe": "ordinary_noop_empty_deleted",
+      "exit": 1,
+      "expected_context": "pending-generation revert",
+      "publication_committed": false
+    }
+  ]
+}

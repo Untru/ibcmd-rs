@@ -1,0 +1,9 @@
+{
+  "comparison": "own_before_final.json vs after_first_apply_refusal.json",
+  "all_six_table_inventories_equal": true,
+  "all_saved_blobs_equal": true,
+  "configsave_rows": 8,
+  "new_generation_committed": false,
+  "error": "57318 distinct registered-node count; runtime reported uncertain until inspection",
+  "binary": "dynamic-wave2-eligible.exe"
+}

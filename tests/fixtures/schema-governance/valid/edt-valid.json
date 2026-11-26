@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "1C:Enterprise Development Tools",
+    "release": "2025.1",
+    "derivation": "Curated public schema facts"
+  },
+  "artifacts": {
+    "rawSource": "candidate_dump/Config_inflated/34accda9-6211-4bc3-be8d-e42a24260653.0__part0.txt",
+    "nativeSource": "DataProcessors/УправлениеПродажамиНаOzon/Forms/НастройкиИнтеграции/Ext/Form.xml"
+  },
+  "facts": [
+    {
+      "name": "managed-form",
+      "evidence": {
+        "status": "verified",
+        "sources": ["model/ManagedForm.xcore"]
+      }
+    }
+  ]
+}

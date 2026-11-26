@@ -1,0 +1,26 @@
+{
+  "compact6-frozen-files-v2.json": {
+    "sha256": "D26E884FB0C84580C69B03BCCAD1B867922DC5633E33A53E0EAA09BF2658C7B2",
+    "members": 54
+  },
+  "compact6-frozen-files-v1.json": {
+    "sha256": "B6F7B923EDEC3936FFF248BC3C24A1631289EF51E05960937E39675B2E6CED85",
+    "members": 52
+  },
+  "compact5-frozen-files-v4.json": {
+    "sha256": "ACE8EBAC47FAED24E25F72B9EC14DC7174FECE3F825F065AE67502F45598ED4D",
+    "members": 45
+  },
+  "final-combined-v2-frozen.json": {
+    "sha256": "9EA2B4AFA4EB08A6C3F47F12B423D5AA5EB8E729C5CB63C70867DDCFDC60E716",
+    "members": 40
+  },
+  "compact6-runtime-resource-proof.json": {
+    "sha256": "72D05BACA921E350773C05CDD5F1616A18FE0961282FB81CC3950EAAB0B1E450",
+    "members": 613
+  },
+  "compact5-runtime-failure-proof.json": {
+    "sha256": "57A48A22E1DF3110A5947AEFBE55ACC762BF6B25BA693E95F90B4CD46BF04813",
+    "members": 285
+  }
+}

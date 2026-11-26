@@ -1,0 +1,64 @@
+{
+  "all_inventory_names_parts_equal": true,
+  "all_auxiliary_exact_equal": true,
+  "unclassified_deltas": 0,
+  "explicit_raw_differences": [
+    {
+      "table": "Config",
+      "name": "DynamicallyUpdated",
+      "classification": "actual independent publication time",
+      "fields": [
+        "creation",
+        "modified"
+      ]
+    },
+    {
+      "table": "Params",
+      "name": "54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui",
+      "classification": "native runtime licensing drift; raw retained, no codec or SQL write",
+      "fields": [
+        "modified"
+      ]
+    },
+    {
+      "table": "Params",
+      "name": "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+      "classification": "native runtime licensing drift; raw retained, no codec or SQL write",
+      "fields": [
+        "modified",
+        "sha256"
+      ]
+    },
+    {
+      "table": "Params",
+      "name": "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+      "classification": "native runtime licensing drift; raw retained, no codec or SQL write",
+      "fields": [
+        "modified",
+        "sha256"
+      ]
+    },
+    {
+      "table": "Params",
+      "name": "DynamicallyUpdated",
+      "classification": "actual independent publication time",
+      "fields": [
+        "creation",
+        "modified"
+      ]
+    },
+    {
+      "table": "Files",
+      "name": "MobileVersions.dat",
+      "classification": "independently fresh head UUID and publication time; exact capped tail",
+      "native_head": "da21d18b-2613-4e99-b2d9-ee0d408d18bf",
+      "own_head": "fbd3be3d-f6c6-411e-a2a3-6356096cf320",
+      "fields": [
+        "creation",
+        "modified",
+        "sha256"
+      ]
+    }
+  ],
+  "scope": "existing CommonModule initial85 dynamic, full raw storage examined; NOT full byte/header parity due to listed differences"
+}

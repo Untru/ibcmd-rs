@@ -1,0 +1,345 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::atomic::{AtomicUsize, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use serde_json::Value;
+
+struct TempDirectory(PathBuf);
+
+impl TempDirectory {
+    fn new() -> Self {
+        // The wall clock alone can collide when parallel tests hit the same
+        // timer tick; a per-process sequence keeps the names unique.
+        static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+        let nonce = format!(
+            "{}-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        );
+        let path = std::env::temp_dir().join(format!(
+            "ibcmd-rs-cf-bootstrap-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDirectory {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/bootstrap/8.3.27.1989/xcf-2.20/minimal")
+}
+
+fn fixture_manifest() -> Value {
+    serde_json::from_slice(
+        &fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/bootstrap/manifest.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn relative_files(root: &Path) -> Vec<String> {
+    fn visit(root: &Path, current: &Path, files: &mut Vec<String>) {
+        for entry in fs::read_dir(current).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                visit(root, &path, files);
+            } else {
+                files.push(
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    visit(root, root, &mut files);
+    files.sort();
+    files
+}
+
+#[test]
+fn checked_in_source_tree_bootstraps_and_exports_without_missing_or_extra_files() {
+    let manifest = fixture_manifest();
+    let fixture = &manifest["fixtures"][0];
+    assert_eq!(manifest["schema_version"], 1);
+    assert_eq!(fixture["provenance"], "hand-authored-clean-room");
+    assert_eq!(fixture["contains_application_code"], false);
+    let expected_sources = fixture["expected_source_files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|path| path.as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(relative_files(&fixture_root()), expected_sources);
+
+    let temp = TempDirectory::new();
+    let cf = temp.path().join("configuration.cf");
+    let exported = temp.path().join("exported");
+
+    let bootstrap = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "bootstrap"])
+        .arg(fixture_root())
+        .arg(&cf)
+        .args([
+            "--source-version",
+            "2.20",
+            "--target-profile",
+            "platform-8.3.27.1989",
+            "--revision",
+            "format16",
+        ])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        bootstrap.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&bootstrap.stdout),
+        String::from_utf8_lossy(&bootstrap.stderr)
+    );
+    let report: Value = serde_json::from_slice(&bootstrap.stdout).unwrap();
+    assert_eq!(report["command"], "bootstrap");
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["source_files"], 3);
+    assert_eq!(report["storage_entries"], 6);
+
+    let inspect = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "inspect"])
+        .arg(&cf)
+        .args(["--profile", "storage:mssql-config-configsave"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        inspect.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let report: Value = serde_json::from_slice(&inspect.stdout).unwrap();
+    let actual_entries = report["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    let expected_entries = fixture["expected_storage_entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(actual_entries, expected_entries);
+
+    let export = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "export"])
+        .arg(&cf)
+        .arg(&exported)
+        .args([
+            "--source-version",
+            "2.20",
+            "--profile",
+            "storage:mssql-config-configsave",
+        ])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(
+        export.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&export.stdout),
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let report: Value = serde_json::from_slice(&export.stdout).unwrap();
+    assert_eq!(report["command"], "export");
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["export"]["storage"]["failed"], 0);
+    // A CF exports to XML with its `ConfigDumpInfo.xml`, as the platform's own
+    // dump does: nothing is missing, and the one file beyond the sources is the
+    // version inventory of exactly the objects the CF stores.
+    let mut expected_exported = expected_sources.clone();
+    expected_exported.push("ConfigDumpInfo.xml".to_owned());
+    expected_exported.sort();
+    assert_eq!(relative_files(&exported), expected_exported);
+    let dump_info = fs::read_to_string(exported.join("ConfigDumpInfo.xml")).unwrap();
+    let names = dump_info
+        .split("<Metadata name=\"")
+        .skip(1)
+        .map(|entry| entry.split('"').next().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "CommonModule.Portable",
+            "CommonModule.Portable.Module",
+            "Configuration.BootstrapFixture",
+        ],
+        "{dump_info}"
+    );
+}
+
+#[test]
+fn unsupported_source_prevents_publication() {
+    let temp = TempDirectory::new();
+    let source = temp.path().join("source");
+    copy_tree(&fixture_root(), &source);
+    fs::write(source.join("unsupported.dat"), b"must not disappear").unwrap();
+    let cf = temp.path().join("blocked.cf");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "bootstrap"])
+        .arg(&source)
+        .arg(&cf)
+        .args(["--source-version", "2.20"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let report: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(report["errors"][0]["code"], "bootstrap_compile_failed");
+    let guidance = report["errors"][0]["message"].as_str().unwrap();
+    assert!(
+        guidance.contains("limited legacy bootstrap compiler"),
+        "{guidance}"
+    );
+    assert!(guidance.contains("sources newer than v0.4.0"), "{guidance}");
+    assert!(guidance.contains("v0.4.0 lacks"), "{guidance}");
+    assert!(
+        guidance.contains("ibcmd-rs cf bootstrap --base-free --platform <version>"),
+        "{guidance}"
+    );
+    // The umbrella entry alone never says which rule fired or on which file;
+    // the typed entry that follows it must.
+    let detail = &report["errors"][1];
+    assert_eq!(detail["code"], "unconsumed_source");
+    assert_eq!(detail["element"], "unsupported.dat");
+    assert!(
+        detail["message"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported.dat")
+    );
+    assert_eq!(report["errors"].as_array().unwrap().len(), 2);
+    assert!(report["publication"].is_null());
+    assert!(!cf.exists());
+}
+
+#[test]
+fn export_inventory_manifest_is_excluded_from_construction() {
+    let temp = TempDirectory::new();
+    let source = temp.path().join("source");
+    copy_tree(&fixture_root(), &source);
+    // A native `config export` tree always carries this file; it is an
+    // inventory manifest of the dump, has no CF storage record of its own, and
+    // must therefore be excluded from construction rather than parsed as
+    // metadata or routed as a source asset.
+    fs::write(
+        source.join("ConfigDumpInfo.xml"),
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" format="Hierarchical" version="2.20">
+  <ConfigVersions>
+    <Metadata name="Configuration.BootstrapFixture" id="10000000-0000-4000-8000-000000000001" configVersion="00"/>
+  </ConfigVersions>
+</ConfigDumpInfo>"#,
+    )
+    .unwrap();
+    let cf = temp.path().join("configuration.cf");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "bootstrap"])
+        .arg(&source)
+        .arg(&cf)
+        .args([
+            "--source-version",
+            "2.20",
+            "--target-profile",
+            "platform-8.3.27.1989",
+        ])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["source_files"], 4);
+    assert_eq!(report["metadata_files"], 2);
+    assert_eq!(report["asset_files"], 1);
+    assert_eq!(report["non_source_files"], 1);
+    // Same entry inventory as the manifest-free tree: the excluded file adds
+    // nothing to the container.
+    assert_eq!(report["storage_entries"], 6);
+}
+
+#[test]
+fn reserved_manifest_path_holding_metadata_is_rejected_not_skipped() {
+    let temp = TempDirectory::new();
+    let source = temp.path().join("source");
+    copy_tree(&fixture_root(), &source);
+    fs::write(
+        source.join("ConfigDumpInfo.xml"),
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20"/>"#,
+    )
+    .unwrap();
+    let cf = temp.path().join("blocked.cf");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "bootstrap"])
+        .arg(&source)
+        .arg(&cf)
+        .args(["--source-version", "2.20"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let report: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(report["errors"][1]["code"], "non_source_document_mismatch");
+    assert_eq!(report["errors"][1]["element"], "ConfigDumpInfo.xml");
+    assert!(!cf.exists());
+}
+
+fn copy_tree(source: &Path, target: &Path) {
+    fs::create_dir(target).unwrap();
+    for entry in fs::read_dir(source).unwrap() {
+        let entry = entry.unwrap();
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_tree(&source_path, &target_path);
+        } else {
+            fs::copy(source_path, target_path).unwrap();
+        }
+    }
+}

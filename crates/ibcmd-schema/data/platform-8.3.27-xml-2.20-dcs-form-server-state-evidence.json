@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "contract": "8.3.27-xml-2.20-dcs-form-server-state-v1",
+  "bodyContract": "8.3.27-xml-2.20-dcs-settings-server-state-v1",
+  "source": {
+    "product": "1C:Enterprise Platform",
+    "release": "8.3.27 / XML 2.20",
+    "derivation": "wrapper contract synthesized from two two-round clean-room Form DynamicList experiments (minimal, and with explicit ListSettings) with ru_RU pinned; only the empty envelope shape is authenticated"
+  },
+  "sources": {
+    "dynamicList": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "two fresh isolated file-infobase round-trips from a minimal DynamicList list-form delta (no ListSettings); native tree, Form.xml and raw form body were byte-stable",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-form-dynamic-list-server-state",
+      "formBodyUnpackedSha256": "bc2a93ea4fe9b05ae96ce1e72a4c848a5d4b636967da6bb118cf9345f23999b0",
+      "formNativeXmlSha256": "86b8aa82871e676cbfa994fb3528db914ef326f8ca27d5a1a578dad557ca8cc8",
+      "serverStateDecodedSha256": "08e0e00120f703b681522b0c1ea315055f4de28e6af806983707ba9a0ec96487",
+      "databaseLocale": "ru_RU",
+      "roundTrips": 2
+    },
+    "listSettings": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "two fresh isolated file-infobase round-trips from the dynamicList delta plus an explicit non-default ListSettings (filter + order); native tree, Form.xml and raw form body were byte-stable, and the decoded ServerState envelope was byte-identical to the dynamicList corpus despite the explicit ListSettings",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-form-list-settings-server-state",
+      "formBodyUnpackedSha256": "6d455e9dbbe346408b9e04262142592e5d8786740c734f193a9e8f4b6cca651c",
+      "formNativeXmlSha256": "b00707828886c454e17736f79573333fd89b4fec9f04618bdd740ecb9a4293ae",
+      "serverStateDecodedSha256": "08e0e00120f703b681522b0c1ea315055f4de28e6af806983707ba9a0ec96487",
+      "databaseLocale": "ru_RU",
+      "roundTrips": 2
+    },
+    "sourceVersion": "2.20",
+    "platformLine": "8.3.27",
+    "ibcmdSha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "policy": {
+    "propertyBagKey": "ServerState",
+    "siblingKeys": ["Filter", "Order", "AutoSaveUserSettings"],
+    "chunkMagic": [65, 193],
+    "chunkShortLengthTag": 154,
+    "chunkLongLengthTag": 155,
+    "chunkTerminator": [32, 32],
+    "wrapperLocalName": "UniversalListServerOnlyState",
+    "wrapperDefaultNamespace": "",
+    "wrapperXsNamespace": "http://www.w3.org/2001/XMLSchema",
+    "wrapperXsiNamespace": "http://www.w3.org/2001/XMLSchema-instance",
+    "wrapperSelfClosing": true,
+    "emptyEnvelopeHasUtf8Bom": true,
+    "emptyEnvelopeDecodedByteLen": 181,
+    "emptyEnvelopeDecodedSha256": "08e0e00120f703b681522b0c1ea315055f4de28e6af806983707ba9a0ec96487",
+    "nativeFormXmlNeverEmitsServerState": true,
+    "explicitListSettingsDoesNotPopulateEnvelope": true
+  }
+}

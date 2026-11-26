@@ -1,0 +1,26 @@
+PASS synthetic compact2 to reconstructed1 exact token/fullheaders/standalone rows
+PASS synthetic refusal corrupt-pack
+PASS synthetic refusal missing-pack
+PASS synthetic refusal wrong-envelope-digest
+PASS synthetic refusal wrong-sidecar-digest
+PASS synthetic refusal foreign-sidecar-name
+PASS synthetic refusal unknown-identity
+PASS synthetic refusal duplicate-field
+PASS synthetic refusal wrong-header
+PASS synthetic refusal standalone-duplicate
+PASS synthetic refusal standalone-unknown-envelope
+PASS synthetic refusal standalone-unknown-payload
+PASS synthetic refusal standalone-unknown-row
+PASS pure representation cases only; SQL/native/process calls0; actual format2 runtime remains OPEN
+PASS copied actual-package compact6 fixedDB/UUID case upper
+PASS copied actual-package compact6 fixedDB/UUID case lower
+PASS copied actual-package compact6 fixedDB/UUID case mixed
+PASS copied actual-package compact6 fixedDB/UUID case foreign-db5
+PASS copied actual-package compact6 fixedDB/UUID case malformed-operation
+PASS copied actual-package compact6 fixedDB/UUID case malformed-cluster_id
+PASS copied actual-package compact6 fixedDB/UUID case malformed-infobase_id
+PASS copied actual-package compact6 fixedDB/UUID case malformed-database_guid
+PASS copied actual-package compact6 fixedDB/UUID case malformed-family_guid
+PASS copied actual-package compact6 fixedDB/UUID case malformed-recovery_fork
+PASS copied actual-package compact6 fixedDB/UUID case foreign-valid-guid
+PASS original compact5 package/storage bytes unchanged; native/SQL/process actions0; compact6 actual runtime UNMEASURED

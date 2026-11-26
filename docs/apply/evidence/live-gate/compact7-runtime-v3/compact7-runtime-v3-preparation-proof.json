@@ -1,0 +1,37 @@
+{
+  "scope": "Frozen runtime successor PREPARATION only; no actual lifecycle/FIFO/DB/native/client execution. Requires root+independent PREEXEC and explicit scheduling.",
+  "runtime_executed": false,
+  "source_parent": "99fe71e1e13738ad1a2565dc436e06f9478389bd",
+  "manifest": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\compact7-runtime-frozen-v3.json",
+  "manifest_sha256": "781CFD57A8E27E918D7D1FF167692A11F46A1E76173878E8835F171C6C87202A",
+  "pins": 100,
+  "effective_executables": 15,
+  "original58_sha256": "30F33F9BC97B11524412F87E72B12061A7D2C4D19C4D40CCB01B4F2224B63D8E",
+  "preserved_inventories": [
+    54,
+    52,
+    45,
+    58,
+    40,
+    613,
+    285
+  ],
+  "pure_log": {
+    "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-runtime-v3-pure.txt",
+    "sha256": "10B1BB2EA72FF14F482194004CCCCEF603D57902AD7A40CA0E88B7028A90BA30",
+    "exit_code": 0
+  },
+  "actual_readonly_full_closure": {
+    "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-runtime-v3-validation.txt",
+    "sha256": "F49AEC81015EF1A8F1CC61B59BA57250C5CEEFECD80373416448D2C14847945F",
+    "exit_code": 0,
+    "parsers": 19
+  },
+  "binary_source": "fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2",
+  "binary_sha256": "81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0",
+  "case7_runtime_paths_created": {
+    "compact7-temp": false,
+    "compact7-child-receipts": false,
+    "compact7-lock-proofs": false
+  }
+}

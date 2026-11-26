@@ -1,0 +1,35 @@
+[package]
+name = "ibcmd-apply-check"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The restructuring check of a configuration apply: a staged ConfigSave, a source tree or a second XML tree against the active configuration, every difference classified as harmless or as a restructuring, with S1's operation or refusal for each, and its two read-only commands' arguments"
+
+[dependencies]
+anyhow = "1.0"
+# The arguments of `mssql-apply-check` and `apply-check-trees`, which the
+# root's command line flattens into its own.
+clap = { version = "4.5", features = ["derive"] }
+# The 8.5 root row's base64 payload.
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+# The descriptor model: the stored rows' brace trees, their export to XML and
+# the source tree's index.
+ibcmd-metadata-model = { path = "../ibcmd-metadata-model" }
+# The stored rows' raw deflate.
+ibcmd-module-blob = { path = "../ibcmd-module-blob" }
+# The process-wide worker pools the tree and database checks run on.
+ibcmd-parallel = { path = "../ibcmd-parallel" }
+# The read-only Config and ConfigSave reads.
+ibcmd-sql = { path = "../ibcmd-sql" }
+rayon = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+walkdir = "2.5"
+
+[dev-dependencies]
+# The raw deflate of the lab corpus' stored rows (`s1h_corpus_tests`).
+flate2 = "1.1"
+
+[lints.rust]
+unsafe_code = "forbid"

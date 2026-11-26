@@ -1,0 +1,515 @@
+{
+  "database": "ibcmd_rs_04_ddl_a2_fin",
+  "mode": "trial",
+  "summary": "_ДемоПартнеры (Reference20): 1 new attribute(s) -> Fld11034 = ДемоНовыйРеквизит",
+  "object": "Reference20",
+  "additions": [
+    {
+      "attribute": "ДемоНовыйРеквизит",
+      "uuid": "c60cdc87-198a-4f6e-8f17-76bcb1b1914b",
+      "field": "Fld11034",
+      "number": 11034,
+      "position": 14
+    }
+  ],
+  "tables": [
+    {
+      "table": "_Reference20",
+      "columns": 16,
+      "indexes": [
+        "_Reference20_1 (_Fld2683, _PredefinedID)",
+        "unique _Reference20_2 (_Fld2683, _ParentIDRRef, _Folder, _Code, _IDRRef)",
+        "unique _Reference20_3 (_Fld2683, _ParentIDRRef, _Folder, _Description, _IDRRef)",
+        "unique _Reference20_4 (_Fld2683, _Code, _IDRRef)",
+        "unique _Reference20_5 (_Fld2683, _Description, _IDRRef)",
+        "unique clustered _Reference20_S_HPK (_Fld2683, _IDRRef)"
+      ],
+      "copy_columns": 15
+    },
+    {
+      "table": "_Reference20_VT155",
+      "columns": 13,
+      "indexes": [
+        "unique clustered _Reference20_VT155_SK (_Fld2683, _Reference20_IDRRef, _KeyField)"
+      ],
+      "copy_columns": 13
+    },
+    {
+      "table": "_Reference20_VT159",
+      "columns": 17,
+      "indexes": [
+        "unique clustered _Reference20_VT159_SK (_Fld2683, _Reference20_IDRRef, _KeyField)",
+        "_Reference20_VT159_1 (_Fld2683, _Fld161RRef, _Reference20_IDRRef)",
+        "_Reference20_VT159_2 (_Fld2683, _Fld162RRef, _Reference20_IDRRef)"
+      ],
+      "copy_columns": 17
+    }
+  ],
+  "old_schema_sha256": "ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef",
+  "new_schema_sha256": "839aa6272ab485ba2a037c71087c23ad2b4ccf827ffaf4bb36cdc284d744a7ea",
+  "new_names_sha256": "cec16f07f09ac0e97e772e1195ca43bb5787846a4459195dc3942fb23287cdc2",
+  "statements": [
+    {
+      "phase": "guard",
+      "label": "the stored schema is the one the plan was made from",
+      "sql": "IF NOT EXISTS (SELECT 1 FROM dbo.SchemaStorage WHERE SchemaID = 0 AND Status = 100 AND DATALENGTH(NewGenCreated) = 14 AND DATALENGTH(NewGenDropped) = 14 AND CONVERT(varchar(64), HASHBYTES('SHA2_256', CurrentSchema), 2) = 'BA56D560791813EE2063F55501D866DD05EFDA500D6EEA9A0AD97F1DB094AAEF') THROW 51000, 'SchemaStorage is not idle or its schema is not the planned one', 1;"
+    },
+    {
+      "phase": "create",
+      "label": "create _Reference20NG",
+      "sql": "create table dbo._Reference20NG (\n_IDRRef binary(16) not null,\n_Version timestamp not null,\n_Marked binary(1) not null,\n_PredefinedID binary(16) not null,\n_ParentIDRRef binary(16) not null,\n_Folder binary(1) not null,\n_Code nvarchar(9) not null,\n_Description nvarchar(150) not null,\n_Fld151 binary(1),\n_Fld152 binary(1),\n_Fld153 binary(1),\n_Fld154 binary(1),\n_Fld949RRef binary(16),\n_Fld6357RRef bina"
+    },
+    {
+      "phase": "create",
+      "label": "create _Reference20_VT155NG",
+      "sql": "create table dbo._Reference20_VT155NG (\n_Reference20_IDRRef binary(16) not null,\n_Fld2683 numeric(7, 0) not null,\n_KeyField binary(4) not null,\n_LineNo156 numeric(5, 0) not null,\n_Fld157RRef binary(16) not null,\n_Fld158_TYPE binary(1) not null,\n_Fld158_L binary(1) not null,\n_Fld158_N numeric(17, 5) not null,\n_Fld158_T datetime2(0) not null,\n_Fld158_S nvarchar(1024) not null,\n_Fld158_RTRef binary(4"
+    },
+    {
+      "phase": "create",
+      "label": "create _Reference20_VT159NG",
+      "sql": "create table dbo._Reference20_VT159NG (\n_Reference20_IDRRef binary(16) not null,\n_Fld2683 numeric(7, 0) not null,\n_KeyField binary(4) not null,\n_LineNo160 numeric(5, 0) not null,\n_Fld161RRef binary(16) not null,\n_Fld162RRef binary(16) not null,\n_Fld163 nvarchar(500) not null,\n_Fld164 nvarchar(max) not null,\n_Fld165 nvarchar(100) not null,\n_Fld166 nvarchar(50) not null,\n_Fld167 nvarchar(50) not nul"
+    },
+    {
+      "phase": "load",
+      "label": "copy _Reference20 into _Reference20NG",
+      "sql": "INSERT INTO dbo._Reference20NG WITH(TABLOCK) (_IDRRef, _Marked, _PredefinedID, _ParentIDRRef, _Folder, _Code, _Description, _Fld151, _Fld152, _Fld153, _Fld154, _Fld949RRef, _Fld6357RRef, _Fld11034, _Fld2683) SELECT\nT1._IDRRef,\nT1._Marked,\nT1._PredefinedID,\nT1._ParentIDRRef,\nT1._Folder,\nT1._Code,\nT1._Description,\nT1._Fld151,\nT1._Fld152,\nT1._Fld153,\nT1._Fld154,\nT1._Fld949RRef,\nT1._Fld6357RRef,\nCAST("
+    },
+    {
+      "phase": "load",
+      "label": "copy _Reference20_VT155 into _Reference20_VT155NG",
+      "sql": "INSERT INTO dbo._Reference20_VT155NG WITH(TABLOCK) (_LineNo156, _Fld157RRef, _Fld158_TYPE, _Fld158_L, _Fld158_N, _Fld158_T, _Fld158_S, _Fld158_RTRef, _Fld158_RRRef, _Fld1473, _Fld2683, _Reference20_IDRRef, _KeyField) SELECT\nT2._LineNo156,\nT2._Fld157RRef,\nT2._Fld158_TYPE,\nT2._Fld158_L,\nT2._Fld158_N,\nT2._Fld158_T,\nT2._Fld158_S,\nT2._Fld158_RTRef,\nT2._Fld158_RRRef,\nT2._Fld1473,\nT2._Fld2683,\nT2._Refere"
+    },
+    {
+      "phase": "load",
+      "label": "copy _Reference20_VT159 into _Reference20_VT159NG",
+      "sql": "INSERT INTO dbo._Reference20_VT159NG WITH(TABLOCK) (_LineNo160, _Fld161RRef, _Fld162RRef, _Fld163, _Fld164, _Fld165, _Fld166, _Fld167, _Fld168, _Fld169, _Fld170, _Fld171, _Fld5024RRef, _Fld6753, _Fld2683, _Reference20_IDRRef, _KeyField) SELECT\nT3._LineNo160,\nT3._Fld161RRef,\nT3._Fld162RRef,\nT3._Fld163,\nT3._Fld164,\nT3._Fld165,\nT3._Fld166,\nT3._Fld167,\nT3._Fld168,\nT3._Fld169,\nT3._Fld170,\nT3._Fld171,\nT"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_1NG",
+      "sql": "CREATE INDEX _Reference20_1NG ON dbo._Reference20NG (_Fld2683, _PredefinedID) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON) ON [PRIMARY];"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_2NG",
+      "sql": "CREATE UNIQUE INDEX _Reference20_2NG ON dbo._Reference20NG (_Fld2683, _ParentIDRRef, _Folder, _Code, _IDRRef) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON) ON [PRIMARY];"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_3NG",
+      "sql": "CREATE UNIQUE INDEX _Reference20_3NG ON dbo._Reference20NG (_Fld2683, _ParentIDRRef, _Folder, _Description, _IDRRef) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON) ON [PRIMARY];"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_4NG",
+      "sql": "CREATE UNIQUE INDEX _Reference20_4NG ON dbo._Reference20NG (_Fld2683, _Code, _IDRRef) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON) ON [PRIMARY];"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_5NG",
+      "sql": "CREATE UNIQUE INDEX _Reference20_5NG ON dbo._Reference20NG (_Fld2683, _Description, _IDRRef) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON) ON [PRIMARY];"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_S_HPKNG",
+      "sql": "CREATE UNIQUE CLUSTERED INDEX _Reference20_S_HPKNG ON dbo._Reference20NG (_Fld2683, _IDRRef) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON);"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_VT155_SKNG",
+      "sql": "CREATE UNIQUE CLUSTERED INDEX _Reference20_VT155_SKNG ON dbo._Reference20_VT155NG (_Fld2683, _Reference20_IDRRef, _KeyField) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON);"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_VT159_SKNG",
+      "sql": "CREATE UNIQUE CLUSTERED INDEX _Reference20_VT159_SKNG ON dbo._Reference20_VT159NG (_Fld2683, _Reference20_IDRRef, _KeyField) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON);"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_VT159_1NG",
+      "sql": "CREATE INDEX _Reference20_VT159_1NG ON dbo._Reference20_VT159NG (_Fld2683, _Fld161RRef, _Reference20_IDRRef) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON) ON [PRIMARY];"
+    },
+    {
+      "phase": "indexes",
+      "label": "index _Reference20_VT159_2NG",
+      "sql": "CREATE INDEX _Reference20_VT159_2NG ON dbo._Reference20_VT159NG (_Fld2683, _Fld162RRef, _Reference20_IDRRef) WITH (SORT_IN_TEMPDB = ON, MAXDOP = 0, ALLOW_PAGE_LOCKS = OFF, ALLOW_ROW_LOCKS = ON) ON [PRIMARY];"
+    },
+    {
+      "phase": "dropold",
+      "label": "drop _Reference20",
+      "sql": "drop table dbo._Reference20;"
+    },
+    {
+      "phase": "dropold",
+      "label": "drop _Reference20_VT155",
+      "sql": "drop table dbo._Reference20_VT155;"
+    },
+    {
+      "phase": "dropold",
+      "label": "drop _Reference20_VT159",
+      "sql": "drop table dbo._Reference20_VT159;"
+    },
+    {
+      "phase": "rename",
+      "label": "rename _Reference20NG",
+      "sql": "EXEC sp_rename N'_Reference20NG', N'_Reference20', 'OBJECT';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename _Reference20_VT155NG",
+      "sql": "EXEC sp_rename N'_Reference20_VT155NG', N'_Reference20_VT155', 'OBJECT';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename _Reference20_VT159NG",
+      "sql": "EXEC sp_rename N'_Reference20_VT159NG', N'_Reference20_VT159', 'OBJECT';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_1NG",
+      "sql": "EXEC sp_rename N'_Reference20._Reference20_1NG', N'_Reference20_1', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_2NG",
+      "sql": "EXEC sp_rename N'_Reference20._Reference20_2NG', N'_Reference20_2', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_3NG",
+      "sql": "EXEC sp_rename N'_Reference20._Reference20_3NG', N'_Reference20_3', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_4NG",
+      "sql": "EXEC sp_rename N'_Reference20._Reference20_4NG', N'_Reference20_4', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_5NG",
+      "sql": "EXEC sp_rename N'_Reference20._Reference20_5NG', N'_Reference20_5', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_S_HPKNG",
+      "sql": "EXEC sp_rename N'_Reference20._Reference20_S_HPKNG', N'_Reference20_S_HPK', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_VT155_SKNG",
+      "sql": "EXEC sp_rename N'_Reference20_VT155._Reference20_VT155_SKNG', N'_Reference20_VT155_SK', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_VT159_SKNG",
+      "sql": "EXEC sp_rename N'_Reference20_VT159._Reference20_VT159_SKNG', N'_Reference20_VT159_SK', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_VT159_1NG",
+      "sql": "EXEC sp_rename N'_Reference20_VT159._Reference20_VT159_1NG', N'_Reference20_VT159_1', 'INDEX';"
+    },
+    {
+      "phase": "rename",
+      "label": "rename index _Reference20_VT159_2NG",
+      "sql": "EXEC sp_rename N'_Reference20_VT159._Reference20_VT159_2NG', N'_Reference20_VT159_2', 'INDEX';"
+    },
+    {
+      "phase": "publish",
+      "label": "SchemaStorage: idle, the new schema, empty generations",
+      "sql": "UPDATE dbo.SchemaStorage SET Status = 100, CurrentSchema = @P1, NewGenCreated = @P2, NewGenDropped = @P3 WHERE SchemaID = 0;"
+    },
+    {
+      "phase": "publish",
+      "label": "DBSchema",
+      "sql": "UPDATE dbo.DBSchema SET SerializedData = @P1;"
+    },
+    {
+      "phase": "publish",
+      "label": "Params DBNames",
+      "sql": "UPDATE dbo.Params SET BinaryData = @P1, DataSize = @P2, Modified = DATEADD(YEAR, 2000, SYSDATETIME()) WHERE FileName = N'DBNames' AND PartNo = 0;"
+    },
+    {
+      "phase": "publish",
+      "label": "Params DBNamesVersion-DBNames",
+      "sql": "UPDATE dbo.Params SET BinaryData = @P1, DataSize = @P2, Modified = DATEADD(YEAR, 2000, SYSDATETIME()) WHERE FileName = N'DBNamesVersion-DBNames' AND PartNo = 0;"
+    },
+    {
+      "phase": "publish",
+      "label": "Params ea13a2c9-0c2f-40fa-b855-710387e3271d.si: the XDTO model with the new properties",
+      "sql": "UPDATE dbo.Params SET BinaryData = @P1, DataSize = @P2, Modified = DATEADD(YEAR, 2000, SYSDATETIME()) WHERE FileName = N'ea13a2c9-0c2f-40fa-b855-710387e3271d.si' AND PartNo = 0;"
+    },
+    {
+      "phase": "publish",
+      "label": "Config: the changed staged rows replace the stored ones",
+      "sql": "DELETE c FROM dbo.Config c WHERE c.FileName IN (SELECT FileName FROM dbo.ConfigSave WHERE FileName <> N'deleted') AND NOT EXISTS (SELECT 1 FROM dbo.ConfigSave s WHERE s.FileName = c.FileName AND s.PartNo = c.PartNo AND s.Creation = c.Creation AND s.Modified = c.Modified AND s.Attributes = c.Attributes AND s.DataSize = c.DataSize AND s.BinaryData = c.BinaryData);\nINSERT INTO dbo.Config (FileName, C"
+    },
+    {
+      "phase": "publish",
+      "label": "ConfigSave: emptied",
+      "sql": "DELETE FROM dbo.ConfigSave;"
+    }
+  ],
+  "execution": {
+    "database": "ibcmd_rs_04_ddl_a2_fin",
+    "trial": true,
+    "committed": false,
+    "other_sessions": 0,
+    "steps": [
+      {
+        "phase": "guard",
+        "label": "the stored schema is the one the plan was made from",
+        "milliseconds": 8,
+        "rows": null
+      },
+      {
+        "phase": "create",
+        "label": "create _Reference20NG",
+        "milliseconds": 16,
+        "rows": null
+      },
+      {
+        "phase": "create",
+        "label": "create _Reference20_VT155NG",
+        "milliseconds": 2,
+        "rows": null
+      },
+      {
+        "phase": "create",
+        "label": "create _Reference20_VT159NG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "load",
+        "label": "copy _Reference20 into _Reference20NG",
+        "milliseconds": 3,
+        "rows": null
+      },
+      {
+        "phase": "load",
+        "label": "copy _Reference20_VT155 into _Reference20_VT155NG",
+        "milliseconds": 2,
+        "rows": null
+      },
+      {
+        "phase": "load",
+        "label": "copy _Reference20_VT159 into _Reference20_VT159NG",
+        "milliseconds": 2,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_1NG",
+        "milliseconds": 11,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_2NG",
+        "milliseconds": 3,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_3NG",
+        "milliseconds": 2,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_4NG",
+        "milliseconds": 2,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_5NG",
+        "milliseconds": 5,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_S_HPKNG",
+        "milliseconds": 22,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_VT155_SKNG",
+        "milliseconds": 5,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_VT159_SKNG",
+        "milliseconds": 8,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_VT159_1NG",
+        "milliseconds": 2,
+        "rows": null
+      },
+      {
+        "phase": "indexes",
+        "label": "index _Reference20_VT159_2NG",
+        "milliseconds": 2,
+        "rows": null
+      },
+      {
+        "phase": "drop-old",
+        "label": "drop _Reference20",
+        "milliseconds": 7,
+        "rows": null
+      },
+      {
+        "phase": "drop-old",
+        "label": "drop _Reference20_VT155",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "drop-old",
+        "label": "drop _Reference20_VT159",
+        "milliseconds": 2,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename _Reference20NG",
+        "milliseconds": 494,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename _Reference20_VT155NG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename _Reference20_VT159NG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_1NG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_2NG",
+        "milliseconds": 0,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_3NG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_4NG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_5NG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_S_HPKNG",
+        "milliseconds": 4,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_VT155_SKNG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_VT159_SKNG",
+        "milliseconds": 1,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_VT159_1NG",
+        "milliseconds": 0,
+        "rows": null
+      },
+      {
+        "phase": "rename",
+        "label": "rename index _Reference20_VT159_2NG",
+        "milliseconds": 0,
+        "rows": null
+      },
+      {
+        "phase": "publish",
+        "label": "SchemaStorage: idle, the new schema, empty generations",
+        "milliseconds": 60,
+        "rows": 1
+      },
+      {
+        "phase": "publish",
+        "label": "DBSchema",
+        "milliseconds": 41,
+        "rows": 1
+      },
+      {
+        "phase": "publish",
+        "label": "Params DBNames",
+        "milliseconds": 17,
+        "rows": 1
+      },
+      {
+        "phase": "publish",
+        "label": "Params DBNamesVersion-DBNames",
+        "milliseconds": 4,
+        "rows": 1
+      },
+      {
+        "phase": "publish",
+        "label": "Params ea13a2c9-0c2f-40fa-b855-710387e3271d.si: the XDTO model with the new properties",
+        "milliseconds": 79,
+        "rows": 1
+      },
+      {
+        "phase": "publish",
+        "label": "Config: the changed staged rows replace the stored ones",
+        "milliseconds": 14919,
+        "rows": null
+      },
+      {
+        "phase": "publish",
+        "label": "ConfigSave: emptied",
+        "milliseconds": 6433,
+        "rows": null
+      }
+    ],
+    "verified": [
+      "_Reference20: 14 rows copied",
+      "_Reference20_VT155: 29 rows copied",
+      "_Reference20_VT159: 18 rows copied",
+      "_Reference20NG: columns and indexes as the model",
+      "_Reference20_VT155NG: columns and indexes as the model",
+      "_Reference20_VT159NG: columns and indexes as the model",
+      "_Reference20: columns and indexes as the model, 14 rows",
+      "_Reference20_VT155: columns and indexes as the model, 29 rows",
+      "_Reference20_VT159: columns and indexes as the model, 18 rows",
+      "SchemaStorage, DBSchema, DBNames and Config as the plan",
+      "trial: rolled back"
+    ],
+    "milliseconds": 29814
+  }
+}

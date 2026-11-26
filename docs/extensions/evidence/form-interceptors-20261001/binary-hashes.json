@@ -1,0 +1,10 @@
+[
+  {
+    "path": "F:\\ibcmd\\lab\\05\\wave1\\extensions\\ibcmd-rs-interceptors.exe",
+    "sha256": "7FC8026AB7B5921103AE828D0F4BDAA0911E4F01941B9317E7B9931A84EC7913"
+  },
+  {
+    "path": "F:\\ibcmd\\src\\ibcmd-rs-05-ext\\target\\iter\\ibcmd-rs.exe",
+    "sha256": "36ED46BDE89B4580D6FABCD2D2CF7D464188CDCBF266C74DD590056B6BB58323"
+  }
+]

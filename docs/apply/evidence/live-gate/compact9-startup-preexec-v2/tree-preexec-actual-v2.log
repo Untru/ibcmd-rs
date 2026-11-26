@@ -1,0 +1,10 @@
+
+total_nodes             : 5485
+directories             : 4888
+ordinary_files          : 597
+captured613_bytes_equal : True
+no_reparse              : True
+signal_authority        : False
+ownership_authority     : False
+archive_moves           : 0
+

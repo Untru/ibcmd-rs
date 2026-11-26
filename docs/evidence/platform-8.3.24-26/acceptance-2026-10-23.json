@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "rows": [
+    {
+      "release": "8.3.24",
+      "state": "blocked",
+      "blockers": [
+        "8.3.24.1819 is named by issue #361 but no exact native executable or installer was found in the bounded local inventory.",
+        "Official release portal redirects to login; no authenticated installer access was available.",
+        "No authorized SQL endpoint, frozen SQL corpus snapshot, or fresh native SQL targets are identified; coordinated with #359.",
+        "Native export/import parity, layout census and write limits have not been measured on this release."
+      ]
+    },
+    {
+      "release": "8.3.25",
+      "state": "blocked",
+      "blockers": [
+        "No 8.3.25 exact native executable or installer was found in the bounded local inventory. Exact test build remains to be selected from an authorized official installer.",
+        "Official 8.3.25.1257 release notes are public metadata; the release portal redirects to login and installer availability was not established.",
+        "No authorized SQL endpoint, frozen SQL corpus snapshot, or fresh native SQL targets are identified; coordinated with #359.",
+        "Native export/import parity, layout census and write limits have not been measured on this release."
+      ]
+    },
+    {
+      "release": "8.3.26",
+      "state": "blocked",
+      "blockers": [
+        "No 8.3.26 exact native executable or installer was found in the bounded local inventory. Exact test build remains to be selected from an authorized official installer.",
+        "Official 8.3.26.1318 release notes are public metadata; the release portal redirects to login and installer availability was not established.",
+        "No authorized SQL endpoint, frozen SQL corpus snapshot, or fresh native SQL targets are identified; coordinated with #359.",
+        "Native export/import parity, layout census and write limits have not been measured on this release."
+      ]
+    }
+  ]
+}

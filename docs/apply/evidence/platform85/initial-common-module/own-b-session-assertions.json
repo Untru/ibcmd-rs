@@ -1,0 +1,32 @@
+{
+  "concurrent_old_new_overlap_ms": 375071,
+  "observations": {
+    "own-b-old": {
+      "sid": "1",
+      "client_marker": "P85_NATIVE_A",
+      "server_marker": "P85_NATIVE_A",
+      "samples": 550,
+      "first_tick": 63926467096127,
+      "last_tick": 63926467654166,
+      "sha256": "20665149b025701333bfd689765d87432c55fde78eafbdb290d8466dadb60c61",
+      "identity": {
+        "command": "\"C:\\Program Files\\1cv8\\8.5.1.1150\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:6541\\ibcmd_rs_05_p85_w3_own_20261001\" /N\"Администратор (обычное приложение)\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\platform85\\observer\\IbcmdRsObserver.epf\" /C\"own-b-old;poll;F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\own-b-old.client-out.txt\" -NoTruncate",
+        "born": "2026-10-01T15:58:07.3814050Z"
+      }
+    },
+    "own-b-new": {
+      "sid": "2",
+      "client_marker": "P85_NATIVE_B",
+      "server_marker": "P85_NATIVE_B",
+      "samples": 371,
+      "first_tick": 63926467279095,
+      "last_tick": 63926467654986,
+      "sha256": "65f2dc631e76a5809e5a1964fe05f66684ec3fd780fde5cff6d9992aec7d5de6",
+      "identity": {
+        "command": "\"C:\\Program Files\\1cv8\\8.5.1.1150\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:6541\\ibcmd_rs_05_p85_w3_own_20261001\" /N\"Администратор (обычное приложение)\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\platform85\\observer\\IbcmdRsObserver.epf\" /C\"own-b-new;poll;F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\own-b-new.client-out.txt\" -NoTruncate",
+        "born": "2026-10-01T16:01:10.8605490Z"
+      }
+    }
+  },
+  "scope": "old session stays A/A, new session reads B/B; no same-session refresh assertion"
+}

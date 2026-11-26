@@ -1,0 +1,3 @@
+PASS exact frozen compact6 closure after queue grant
+PASS exact frozen compact5 closure after queue grant
+PASS all285 compact5 raw files unchanged; runtime compact6 not started

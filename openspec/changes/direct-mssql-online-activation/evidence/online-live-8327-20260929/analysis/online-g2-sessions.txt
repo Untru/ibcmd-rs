@@ -1,0 +1,27 @@
+=== on-lazy: 1966 lines, session 5
+  first 17:01:44.718 (-1822.76 s)
+  last  17:43:18.675 ( +671.20 s)
+  event open           17:01:44.718 (-1822.76 s) | 5 | режим=lazy
+  event lazy-armed     17:08:36.749 (-1410.73 s) | 5 | 
+  markers client=Telegram               server=Telegram               B=-                                        17:08:37.122 (-1410.36 s) .. 17:43:18.675 ( +671.20 s)  n=1639
+  beats n=325 17:01:44.719 (-1822.76 s) .. 17:08:35.735 (-1411.74 s)
+=== on-new1: 1612 lines, session 8
+  first 17:09:05.195 (-1382.29 s)
+  last  17:43:18.267 ( +670.79 s)
+  event open           17:09:05.195 (-1382.29 s) | 8 | режим=poll
+  markers client=ibcmd-online-v1        server=ibcmd-online-v1        B=-                                        17:09:05.230 (-1382.25 s) .. 17:43:18.267 ( +670.79 s)  n=1611
+=== on-new2: 1505 lines, session 9
+  first 17:11:22.301 (-1245.18 s)
+  last  17:43:18.676 ( +671.20 s)
+  event open           17:11:22.301 (-1245.18 s) | 9 | режим=poll
+  markers client=ibcmd-online-v1        server=ibcmd-online-v1        B=-                                        17:11:22.358 (-1245.12 s) .. 17:43:18.676 ( +671.20 s)  n=1504
+=== on-warm-c: 655 lines, session 10
+  first 17:29:28.872 ( -158.61 s)
+  last  17:43:20.120 ( +672.64 s)
+  event open           17:29:28.872 ( -158.61 s) | 10 | режим=poll
+  markers client=ibcmd-online-v1        server=ibcmd-online-v1        B=нет/нет                                  17:29:29.236 ( -158.24 s) .. 17:43:20.120 ( +672.64 s)  n=654
+=== on-new3: 496 lines, session 16
+  first 17:32:41.666 (  +34.19 s)
+  last  17:43:11.984 ( +664.50 s)
+  event open           17:32:41.666 (  +34.19 s) | 16 | режим=poll
+  markers client=ibcmd-online-v1        server=ibcmd-online-v1        B=ibcmd-online-B-v2/ibcmd-online-B-v2      17:32:41.777 (  +34.30 s) .. 17:43:11.984 ( +664.50 s)  n=495

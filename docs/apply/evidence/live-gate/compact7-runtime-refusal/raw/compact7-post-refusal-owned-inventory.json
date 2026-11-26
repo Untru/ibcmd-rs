@@ -1,0 +1,15 @@
+{
+  "scope": "bounded post-refusal own-scope inventory",
+  "case7_started_scripts": [
+    "compact7-lifetime-prior-case5-readonly.command.json",
+    "compact7-lifetime-worker-acquire.command.json"
+  ],
+  "worker_owner": "absent",
+  "database": "ibcmd_rs_05_load_w3_compact7_20261002",
+  "shared_manifest_target_records": 0,
+  "binding_present": false,
+  "unknown_child_receipt_files": 0,
+  "private_state_present": false,
+  "native_artifacts": 0,
+  "resource_unconfirmed": false
+}

@@ -1,0 +1,229 @@
+
+====================================================================================================
+Twin 1: the form ВсеЗаметки and the template ДатыПасха removed. Stage: this repository's import (import-override build) of tree rem2. fdp = native apply, fdo = this apply, same stage.
+====================================================================================================
+Databases: ibcmd_rs_04_apply_fdp_20260930 (native), ibcmd_rs_04_apply_fdo_20260930 (ours); staged backup bak\fd_ours_staged.bak
+
+====================================================================================================
+deleted_cmp.py: the platform's list (two runs, fdk and fdd) against the import's (snapshot of the twin's staged state)
+====================================================================================================
+F:\ibcmd\lab\04\apply\work\fd\native_deleted.txt             bytes 655, deflated None, BOM True, count 11, format ok True, trailing newline False
+F:\ibcmd\lab\04\apply\work\fd\native_deleted_fdd.txt         bytes 655, deflated None, BOM True, count 11, format ok True, trailing newline False
+snap:ibcmd_rs_04_apply_fdp_20260930/staged                   bytes 655, deflated 209, BOM True, count 11, format ok True, trailing newline False
+F:\ibcmd\lab\04\apply\work\fd\native_deleted_fdd.txt against F:\ibcmd\lab\04\apply\work\fd\native_deleted.txt: same set of (name, flag) True, same order False, same length True
+snap:ibcmd_rs_04_apply_fdp_20260930/staged against F:\ibcmd\lab\04\apply\work\fd\native_deleted.txt: same set of (name, flag) True, same order False, same length True
+
+====================================================================================================
+snapdiff.py fdp/nat_after -> fdo/own_after (listings of cache rows and help-index chunks left out)
+====================================================================================================
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (1):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C4ADD34925 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C4A37577B9 CLUSTERED [PK UNIQUE] (_IDRRef)
+== data: tables whose rowcount/checksum changed
+(6)
+  ConfigCAS: (636, '1634444173') -> (12797, '-472238273')
+  Files: (44, '266950215') -> (353, '1538066531')
+  Params: (38, '-1989657810') -> (38, '-47896615')
+  _ConfigChngR: (20685, '-1860842224') -> (20685, '-1354141076')
+  _ConfigChngR_ExtProps: (21365, '-1160668054') -> (21365, '-1566056783')
+  _ExtensionsRestructNGS: (3, '2045766927') -> (0, 'None')
+== service blobs
+DBSchema same: True ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef']
+SchemaStorage id=0 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 6 meta-only 14
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 447460 -> 449361 bytes  35ad5a9c -> 441f8c11
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  7ec7ff04 -> 8732478b
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  9276a72d -> dd001d83
+    ~ c4629235-4823-4320-b8b5-1d08f4c6d612.si [0] 110827 -> 111567 bytes  60a5df62 -> 592daddc
+    ~ c77bc206-5935-48ea-b32e-508a572d94f4.si [0] 24397 -> 23817 bytes  1f2a5de6 -> 6a93f6e5
+    ~ siVersions [0] 1273 -> 1273 bytes  26eb92ce -> 46c07520
+Config: rows 9836 -> 9836; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+ConfigCAS: rows 636 -> 12797; added 12161 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 353; added 309 removed 0 changed 6 meta-only 0
+    ~ CAS_GC_Info [0] 21 -> 21 bytes  b1c34c1d -> fecc0bcd
+    ~ MobileVersions.dat [0] 37009 -> 37009 bytes  309bed5b -> f2f25065
+    ~ extd_props_cached/gc.mrk [0] 9 -> 9 bytes  1cf1ec2c -> c6626a19
+    ~ userDocs_ru.bin [0] 2255 -> 47528 bytes  12145c82 -> cae1d95a
+    ~ userPostings_ru.bin [0] 5057 -> 537522 bytes  1d2d752e -> 792f02b6
+    ~ userVocabulary_ru.bin [0] 8795 -> 105710 bytes  eb8662e7 -> fe236c5f
+
+====================================================================================================
+si_diff.py: the .si rows compared after inflate
+====================================================================================================
+== ibcmd_rs_04_apply_fdp_20260930/nat_after  ->  ibcmd_rs_04_apply_fdo_20260930/own_after
+-- c77bc206-5935-48ea-b32e-508a572d94f4.si: raw 24397 -> 23817 bytes, text 71116 -> 71116 chars, sha256 f87960ddf415 -> 9c649f44de40
+  diff lines: 4
+  --- before
+  +++ after
+  -{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,105cd740-1f60-45e1-871c-adeecd291b0d,0,01914e00-3164-4c89-8c95-14b72786f20b,0,fc665789-1453-4225-b9ff-1bbf1a6b54f1,0,bf1ab189-634d-4b31-82e3-35fb15305da9,0,3aa6cf89-542a-48a2-b50d-5d9cfa4383fb, ...
+  +{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,2063d4ea-5f58-4cf9-84de-1f8f59d87748,0,9d8496ea-fc0c-410d-994d-7480350d71d3,0,52ab6aea-e6a0-43f0-9cc8-f7c9126635cc,0,ecaba9aa-fca7-42f5-a4fe-d8176cf875b9,0,f6ed8faa-4ca3-46f2-8813-815b11f8059f, ...
+15 of 16 `.si` rows have the same text (compared after inflate)
+
+====================================================================================================
+reg_cmp.py fdp fdo (change registers)
+====================================================================================================
+rows 20685 20685
+only in A 0 only in B 0
+message number differs 782 | file list differs 6
+  msg 0190A866 obj e8b248d9-9049-456a-9c7d-7a0462cc67ab 0 None
+  msg 8792107B obj f24de2ea-fcda-4052-b90f-e9d84314c4f2 0 None
+  files 0190A866 obj 6707f7f5-4a6c-4d8b-84cf-483768cb71b9 [(0, '6707f7f5-4a6c-4d8b-84cf-483768cb71b9.3'), (1, '6707f7f5-4a6c-4d8b-84cf-483768cb71b9.0')] [(0, '6707f7f5-4a6c-4d8b-84cf-483768cb71b9.0'), (1, '6707f7f5-4a6c-4d8b-84cf-483768cb71b9.3')]
+  files 0190A866 obj 6707f7f5-4a6c-4d8b-84cf-483768cb71b9 [(0, '6707f7f5-4a6c-4d8b-84cf-483768cb71b9.3'), (1, '6707f7f5-4a6c-4d8b-84cf-483768cb71b9.0')] [(0, '6707f7f5-4a6c-4d8b-84cf-483768cb71b9.0'), (1, '6707f7f5-4a6c-4d8b-84cf-483768cb71b9.3')]
+
+====================================================================================================
+Control twin (native import of the unedited tree, native apply: fdc) against the removal twin (native, fdk): the removal's effect on the register
+====================================================================================================
+rows 20685 20685
+only in A 0 only in B 0
+message number differs 0 | file list differs 0
+
+====================================================================================================
+Native export of our result against the tree rem2 (ibcmd-rs source-diff)
+====================================================================================================
+summary: left_only 0, right_only 0, different 1, unchanged 12190; differing files: ConfigDumpInfo.xml
+
+====================================================================================================
+A repeated native config apply on our result
+====================================================================================================
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+
+====================================================================================================
+Twin 2: the same and an attribute removed (Catalog _ДемоГруппыДоступаНоменклатуры), gate S1. mxp = native apply, mxo = this apply (--allow-restructure s1), same stage.
+====================================================================================================
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (3):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C43E8554AA CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C4A37577B9 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     - C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     - C _UpdateId binary(16) NULL
+     - C _LastUpdateResult numeric(2,0) NULL
+     - C _LastUpdateError varbinary(max) NULL
+== data: tables whose rowcount/checksum changed
+(9)
+  ConfigCAS: (636, '1634444173') -> (12797, '-472238273')
+  DBSchema: (1, '-1370029932') -> (1, '44071803')
+  Files: (44, '159412738') -> (353, '821090139')
+  Params: (38, '385537102') -> (38, '-1180754735')
+  SchemaStorage: (2, '913759464') -> (2, '-1056099516')
+  _ConfigChngR: (20685, '1257411005') -> (20685, '-1354141076')
+  _ConfigChngR_ExtProps: (21365, '-1437421391') -> (21365, '-1566056783')
+  _ExtensionsRestructNGS: (3, '2045766927') -> (0, 'None')
+== service blobs
+DBSchema same: False ['8f37b91a0ac6f2b4773f1b0ac8a1aeef5d5cb05d21c344ecc5c93535a079f1be'] ['c4fc844f117efbca679c878eeb699442edeb7b8a3c76aeea25d741d3c1d6f98a']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 9 meta-only 13
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 447429 -> 449319 bytes  c6e0478b -> c867f7bc
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  92ca642b -> 8732478b
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  812eab8d -> dd001d83
+    ~ DBNames [0] 143619 -> 144916 bytes  e1d48608 -> 98fb18e0
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  ac10b5b7 -> e665390b
+    ~ c4629235-4823-4320-b8b5-1d08f4c6d612.si [0] 110827 -> 111567 bytes  60a5df62 -> 592daddc
+    ~ c77bc206-5935-48ea-b32e-508a572d94f4.si [0] 24397 -> 23817 bytes  1f2a5de6 -> 6a93f6e5
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2998112 -> 2977567 bytes  9afcb8d3 -> 083d7028
+Config: rows 9836 -> 9836; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+ConfigCAS: rows 636 -> 12797; added 12161 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 353; added 309 removed 0 changed 6 meta-only 0
+    ~ CAS_GC_Info [0] 21 -> 21 bytes  0930b86a -> fecc0bcd
+    ~ MobileVersions.dat [0] 37009 -> 37009 bytes  25d4dc9c -> 99be6d4c
+    ~ extd_props_cached/gc.mrk [0] 9 -> 9 bytes  a3481241 -> c6626a19
+    ~ userDocs_ru.bin [0] 2255 -> 47528 bytes  12145c82 -> cae1d95a
+    ~ userPostings_ru.bin [0] 5057 -> 537522 bytes  1d2d752e -> 792f02b6
+    ~ userVocabulary_ru.bin [0] 8795 -> 105710 bytes  eb8662e7 -> fe236c5f
+== ibcmd_rs_04_apply_mxp_20260930/nat_after  ->  ibcmd_rs_04_apply_mxo_20260930/own_after
+-- c77bc206-5935-48ea-b32e-508a572d94f4.si: raw 24397 -> 23817 bytes, text 71116 -> 71116 chars, sha256 f87960ddf415 -> 9c649f44de40
+  diff lines: 4
+  --- before
+  +++ after
+  -{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,105cd740-1f60-45e1-871c-adeecd291b0d,0,01914e00-3164-4c89-8c95-14b72786f20b,0,fc665789-1453-4225-b9ff-1bbf1a6b54f1,0,bf1ab189-634d-4b31-82e3-35fb15305da9,0,3aa6cf89-542a-48a2-b50d-5d9cfa4383fb, ...
+  +{6,edee6a03-4672-469d-9f63-fad7acaae0cc,268,2063d4ea-5f58-4cf9-84de-1f8f59d87748,0,9d8496ea-fc0c-410d-994d-7480350d71d3,0,52ab6aea-e6a0-43f0-9cc8-f7c9126635cc,0,ecaba9aa-fca7-42f5-a4fe-d8176cf875b9,0,f6ed8faa-4ca3-46f2-8813-815b11f8059f, ...
+15 of 16 `.si` rows have the same text (compared after inflate)
+tables: 1761 / 1761
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+order of the common entries is the same: False
+first positions that differ (1 vs 2): [('DbCopiesSettings', 'DbCopies'), ('DbCopiesTrLogs', 'DbCopiesSettings'), ('DbCopiesTablesStates', 'DbCopiesTrLogs'), ('DbCopiesInitialLast', 'DbCopiesUpdates'), ('DbCopiesTrChObj', 'DbCopiesTablesStates'), ('ChrcOpt', 'DbCopiesInitialLast'), ('CKindsOpt', 'DbC ...
+DBNames text equal: True 347170 347170
+_Reference3347	rows 4 / 4	only in A 0	only in B 0
+rows 20685 20685
+only in A 0 only in B 0
+message number differs 782 | file list differs 6
+  msg 8792107B obj 8a7e61ad-90c2-4b5c-bd85-cfc28d4c1958 0 None
+  files 0190A866 obj a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9 [(0, 'a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.2'), (1, 'a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.0'), (2, 'a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.1'), (3, 'a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.3')] [(0, 'a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9.0'), (1, ' ...
+native export of our result against the tree mix: left_only 0, right_only 0, different 1, unchanged 12190; differing files: ConfigDumpInfo.xml
+native config apply on our result:
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+native config check on our result:
+[INFO] Проверка корректности метаданных...
+[INFO] Проверка корректности метаданных успешно завершена
+
+====================================================================================================
+Twin 3: the register of the removed objects with message numbers and a missing row. fdq = native apply, fdq2 = this apply; the same stage and register state
+====================================================================================================
+before (reg_state.py show on the state set up by reg_state.py setup; node prefixes, _MessageNo, file rows):
+  form     [('0190A866', 7, 2), ('0190A866', None, 2), ('84D4816E', None, 2), ('B9E29B2B', 0, 2)]   (no row at 8792107B)
+  template [('0190A866', 7, 1), ('0190A866', None, 1)]                                              (no row at 8792107B)
+after the native apply (fdq):
+form 8a7546f4 [('0190A866', None, 2), ('0190A866', None, 2), ('84D4816E', None, 2), ('8792107B', None, 2), ('B9E29B2B', None, 2)]
+template 0384ec55 [('0190A866', None, 1), ('0190A866', None, 1), ('8792107B', None, 1)]
+after this apply (fdq2):
+form 8a7546f4 [('0190A866', None, 2), ('0190A866', None, 2), ('84D4816E', None, 2), ('8792107B', None, 2), ('B9E29B2B', None, 2)]
+template 0384ec55 [('0190A866', None, 1), ('0190A866', None, 1), ('8792107B', None, 1)]
+rows 20685 20685
+only in A 0 only in B 0
+message number differs 782 | file list differs 6
+
+====================================================================================================
+Rehearsal (fdr): snapdiff before / after
+====================================================================================================
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (0):
+== data: tables whose rowcount/checksum changed
+(0)
+== service blobs
+DBSchema same: True ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef']
+SchemaStorage id=0 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 39 -> 39; added 0 removed 0 changed 0 meta-only 0
+Config: rows 9847 -> 9847; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 9516 -> 9516; added 0 removed 0 changed 0 meta-only 0
+
+====================================================================================================
+Lists refused whole (tools\refusal_cases.ps1)
+====================================================================================================
+control: the whole list of the native import
+   exit=0  "dry_run": true, "executed": false,
+an attribute id (flag 1) next to the form: no gate judges it
+   exit=1  "reason": "the stage carries a `deleted` row, the list of removals: 12 row name(s), 6 of them rows of a dynamic update and 6 others, the first of them 0384ec55-dc18-40ae-ae83-7defc28d8f3f. This apply consumes an empty list, the rows of a dynamic update and the rows of a removed form or template that it can account for name by name (1 of its names are not accounted for, the first c1a2b3d4-0000-4000-8000-000 ...
+a body row of an object that stays (00149051-....0)
+   exit=1  "reason": "the stage carries a `deleted` row, the list of removals: 12 row name(s), 6 of them rows of a dynamic update and 6 others, the first of them 0384ec55-dc18-40ae-ae83-7defc28d8f3f. This apply consumes an empty list, the rows of a dynamic update and the rows of a removed form or template that it can account for name by name (1 reason(s) against removing the objects it names); a list it cannot accoun ...
+a body of the removed form left out of the list (.1)
+   exit=1  "reason": "the stage carries a `deleted` row, the list of removals: 10 row name(s), 6 of them rows of a dynamic update and 4 others, the first of them 0384ec55-dc18-40ae-ae83-7defc28d8f3f. This apply consumes an empty list, the rows of a dynamic update and the rows of a removed form or template that it can account for name by name (1 reason(s) against removing the objects it names); a list it cannot accoun ...
+a row Config does not hold (.7)
+   exit=1  "reason": "the stage carries a `deleted` row, the list of removals: 12 row name(s), 6 of them rows of a dynamic update and 6 others, the first of them 0384ec55-dc18-40ae-ae83-7defc28d8f3f. This apply consumes an empty list, the rows of a dynamic update and the rows of a removed form or template that it can account for name by name (1 reason(s) against removing the objects it names); a list it cannot accoun ...
+only some of the rows of the dynamic update
+   exit=1  "reason": "the stage carries a `deleted` row, the list of removals: 9 row name(s), 4 of them rows of a dynamic update and 5 others, the first of them 0384ec55-dc18-40ae-ae83-7defc28d8f3f. This apply consumes an empty list, the rows of a dynamic update and the rows of a removed form or template that it can account for name by name (it names 4 of the 6 rows of the dynamic update that Config carries, and the  ...
+original list put back

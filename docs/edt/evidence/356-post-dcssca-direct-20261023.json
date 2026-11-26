@@ -1,0 +1,684 @@
+{
+  "status": "DIRECT_COMPATIBILITY_CONTENT_DIFFERENCE",
+  "strict_equal": false,
+  "configuration_content_equal": false,
+  "counts": {
+    "ours": 18,
+    "native": 19,
+    "strict_differences": 4,
+    "content_differences": 3
+  },
+  "candidate_sha256": "6340fd5458a19aa7e40a1208dd35bb29138d79313ce8d2534ad5aa458d2bf471",
+  "source_profile": "edt-2025.2.3-xml-2.21",
+  "installed_edt_build": "2026.2.1.3",
+  "native_build": "8.5.1.1592",
+  "scope": "Public nonempty DcsFilterEvidence only; reference reused with complete identical installed-export input",
+  "sdk_validation": "Not accepted: existing fatal/no-workbench/structured diagnostics remain unsuppressed",
+  "no_sdk_or_jvm_launch": true,
+  "full_bsp_acceptance": false,
+  "candidate_source_head": "c0cd767be62086b7f72f03f6373e944860e139af",
+  "candidate_source_tree": "551847d09b474e52f253207db4aa606c6d1d61c1",
+  "capture": "fixtures/issue356-current-server-dcs-fixed-direct-004",
+  "convert_exit_code": 0,
+  "immutability": {
+    "all_inputs_unchanged": true,
+    "candidate_unchanged": true,
+    "bound_command_receipts_and_build_unchanged": true
+  },
+  "comparison": {
+    "strict": {
+      "equal": false,
+      "left_tree_sha256": "05e32caa983dbd189fada24b8d03080081383b14b5ce6894d4069b5209969991",
+      "right_tree_sha256": "8628cfab808f7414be1e6e8912ff7912fe7c027b95ab4c303cf451d17141cc67",
+      "differing_rows": [
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+          "left": {
+            "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+            "bytes": 474,
+            "sha256": "b4f1bb33da9f35cd6ee38a213019d4d5483154663264a9ef52869d9c65bb81f0"
+          },
+          "right": {
+            "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+            "bytes": 492,
+            "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+          }
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+          "left": {
+            "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+            "bytes": 474,
+            "sha256": "b4f1bb33da9f35cd6ee38a213019d4d5483154663264a9ef52869d9c65bb81f0"
+          },
+          "right": {
+            "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+            "bytes": 492,
+            "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+          }
+        },
+        {
+          "path": "ConfigDumpInfo.xml",
+          "left": null,
+          "right": {
+            "path": "ConfigDumpInfo.xml",
+            "bytes": 3084,
+            "sha256": "7301e7124e132fc5119c4a4c809b84187f475d8f89ec7a89a6085ea4e4447b7d"
+          }
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+          "left": {
+            "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+            "bytes": 3189,
+            "sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000"
+          },
+          "right": {
+            "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+            "bytes": 3264,
+            "sha256": "05c5fe4b67aaf6eb46bbf644fe8872f281a046ff1c236714c7ea0e675d58c635"
+          }
+        }
+      ],
+      "excluded_paths": [],
+      "original_excluded_rows": []
+    },
+    "configuration_content": {
+      "equal": false,
+      "left_tree_sha256": "05e32caa983dbd189fada24b8d03080081383b14b5ce6894d4069b5209969991",
+      "right_tree_sha256": "8628cfab808f7414be1e6e8912ff7912fe7c027b95ab4c303cf451d17141cc67",
+      "differing_rows": [
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+          "left": {
+            "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+            "bytes": 474,
+            "sha256": "b4f1bb33da9f35cd6ee38a213019d4d5483154663264a9ef52869d9c65bb81f0"
+          },
+          "right": {
+            "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+            "bytes": 492,
+            "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+          }
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+          "left": {
+            "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+            "bytes": 474,
+            "sha256": "b4f1bb33da9f35cd6ee38a213019d4d5483154663264a9ef52869d9c65bb81f0"
+          },
+          "right": {
+            "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+            "bytes": 492,
+            "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+          }
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+          "left": {
+            "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+            "bytes": 3189,
+            "sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000"
+          },
+          "right": {
+            "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+            "bytes": 3264,
+            "sha256": "05c5fe4b67aaf6eb46bbf644fe8872f281a046ff1c236714c7ea0e675d58c635"
+          }
+        }
+      ],
+      "excluded_paths": [
+        "ConfigDumpInfo.xml"
+      ],
+      "original_excluded_rows": [
+        {
+          "path": "ConfigDumpInfo.xml",
+          "left": null,
+          "right": {
+            "path": "ConfigDumpInfo.xml",
+            "bytes": 3084,
+            "sha256": "7301e7124e132fc5119c4a4c809b84187f475d8f89ec7a89a6085ea4e4447b7d"
+          }
+        }
+      ]
+    },
+    "counts": {
+      "ours": 18,
+      "native": 19,
+      "strict_differences": 4,
+      "content_differences": 3
+    }
+  },
+  "inventories": {
+    "project": {
+      "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/native-workspace/NativeControl",
+      "file_count": 19,
+      "total_bytes": 79140,
+      "tree_sha256": "c9781c7a36e856978b337d695dd92abf0c5d93ee89eefb6523a6fc0cce897a80",
+      "files": [
+        {
+          "path": ".project",
+          "bytes": 451,
+          "sha256": "f05c1b6b74a2564d30a8c11a8f771c70b723dd6ac76f4e8e2221251ca65cc814"
+        },
+        {
+          "path": ".settings/org.eclipse.core.resources.prefs",
+          "bytes": 55,
+          "sha256": "4238e4eafab8309d5f1ee3c167db1e6bf254d5587daa652f1495da7c3942b4c4"
+        },
+        {
+          "path": "DT-INF/PROJECT.PMF",
+          "bytes": 45,
+          "sha256": "9a5cfd945838f1ef6cdbe8f0e1b5d13c280a431f999d3ef4321ee56251c12560"
+        },
+        {
+          "path": "src/Catalogs/CorpusList/CorpusList.mdo",
+          "bytes": 5240,
+          "sha256": "7acf0c000917c66f9c97697dda928d07eedac4a68ef6c0e6f473aec020aafa57"
+        },
+        {
+          "path": "src/Catalogs/CorpusList/Forms/ListForm/Form.form",
+          "bytes": 45086,
+          "sha256": "a0c41501b9547767b6864b2615c477a8e186ffb026b4380c961955a935b6a076"
+        },
+        {
+          "path": "src/Catalogs/CorpusList/Forms/ListForm/Module.bsl",
+          "bytes": 471,
+          "sha256": "b38afa66c68dcb2771ba095f6a55b1030a2c32c8aad621a7f7d8c94df72e0f23"
+        },
+        {
+          "path": "src/Catalogs/CorpusList/ObjectModule.bsl",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "src/Catalogs/FilterProbe/FilterProbe.mdo",
+          "bytes": 5209,
+          "sha256": "3afed4e53127b78201ef28be41f94f0d37d8ea30cc02c0ba959823d4a9d95653"
+        },
+        {
+          "path": "src/Catalogs/FilterProbe/Forms/ListForm/Attributes/Список/ExtInfo/ListSettings.dcss",
+          "bytes": 1869,
+          "sha256": "ba5415251a911a56c85350f53a8b8d82938852f77a758c7e0908af7e35995d90"
+        },
+        {
+          "path": "src/Catalogs/FilterProbe/Forms/ListForm/ConditionalAppearance.dcssca",
+          "bytes": 1317,
+          "sha256": "c6e6e9b8b6055d5103a49a944f2d2cf2a6913b5678bbb648170beac6a71c7373"
+        },
+        {
+          "path": "src/Catalogs/FilterProbe/Forms/ListForm/Form.form",
+          "bytes": 11724,
+          "sha256": "d52f1ea2df0e3b9347314d3d356d0d6036ffc0efc4a36f3d138f984ebfc04637"
+        },
+        {
+          "path": "src/Catalogs/FilterProbe/Forms/ListForm/Module.bsl",
+          "bytes": 471,
+          "sha256": "b38afa66c68dcb2771ba095f6a55b1030a2c32c8aad621a7f7d8c94df72e0f23"
+        },
+        {
+          "path": "src/Catalogs/FilterProbe/ObjectModule.bsl",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "src/Configuration/ClientApplicationInterface.cai",
+          "bytes": 639,
+          "sha256": "f1659827aed39cb1240e6dc9e4252c8efa66559a3c5448e7e75e96d29e52d62b"
+        },
+        {
+          "path": "src/Configuration/Configuration.mdo",
+          "bytes": 2432,
+          "sha256": "11f966bfff1cbe1cfd8d13b28369646f701d8131d2e2c7d9029410489cd969cf"
+        },
+        {
+          "path": "src/Reports/FilterProbeReport/FilterProbeReport.mdo",
+          "bytes": 945,
+          "sha256": "ba6f13776da89dd77653f1bd761b12915e9ce317200042e35da5aa5b4fc5436a"
+        },
+        {
+          "path": "src/Reports/FilterProbeReport/ManagerModule.bsl",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "src/Reports/FilterProbeReport/ObjectModule.bsl",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "src/Reports/FilterProbeReport/Templates/MainSchema/Template.dcs",
+          "bytes": 3186,
+          "sha256": "73c60d6c95f79d6f23648f2c9ecf01e1142e225458450f9ca98901e4fea2c32b"
+        }
+      ]
+    },
+    "current-installed-export": {
+      "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/authentic-xml",
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2",
+      "files": [
+        {
+          "path": "Catalogs/CorpusList.xml",
+          "bytes": 15353,
+          "sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac"
+        },
+        {
+          "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+          "bytes": 19444,
+          "sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Catalogs/FilterProbe.xml",
+          "bytes": 15364,
+          "sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+          "bytes": 8283,
+          "sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Configuration.xml",
+          "bytes": 11305,
+          "sha256": "4ad07d2fb94927e39066a326ad83d73a35a18fd1dc76b076ea094107491f2054"
+        },
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "bytes": 836,
+          "sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "bytes": 1306,
+          "sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06"
+        },
+        {
+          "path": "Reports/FilterProbeReport.xml",
+          "bytes": 2312,
+          "sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema.xml",
+          "bytes": 1317,
+          "sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+          "bytes": 3189,
+          "sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000"
+        }
+      ]
+    },
+    "old-installed-export": {
+      "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-001/edt-xml",
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2",
+      "files": [
+        {
+          "path": "Catalogs/CorpusList.xml",
+          "bytes": 15353,
+          "sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac"
+        },
+        {
+          "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+          "bytes": 19444,
+          "sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Catalogs/FilterProbe.xml",
+          "bytes": 15364,
+          "sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+          "bytes": 8283,
+          "sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Configuration.xml",
+          "bytes": 11305,
+          "sha256": "4ad07d2fb94927e39066a326ad83d73a35a18fd1dc76b076ea094107491f2054"
+        },
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "bytes": 836,
+          "sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "bytes": 1306,
+          "sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06"
+        },
+        {
+          "path": "Reports/FilterProbeReport.xml",
+          "bytes": 2312,
+          "sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema.xml",
+          "bytes": 1317,
+          "sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+          "bytes": 3189,
+          "sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000"
+        }
+      ]
+    },
+    "native-reference": {
+      "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-001/native-xml",
+      "file_count": 19,
+      "total_bytes": 86112,
+      "tree_sha256": "8628cfab808f7414be1e6e8912ff7912fe7c027b95ab4c303cf451d17141cc67",
+      "files": [
+        {
+          "path": "Catalogs/CorpusList.xml",
+          "bytes": 15353,
+          "sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac"
+        },
+        {
+          "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+          "bytes": 19444,
+          "sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb"
+        },
+        {
+          "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "Catalogs/FilterProbe.xml",
+          "bytes": 15364,
+          "sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+          "bytes": 1624,
+          "sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+          "bytes": 8283,
+          "sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88"
+        },
+        {
+          "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+          "bytes": 492,
+          "sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805"
+        },
+        {
+          "path": "ConfigDumpInfo.xml",
+          "bytes": 3084,
+          "sha256": "7301e7124e132fc5119c4a4c809b84187f475d8f89ec7a89a6085ea4e4447b7d"
+        },
+        {
+          "path": "Configuration.xml",
+          "bytes": 11305,
+          "sha256": "9de0688e13c30f49d1780faa75b58a60b6f5af0272ce5fd1be4e3f72f65ae6c7"
+        },
+        {
+          "path": "Ext/ClientApplicationInterface.xml",
+          "bytes": 836,
+          "sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "bytes": 1306,
+          "sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06"
+        },
+        {
+          "path": "Reports/FilterProbeReport.xml",
+          "bytes": 2312,
+          "sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl",
+          "bytes": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema.xml",
+          "bytes": 1317,
+          "sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958"
+        },
+        {
+          "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+          "bytes": 3264,
+          "sha256": "05c5fe4b67aaf6eb46bbf644fe8872f281a046ff1c236714c7ea0e675d58c635"
+        }
+      ]
+    }
+  },
+  "output_inventory": {
+    "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-fixed-direct-004/ours-xml",
+    "file_count": 18,
+    "total_bytes": 82917,
+    "tree_sha256": "05e32caa983dbd189fada24b8d03080081383b14b5ce6894d4069b5209969991",
+    "files": [
+      {
+        "path": "Catalogs/CorpusList.xml",
+        "bytes": 15353,
+        "sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac"
+      },
+      {
+        "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+        "bytes": 3,
+        "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+      },
+      {
+        "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+        "bytes": 1624,
+        "sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797"
+      },
+      {
+        "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+        "bytes": 19444,
+        "sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb"
+      },
+      {
+        "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+        "bytes": 474,
+        "sha256": "b4f1bb33da9f35cd6ee38a213019d4d5483154663264a9ef52869d9c65bb81f0"
+      },
+      {
+        "path": "Catalogs/FilterProbe.xml",
+        "bytes": 15364,
+        "sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b"
+      },
+      {
+        "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+        "bytes": 3,
+        "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+      },
+      {
+        "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+        "bytes": 1624,
+        "sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715"
+      },
+      {
+        "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+        "bytes": 8283,
+        "sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88"
+      },
+      {
+        "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+        "bytes": 474,
+        "sha256": "b4f1bb33da9f35cd6ee38a213019d4d5483154663264a9ef52869d9c65bb81f0"
+      },
+      {
+        "path": "Configuration.xml",
+        "bytes": 11305,
+        "sha256": "9de0688e13c30f49d1780faa75b58a60b6f5af0272ce5fd1be4e3f72f65ae6c7"
+      },
+      {
+        "path": "Ext/ClientApplicationInterface.xml",
+        "bytes": 836,
+        "sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8"
+      },
+      {
+        "path": "Languages/Русский.xml",
+        "bytes": 1306,
+        "sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06"
+      },
+      {
+        "path": "Reports/FilterProbeReport.xml",
+        "bytes": 2312,
+        "sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0"
+      },
+      {
+        "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl",
+        "bytes": 3,
+        "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+      },
+      {
+        "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl",
+        "bytes": 3,
+        "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+      },
+      {
+        "path": "Reports/FilterProbeReport/Templates/MainSchema.xml",
+        "bytes": 1317,
+        "sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958"
+      },
+      {
+        "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+        "bytes": 3189,
+        "sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000"
+      }
+    ]
+  },
+  "byte_difference_diagnostics": [
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+      "ours_crlf_count": 0,
+      "native_crlf_count": 18,
+      "native_equals_ours_with_each_LF_replaced_by_CRLF": true,
+      "comparison_policy": "Diagnostic only; exact comparison remains FAIL, no normalization applied"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+      "ours_crlf_count": 0,
+      "native_crlf_count": 18,
+      "native_equals_ours_with_each_LF_replaced_by_CRLF": true,
+      "comparison_policy": "Diagnostic only; exact comparison remains FAIL, no normalization applied"
+    },
+    {
+      "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+      "ours_crlf_count": 0,
+      "native_crlf_count": 75,
+      "native_equals_ours_with_each_LF_replaced_by_CRLF": true,
+      "comparison_policy": "Diagnostic only; exact comparison remains FAIL, no normalization applied"
+    }
+  ],
+  "limits": [
+    "Public nonempty smoke only, not BSP/UH",
+    "Legacy model profile on explicitly named current EDT build",
+    "Strict raw SDK/style diagnostics remain unsuppressed",
+    "Historical native configuration custody not retroactively upgraded"
+  ]
+}

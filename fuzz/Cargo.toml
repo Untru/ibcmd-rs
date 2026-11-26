@@ -1,0 +1,24 @@
+[package]
+name = "ibcmd-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+ibcmd-cf = { path = "../crates/ibcmd-cf" }
+ibcmd-core = { path = "../crates/ibcmd-core" }
+ibcmd-v8 = { path = "../crates/ibcmd-v8" }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "cf_parse"
+path = "fuzz_targets/cf_parse.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

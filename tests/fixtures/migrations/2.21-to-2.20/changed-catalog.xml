@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.21">
+  <Catalog uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
+    <InternalInfo>
+      <xr:GeneratedType name="CatalogObject.Products" category="Object"><xr:TypeId>00000000-0000-4000-8000-00000000000a</xr:TypeId><xr:ValueId>00000000-0000-4000-8000-00000000000b</xr:ValueId></xr:GeneratedType>
+      <xr:GeneratedType name="CatalogRef.Products" category="Ref"><xr:TypeId>00000000-0000-4000-8000-000000000014</xr:TypeId><xr:ValueId>00000000-0000-4000-8000-000000000015</xr:ValueId></xr:GeneratedType>
+      <xr:GeneratedType name="CatalogSelection.Products" category="Selection"><xr:TypeId>00000000-0000-4000-8000-00000000001e</xr:TypeId><xr:ValueId>00000000-0000-4000-8000-00000000001f</xr:ValueId></xr:GeneratedType>
+      <xr:GeneratedType name="CatalogList.Products" category="List"><xr:TypeId>00000000-0000-4000-8000-000000000028</xr:TypeId><xr:ValueId>00000000-0000-4000-8000-000000000029</xr:ValueId></xr:GeneratedType>
+      <xr:GeneratedType name="CatalogManager.Products" category="Manager"><xr:TypeId>00000000-0000-4000-8000-000000000032</xr:TypeId><xr:ValueId>00000000-0000-4000-8000-000000000033</xr:ValueId></xr:GeneratedType>
+    </InternalInfo>
+    <Properties>
+      <Name>Products</Name><Synonym/><Comment/><Hierarchical>false</Hierarchical><HierarchyType>HierarchyFoldersAndItems</HierarchyType><LimitLevelCount>false</LimitLevelCount><LevelCount>2</LevelCount><FoldersOnTop>true</FoldersOnTop><UseStandardCommands>true</UseStandardCommands><Owners/><SubordinationUse>ToItems</SubordinationUse><CodeLength>9</CodeLength><DescriptionLength>100</DescriptionLength><CodeType>String</CodeType><CodeAllowedLength>Variable</CodeAllowedLength><CodeSeries>WholeCatalog</CodeSeries><CheckUnique>true</CheckUnique><Autonumbering>true</Autonumbering><DefaultPresentation>AsDescription</DefaultPresentation><StandardAttributes/><Characteristics/><PredefinedDataUpdate>Auto</PredefinedDataUpdate><EditType>InDialog</EditType><QuickChoice>false</QuickChoice><ChoiceMode>BothWays</ChoiceMode><InputByString/><SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString><FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString><ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString><DefaultObjectForm/><DefaultFolderForm/><DefaultListForm/><DefaultChoiceForm/><DefaultFolderChoiceForm/><AuxiliaryObjectForm/><AuxiliaryFolderForm/><AuxiliaryListForm/><AuxiliaryChoiceForm/><AuxiliaryFolderChoiceForm/><IncludeHelpInContents>false</IncludeHelpInContents><BasedOn/><DataLockFields/><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><ObjectPresentation/><ExtendedObjectPresentation/><ListPresentation/><ExtendedListPresentation/><Explanation/><CreateOnInput>Use</CreateOnInput><ChoiceHistoryOnInput>DontUse</ChoiceHistoryOnInput><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+    </Properties>
+    <ChildObjects/>
+  </Catalog>
+</MetaDataObject>

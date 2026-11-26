@@ -1,0 +1,92 @@
+name: Issue self-service
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/issue-self-service.yml
+      - scripts/issue_claim_bot.py
+      - tests/scripts/test_issue_claim_bot.py
+      - docs/issue-self-service.md
+      - openspec/changes/add-issue-self-service/**
+      - AGENTS.md
+      - CONTRIBUTING.md
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/issue-self-service.yml
+      - scripts/issue_claim_bot.py
+      - tests/scripts/test_issue_claim_bot.py
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: Issue bot offline contracts
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test commands and API boundaries without credentials
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 tests/scripts/test_issue_claim_bot.py
+
+  command:
+    name: Issue command
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.repository == 'Untru/ibcmd-rs' &&
+      !github.event.issue.pull_request &&
+      github.event.comment.user.type == 'User' &&
+      (startsWith(github.event.comment.body, '/claim') ||
+       startsWith(github.event.comment.body, '/unclaim') ||
+       startsWith(github.event.comment.body, '/review'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    concurrency:
+      group: issue-command-${{ github.repository_id }}-${{ github.event.issue.number }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      # issue_comment uses the trusted default-branch commit, never a PR head.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Process immutable event as data
+        env:
+          ISSUE_BOT_SINGLE_WRITER_CONFIRMED: ${{ vars.ISSUE_BOT_SINGLE_WRITER_CONFIRMED }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 scripts/issue_claim_bot.py
+
+  configuration:
+    name: Project configuration (read only)
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'Untru/ibcmd-rs' &&
+      github.actor == github.repository_owner &&
+      github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify personal Project credential and schema without writes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 scripts/issue_claim_bot.py --check-config

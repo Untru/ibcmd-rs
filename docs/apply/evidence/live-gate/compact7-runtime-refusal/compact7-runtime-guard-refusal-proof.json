@@ -1,0 +1,165 @@
+{
+  "scope": "Actual ONE compact7 runtimeV3 stopped at readonly archive authority refusal before heavy/restore/native/client/phase1.",
+  "script_head": "ad9f1e2dbda5de78a09af6a5fc06f6f775708922",
+  "manifest_sha256": "781CFD57A8E27E918D7D1FF167692A11F46A1E76173878E8835F171C6C87202A",
+  "frozen100_after_terminal": true,
+  "binary_source": "fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2",
+  "binary_sha256": "81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0",
+  "database": "ibcmd_rs_05_load_w3_compact7_20261002",
+  "origin": {
+    "arguments": [
+      "-NoProfile",
+      "-File",
+      "F:/ibcmd/lab/05/wave3/load/compact7-runtime-v3/compact7_lifetime_v2.ps1",
+      "-Binary",
+      "F:/ibcmd/lab/05/wave3/coordinator/ibcmd-rs-fbf2d743-debug.exe",
+      "-SourceHead",
+      "fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2",
+      "-BinarySha256",
+      "81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0",
+      "-ManifestSha256",
+      "30F33F9BC97B11524412F87E72B12061A7D2C4D19C4D40CCB01B4F2224B63D8E",
+      "-ControllerHead",
+      "ad9f1e2dbda5de78a09af6a5fc06f6f775708922",
+      "-RuntimeManifestSha256",
+      "781CFD57A8E27E918D7D1FF167692A11F46A1E76173878E8835F171C6C87202A"
+    ],
+    "birth_ticks": 639265199813721143,
+    "expected_executable": "C:/Program Files/PowerShell/7/pwsh.exe",
+    "executor_pid": 95692,
+    "launch_utc": "2026-10-02T06:39:41.8727187Z",
+    "parent_pid": 95692,
+    "command_line": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -File F:/ibcmd/lab/05/wave3/load/compact7-runtime-v3/compact7_lifetime_v2.ps1 -Binary F:/ibcmd/lab/05/wave3/coordinator/ibcmd-rs-fbf2d743-debug.exe -SourceHead fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2 -BinarySha256 81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0 -ManifestSha256 30F33F9BC97B11524412F87E72B12061A7D2C4D19C4D40CCB01B4F2224B63D8E -ControllerHead ad9f1e2dbda5de78a09af6a5fc06f6f775708922 -RuntimeManifestSha256 781CFD57A8E27E918D7D1FF167692A11F46A1E76173878E8835F171C6C87202A",
+    "actual_executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+    "native_authorized_one_attempt": true,
+    "birth_utc": "2026-10-02T06:39:41.3721143Z",
+    "cim_birth_utc": "2026-10-02T06:39:41.3721140Z",
+    "timeout_seconds": 7200,
+    "controller_pid": 101168
+  },
+  "outcome": {
+    "exit_code": 1,
+    "ended_utc": "2026-10-02T06:50:57.9935399Z",
+    "no_signal": true,
+    "direct_exit_proved": true,
+    "controller_pid": 101168
+  },
+  "worker_acquire_exit": 0,
+  "worker_release_exit": 0,
+  "heavy_acquire_dispatched": false,
+  "restore_dispatched": false,
+  "cluster_started": false,
+  "registered": false,
+  "workload_clients": 0,
+  "native_commands": 0,
+  "phase1_executed": false,
+  "cycle2_executed": false,
+  "archive_move_executed": false,
+  "first_refusal": "case5 saved PID/reused PID/root process present; no archive",
+  "post_refusal_current_census_limit": "Historical admission census was not retained. Later current census establishes numeric PID99324 reuse, not an exact historical same-census reconstruction. No signals to this foreign PID.",
+  "database_current_readonly_absent": true,
+  "owned_inventory": {
+    "scope": "bounded post-refusal own-scope inventory",
+    "case7_started_scripts": [
+      "compact7-lifetime-prior-case5-readonly.command.json",
+      "compact7-lifetime-worker-acquire.command.json"
+    ],
+    "worker_owner": "absent",
+    "database": "ibcmd_rs_05_load_w3_compact7_20261002",
+    "shared_manifest_target_records": 0,
+    "binding_present": false,
+    "unknown_child_receipt_files": 0,
+    "private_state_present": false,
+    "native_artifacts": 0,
+    "resource_unconfirmed": false
+  },
+  "no_automatic_retry": true,
+  "temporary_directories": "compact7 TEMP/child receipts remain empty; lockproofs2 retained. Old compact6 TEMP untouched.",
+  "raw": [
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\execute-compact7-781CF-once.ps1",
+      "bytes": 2589,
+      "sha256": "E2B72BACD063BC4E5F4D50F7609B8F08CD4E4634078196BDF43CD03B6214A2D3"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-lock-proofs\\lock-1f99a2ea8fc34428adec9a5640519fb2.json",
+      "bytes": 236,
+      "sha256": "E17084268752105142DBBD504E3740692E967DEC178144722816991D0ADADE2C"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-lock-proofs\\lock-8c4eceeb1f0a4789bc8c359b6a3b86f6.json",
+      "bytes": 236,
+      "sha256": "8F219F7B7CABF91B50BC29C6CCEF395F9AF47A412A5FEE9D83559DBEAEC7403B"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-post-refusal-database-readonly.json",
+      "bytes": 67,
+      "sha256": "00D3A4E1B03B163014094EE8030A8BDACCE145F807083560206A8480CEE6EBC3"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-post-refusal-owned-inventory.json",
+      "bytes": 496,
+      "sha256": "915C280F9923FD3DCBF09E1221528234B2D15CCC02CAC3A5C026C7780E43D735"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-prior-refusal-current-census.json",
+      "bytes": 1293,
+      "sha256": "4AC27311D2A2A40C4ADEE112F0307E9C7FBCCAB7F1EF61BD5A3DC5593EF5EA35"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3-executor-origin.json",
+      "bytes": 1725,
+      "sha256": "F56EDD98E4259A51BC73D2679EED74C70A6635A8048D25044786933A56B5D143"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3-executor-result.json",
+      "bytes": 154,
+      "sha256": "9912EF3F2F674DE94898D6EA210A6D501DEAD85DB9E3BE6C97E46A36DA8E4E65"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-lifetime-cleanup-status.json",
+      "bytes": 243,
+      "sha256": "F2C69E8C8376F5A8FA4C7F7B7F1DCFAFA5FBCE665D896542FD51ADF1B3441BA3"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-lifetime-prior-case5-readonly.command.json",
+      "bytes": 264,
+      "sha256": "E715E01B2BCE710AB52FB949BB1099340C893C7563C9638A8B8FD49D74FE0484"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-lifetime-prior-case5-readonly.error.txt",
+      "bytes": 321,
+      "sha256": "09FAC41807B33FE29B9FA6C42EA7F34C99F0BE690D660F94AED49A71A113AF79"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-lifetime-prior-case5-readonly.json",
+      "bytes": 451,
+      "sha256": "511DBC47EC3DE674D726097BFB76A5F18F638F19A45F633092B1AC117E04BD0C"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-lifetime-worker-acquire.command.json",
+      "bytes": 299,
+      "sha256": "4D297655AC337A060159953695CC0DEA35DF1AEF66867FB7959664086BA32204"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-lifetime-worker-acquire.json",
+      "bytes": 132,
+      "sha256": "6108B82EAB72ED55C2040379F6653AB8ACEDC36AA160541D41BAB9B0958F52C4"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-lifetime-worker-release.json",
+      "bytes": 84,
+      "sha256": "DBE34A83596365476832B017042243494A4714EF753B82F9D4B72AC3A741D2ED"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-runtime-v3-executor.stderr.txt",
+      "bytes": 313,
+      "sha256": "22FF0A24D62D4EDEE61F1501F8FC78D282A6608DE04FCC6233F752F21FCCFB18"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact7-runtime-v3-executor.stdout.txt",
+      "bytes": 108,
+      "sha256": "E5C2175E195276784AC3573653680813D61A31E2302E364E48ECC1C9D1B099A0"
+    }
+  ]
+}

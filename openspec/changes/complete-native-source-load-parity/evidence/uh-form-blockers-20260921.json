@@ -1,0 +1,707 @@
+{
+  "root": "E:\\ibcmd_lab\\parity\\ibcmd_rs_uha_8327_native_20260919_20260919_uha_8327_85head\\native",
+  "form_xml_files": 13044,
+  "compilable_form_xml_files": 87,
+  "blocked_form_xml_files": 12957,
+  "blocked_form_xml_bytes": 583709294,
+  "reasons": [
+    {
+      "reason": "Form item `…` uses an unsupported decoration/font/border creation facet",
+      "phase": "model",
+      "forms": 10174,
+      "bytes": 402489397
+    },
+    {
+      "reason": "Form attribute `…` requires numeric id, name and a typed pattern",
+      "phase": "model",
+      "forms": 4600,
+      "bytes": 297962573
+    },
+    {
+      "reason": "Form item `…` uses unsupported base-free element LabelDecoration",
+      "phase": "model",
+      "forms": 4463,
+      "bytes": 298854674
+    },
+    {
+      "reason": "Form item `…` uses strict-schema properties without an evidenced creation layout",
+      "phase": "model",
+      "forms": 3837,
+      "bytes": 134552582
+    },
+    {
+      "reason": "Form item `…` uses unsupported base-free element SpreadSheetDocumentField",
+      "phase": "model",
+      "forms": 2075,
+      "bytes": 176544307
+    },
+    {
+      "reason": "one or more root property-bag/report facets require a separately evidenced marker-50 template",
+      "phase": "model",
+      "forms": 1560,
+      "bytes": 69707013
+    },
+    {
+      "reason": "unsupported Form ExcludedCommand: Copy",
+      "phase": "parse",
+      "forms": 973,
+      "bytes": 37046774
+    },
+    {
+      "reason": "Form root event `…` has no unambiguous platform event UUID",
+      "phase": "model",
+      "forms": 946,
+      "bytes": 56664965
+    },
+    {
+      "reason": "Form item `…` uses unsupported base-free element RadioButtonField",
+      "phase": "model",
+      "forms": 862,
+      "bytes": 61296847
+    },
+    {
+      "reason": "Form item `…` uses unsupported base-free element PictureField",
+      "phase": "model",
+      "forms": 724,
+      "bytes": 49766773
+    },
+    {
+      "reason": "unsupported Form Attributes conditional appearance: conditional-appearance nested filter is outside the complete one-comparison cohort",
+      "phase": "parse",
+      "forms": 502,
+      "bytes": 37434350
+    },
+    {
+      "reason": "unsupported Form ExcludedCommand: Post",
+      "phase": "parse",
+      "forms": 348,
+      "bytes": 37996943
+    },
+    {
+      "reason": "cannot parse Form DCS children: invalid DCS settings structure: container has more than one direct element child",
+      "phase": "parse",
+      "forms": 144,
+      "bytes": 14350099
+    },
+    {
+      "reason": "Form item `…` uses unsupported base-free element HTMLDocumentField",
+      "phase": "model",
+      "forms": 126,
+      "bytes": 6974659
+    },
+    {
+      "reason": "unsupported Form ExcludedCommand: Delete",
+      "phase": "parse",
+      "forms": 96,
+      "bytes": 7194166
+    },
+    {
+      "reason": "Form MobileDeviceCommandBarContent has no evidenced base-free layout",
+      "phase": "parse",
+      "forms": 85,
+      "bytes": 3856222
+    },
+    {
+      "reason": "unsupported Form ListSettings filter: explicit filter use is outside the platform-evidenced cohort",
+      "phase": "parse",
+      "forms": 74,
+      "bytes": 3387270
+    },
+    {
+      "reason": "unsupported Form ListSettings filter: metadata-only filter requires both viewMode and userSettingID",
+      "phase": "parse",
+      "forms": 71,
+      "bytes": 9850556
+    },
+    {
+      "reason": "unsupported Form ListSettings order: order cardinality is outside the platform-evidenced emission cohort",
+      "phase": "parse",
+      "forms": 70,
+      "bytes": 4231354
+    },
+    {
+      "reason": "AutoCommandBar requires a numeric id and non-empty name",
+      "phase": "model",
+      "forms": 68,
+      "bytes": 342146
+    },
+    {
+      "reason": "unsupported Form ListSettings filter: filter right type is unsupported",
+      "phase": "parse",
+      "forms": 68,
+      "bytes": 2814494
+    },
+    {
+      "reason": "unsupported Form ListSettings conditional appearance: empty conditional-appearance selection is unsupported",
+      "phase": "parse",
+      "forms": 48,
+      "bytes": 1469939
+    },
+    {
+      "reason": "cannot parse Form DCS children: invalid DCS settings structure: Form ListSettings contains an unsupported direct child",
+      "phase": "parse",
+      "forms": 46,
+      "bytes": 2930019
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (1 source asset file(s))",
+      "phase": "model",
+      "forms": 39,
+      "bytes": 3294284
+    },
+    {
+      "reason": "Form item `…` uses unsupported base-free element FormattedDocumentField",
+      "phase": "model",
+      "forms": 38,
+      "bytes": 3621113
+    },
+    {
+      "reason": "unsupported Form Attributes conditional appearance: conditional-appearance item has unsupported extra children",
+      "phase": "parse",
+      "forms": 37,
+      "bytes": 4091550
+    },
+    {
+      "reason": "unsupported Form ExcludedCommand: ChangeHistory",
+      "phase": "parse",
+      "forms": 36,
+      "bytes": 911024
+    },
+    {
+      "reason": "unsupported Form ListSettings conditional appearance: conditional-appearance nested filter is outside the complete one-comparison cohort",
+      "phase": "parse",
+      "forms": 30,
+      "bytes": 1301094
+    },
+    {
+      "reason": "unsupported Form Command CurrentRowUse: Use",
+      "phase": "parse",
+      "forms": 29,
+      "bytes": 2311646
+    },
+    {
+      "reason": "unsupported Form Attributes conditional appearance: appearance parameter or color is outside the authenticated cohort",
+      "phase": "parse",
+      "forms": 20,
+      "bytes": 1444681
+    },
+    {
+      "reason": "unsupported Form ListSettings filter: comparisonType is outside the platform-evidenced set",
+      "phase": "parse",
+      "forms": 17,
+      "bytes": 652665
+    },
+    {
+      "reason": "unsupported Form ListSettings order: order item type is unsupported in this root context",
+      "phase": "parse",
+      "forms": 14,
+      "bytes": 2167652
+    },
+    {
+      "reason": "unsupported Form Attributes conditional appearance: empty conditional-appearance selection is unsupported",
+      "phase": "parse",
+      "forms": 10,
+      "bytes": 412568
+    },
+    {
+      "reason": "unsupported Form ListSettings conditional appearance: conditional-appearance item has unsupported extra children",
+      "phase": "parse",
+      "forms": 10,
+      "bytes": 297808
+    },
+    {
+      "reason": "Form item `…` uses unsupported base-free element CalendarField",
+      "phase": "model",
+      "forms": 9,
+      "bytes": 220892
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (2 source asset file(s))",
+      "phase": "model",
+      "forms": 9,
+      "bytes": 434224
+    },
+    {
+      "reason": "Form item `…` uses unsupported base-free element GraphicalSchemaField",
+      "phase": "model",
+      "forms": 6,
+      "bytes": 173944
+    },
+    {
+      "reason": "unsupported Form ListSettings conditional appearance: metadata-only conditionalAppearance requires both viewMode and userSettingID",
+      "phase": "parse",
+      "forms": 6,
+      "bytes": 1362614
+    },
+    {
+      "reason": "unsupported Form ListSettings filter: filter item child kind is unsupported",
+      "phase": "parse",
+      "forms": 6,
+      "bytes": 103630
+    },
+    {
+      "reason": "unsupported Form VerticalScroll: useWithoutStretch",
+      "phase": "parse",
+      "forms": 6,
+      "bytes": 1219152
+    },
+    {
+      "reason": "cannot parse Form DCS children: invalid DCS settings structure: filter operand is empty or complex",
+      "phase": "parse",
+      "forms": 5,
+      "bytes": 503551
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (3 source asset file(s))",
+      "phase": "model",
+      "forms": 5,
+      "bytes": 293483
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (4 source asset file(s))",
+      "phase": "model",
+      "forms": 5,
+      "bytes": 181768
+    },
+    {
+      "reason": "unsupported Form ListSettings filter: filter item type is unsupported",
+      "phase": "parse",
+      "forms": 4,
+      "bytes": 225090
+    },
+    {
+      "reason": "unsupported Form Table CommandBarLocation: Bottom",
+      "phase": "parse",
+      "forms": 4,
+      "bytes": 179544
+    },
+    {
+      "reason": "unsupported Form ListSettings order: metadata-only order requires both viewMode and userSettingID",
+      "phase": "parse",
+      "forms": 3,
+      "bytes": 179584
+    },
+    {
+      "reason": "unsupported Form ListSettings order: order item child kind is unsupported",
+      "phase": "parse",
+      "forms": 3,
+      "bytes": 23919
+    },
+    {
+      "reason": "unsupported Form ColumnGroup FixingInTable: Right",
+      "phase": "parse",
+      "forms": 2,
+      "bytes": 578952
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (10 source asset file(s))",
+      "phase": "model",
+      "forms": 1,
+      "bytes": 172390
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (5 source asset file(s))",
+      "phase": "model",
+      "forms": 1,
+      "bytes": 102066
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (7 source asset file(s))",
+      "phase": "model",
+      "forms": 1,
+      "bytes": 443460
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (8 source asset file(s))",
+      "phase": "model",
+      "forms": 1,
+      "bytes": 23549
+    },
+    {
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (9 source asset file(s))",
+      "phase": "model",
+      "forms": 1,
+      "bytes": 65734
+    },
+    {
+      "reason": "unsupported Form ExcludedCommand: SetDeletionMark",
+      "phase": "parse",
+      "forms": 1,
+      "bytes": 171262
+    },
+    {
+      "reason": "unsupported Form ExcludedCommand: UndoPosting",
+      "phase": "parse",
+      "forms": 1,
+      "bytes": 322429
+    },
+    {
+      "reason": "unsupported Form ListSettings conditional appearance: appearance parameter or color is outside the authenticated cohort",
+      "phase": "parse",
+      "forms": 1,
+      "bytes": 22444
+    },
+    {
+      "reason": "unsupported Form ListSettings filter: filter child kind is unsupported",
+      "phase": "parse",
+      "forms": 1,
+      "bytes": 13678
+    },
+    {
+      "reason": "unsupported Form ListSettings filter: filter comparison is missing an operand outside the evidenced complete cohort",
+      "phase": "parse",
+      "forms": 1,
+      "bytes": 74361
+    }
+  ],
+  "examples": [
+    {
+      "path": "Catalogs/ВидыДвиженийМСФО/Forms/ФормаВыбора/Ext/Form.xml",
+      "bytes": 6426,
+      "reason": "AutoCommandBar requires a numeric id and non-empty name",
+      "phase": "model"
+    },
+    {
+      "path": "BusinessProcesses/Задание/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 31614,
+      "reason": "Form MobileDeviceCommandBarContent has no evidenced base-free layout",
+      "phase": "parse"
+    },
+    {
+      "path": "AccountingRegisters/КорректировкиНалоговойБазы/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 55579,
+      "reason": "Form attribute `ОтборРегистратор` requires numeric id, name and a typed pattern",
+      "phase": "model"
+    },
+    {
+      "path": "AccountingRegisters/КорректировкиНалоговойБазы/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 55579,
+      "reason": "Form item `ГруппаБыстрыеОтборы` uses an unsupported decoration/font/border creation facet",
+      "phase": "model"
+    },
+    {
+      "path": "AccountingRegisters/КорректировкиНалоговойБазы/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 55579,
+      "reason": "Form item `Список` uses strict-schema properties without an evidenced creation layout",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/Календари/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 77507,
+      "reason": "Form item `ГрафикРаботы` uses unsupported base-free element CalendarField",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/АналитическиеПанели/Forms/ФормаИзмененияСвойствОбласти/Ext/Form.xml",
+      "bytes": 71812,
+      "reason": "Form item `ПолеТекст` uses unsupported base-free element FormattedDocumentField",
+      "phase": "model"
+    },
+    {
+      "path": "DataProcessors/ВыполнениеМаршрутныхЛистов/Forms/ВыполнениеМаршрутныхЛистов/Ext/Form.xml",
+      "bytes": 14849,
+      "reason": "Form item `СхемаРабочегоМеста` uses unsupported base-free element GraphicalSchemaField",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/ДемонстрационныеСценарии/Forms/АльбомПроцессов/Ext/Form.xml",
+      "bytes": 4072,
+      "reason": "Form item `ТекстHTML` uses unsupported base-free element HTMLDocumentField",
+      "phase": "model"
+    },
+    {
+      "path": "AccumulationRegisters/ПланыПроизводства/Forms/ФормаРедактированияПолуфабриката/Ext/Form.xml",
+      "bytes": 31400,
+      "reason": "Form item `ДекорацияНадпись` uses unsupported base-free element LabelDecoration",
+      "phase": "model"
+    },
+    {
+      "path": "AccumulationRegisters/ПланыПроизводства/Forms/ФормаРедактированияПолуфабриката/Ext/Form.xml",
+      "bytes": 31400,
+      "reason": "Form item `СписокКорректировокРучнаяКорректировка` uses unsupported base-free element PictureField",
+      "phase": "model"
+    },
+    {
+      "path": "AccumulationRegisters/РНПТМатериаловВПроизводстве/Forms/РабочееМесто/Ext/Form.xml",
+      "bytes": 50110,
+      "reason": "Form item `Отображать` uses unsupported base-free element RadioButtonField",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/АналитическиеПанели/Forms/ФормаРасшифровкиЗначения/Ext/Form.xml",
+      "bytes": 6375,
+      "reason": "Form item `Результат` uses unsupported base-free element SpreadSheetDocumentField",
+      "phase": "model"
+    },
+    {
+      "path": "AccumulationRegisters/РНПТМатериаловВПроизводстве/Forms/ПодборПоСпецификации/Ext/Form.xml",
+      "bytes": 58696,
+      "reason": "Form root event `ChoiceProcessing` has no unambiguous platform event UUID",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/ВидыВременныхРазниц/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 14716,
+      "reason": "cannot parse Form DCS children: invalid DCS settings structure: Form ListSettings contains an unsupported direct child",
+      "phase": "parse"
+    },
+    {
+      "path": "BusinessProcesses/СогласованиеЗакупки/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 36826,
+      "reason": "cannot parse Form DCS children: invalid DCS settings structure: container has more than one direct element child",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ОтправкиОтчетности/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 39441,
+      "reason": "cannot parse Form DCS children: invalid DCS settings structure: filter operand is empty or complex",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ИсточникиДанныхПланирования/Forms/ФормаЗаполнения/Ext/Form.xml",
+      "bytes": 117013,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (1 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "DataProcessors/РегистрацияИзмененийДляОбменаДанными/Forms/Форма/Ext/Form.xml",
+      "bytes": 172390,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (10 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/ДокументыРеализацииПолномочийНалоговыхОрганов/Forms/КакНайтиНастройкиПодтвержденияБРО/Ext/Form.xml",
+      "bytes": 4624,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (2 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/ЭлементыФинансовыхОтчетов/Forms/ФормаВыбораТипТаблицы/Ext/Form.xml",
+      "bytes": 19293,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (3 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/ЭлементыФинансовыхОтчетов/Forms/НастройкаЯчеекВидаОтчета/Ext/Form.xml",
+      "bytes": 35674,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (4 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "DataProcessors/ПомощникПереходаСУправлениеТорговлей103/Forms/Форма/Ext/Form.xml",
+      "bytes": 102066,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (5 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "DataProcessors/ГрупповаяОбработкаРаспознанныхДокументов/Forms/ГрупповаяОбработка/Ext/Form.xml",
+      "bytes": 443460,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (7 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "DataProcessors/ОбщиеОбъектыРеглОтчетности/Forms/ПредложениеОформитьЗаявлениеНаПодключение/Ext/Form.xml",
+      "bytes": 23549,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (8 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/ЭлементыФинансовыхОтчетов/Forms/НастройкаЯчеек/Ext/Form.xml",
+      "bytes": 65734,
+      "reason": "embedded Form item assets have no evidenced base-free payload slot (9 source asset file(s))",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/АлгоритмыСбораДанныхБухОтчетности/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 21648,
+      "reason": "one or more root property-bag/report facets require a separately evidenced marker-50 template",
+      "phase": "model"
+    },
+    {
+      "path": "Catalogs/МашиночитаемыеДоверенностиРаспределенныйРеестр/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 114460,
+      "reason": "unsupported Form Attributes conditional appearance: appearance parameter or color is outside the authenticated cohort",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ВерсииРегламентовПодготовкиОтчетности/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 9865,
+      "reason": "unsupported Form Attributes conditional appearance: conditional-appearance item has unsupported extra children",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/АналитическаяПодписка/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 95764,
+      "reason": "unsupported Form Attributes conditional appearance: conditional-appearance nested filter is outside the complete one-comparison cohort",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ЭлементыФинансовыхОтчетов/Forms/ВсеПоказателиСложнаяТаблица/Ext/Form.xml",
+      "bytes": 14733,
+      "reason": "unsupported Form Attributes conditional appearance: empty conditional-appearance selection is unsupported",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ВидыНоменклатуры/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 516772,
+      "reason": "unsupported Form ColumnGroup FixingInTable: Right",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ДоговорыКонтрагентов/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 413027,
+      "reason": "unsupported Form Command CurrentRowUse: Use",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/БанковскиеСчетаОрганизаций/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 44244,
+      "reason": "unsupported Form ExcludedCommand: ChangeHistory",
+      "phase": "parse"
+    },
+    {
+      "path": "BusinessProcesses/Задание/Forms/ДействиеВыполнить/Ext/Form.xml",
+      "bytes": 37807,
+      "reason": "unsupported Form ExcludedCommand: Copy",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/АнкетыПоставщиков/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 62628,
+      "reason": "unsupported Form ExcludedCommand: Delete",
+      "phase": "parse"
+    },
+    {
+      "path": "Documents/АвансовыйОтчет/Forms/ФормаВыбора/Ext/Form.xml",
+      "bytes": 21076,
+      "reason": "unsupported Form ExcludedCommand: Post",
+      "phase": "parse"
+    },
+    {
+      "path": "ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ФормаЭлемента/Ext/Form.xml",
+      "bytes": 171262,
+      "reason": "unsupported Form ExcludedCommand: SetDeletionMark",
+      "phase": "parse"
+    },
+    {
+      "path": "Documents/ЗапросКоммерческихПредложенийПоставщиков/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 322429,
+      "reason": "unsupported Form ExcludedCommand: UndoPosting",
+      "phase": "parse"
+    },
+    {
+      "path": "DataProcessors/ДокументооборотСКонтролирующимиОрганами/Forms/ОтветыНаТребованияФСС/Ext/Form.xml",
+      "bytes": 22444,
+      "reason": "unsupported Form ListSettings conditional appearance: appearance parameter or color is outside the authenticated cohort",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ВидыДокументовВводДанныхДляРасчетаЗарплаты/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 12627,
+      "reason": "unsupported Form ListSettings conditional appearance: conditional-appearance item has unsupported extra children",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ВариантыКомплектацииНоменклатуры/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 11757,
+      "reason": "unsupported Form ListSettings conditional appearance: conditional-appearance nested filter is outside the complete one-comparison cohort",
+      "phase": "parse"
+    },
+    {
+      "path": "BusinessProcesses/СогласованиеЗакупки/Forms/ФормаЗадачиОзнакомиться/Ext/Form.xml",
+      "bytes": 36481,
+      "reason": "unsupported Form ListSettings conditional appearance: empty conditional-appearance selection is unsupported",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ЕдиницыГенерирующиеДенежныеСредства/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 16880,
+      "reason": "unsupported Form ListSettings conditional appearance: metadata-only conditionalAppearance requires both viewMode and userSettingID",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ГрафикиРаботыСотрудников/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 11517,
+      "reason": "unsupported Form ListSettings filter: comparisonType is outside the platform-evidenced set",
+      "phase": "parse"
+    },
+    {
+      "path": "AccountingRegisters/МСФО/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 132055,
+      "reason": "unsupported Form ListSettings filter: explicit filter use is outside the platform-evidenced cohort",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ПравилаФормированияРезервовПодОбесценениеЗапасов/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 13678,
+      "reason": "unsupported Form ListSettings filter: filter child kind is unsupported",
+      "phase": "parse"
+    },
+    {
+      "path": "Documents/ИзменениеПретензии/Forms/ФормаДокумента/Ext/Form.xml",
+      "bytes": 74361,
+      "reason": "unsupported Form ListSettings filter: filter comparison is missing an operand outside the evidenced complete cohort",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ВидыВременныхРазниц/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 8525,
+      "reason": "unsupported Form ListSettings filter: filter item child kind is unsupported",
+      "phase": "parse"
+    },
+    {
+      "path": "Documents/ИнвентаризацияПродукцииВЕТИС/Forms/ФормаСпискаДокументов/Ext/Form.xml",
+      "bytes": 74765,
+      "reason": "unsupported Form ListSettings filter: filter item type is unsupported",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ВидыПланов/Forms/ФормаВыбораГруппы/Ext/Form.xml",
+      "bytes": 7370,
+      "reason": "unsupported Form ListSettings filter: filter right type is unsupported",
+      "phase": "parse"
+    },
+    {
+      "path": "AccumulationRegisters/ОстаткиАлкогольнойПродукцииЕГАИС/Forms/ФормаОстатков/Ext/Form.xml",
+      "bytes": 27671,
+      "reason": "unsupported Form ListSettings filter: metadata-only filter requires both viewMode and userSettingID",
+      "phase": "parse"
+    },
+    {
+      "path": "DataProcessors/НастройкаОтраженияДокументовВРеглУчете/Forms/РасшифровкаПоДокументамПродаж/Ext/Form.xml",
+      "bytes": 12231,
+      "reason": "unsupported Form ListSettings order: metadata-only order requires both viewMode and userSettingID",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ВариантыГрафиковКредитовИДепозитов/Forms/ФормаВыбора/Ext/Form.xml",
+      "bytes": 19649,
+      "reason": "unsupported Form ListSettings order: order cardinality is outside the platform-evidenced emission cohort",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ВидыДоговоровКонтрагентовУХ/Forms/ФормаВыбора/Ext/Form.xml",
+      "bytes": 7994,
+      "reason": "unsupported Form ListSettings order: order item child kind is unsupported",
+      "phase": "parse"
+    },
+    {
+      "path": "DataProcessors/ЖурналДокументовАренды/Forms/ДокументыПоАренде/Ext/Form.xml",
+      "bytes": 113044,
+      "reason": "unsupported Form ListSettings order: order item type is unsupported in this root context",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/ДашбордыМЦП/Forms/ФормаСписка/Ext/Form.xml",
+      "bytes": 12717,
+      "reason": "unsupported Form Table CommandBarLocation: Bottom",
+      "phase": "parse"
+    },
+    {
+      "path": "Catalogs/МЧД003/Forms/ЧерновикМЧД/Ext/Form.xml",
+      "bytes": 1046350,
+      "reason": "unsupported Form VerticalScroll: useWithoutStretch",
+      "phase": "parse"
+    }
+  ]
+}

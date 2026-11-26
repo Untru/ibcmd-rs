@@ -1,0 +1,16 @@
+gap = time between two consecutive journal lines of one session (poll or beat)
+on-warm-a  lines  1320  median 1.02  p95 1.19  p99 7.67  max 9.35 s
+    within 30 s of g1: 47 intervals, max 7.63 s at -19.6 s
+on-warm-b  lines  1251  median 1.02  p95 1.18  p99 7.72  max 66.83 s
+    within 30 s of g1: 5 intervals, max 66.83 s at -20.1 s
+on-lazy    lines  1964  median 1.02  p95 1.19  p99 7.60  max 8.00 s
+    within 30 s of g1: 47 intervals, max 7.38 s at -21.7 s
+    within 30 s of g2: 47 intervals, max 7.52 s at -19.8 s
+on-new1    lines  1611  median 1.02  p95 1.19  p99 7.63  max 8.55 s
+    within 30 s of g1: 1 intervals, max 1.16 s at +29.5 s
+    within 30 s of g2: 46 intervals, max 6.76 s at -0.1 s
+on-new2    lines  1504  median 1.02  p95 1.20  p99 7.62  max 8.13 s
+    within 30 s of g2: 48 intervals, max 7.42 s at +16.9 s
+on-warm-c  lines   654  median 1.02  p95 1.20  p99 7.65  max 7.94 s
+    within 30 s of g2: 49 intervals, max 6.42 s at +20.2 s
+on-new3    lines   495  median 1.02  p95 1.26  p99 7.70  max 7.94 s

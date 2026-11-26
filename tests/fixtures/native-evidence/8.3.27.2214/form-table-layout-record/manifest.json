@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-form-table-layout-record",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_written",
+    "created_on": "2026-09-27",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_kind": "real_configuration",
+    "note": "Config table rows of the BSP demo lab database ibcmd_rs_bsp_8327_native_20260919 (stored by platform 8.3.27.2214), read offline from the lab row cache; each `proves` property is what the native ibcmd 8.3.27.2214 export of that database writes for the form. They replace hand-made fixtures of the mssql_dump unit tests in layouts no platform writes."
+  },
+  "objects": [
+    {
+      "kind": "Form item record, one line (the body's layout line breaks removed)",
+      "form": "CommonForms/ПраваДоступаУпрощенно",
+      "form_uuid": "32d4a42d-6e4d-49db-b5bc-1ea6dbe9fe4d",
+      "item": {
+        "id": "12",
+        "name": "ВидыДоступа"
+      },
+      "proves": "Table record (revision 55): Representation List, SkipOnInput false, HeightInTableRows 2, RowSelectionMode Row, EnableStartDrag true, EnableDrag true, FileDragMode AsFile, DataPath ВидыДоступа (attribute 2)",
+      "record": {
+        "path": "records/32d4a42d-6e4d-49db-b5bc-1ea6dbe9fe4d.item-12.txt",
+        "size": 9481,
+        "sha256": "33b08a1bda64384019a71f12bd8c61d1fb0729e43dd933745479e47e4bb342e2"
+      }
+    }
+  ]
+}

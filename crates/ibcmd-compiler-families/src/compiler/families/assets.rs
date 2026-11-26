@@ -1,0 +1,1956 @@
+//! Profile-gated source-asset routes and standalone body codecs.
+
+use std::collections::BTreeSet;
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+use std::path::{Path, PathBuf};
+use std::str;
+
+use ibcmd_1c_text::encode_base64;
+use ibcmd_core::artifact::{ProfileId, StorageProfileId};
+use ibcmd_core::asset::{Asset, AssetBuildError, MediaKind};
+use ibcmd_core::family::FamilyId;
+use ibcmd_core::identity::ObjectUuid;
+use ibcmd_core::profile::EffectiveProfile;
+use ibcmd_core::storage::{
+    MultipartIdentity, StorageBuildError, StoragePatchBuildError, StoragePatchEntry,
+    StoragePatchOutcome, StoragePatchTarget, StorageProvenance,
+};
+use ibcmd_core::version::PlatformBuild;
+
+use super::super::CompileAxes;
+use super::super::graph::{BootstrapGraph, StorageSuffix};
+use super::native::{
+    NativeValue, deflate_bytes, exact_list, exact_token, inflate, inline_list, parse_without_bom,
+    required_list, required_text, required_token, serialize_without_bom, text, token,
+};
+use ibcmd_module_blob::{pack_module_blob_bytes_base_free, unpack_module_container_text};
+
+const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
+
+/// A module container with the compiled image and its information member.
+/// A text member may still be unreadable; the caller must attempt its codec
+/// before deciding whether preserving the binary-only module is necessary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BinaryModuleMemberLayout {
+    pub text_member_present: bool,
+}
+
+impl BinaryModuleMemberLayout {
+    pub fn from_member_names(names: &BTreeSet<String>) -> Option<Self> {
+        if !names.contains("image") || !names.contains("info") {
+            return None;
+        }
+        Some(Self {
+            text_member_present: names.contains("text"),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SourceAssetCodec {
+    Module,
+    RawBinary,
+    Picture,
+    Help,
+    Rights,
+    Predefined,
+    OpaqueSupport,
+    ManagedForm,
+    CommandInterface,
+    Deferred,
+}
+
+impl SourceAssetCodec {
+    const fn layout_key(self) -> Option<&'static str> {
+        match self {
+            Self::Module => Some("bootstrap.asset.module.layout"),
+            Self::RawBinary => Some("bootstrap.asset.raw_binary.layout"),
+            Self::Picture => Some("bootstrap.asset.picture.layout"),
+            Self::Help => Some("bootstrap.asset.help.layout"),
+            Self::ManagedForm => Some("bootstrap.body.form.layout"),
+            Self::CommandInterface => Some("bootstrap.body.command_interface.layout"),
+            Self::Rights | Self::Predefined | Self::OpaqueSupport | Self::Deferred => None,
+        }
+    }
+
+    const fn layout(self) -> Option<&'static str> {
+        match self {
+            Self::Module => Some("module-v8-container-v1"),
+            Self::RawBinary => Some("raw-deflate-v1"),
+            Self::Picture => Some("ext-picture-v1"),
+            Self::Help => Some("help-v1"),
+            Self::ManagedForm => Some("managed-form-marker50-v1-raw-deflate-utf8-bom"),
+            Self::CommandInterface => Some("command-interface-v7-sections-v1-raw-deflate-utf8-bom"),
+            Self::Rights | Self::Predefined | Self::OpaqueSupport | Self::Deferred => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SourceAssetRole {
+    Module,
+    OrdinaryApplicationModule,
+    ExternalConnectionModule,
+    ManagedApplicationModule,
+    SessionModule,
+    CommandModule,
+    FormModule,
+    ObjectModule,
+    ManagerModule,
+    ValueManagerModule,
+    RecordSetModule,
+    Picture,
+    Help,
+    Package,
+    CommandInterface,
+    Splash,
+    Logo,
+    ParentConfigurations,
+    HomePageWorkArea,
+    MainSectionCommandInterface,
+    MobileClientSignature,
+    ClientApplicationInterface,
+    MainSectionPicture,
+    StandaloneContent,
+    Rights,
+    Aggregates,
+    Predefined,
+    Flowchart,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceAssetRoute {
+    owner_family: &'static str,
+    role: SourceAssetRole,
+    suffix: &'static str,
+    relative_path: &'static str,
+    codec: SourceAssetCodec,
+}
+
+impl SourceAssetRoute {
+    pub const fn owner_family(self) -> &'static str {
+        self.owner_family
+    }
+
+    pub const fn role(self) -> SourceAssetRole {
+        self.role
+    }
+
+    pub const fn suffix(self) -> &'static str {
+        self.suffix
+    }
+
+    pub const fn relative_path(self) -> &'static str {
+        self.relative_path
+    }
+
+    pub const fn codec(self) -> SourceAssetCodec {
+        self.codec
+    }
+
+    pub fn file_name(self) -> &'static str {
+        self.relative_path
+            .rsplit('/')
+            .next()
+            .expect("registry paths are non-empty")
+    }
+}
+
+macro_rules! route {
+    ($family:literal, $role:ident, $suffix:literal, $path:literal, $codec:ident) => {
+        SourceAssetRoute {
+            owner_family: $family,
+            role: SourceAssetRole::$role,
+            suffix: $suffix,
+            relative_path: $path,
+            codec: SourceAssetCodec::$codec,
+        }
+    };
+}
+
+const ROUTES: &[SourceAssetRoute] = &[
+    route!(
+        "Configuration",
+        OrdinaryApplicationModule,
+        ".0",
+        "Ext/OrdinaryApplicationModule.bsl",
+        Module
+    ),
+    route!(
+        "Configuration",
+        ExternalConnectionModule,
+        ".5",
+        "Ext/ExternalConnectionModule.bsl",
+        Module
+    ),
+    route!(
+        "Configuration",
+        ManagedApplicationModule,
+        ".6",
+        "Ext/ManagedApplicationModule.bsl",
+        Module
+    ),
+    route!(
+        "Configuration",
+        SessionModule,
+        ".7",
+        "Ext/SessionModule.bsl",
+        Module
+    ),
+    route!("CommonModule", Module, ".0", "Ext/Module.bsl", Module),
+    route!("HTTPService", Module, ".0", "Ext/Module.bsl", Module),
+    SourceAssetRoute {
+        owner_family: ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
+        role: SourceAssetRole::Module,
+        suffix: ibcmd_schema::websocket_client::WebSocketClientLayout::MODULE_SUFFIX,
+        relative_path: ibcmd_schema::websocket_client::WebSocketClientLayout::MODULE_SOURCE,
+        codec: SourceAssetCodec::Module,
+    },
+    route!("WebService", Module, ".0", "Ext/Module.bsl", Module),
+    route!("Bot", Module, ".1", "Ext/Module.bsl", Module),
+    route!("IntegrationService", Module, ".0", "Ext/Module.bsl", Module),
+    route!(
+        "Subsystem",
+        CommandInterface,
+        ".1",
+        "Ext/CommandInterface.xml",
+        CommandInterface
+    ),
+    route!(
+        "CommonCommand",
+        CommandInterface,
+        ".0",
+        "Ext/CommandInterface.xml",
+        CommandInterface
+    ),
+    route!(
+        "CommonCommand",
+        CommandModule,
+        ".2",
+        "Ext/CommandModule.bsl",
+        Module
+    ),
+    route!(
+        "Command",
+        CommandModule,
+        ".2",
+        "Ext/CommandModule.bsl",
+        Module
+    ),
+    route!("Form", FormModule, ".0", "Ext/Form/Module.bsl", ManagedForm),
+    route!(
+        "CommonForm",
+        FormModule,
+        ".0",
+        "Ext/Form/Module.bsl",
+        ManagedForm
+    ),
+    route!(
+        "FilterCriterion",
+        ManagerModule,
+        ".0",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "Constant",
+        ValueManagerModule,
+        ".0",
+        "Ext/ValueManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "Constant",
+        ManagerModule,
+        ".1",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "SettingsStorage",
+        ManagerModule,
+        ".8",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "Sequence",
+        RecordSetModule,
+        ".0",
+        "Ext/RecordSetModule.bsl",
+        Module
+    ),
+    route!(
+        "Catalog",
+        ObjectModule,
+        ".0",
+        "Ext/ObjectModule.bsl",
+        Module
+    ),
+    route!(
+        "Catalog",
+        ManagerModule,
+        ".3",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!("Report", ObjectModule, ".0", "Ext/ObjectModule.bsl", Module),
+    route!(
+        "Report",
+        ManagerModule,
+        ".2",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "DataProcessor",
+        ObjectModule,
+        ".0",
+        "Ext/ObjectModule.bsl",
+        Module
+    ),
+    route!(
+        "DataProcessor",
+        ManagerModule,
+        ".2",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "Document",
+        ObjectModule,
+        ".0",
+        "Ext/ObjectModule.bsl",
+        Module
+    ),
+    route!(
+        "Document",
+        ManagerModule,
+        ".2",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!("Enum", ManagerModule, ".0", "Ext/ManagerModule.bsl", Module),
+    route!(
+        "ExchangePlan",
+        ObjectModule,
+        ".2",
+        "Ext/ObjectModule.bsl",
+        Module
+    ),
+    route!(
+        "ExchangePlan",
+        ManagerModule,
+        ".3",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "AccountingRegister",
+        RecordSetModule,
+        ".6",
+        "Ext/RecordSetModule.bsl",
+        Module
+    ),
+    route!(
+        "AccountingRegister",
+        ManagerModule,
+        ".7",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "AccumulationRegister",
+        RecordSetModule,
+        ".1",
+        "Ext/RecordSetModule.bsl",
+        Module
+    ),
+    route!(
+        "AccumulationRegister",
+        ManagerModule,
+        ".2",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "CalculationRegister",
+        RecordSetModule,
+        ".1",
+        "Ext/RecordSetModule.bsl",
+        Module
+    ),
+    route!(
+        "CalculationRegister",
+        ManagerModule,
+        ".2",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "InformationRegister",
+        RecordSetModule,
+        ".1",
+        "Ext/RecordSetModule.bsl",
+        Module
+    ),
+    route!(
+        "InformationRegister",
+        ManagerModule,
+        ".2",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "DocumentJournal",
+        ManagerModule,
+        ".1",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!("Task", ObjectModule, ".6", "Ext/ObjectModule.bsl", Module),
+    route!("Task", ManagerModule, ".7", "Ext/ManagerModule.bsl", Module),
+    route!(
+        "BusinessProcess",
+        ObjectModule,
+        ".6",
+        "Ext/ObjectModule.bsl",
+        Module
+    ),
+    route!(
+        "BusinessProcess",
+        ManagerModule,
+        ".8",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    // A business process's flowchart: the `<uuid>.7` row the export writes as
+    // `Ext/Flowchart.xml` (`source_assets`, `SourceAssetKind::
+    // BusinessProcessFlowchart`) and the base-free stage compiles from it
+    // (`metadata_model::bodies_rows::body_row_suffix`). Without a route the
+    // apply gate reported the row of `BusinessProcess.Задание` (БСП 8.3.27)
+    // as a body "the source-asset registry does not name"
+    // (Untru/ibcmd-rs#415). Its codec lives outside this registry.
+    route!(
+        "BusinessProcess",
+        Flowchart,
+        ".7",
+        "Ext/Flowchart.xml",
+        Deferred
+    ),
+    route!(
+        "ChartOfAccounts",
+        ObjectModule,
+        ".14",
+        "Ext/ObjectModule.bsl",
+        Module
+    ),
+    route!(
+        "ChartOfAccounts",
+        ManagerModule,
+        ".15",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "ChartOfCalculationTypes",
+        ObjectModule,
+        ".0",
+        "Ext/ObjectModule.bsl",
+        Module
+    ),
+    route!(
+        "ChartOfCalculationTypes",
+        ManagerModule,
+        ".3",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!(
+        "ChartOfCharacteristicTypes",
+        ObjectModule,
+        ".15",
+        "Ext/ObjectModule.bsl",
+        Module
+    ),
+    route!(
+        "ChartOfCharacteristicTypes",
+        ManagerModule,
+        ".16",
+        "Ext/ManagerModule.bsl",
+        Module
+    ),
+    route!("CommonPicture", Picture, ".0", "Ext/Picture.xml", Picture),
+    // Match the measured Help suffix used by the export reader below.
+    route!("CommonCommand", Help, ".1", "Ext/Help.xml", Help),
+    // The remaining help slots, read off `ConfigDumpInfo.xml`, which names
+    // every versioned storage record: Документооборот КОРП 3.0.21.3 writes
+    // `Catalog.ДокументыПредприятия.Help` for `<uuid>.1`,
+    // `DataProcessor.ПодписаниеДанныхВМобильномДО.Help` for `<uuid>.1`,
+    // `InformationRegister.ТекущиеСостоянияДокументов.Help` for `<uuid>.0`,
+    // `CommonForm.СозданиеДокументаПоШаблону.Help` for `<uuid>.1`,
+    // `DocumentJournal.ЭлектроннаяПочта.Form.ФормаСписка.Help` for
+    // `<uuid>.1` and `Subsystem.СтандартныеПодсистемыДокументооборота.Help`
+    // for `<uuid>.0`. None of the six suffixes was claimed by another route
+    // of the same family.
+    route!("Catalog", Help, ".1", "Ext/Help.xml", Help),
+    route!("DataProcessor", Help, ".1", "Ext/Help.xml", Help),
+    route!("InformationRegister", Help, ".0", "Ext/Help.xml", Help),
+    route!("CommonForm", Help, ".1", "Ext/Help.xml", Help),
+    route!("Form", Help, ".1", "Ext/Help.xml", Help),
+    route!("Subsystem", Help, ".0", "Ext/Help.xml", Help),
+    // The remaining families, read off the same `ConfigDumpInfo.xml` record
+    // names on two independent native 8.3.27.2214 exports: ERP УХ 3.3.3.3
+    // (6,465 help records) and the BSP demo infobase (628). Every family below
+    // uses exactly one suffix across both corpora -- `Report` `.1` (901 + 40),
+    // `Document` `.1` (645 + 19), `DocumentJournal` `.0` (29 + 3),
+    // `BusinessProcess` `.5` (16 + 2), `ChartOfCharacteristicTypes` `.5`
+    // (13 + 4), `AccumulationRegister` `.0` (10 + 2), `ExchangePlan` `.0`
+    // (7 + 1), `ChartOfAccounts` `.5` (3 + 1), `AccountingRegister` `.5`
+    // (2 + 2), `Task` `.5` (2 + 1), `ChartOfCalculationTypes` `.1` (1 + 1) and
+    // `CalculationRegister` `.0` (0 + 1) -- and none of those suffixes was
+    // claimed by another route of the same family. An object whose help body
+    // is empty emits no `Ext/Help.xml`, so only this table can name its record
+    // in `ConfigDumpInfo.xml`.
+    route!("Report", Help, ".1", "Ext/Help.xml", Help),
+    route!("Document", Help, ".1", "Ext/Help.xml", Help),
+    route!("DocumentJournal", Help, ".0", "Ext/Help.xml", Help),
+    route!("BusinessProcess", Help, ".5", "Ext/Help.xml", Help),
+    route!(
+        "ChartOfCharacteristicTypes",
+        Help,
+        ".5",
+        "Ext/Help.xml",
+        Help
+    ),
+    route!("AccumulationRegister", Help, ".0", "Ext/Help.xml", Help),
+    route!("ExchangePlan", Help, ".0", "Ext/Help.xml", Help),
+    route!("ChartOfAccounts", Help, ".5", "Ext/Help.xml", Help),
+    route!("AccountingRegister", Help, ".5", "Ext/Help.xml", Help),
+    route!("Task", Help, ".5", "Ext/Help.xml", Help),
+    route!("ChartOfCalculationTypes", Help, ".1", "Ext/Help.xml", Help),
+    route!("CalculationRegister", Help, ".0", "Ext/Help.xml", Help),
+    route!("Role", Rights, ".0", "Ext/Rights.xml", Rights),
+    route!(
+        "AccumulationRegister",
+        Aggregates,
+        ".3",
+        "Ext/Aggregates.xml",
+        Deferred
+    ),
+    route!(
+        "Catalog",
+        Predefined,
+        ".1c",
+        "Ext/Predefined.xml",
+        Predefined
+    ),
+    route!(
+        "ChartOfCharacteristicTypes",
+        Predefined,
+        ".7",
+        "Ext/Predefined.xml",
+        Predefined
+    ),
+    route!(
+        "ChartOfAccounts",
+        Predefined,
+        ".9",
+        "Ext/Predefined.xml",
+        Predefined
+    ),
+    route!(
+        "ChartOfCalculationTypes",
+        Predefined,
+        ".2",
+        "Ext/Predefined.xml",
+        Predefined
+    ),
+    route!("XDTOPackage", Package, ".0", "Ext/Package.bin", RawBinary),
+    route!("Configuration", Splash, ".2", "Ext/Splash.xml", Picture),
+    // An 8.5 extension may override the logo (`Ext/Logo.xml`, ServiceDesk).
+    route!("Configuration", Logo, ".1", "Ext/Logo.xml", Picture),
+    route!("Configuration", Help, ".3", "Ext/Help.xml", Help),
+    route!(
+        "Configuration",
+        ParentConfigurations,
+        ".4",
+        "Ext/ParentConfigurations.bin",
+        OpaqueSupport
+    ),
+    route!(
+        "Configuration",
+        HomePageWorkArea,
+        ".8",
+        "Ext/HomePageWorkArea.xml",
+        Deferred
+    ),
+    route!(
+        "Configuration",
+        MainSectionCommandInterface,
+        ".9",
+        "Ext/MainSectionCommandInterface.xml",
+        Deferred
+    ),
+    route!(
+        "Configuration",
+        CommandInterface,
+        ".a",
+        "Ext/CommandInterface.xml",
+        CommandInterface
+    ),
+    route!(
+        "Configuration",
+        MobileClientSignature,
+        ".10",
+        "Ext/MobileClientSignature.bin",
+        OpaqueSupport
+    ),
+    route!(
+        "Configuration",
+        ClientApplicationInterface,
+        ".b",
+        "Ext/ClientApplicationInterface.xml",
+        Deferred
+    ),
+    route!(
+        "Configuration",
+        MainSectionPicture,
+        ".c",
+        "Ext/MainSectionPicture.xml",
+        Picture
+    ),
+    route!(
+        "Configuration",
+        StandaloneContent,
+        ".f",
+        "Ext/StandaloneConfigurationContent.bin",
+        OpaqueSupport
+    ),
+];
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceAssetRegistry;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConfigRowIdParseError {
+    MissingDelimiter,
+    EmptyOwner,
+    EmptySuffix,
+    InvalidSuffix,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigRowId<'a> {
+    owner: &'a str,
+    suffix_component: &'a str,
+    suffix: StorageSuffix,
+}
+
+impl<'a> ConfigRowId<'a> {
+    pub fn parse(value: &'a str) -> Result<Self, ConfigRowIdParseError> {
+        let (owner, suffix_component) = value
+            .split_once('.')
+            .ok_or(ConfigRowIdParseError::MissingDelimiter)?;
+        if owner.is_empty() {
+            return Err(ConfigRowIdParseError::EmptyOwner);
+        }
+        if suffix_component.is_empty() {
+            return Err(ConfigRowIdParseError::EmptySuffix);
+        }
+        let suffix = StorageSuffix::new(&format!(".{suffix_component}"))
+            .map_err(|_| ConfigRowIdParseError::InvalidSuffix)?;
+        Ok(Self {
+            owner,
+            suffix_component,
+            suffix,
+        })
+    }
+
+    pub const fn owner(&self) -> &'a str {
+        self.owner
+    }
+
+    pub const fn suffix(&self) -> &StorageSuffix {
+        &self.suffix
+    }
+
+    pub const fn suffix_component(&self) -> &'a str {
+        self.suffix_component
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceAssetRelationError {
+    UnsupportedFamily,
+    WrongSuffix,
+    MissingOwnerReference,
+    OwnerMismatch,
+}
+
+impl SourceAssetRegistry {
+    /// Owner-relative rows containing `Ext/AdditionalIndexes.xml` values.
+    /// Catalogs use their root standard fields; document and register bodies
+    /// retain their existing suffixes. Unknown families have no admitted route.
+    pub fn additional_indexes_suffix(self, owner_family: &str) -> Option<&'static str> {
+        match owner_family {
+            "Document" => Some("3"),
+            "AccumulationRegister" => Some("4"),
+            "Catalog" => Some("1d"),
+            _ => None,
+        }
+    }
+
+    pub fn owner_bound_route(self, owner_family: &FamilyId) -> Option<&'static SourceAssetRoute> {
+        ROUTES.iter().find(|route| {
+            route.owner_family == owner_family.as_str()
+                && matches!(
+                    route.role,
+                    SourceAssetRole::Rights | SourceAssetRole::Aggregates
+                )
+        })
+    }
+
+    pub fn owner_bound_relation(
+        self,
+        owner_family: &FamilyId,
+        suffix: &StorageSuffix,
+    ) -> Result<&'static SourceAssetRoute, SourceAssetRelationError> {
+        let route = self
+            .owner_bound_route(owner_family)
+            .ok_or(SourceAssetRelationError::UnsupportedFamily)?;
+        if route.suffix != suffix.as_str() {
+            return Err(SourceAssetRelationError::WrongSuffix);
+        }
+        Ok(route)
+    }
+
+    pub fn canonical_owner_name<'a>(
+        self,
+        route: &SourceAssetRoute,
+        header_name: &'a str,
+        owner_reference: Option<&str>,
+    ) -> Result<&'a str, SourceAssetRelationError> {
+        let owner_reference =
+            owner_reference.ok_or(SourceAssetRelationError::MissingOwnerReference)?;
+        let expected_reference = format!("{}.{}", route.owner_family, header_name);
+        if owner_reference != expected_reference {
+            return Err(SourceAssetRelationError::OwnerMismatch);
+        }
+        Ok(header_name)
+    }
+
+    /// Enumerates every evidence-backed route for one exact owner family in
+    /// stable registry order.  Bootstrap source-tree planning uses this to
+    /// consume files by explicit relative path instead of filename heuristics.
+    pub fn routes_for_family(
+        self,
+        owner_family: &str,
+    ) -> impl Iterator<Item = &'static SourceAssetRoute> {
+        ROUTES
+            .iter()
+            .filter(move |route| route.owner_family == owner_family)
+    }
+
+    /// Resolves an exact owner-relative source path for one family.
+    pub fn route_by_relative_path(
+        self,
+        owner_family: &str,
+        relative_path: &str,
+    ) -> Option<&'static SourceAssetRoute> {
+        ROUTES.iter().find(|route| {
+            route.owner_family == owner_family && route.relative_path == relative_path
+        })
+    }
+
+    pub fn route(
+        self,
+        owner_family: &str,
+        role: SourceAssetRole,
+    ) -> Option<&'static SourceAssetRoute> {
+        ROUTES
+            .iter()
+            .find(|route| route.owner_family == owner_family && route.role == role)
+    }
+
+    pub fn route_by_suffix(
+        self,
+        owner_family: &str,
+        suffix: &str,
+    ) -> Option<&'static SourceAssetRoute> {
+        let normalized = if suffix.starts_with('.') {
+            suffix.to_owned()
+        } else {
+            format!(".{suffix}")
+        };
+        ROUTES
+            .iter()
+            .find(|route| route.owner_family == owner_family && route.suffix == normalized.as_str())
+    }
+
+    pub fn configuration_routes(self) -> impl Iterator<Item = &'static SourceAssetRoute> {
+        ROUTES
+            .iter()
+            .filter(|route| route.owner_family == "Configuration")
+    }
+
+    pub fn module_routes(
+        self,
+        owner_family: &str,
+    ) -> impl Iterator<Item = &'static SourceAssetRoute> {
+        ROUTES.iter().filter(move |route| {
+            route.owner_family == owner_family && route.codec == SourceAssetCodec::Module
+        })
+    }
+
+    pub fn source_path(
+        self,
+        metadata_xml: &Path,
+        owner_family: &str,
+        role: SourceAssetRole,
+    ) -> Option<PathBuf> {
+        let route = self.route(owner_family, role)?;
+        Some(source_owner_directory(metadata_xml, owner_family).join(route.relative_path))
+    }
+
+    pub fn source_path_by_suffix(
+        self,
+        metadata_xml: &Path,
+        owner_family: &str,
+        suffix: &str,
+    ) -> Option<PathBuf> {
+        let route = self.route_by_suffix(owner_family, suffix)?;
+        Some(source_owner_directory(metadata_xml, owner_family).join(route.relative_path))
+    }
+
+    /// The row an object's `Ext/Help.xml` is stored in. Measured over every
+    /// object with a help of both corpora (2 845 ERP УХ + 312 БСП, one suffix
+    /// per class with no exception): `.0` for the registers of accumulation,
+    /// information and calculation, document journals, exchange plans and
+    /// subsystems; `.1` for catalogs, documents, data processors, reports,
+    /// charts of calculation types, common commands and forms; `.3` for the
+    /// configuration itself (under its module group); `.5` for the rest --
+    /// accounting registers, business processes, tasks and the two charts.
+    pub fn help_suffix(self, owner_family: &str) -> Option<&'static str> {
+        Some(match owner_family {
+            "AccumulationRegister"
+            | "InformationRegister"
+            | "CalculationRegister"
+            | "DocumentJournal"
+            | "ExchangePlan"
+            | "Subsystem" => ".0",
+            "Form"
+            | "CommonForm"
+            | "Catalog"
+            | "Document"
+            | "DataProcessor"
+            | "Report"
+            | "ChartOfCalculationTypes"
+            | "CommonCommand" => ".1",
+            "Configuration" => ".3",
+            _ => ".5",
+        })
+    }
+
+    pub const fn help_relative_path(self) -> &'static str {
+        "Ext/Help.xml"
+    }
+
+    pub fn help_source_path(self, metadata_xml: &Path, owner_family: &str) -> PathBuf {
+        source_owner_directory(metadata_xml, owner_family).join(self.help_relative_path())
+    }
+}
+
+fn source_owner_directory(metadata_xml: &Path, owner_family: &str) -> PathBuf {
+    if owner_family == "Configuration" {
+        return metadata_xml
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .to_path_buf();
+    }
+    metadata_xml.with_extension("")
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssetCodecProfile {
+    profile_id: ProfileId,
+    platform_build: PlatformBuild,
+    storage_profile: StorageProfileId,
+    codec: SourceAssetCodec,
+}
+
+impl AssetCodecProfile {
+    pub fn from_effective_for_codec(
+        profile: &EffectiveProfile,
+        codec: SourceAssetCodec,
+    ) -> Result<Self, AssetProfileError> {
+        let key = codec.layout_key().ok_or(AssetProfileError::DeferredCodec)?;
+        let expected = codec.layout().expect("non-deferred codec has a layout");
+        let platform_build = profile
+            .platform_build
+            .as_ref()
+            .map(|value| value.value.clone())
+            .ok_or_else(|| AssetProfileError::MissingCoordinate {
+                profile: profile.id.clone(),
+                coordinate: "platform_build",
+            })?;
+        let storage_profile = profile
+            .storage_profile
+            .as_ref()
+            .map(|value| value.value.clone())
+            .ok_or_else(|| AssetProfileError::MissingCoordinate {
+                profile: profile.id.clone(),
+                coordinate: "storage_profile",
+            })?;
+        if storage_profile.as_str() != SUPPORTED_STORAGE_PROFILE {
+            return Err(AssetProfileError::UnsupportedCoordinate {
+                profile: profile.id.clone(),
+                coordinate: "storage_profile",
+                value: storage_profile.to_string(),
+            });
+        }
+        let value =
+            profile
+                .constants
+                .get(key)
+                .ok_or_else(|| AssetProfileError::MissingConstant {
+                    profile: profile.id.clone(),
+                    key,
+                })?;
+        if value.value != expected {
+            return Err(AssetProfileError::UnsupportedLayout {
+                profile: profile.id.clone(),
+                codec,
+                value: value.value.clone(),
+            });
+        }
+        Ok(Self {
+            profile_id: profile.id.clone(),
+            platform_build,
+            storage_profile,
+            codec,
+        })
+    }
+
+    #[cfg(test)]
+    fn fixture(codec: SourceAssetCodec) -> Self {
+        Self {
+            profile_id: ProfileId::parse("platform-8.3.27.1989").unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            codec,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AssetProfileError {
+    DeferredCodec,
+    MissingCoordinate {
+        profile: ProfileId,
+        coordinate: &'static str,
+    },
+    MissingConstant {
+        profile: ProfileId,
+        key: &'static str,
+    },
+    UnsupportedCoordinate {
+        profile: ProfileId,
+        coordinate: &'static str,
+        value: String,
+    },
+    UnsupportedLayout {
+        profile: ProfileId,
+        codec: SourceAssetCodec,
+        value: String,
+    },
+}
+
+impl Display for AssetProfileError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DeferredCodec => {
+                formatter.write_str("deferred source asset has no BOOT-009 codec")
+            }
+            Self::MissingCoordinate {
+                profile,
+                coordinate,
+            } => {
+                write!(
+                    formatter,
+                    "profile `{profile}` has no `{coordinate}` coordinate"
+                )
+            }
+            Self::MissingConstant { profile, key } => {
+                write!(formatter, "profile `{profile}` has no `{key}` constant")
+            }
+            Self::UnsupportedCoordinate {
+                profile,
+                coordinate,
+                value,
+            } => write!(
+                formatter,
+                "profile `{profile}` declares unsupported `{coordinate}` value `{value}`"
+            ),
+            Self::UnsupportedLayout {
+                profile,
+                codec,
+                value,
+            } => write!(
+                formatter,
+                "profile `{profile}` declares unsupported {codec:?} layout `{value}`"
+            ),
+        }
+    }
+}
+
+impl Error for AssetProfileError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NamedAsset {
+    name: String,
+    asset: Asset,
+}
+
+impl NamedAsset {
+    pub fn new(name: &str, asset: Asset) -> Result<Self, AssetCodecError> {
+        validate_asset_name(name)?;
+        Ok(Self {
+            name: name.to_owned(),
+            asset,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub const fn asset(&self) -> &Asset {
+        &self.asset
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HelpAssets {
+    pages: Vec<NamedAsset>,
+    files: Vec<NamedAsset>,
+}
+
+impl HelpAssets {
+    pub fn new(pages: Vec<NamedAsset>, files: Vec<NamedAsset>) -> Result<Self, AssetCodecError> {
+        if pages.is_empty() {
+            return Err(AssetCodecError::InvalidModel(
+                "Help must contain at least one page".into(),
+            ));
+        }
+        let mut names = BTreeSet::new();
+        for value in pages.iter().chain(&files) {
+            if !names.insert(value.name.as_str()) {
+                return Err(AssetCodecError::InvalidModel(
+                    "Help page/file name is duplicated".into(),
+                ));
+            }
+        }
+        Ok(Self { pages, files })
+    }
+
+    pub fn pages(&self) -> &[NamedAsset] {
+        &self.pages
+    }
+
+    pub fn files(&self) -> &[NamedAsset] {
+        &self.files
+    }
+}
+
+pub enum SourceAssetPayload<'a> {
+    Module(&'a [u8]),
+    Binary(&'a Asset),
+    Picture(&'a Asset),
+    Help(&'a HelpAssets),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DecodedSourceAsset {
+    Module(Vec<u8>),
+    Binary(Vec<u8>),
+    Picture(Vec<u8>),
+    Help(HelpAssets),
+}
+
+pub fn compile_source_asset(
+    graph: &BootstrapGraph,
+    owner_uuid: ObjectUuid,
+    route: &SourceAssetRoute,
+    payload: SourceAssetPayload<'_>,
+    axes: &CompileAxes,
+    profile: &AssetCodecProfile,
+) -> Result<StoragePatchEntry, AssetCodecError> {
+    validate_coordinates(graph, axes, profile)?;
+    if route.codec != profile.codec {
+        return Err(AssetCodecError::CodecMismatch {
+            route: route.codec,
+            profile: profile.codec,
+        });
+    }
+    let bytes = match (route.codec, payload) {
+        (SourceAssetCodec::Module, SourceAssetPayload::Module(text)) => encode_module(text)?,
+        (SourceAssetCodec::RawBinary, SourceAssetPayload::Binary(asset)) => {
+            deflate_bytes(asset.bytes()).map_err(native_error)?
+        }
+        (SourceAssetCodec::Picture, SourceAssetPayload::Picture(asset)) => encode_picture(asset)?,
+        (SourceAssetCodec::Help, SourceAssetPayload::Help(help)) => encode_help(help)?,
+        (
+            SourceAssetCodec::Rights
+            | SourceAssetCodec::Predefined
+            | SourceAssetCodec::OpaqueSupport
+            | SourceAssetCodec::ManagedForm
+            | SourceAssetCodec::CommandInterface
+            | SourceAssetCodec::Deferred,
+            _,
+        ) => return Err(AssetCodecError::DeferredRoute),
+        _ => return Err(AssetCodecError::PayloadMismatch),
+    };
+    let suffix = StorageSuffix::new(route.suffix).map_err(|error| {
+        AssetCodecError::InvalidModel(format!("registry suffix is invalid: {error}"))
+    })?;
+    let target = graph
+        .object_entry(owner_uuid, &suffix)
+        .ok_or(AssetCodecError::MissingRoute {
+            object: owner_uuid,
+            suffix: route.suffix,
+        })?;
+    let provenance = StorageProvenance::new(&format!(
+        "bootstrap:{}:asset:{}:{}",
+        profile.profile_id, route.owner_family, route.relative_path
+    ))?;
+    Ok(StoragePatchEntry::new(
+        StoragePatchTarget::new(
+            target.key().clone(),
+            MultipartIdentity::single(),
+            provenance,
+        ),
+        StoragePatchOutcome::compiled(bytes)?,
+    ))
+}
+
+pub fn decode_source_asset(
+    blob: &[u8],
+    route: &SourceAssetRoute,
+    profile: &AssetCodecProfile,
+) -> Result<DecodedSourceAsset, AssetCodecError> {
+    if route.codec != profile.codec {
+        return Err(AssetCodecError::CodecMismatch {
+            route: route.codec,
+            profile: profile.codec,
+        });
+    }
+    match route.codec {
+        SourceAssetCodec::Module => decode_module(blob).map(DecodedSourceAsset::Module),
+        SourceAssetCodec::RawBinary => inflate(blob)
+            .map(DecodedSourceAsset::Binary)
+            .map_err(native_error),
+        SourceAssetCodec::Picture => decode_picture(blob).map(DecodedSourceAsset::Picture),
+        SourceAssetCodec::Help => decode_help(blob).map(DecodedSourceAsset::Help),
+        SourceAssetCodec::Rights
+        | SourceAssetCodec::Predefined
+        | SourceAssetCodec::OpaqueSupport
+        | SourceAssetCodec::ManagedForm
+        | SourceAssetCodec::CommandInterface
+        | SourceAssetCodec::Deferred => Err(AssetCodecError::DeferredRoute),
+    }
+}
+
+/// The storage payload of a module body (`Module.bsl` and its kin), as
+/// `compile_source_asset` writes it; for callers that already know the row.
+pub fn encode_source_module(text: &[u8]) -> Result<Vec<u8>, AssetCodecError> {
+    encode_module(text)
+}
+
+fn encode_module(text: &[u8]) -> Result<Vec<u8>, AssetCodecError> {
+    str::from_utf8(text)
+        .map_err(|_| AssetCodecError::InvalidModel("module is not UTF-8".into()))?;
+    let packed = pack_module_blob_bytes_base_free(text, None)
+        .map_err(|error| AssetCodecError::Module(error.to_string()))?;
+    let container = inflate(&packed.blob).map_err(native_error)?;
+    deflate_bytes(&container).map_err(native_error)
+}
+
+fn decode_module(blob: &[u8]) -> Result<Vec<u8>, AssetCodecError> {
+    let container = inflate(blob).map_err(native_error)?;
+    unpack_module_container_text(&container)
+        .map_err(|error| AssetCodecError::Module(error.to_string()))
+}
+
+fn encode_picture(asset: &Asset) -> Result<Vec<u8>, AssetCodecError> {
+    let value = inline_list(vec![
+        token("1"),
+        inline_list(vec![token("0"), token("0"), token("-1"), token("-1")]),
+        inline_list(vec![inline_list(vec![base64_token(asset.bytes())])]),
+    ]);
+    let plain = serialize_without_bom(&value).map_err(native_error)?;
+    deflate_bytes(&plain).map_err(native_error)
+}
+
+fn decode_picture(blob: &[u8]) -> Result<Vec<u8>, AssetCodecError> {
+    let plain = inflate(blob).map_err(native_error)?;
+    let value = parse_without_bom(&plain).map_err(native_error)?;
+    let root = exact_list(&value, 3, "picture body").map_err(native_error)?;
+    exact_token(&root[0], "1", "picture body marker").map_err(native_error)?;
+    let dimensions = exact_list(&root[1], 4, "picture dimensions").map_err(native_error)?;
+    for (value, expected) in dimensions.iter().zip(["0", "0", "-1", "-1"]) {
+        exact_token(value, expected, "picture dimension").map_err(native_error)?;
+    }
+    let payload = exact_list(&root[2], 1, "picture payload wrapper").map_err(native_error)?;
+    let payload = exact_list(&payload[0], 1, "picture payload").map_err(native_error)?;
+    decode_base64_token(&payload[0])
+}
+
+fn encode_help(help: &HelpAssets) -> Result<Vec<u8>, AssetCodecError> {
+    let mut fields = Vec::with_capacity(3 + help.pages.len() * 2 + help.files.len() * 3);
+    fields.push(token("5"));
+    fields.push(token(help.pages.len().to_string()));
+    for page in &help.pages {
+        fields.push(text(&page.name));
+        fields.push(inline_list(vec![base64_token(page.asset.bytes())]));
+    }
+    fields.push(token(help.files.len().to_string()));
+    for file in &help.files {
+        fields.push(text(&file.name));
+        fields.push(token("1"));
+        fields.push(inline_list(vec![base64_token(file.asset.bytes())]));
+    }
+    let plain = serialize_without_bom(&inline_list(fields)).map_err(native_error)?;
+    deflate_bytes(&plain).map_err(native_error)
+}
+
+fn decode_help(blob: &[u8]) -> Result<HelpAssets, AssetCodecError> {
+    let plain = inflate(blob).map_err(native_error)?;
+    let value = parse_without_bom(&plain).map_err(native_error)?;
+    let fields = required_list(&value, "Help body").map_err(native_error)?;
+    if fields.len() < 3 {
+        return Err(AssetCodecError::InvalidModel(
+            "Help body is truncated".into(),
+        ));
+    }
+    exact_token(&fields[0], "5", "Help marker").map_err(native_error)?;
+    let page_count = parse_count(&fields[1], "Help page count")?;
+    let mut index = 2usize;
+    let mut pages = Vec::with_capacity(page_count);
+    for _ in 0..page_count {
+        let name = required_text(
+            fields
+                .get(index)
+                .ok_or_else(|| AssetCodecError::InvalidModel("Help page name is missing".into()))?,
+            "Help page name",
+        )
+        .map_err(native_error)?;
+        index += 1;
+        let bytes =
+            decode_base64_field(fields.get(index).ok_or_else(|| {
+                AssetCodecError::InvalidModel("Help page body is missing".into())
+            })?)?;
+        index += 1;
+        pages.push(NamedAsset::new(
+            name,
+            Asset::new(bytes, MediaKind::octet_stream())?,
+        )?);
+    }
+    let file_count = parse_count(
+        fields
+            .get(index)
+            .ok_or_else(|| AssetCodecError::InvalidModel("Help file count is missing".into()))?,
+        "Help file count",
+    )?;
+    index += 1;
+    let mut files = Vec::with_capacity(file_count);
+    for _ in 0..file_count {
+        let name = required_text(
+            fields
+                .get(index)
+                .ok_or_else(|| AssetCodecError::InvalidModel("Help file name is missing".into()))?,
+            "Help file name",
+        )
+        .map_err(native_error)?;
+        index += 1;
+        exact_token(
+            fields.get(index).ok_or_else(|| {
+                AssetCodecError::InvalidModel("Help file marker is missing".into())
+            })?,
+            "1",
+            "Help file marker",
+        )
+        .map_err(native_error)?;
+        index += 1;
+        let bytes =
+            decode_base64_field(fields.get(index).ok_or_else(|| {
+                AssetCodecError::InvalidModel("Help file body is missing".into())
+            })?)?;
+        index += 1;
+        files.push(NamedAsset::new(
+            name,
+            Asset::new(bytes, MediaKind::octet_stream())?,
+        )?);
+    }
+    if index != fields.len() {
+        return Err(AssetCodecError::InvalidModel(
+            "Help body has trailing fields".into(),
+        ));
+    }
+    HelpAssets::new(pages, files)
+}
+
+fn decode_base64_field(value: &NativeValue) -> Result<Vec<u8>, AssetCodecError> {
+    let fields = exact_list(value, 1, "base64 field").map_err(native_error)?;
+    decode_base64_token(&fields[0])
+}
+
+fn base64_token(bytes: &[u8]) -> NativeValue {
+    token(format!("#base64:{}", encode_base64(bytes)))
+}
+
+fn decode_base64_token(value: &NativeValue) -> Result<Vec<u8>, AssetCodecError> {
+    let value = required_token(value, "base64 token").map_err(native_error)?;
+    let payload = value
+        .strip_prefix("#base64:")
+        .ok_or_else(|| AssetCodecError::InvalidModel("base64 field has no marker".into()))?;
+    decode_base64(payload)
+}
+
+fn decode_base64(value: &str) -> Result<Vec<u8>, AssetCodecError> {
+    if !value.len().is_multiple_of(4) || !value.is_ascii() {
+        return Err(AssetCodecError::InvalidModel(
+            "base64 length is not canonical".into(),
+        ));
+    }
+    let mut output = Vec::with_capacity(value.len() / 4 * 3);
+    let chunks = value.as_bytes().chunks_exact(4);
+    let chunk_count = chunks.len();
+    for (index, chunk) in chunks.enumerate() {
+        let last = index + 1 == chunk_count;
+        let a = base64_value(chunk[0])?;
+        let b = base64_value(chunk[1])?;
+        let c_padding = chunk[2] == b'=';
+        let d_padding = chunk[3] == b'=';
+        if c_padding && !d_padding || d_padding && !last {
+            return Err(AssetCodecError::InvalidModel(
+                "base64 padding is not canonical".into(),
+            ));
+        }
+        let c = if c_padding {
+            0
+        } else {
+            base64_value(chunk[2])?
+        };
+        let d = if d_padding {
+            0
+        } else {
+            base64_value(chunk[3])?
+        };
+        if c_padding && (b & 0x0f) != 0 || d_padding && !c_padding && (c & 0x03) != 0 {
+            return Err(AssetCodecError::InvalidModel(
+                "base64 padding bits are non-zero".into(),
+            ));
+        }
+        output.push((a << 2) | (b >> 4));
+        if !c_padding {
+            output.push((b << 4) | (c >> 2));
+        }
+        if !d_padding {
+            output.push((c << 6) | d);
+        }
+    }
+    Ok(output)
+}
+
+fn base64_value(byte: u8) -> Result<u8, AssetCodecError> {
+    match byte {
+        b'A'..=b'Z' => Ok(byte - b'A'),
+        b'a'..=b'z' => Ok(byte - b'a' + 26),
+        b'0'..=b'9' => Ok(byte - b'0' + 52),
+        b'+' => Ok(62),
+        b'/' => Ok(63),
+        _ => Err(AssetCodecError::InvalidModel(
+            "base64 alphabet is invalid".into(),
+        )),
+    }
+}
+
+fn parse_count(value: &NativeValue, field: &'static str) -> Result<usize, AssetCodecError> {
+    required_token(value, field)
+        .map_err(native_error)?
+        .parse::<usize>()
+        .map_err(|_| AssetCodecError::InvalidModel(format!("{field} is not usize")))
+}
+
+fn validate_asset_name(name: &str) -> Result<(), AssetCodecError> {
+    if name.is_empty()
+        || name.len() > 1_024
+        || name.chars().any(char::is_control)
+        || name.contains('/')
+        || name.contains('\\')
+        || matches!(name, "." | "..")
+    {
+        return Err(AssetCodecError::InvalidModel(
+            "asset name is unsafe or unbounded".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_coordinates(
+    graph: &BootstrapGraph,
+    axes: &CompileAxes,
+    profile: &AssetCodecProfile,
+) -> Result<(), AssetCodecError> {
+    if graph.profile_id() != &profile.profile_id {
+        return Err(AssetCodecError::ProfileMismatch {
+            graph: graph.profile_id().clone(),
+            codec: profile.profile_id.clone(),
+        });
+    }
+    if axes.platform_build() != Some(&profile.platform_build) {
+        return Err(AssetCodecError::AxisMismatch("platform_build"));
+    }
+    if axes.storage_profile() != &profile.storage_profile {
+        return Err(AssetCodecError::AxisMismatch("storage_profile"));
+    }
+    if axes.compatibility_mode().is_some() || axes.container_revision().is_some() {
+        return Err(AssetCodecError::AxisMismatch(
+            "unevidenced optional coordinate",
+        ));
+    }
+    Ok(())
+}
+
+fn native_error(error: impl Display) -> AssetCodecError {
+    AssetCodecError::Native(error.to_string())
+}
+
+#[derive(Debug)]
+pub enum AssetCodecError {
+    Profile(AssetProfileError),
+    ProfileMismatch {
+        graph: ProfileId,
+        codec: ProfileId,
+    },
+    AxisMismatch(&'static str),
+    CodecMismatch {
+        route: SourceAssetCodec,
+        profile: SourceAssetCodec,
+    },
+    PayloadMismatch,
+    DeferredRoute,
+    MissingRoute {
+        object: ObjectUuid,
+        suffix: &'static str,
+    },
+    InvalidModel(String),
+    Native(String),
+    Module(String),
+    Asset(AssetBuildError),
+    Storage(StorageBuildError),
+    Patch(StoragePatchBuildError),
+}
+
+impl Display for AssetCodecError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Profile(source) => Display::fmt(source, formatter),
+            Self::ProfileMismatch { graph, codec } => {
+                write!(
+                    formatter,
+                    "graph profile `{graph}` differs from asset codec `{codec}`"
+                )
+            }
+            Self::AxisMismatch(axis) => write!(formatter, "source asset `{axis}` axis mismatch"),
+            Self::CodecMismatch { route, profile } => {
+                write!(
+                    formatter,
+                    "route codec {route:?} differs from profile codec {profile:?}"
+                )
+            }
+            Self::PayloadMismatch => formatter.write_str("payload kind differs from route codec"),
+            Self::DeferredRoute => {
+                formatter.write_str("source-asset route is deferred to a later body codec")
+            }
+            Self::MissingRoute { object, suffix } => {
+                write!(
+                    formatter,
+                    "bootstrap graph has no {object}{suffix} asset route"
+                )
+            }
+            Self::InvalidModel(reason) => write!(formatter, "invalid source asset: {reason}"),
+            Self::Native(reason) => {
+                write!(formatter, "source asset payload codec failed: {reason}")
+            }
+            Self::Module(reason) => write!(formatter, "module container codec failed: {reason}"),
+            Self::Asset(source) => Display::fmt(source, formatter),
+            Self::Storage(source) => Display::fmt(source, formatter),
+            Self::Patch(source) => Display::fmt(source, formatter),
+        }
+    }
+}
+
+impl Error for AssetCodecError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Profile(source) => Some(source),
+            Self::Asset(source) => Some(source),
+            Self::Storage(source) => Some(source),
+            Self::Patch(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl From<AssetProfileError> for AssetCodecError {
+    fn from(source: AssetProfileError) -> Self {
+        Self::Profile(source)
+    }
+}
+
+impl From<AssetBuildError> for AssetCodecError {
+    fn from(source: AssetBuildError) -> Self {
+        Self::Asset(source)
+    }
+}
+
+impl From<StorageBuildError> for AssetCodecError {
+    fn from(source: StorageBuildError) -> Self {
+        Self::Storage(source)
+    }
+}
+
+impl From<StoragePatchBuildError> for AssetCodecError {
+    fn from(source: StoragePatchBuildError) -> Self {
+        Self::Patch(source)
+    }
+}
+
+/// Exact source body roles for the source-only external named-owner stage.
+/// Form body and its optional module share one native bundle suffix; this does
+/// not select or invoke a native body codec. Existing ordinary route lookup is
+/// unchanged, including its one-route-per-suffix semantics.
+impl SourceAssetRegistry {
+    pub fn external_owner_relative_path(self, metadata_xml: &Path, relative: &str) -> PathBuf {
+        // All external roots and named objects use the existing non-Config
+        // filename-stem rule. No metadata kind is inferred from this path.
+        metadata_xml.with_extension("").join(relative)
+    }
+
+    pub fn external_named_body_route(
+        self,
+        family: &str,
+        source_file: &str,
+    ) -> Option<&'static SourceAssetRoute> {
+        const FORM: SourceAssetRoute =
+            route!("Form", StandaloneContent, ".0", "Ext/Form.xml", ManagedForm);
+        const XML: SourceAssetRoute = route!(
+            "Template",
+            StandaloneContent,
+            ".0",
+            "Ext/Template.xml",
+            Deferred
+        );
+        const BIN: SourceAssetRoute = route!(
+            "Template",
+            StandaloneContent,
+            ".0",
+            "Ext/Template.bin",
+            Deferred
+        );
+        const TXT: SourceAssetRoute = route!(
+            "Template",
+            StandaloneContent,
+            ".0",
+            "Ext/Template.txt",
+            Deferred
+        );
+        match (family, source_file) {
+            ("Form", "Form.xml") => Some(&FORM),
+            ("Template", "Template.xml") => Some(&XML),
+            ("Template", "Template.bin") => Some(&BIN),
+            ("Template", "Template.txt") => Some(&TXT),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ibcmd_core::diagnostic::{ObjectPath, PathSegment, PropertyPath};
+    use ibcmd_core::identity::LogicalIdentity;
+    use ibcmd_core::model::{
+        CanonicalConfiguration, CanonicalObject, CanonicalObjectParts, MetadataKind,
+    };
+    use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
+    use ibcmd_core::validate::validate_configuration;
+    use ibcmd_core::version::XmlDialect;
+
+    use crate::compiler::graph::{ObjectStorageRoute, build_bootstrap_graph};
+    use crate::compiler::identity::collect_bootstrap_identities;
+
+    use super::*;
+
+    fn object(uuid: &str, kind: &str, name: &str) -> CanonicalObject {
+        let path = ObjectPath::new(vec![PathSegment::name(name).unwrap()]).unwrap();
+        let provenance = SourceProvenance::new(
+            ProfileId::parse("xml-2.21").unwrap(),
+            CanonicalAnchor::new(path.clone(), PropertyPath::root()),
+        );
+        CanonicalObject::new(CanonicalObjectParts::new(
+            LogicalIdentity::new(ObjectUuid::parse(uuid).unwrap(), path),
+            MetadataKind::new(kind).unwrap(),
+            provenance,
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn registry_paths_and_family_suffixes_are_unique_and_safe() {
+        let mut keys = BTreeSet::new();
+        for route in ROUTES {
+            assert!(keys.insert((route.owner_family, route.suffix)));
+            assert!(route.relative_path.starts_with("Ext/"));
+            assert!(!route.relative_path.contains(".."));
+            assert!(!route.relative_path.contains('\\'));
+            StorageSuffix::new(route.suffix).unwrap();
+        }
+        assert_eq!(
+            SourceAssetRegistry
+                .route("CommonModule", SourceAssetRole::Module)
+                .unwrap()
+                .suffix(),
+            ".0"
+        );
+        // The business process flowchart row is named (Untru/ibcmd-rs#415).
+        let flowchart = SourceAssetRegistry
+            .route_by_suffix("BusinessProcess", "7")
+            .unwrap();
+        assert_eq!(flowchart.role(), SourceAssetRole::Flowchart);
+        assert_eq!(flowchart.relative_path(), "Ext/Flowchart.xml");
+        assert_eq!(
+            SourceAssetRegistry
+                .route_by_suffix("CommonCommand", "2")
+                .unwrap()
+                .file_name(),
+            "CommandModule.bsl"
+        );
+        assert_eq!(
+            SourceAssetRegistry
+                .source_path(
+                    &Path::new("CommonPictures").join("Logo.xml"),
+                    "CommonPicture",
+                    SourceAssetRole::Picture,
+                )
+                .unwrap(),
+            Path::new("CommonPictures")
+                .join("Logo")
+                .join("Ext")
+                .join("Picture.xml")
+        );
+        for (family, suffix) in [
+            ("Catalog", ".1c"),
+            ("ChartOfCharacteristicTypes", ".7"),
+            ("ChartOfAccounts", ".9"),
+            ("ChartOfCalculationTypes", ".2"),
+        ] {
+            let route = SourceAssetRegistry
+                .route(family, SourceAssetRole::Predefined)
+                .unwrap();
+            assert_eq!(route.suffix(), suffix);
+            assert_eq!(route.relative_path(), "Ext/Predefined.xml");
+            assert_eq!(route.codec(), SourceAssetCodec::Predefined);
+        }
+        assert_eq!(
+            SourceAssetRegistry
+                .route("Role", SourceAssetRole::Rights)
+                .unwrap()
+                .codec(),
+            SourceAssetCodec::Rights
+        );
+        assert_eq!(
+            SourceAssetRegistry
+                .route("Configuration", SourceAssetRole::MobileClientSignature)
+                .unwrap()
+                .codec(),
+            SourceAssetCodec::OpaqueSupport
+        );
+        assert_eq!(
+            SourceAssetRegistry
+                .route("CommonForm", SourceAssetRole::FormModule)
+                .unwrap()
+                .codec(),
+            SourceAssetCodec::ManagedForm
+        );
+        for family in ["Configuration", "Subsystem", "CommonCommand"] {
+            assert_eq!(
+                SourceAssetRegistry
+                    .route(family, SourceAssetRole::CommandInterface)
+                    .unwrap()
+                    .codec(),
+                SourceAssetCodec::CommandInterface
+            );
+        }
+        assert_eq!(
+            SourceAssetRegistry
+                .source_path_by_suffix(Path::new("Configuration.xml"), "Configuration", "6")
+                .unwrap(),
+            Path::new("Ext").join("ManagedApplicationModule.bsl")
+        );
+        assert_eq!(
+            SourceAssetRegistry
+                .module_routes("AccountingRegister")
+                .map(|route| route.suffix())
+                .collect::<Vec<_>>(),
+            vec![".6", ".7"]
+        );
+    }
+
+    #[test]
+    fn config_row_ids_and_owner_bound_relations_are_exact_and_typed() {
+        let role_id = ConfigRowId::parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0").unwrap();
+        assert_eq!(role_id.owner(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        assert_eq!(role_id.suffix().as_str(), ".0");
+        assert_eq!(role_id.suffix_component(), "0");
+        for (value, expected) in [
+            ("owner", ConfigRowIdParseError::MissingDelimiter),
+            (".0", ConfigRowIdParseError::EmptyOwner),
+            ("owner.", ConfigRowIdParseError::EmptySuffix),
+            ("owner.not-hex", ConfigRowIdParseError::InvalidSuffix),
+            ("owner.0.extra", ConfigRowIdParseError::InvalidSuffix),
+        ] {
+            assert_eq!(ConfigRowId::parse(value).unwrap_err(), expected, "{value}");
+        }
+
+        let registry = SourceAssetRegistry;
+        let role_family = FamilyId::parse("Role").unwrap();
+        let role_route = registry
+            .owner_bound_relation(&role_family, role_id.suffix())
+            .unwrap();
+        assert_eq!(role_route.role(), SourceAssetRole::Rights);
+        assert_eq!(role_route.relative_path(), "Ext/Rights.xml");
+        assert_eq!(
+            registry.canonical_owner_name(role_route, "Editor", Some("Role.Editor"),),
+            Ok("Editor")
+        );
+
+        let aggregate_id = ConfigRowId::parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.3").unwrap();
+        let register_family = FamilyId::parse("AccumulationRegister").unwrap();
+        let aggregate_route = registry
+            .owner_bound_relation(&register_family, aggregate_id.suffix())
+            .unwrap();
+        assert_eq!(aggregate_route.role(), SourceAssetRole::Aggregates);
+        assert_eq!(aggregate_route.relative_path(), "Ext/Aggregates.xml");
+        assert_eq!(
+            registry.owner_bound_relation(&role_family, aggregate_id.suffix()),
+            Err(SourceAssetRelationError::WrongSuffix)
+        );
+        assert_eq!(
+            registry.owner_bound_relation(&FamilyId::parse("Catalog").unwrap(), role_id.suffix(),),
+            Err(SourceAssetRelationError::UnsupportedFamily)
+        );
+        assert_eq!(
+            registry.canonical_owner_name(role_route, "Editor", None),
+            Err(SourceAssetRelationError::MissingOwnerReference)
+        );
+        assert_eq!(
+            registry.canonical_owner_name(role_route, "Editor", Some("Role.Other"),),
+            Err(SourceAssetRelationError::OwnerMismatch)
+        );
+        assert_eq!(
+            registry.canonical_owner_name(role_route, "Editor", Some("malformed")),
+            Err(SourceAssetRelationError::OwnerMismatch)
+        );
+    }
+
+    #[test]
+    fn module_picture_binary_and_help_roundtrip_exact_content_hashes() {
+        let module_route = SourceAssetRegistry
+            .route("CommonModule", SourceAssetRole::Module)
+            .unwrap();
+        let module_profile = AssetCodecProfile::fixture(SourceAssetCodec::Module);
+        let module = "Процедура Тест()\r\nКонецПроцедуры\r\n".as_bytes();
+        let encoded = encode_module(module).unwrap();
+        assert_eq!(
+            decode_source_asset(&encoded, module_route, &module_profile).unwrap(),
+            DecodedSourceAsset::Module(module.to_vec())
+        );
+
+        let picture_route = SourceAssetRegistry
+            .route("CommonPicture", SourceAssetRole::Picture)
+            .unwrap();
+        let picture_profile = AssetCodecProfile::fixture(SourceAssetCodec::Picture);
+        let picture = Asset::from_bytes(b"PK\x03\x04picture".to_vec(), "application/zip").unwrap();
+        let encoded = encode_picture(&picture).unwrap();
+        assert_eq!(
+            decode_source_asset(&encoded, picture_route, &picture_profile).unwrap(),
+            DecodedSourceAsset::Picture(picture.bytes().to_vec())
+        );
+
+        let binary_route = SourceAssetRegistry
+            .route("XDTOPackage", SourceAssetRole::Package)
+            .unwrap();
+        let binary_profile = AssetCodecProfile::fixture(SourceAssetCodec::RawBinary);
+        let encoded = deflate_bytes(picture.bytes()).unwrap();
+        assert_eq!(
+            decode_source_asset(&encoded, binary_route, &binary_profile).unwrap(),
+            DecodedSourceAsset::Binary(picture.bytes().to_vec())
+        );
+
+        let help = HelpAssets::new(
+            vec![
+                NamedAsset::new(
+                    "ru",
+                    Asset::from_bytes(b"<html>help</html>".to_vec(), "text/html").unwrap(),
+                )
+                .unwrap(),
+            ],
+            vec![
+                NamedAsset::new(
+                    "icon.png",
+                    Asset::from_bytes(b"png".to_vec(), "image/png").unwrap(),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap();
+        let encoded = encode_help(&help).unwrap();
+        let decoded = decode_help(&encoded).unwrap();
+        assert_eq!(
+            decoded.pages[0].asset.sha256(),
+            help.pages[0].asset.sha256()
+        );
+        assert_eq!(
+            decoded.files[0].asset.sha256(),
+            help.files[0].asset.sha256()
+        );
+    }
+
+    #[test]
+    fn help_compilation_uses_the_exact_registered_graph_route() {
+        let configuration_uuid = ObjectUuid::parse("11111111-1111-4111-8111-111111111111").unwrap();
+        let command_uuid = ObjectUuid::parse("22222222-2222-4222-8222-222222222222").unwrap();
+        let configuration = CanonicalConfiguration::new(vec![
+            object(
+                &configuration_uuid.to_string(),
+                "Configuration",
+                "configuration",
+            ),
+            object(&command_uuid.to_string(), "CommonCommand", "command"),
+        ])
+        .unwrap();
+        let validated = validate_configuration(&configuration).unwrap();
+        let identities = collect_bootstrap_identities(&validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-8.3.27.1989").unwrap(),
+            vec![
+                ObjectStorageRoute::new(configuration_uuid, Vec::new()).unwrap(),
+                ObjectStorageRoute::new(command_uuid, vec![StorageSuffix::new(".1").unwrap()])
+                    .unwrap(),
+            ],
+        )
+        .unwrap();
+        let axes = CompileAxes::new(
+            XmlDialect::parse("2.21").unwrap(),
+            Some(PlatformBuild::parse("8.3.27.1989").unwrap()),
+            None,
+            StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            None,
+        );
+        let profile = AssetCodecProfile::fixture(SourceAssetCodec::Help);
+        let route = SourceAssetRegistry
+            .route("CommonCommand", SourceAssetRole::Help)
+            .unwrap();
+        let help = HelpAssets::new(
+            vec![
+                NamedAsset::new(
+                    "ru",
+                    Asset::from_bytes(b"<html/>".to_vec(), "text/html").unwrap(),
+                )
+                .unwrap(),
+            ],
+            Vec::new(),
+        )
+        .unwrap();
+
+        let entry = compile_source_asset(
+            &graph,
+            command_uuid,
+            route,
+            SourceAssetPayload::Help(&help),
+            &axes,
+            &profile,
+        )
+        .unwrap();
+
+        assert_eq!(entry.target().key().as_str(), format!("{command_uuid}.1"));
+        let StoragePatchOutcome::Compiled(blob) = entry.outcome() else {
+            panic!("help route must compile")
+        };
+        let DecodedSourceAsset::Help(decoded) =
+            decode_source_asset(blob.bytes(), route, &profile).unwrap()
+        else {
+            panic!("help route decoded as another asset kind")
+        };
+        assert_eq!(decoded.pages[0].name, help.pages[0].name);
+        assert_eq!(
+            decoded.pages[0].asset.sha256(),
+            help.pages[0].asset.sha256()
+        );
+        assert!(decoded.files.is_empty());
+    }
+
+    #[test]
+    fn binary_module_admission_requires_both_image_and_info_members() {
+        let mut names = BTreeSet::from(["image".to_owned(), "text".to_owned()]);
+        assert!(BinaryModuleMemberLayout::from_member_names(&names).is_none());
+        names.insert("info".to_owned());
+        assert!(
+            BinaryModuleMemberLayout::from_member_names(&names)
+                .unwrap()
+                .text_member_present
+        );
+        names.remove("text");
+        assert!(
+            !BinaryModuleMemberLayout::from_member_names(&names)
+                .unwrap()
+                .text_member_present
+        );
+        names.remove("image");
+        assert!(BinaryModuleMemberLayout::from_member_names(&names).is_none());
+    }
+
+    #[test]
+    fn additional_indexes_routes_are_closed_and_keep_existing_owner_suffixes() {
+        assert_eq!(
+            SourceAssetRegistry.additional_indexes_suffix("Catalog"),
+            Some("1d")
+        );
+        assert_eq!(
+            SourceAssetRegistry.additional_indexes_suffix("Document"),
+            Some("3")
+        );
+        assert_eq!(
+            SourceAssetRegistry.additional_indexes_suffix("AccumulationRegister"),
+            Some("4")
+        );
+        assert_eq!(
+            SourceAssetRegistry.additional_indexes_suffix("InformationRegister"),
+            None
+        );
+    }
+
+    #[test]
+    fn malformed_base64_and_future_profile_fail_closed() {
+        assert!(decode_base64("Zh==").is_err());
+        assert_eq!(
+            AssetCodecProfile::fixture(SourceAssetCodec::Deferred).codec,
+            SourceAssetCodec::Deferred
+        );
+        assert!(SourceAssetCodec::Deferred.layout_key().is_none());
+    }
+}

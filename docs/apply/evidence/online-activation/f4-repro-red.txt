@@ -1,0 +1,23 @@
+#408 step 2, checkpoint 1: the F-4 repro is red (branch feat/0.5-408 at f62dd171 plus the red tests and the design).
+
+== lab: scripts/apply-lab/f4_repro.ps1 (clone f5a of the БСП 8.3.27 corpus, its native online generation; our online generation; the exclusive promotion of another module)
+2026-09-30T10:57:16 restore ibcmd_rs_04_apply_f5a_20260930
+2026-09-30T10:57:22 ready: ibcmd_rs_04_apply_f5a_20260930 (from F:\ibcmd\lab\dbbak\bsp_native_20260923.bak)
+2026-09-30T10:57:29 registered: ibcmd_rs_04_apply_f5a_20260930 in the 8.3.27 cluster; connect with Srvr="localhost:2541";Ref="ibcmd_rs_04_apply_f5a_20260930"
+2026-09-30T10:57:29 trees written to F:\ibcmd\lab\04\apply\src
+2026-09-30T10:57:30 PASS  the base carries a native online generation (marker rows 1, alias rows 5)
+2026-09-30T10:57:38 PASS  the online generation is applied (exit 0)
+2026-09-30T10:57:49 PASS  a new session sees the online change (telegram=G2MARK probe=error:Unknown name. (Exception from HRESULT: 0x80020006 (DISP_E_UNKNOWNNAME)))
+2026-09-30T10:57:50 alias rows before the promotion: 6
+2026-09-30T10:58:00 FAIL  the exclusive promotion succeeds (exit 1; Error: write safety gate rejected activation: exclusive promotion refused before any write: this database holds online (dynamic) generations (Config/Params `DynamicallyUpdated` markers are present). A exclusive promotion replaces only the staged rows and deletes the markers, so the earlier online ch)
+2026-09-30T10:58:00 PASS  the refusal left the database as it was (ConfigSave rows)
+2026-09-30T10:58:01 RED: 1 check(s) failed: the exclusive promotion succeeds
+
+== unit tests: cargo test --lib mssql_main_activation -- the two red tests are ignored; cargo test --lib mssql_main_activation::tests::f4_ -- --ignored
+test mssql_main_activation::tests::f4_a_stage_equal_to_the_ordinary_rows_is_no_noop_when_an_exclusive_promotion_has_to_fold ... FAILED
+test mssql_main_activation::tests::f4_an_exclusive_promotion_on_a_database_with_online_generations_is_carried_out_by_the_config_apply ... FAILED
+thread 'mssql_main_activation::tests::f4_a_stage_equal_to_the_ordinary_rows_is_no_noop_when_an_exclusive_promotion_has_to_fold' (99804) panicked at src\mssql_main_activation.rs:1846:9:
+assertion failed: !plan.is_no_op()
+thread 'mssql_main_activation::tests::f4_an_exclusive_promotion_on_a_database_with_online_generations_is_carried_out_by_the_config_apply' (99996) panicked at src\mssql_main_activation.rs:1812:91:
+an exclusive promotion is accepted on a database with online generations: the config apply folds them: SafetyGate("exclusive promotion refused before any write: this database holds online (dynamic) generations (Config/Params `DynamicallyUpdated` markers are present).          A exclusive promotion replaces only the staged rows and deletes the markers, so the earlier online changes          would be lost. Use `mssql-config-apply`, which folds them as the native apply does, or the native          apply; the staged ConfigSave is left as it is")
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 3531 filtered out; finished in 0.09s

@@ -1,0 +1,4 @@
+Error: failed to load the tree of extension "ServiceDesk"
+
+Caused by:
+    these changes are not loaded (activation restructures nothing, so an edit of what a table holds is the platform's own load): Configuration.xml (the root descriptor)

@@ -1,0 +1,2 @@
+common attribute fields: [2683, 3454, 7857, 7858, 7860, 7861, 9894]
+{'skip_owners': 16, 'main_fields_match': 94, 'skip_unsupported_type': 29}

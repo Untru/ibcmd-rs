@@ -1,0 +1,114 @@
+=== T1 (the types case): the ConfigSave of the pristine БСП clone after a native import files --partial (9 rows)
+Реструктуризация нужна: применять штатным config apply.
+Файлов в конфигурации: 9838 -> 9838; строк в ConfigSave: 9; добавлено 0, удалено 0; описаний сравнено 6, тел с данными сравнено 0.
+Объектов с отличиями: 6 (из них с причинами: 6).
+Причины (23):
+  [structure] Catalog.Удалить_ДемоОбщиеСведения: ChildObjects/Attribute[ДемоТ1Первый]: added (a column is added or dropped)  (0a671ca6-728a-41d7-85ed-ce0779064d17)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1Булево]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1СтрокаПеременная]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1СтрокаФикс]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1СтрокаНеогр]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1ЧислоЦелое]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1ЧислоДробное]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1ЧислоНеотр]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1Дата]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоТ1ДатаВремя]: added (a column is added or dropped)  (344cb0de-315d-4d05-93f8-8a1f53208470)
+  [structure] Catalog._ДемоМестаХранения: ChildObjects/Attribute[ДемоТ1Дата]: added (a column is added or dropped)  (3732d6f9-2be1-4d1f-b6af-e6f41c153dcb)
+  [structure] Catalog._ДемоМестаХранения: ChildObjects/Attribute[ДемоТ1Число]: added (a column is added or dropped)  (3732d6f9-2be1-4d1f-b6af-e6f41c153dcb)
+  [structure] Catalog._ДемоГруппыДоступаПартнеров: ChildObjects/Attribute[ДемоТ1Булево]: added (a column is added or dropped)  (4e1437bf-948b-4b05-9341-a2df3f301d7f)
+  [structure] Document._ДемоЗаказПокупателя: ChildObjects/Attribute[ДемоТ1Середина]: added (a column is added or dropped)  (4eee25b1-2da6-459b-953b-4c8d519c9bce)
+  [structure] Document._ДемоЗаказПокупателя: ChildObjects/Attribute[ДемоТ1Булево]: added (a column is added or dropped)  (4eee25b1-2da6-459b-953b-4c8d519c9bce)
+  [structure] Document._ДемоЗаказПокупателя: ChildObjects/Attribute[ДемоТ1Строка]: added (a column is added or dropped)  (4eee25b1-2da6-459b-953b-4c8d519c9bce)
+  [structure] Document._ДемоЗаказПокупателя: ChildObjects/Attribute[ДемоТ1Число]: added (a column is added or dropped)  (4eee25b1-2da6-459b-953b-4c8d519c9bce)
+  [structure] Document._ДемоЗаказПокупателя: ChildObjects/Attribute[ДемоТ1Дата]: added (a column is added or dropped)  (4eee25b1-2da6-459b-953b-4c8d519c9bce)
+  [structure] Document._ДемоЗаказПокупателя: ChildObjects/Attribute[ДемоТ1ДатаВремя]: added (a column is added or dropped)  (4eee25b1-2da6-459b-953b-4c8d519c9bce)
+  [structure] Document._ДемоЗаказПокупателя: ChildObjects/Attribute[ДемоТ1СтрокаНеогр]: added (a column is added or dropped)  (4eee25b1-2da6-459b-953b-4c8d519c9bce)
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоТ1Строка]: added (a column is added or dropped)  (5eab8a1b-070f-4dcf-bdcc-a259c62c3693)
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоТ1Время]: added (a column is added or dropped)  (5eab8a1b-070f-4dcf-bdcc-a259c62c3693)
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоТ1ЧислоПапки]: added (a column is added or dropped)  (5eab8a1b-070f-4dcf-bdcc-a259c62c3693)
+
+=== a: one String(50) attribute in a catalog (tree patches/a/after against the pristine Config)
+Реструктуризация нужна: применять штатным config apply.
+Файлов в базе -> в дереве: 9838 -> 1; различающихся описаний: 1; добавлено 0, удалено 0; описаний сравнено 1, тел с данными сравнено 0.
+Объектов с отличиями: 1 (из них с причинами: 1).
+Причины (1):
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоНовыйРеквизит]: added (a column is added or dropped)  (Catalogs/_ДемоПартнеры.xml)
+
+=== b: a Number(15,2) attribute in a document
+Реструктуризация нужна: применять штатным config apply.
+Файлов в базе -> в дереве: 9838 -> 1; различающихся описаний: 1; добавлено 0, удалено 0; описаний сравнено 1, тел с данными сравнено 0.
+Объектов с отличиями: 1 (из них с причинами: 1).
+Причины (1):
+  [structure] Document._ДемоЗаказПокупателя: ChildObjects/Attribute[ДемоНовоеЧисло]: added (a column is added or dropped)  (Documents/_ДемоЗаказПокупателя.xml)
+
+=== c: a new catalog (the descriptor and the Configuration list)
+Реструктуризация нужна: применять штатным config apply.
+Файлов в базе -> в дереве: 9838 -> 2; различающихся описаний: 2; добавлено 1, удалено 0; описаний сравнено 1, тел с данными сравнено 0.
+Объектов с отличиями: 2 (из них с причинами: 2).
+Причины (2):
+  [structure] Catalog.ДемоНовыйСправочник: added (Catalog; an object that owns tables or stored data is added or dropped)  (Catalogs/ДемоНовыйСправочник.xml)
+  [structure] Configuration: ChildObjects/Catalog[ДемоНовыйСправочник]: added (an object that owns tables or stored data is added or dropped)  (Configuration.xml)
+
+=== d: a dimension of an information register and a resource of an accumulation register (not S1: other kinds)
+Реструктуризация нужна: применять штатным config apply.
+Файлов в базе -> в дереве: 9838 -> 2; различающихся описаний: 2; добавлено 0, удалено 0; описаний сравнено 2, тел с данными сравнено 0.
+Объектов с отличиями: 2 (из них с причинами: 2).
+Причины (2):
+  [structure] AccumulationRegister._ДемоОстаткиТоваровВМестахХранения: ChildObjects/Resource[ДемоНовыйРесурс]: added (a column is added or dropped)  (AccumulationRegisters/_ДемоОстаткиТоваровВМестахХранения.xml)
+  [structure] InformationRegister._ДемоЦеныНоменклатуры: ChildObjects/Dimension[ДемоНовоеИзмерение]: added (a column is added or dropped)  (InformationRegisters/_ДемоЦеныНоменклатуры.xml)
+
+=== h: attributes of every type, an attribute of an existing tabular section, a new tabular section (against the pristine Config)
+Реструктуризация нужна: применять штатным config apply.
+Файлов в базе -> в дереве: 9838 -> 4; различающихся описаний: 4; добавлено 0, удалено 0; описаний сравнено 4, тел с данными сравнено 0.
+Объектов с отличиями: 4 (из них с причинами: 4).
+Причины (15):
+  [structure] Catalog._ДемоКонтрагенты: ChildObjects/TabularSection[ДемоНоваяТЧ]: added (a tabular section is added, dropped or moved)  (Catalogs/_ДемоКонтрагенты.xml)
+  [structure] Catalog._ДемоПартнеры: ChildObjects/TabularSection[КонтактнаяИнформация]/ChildObjects/Attribute[ДемоТабличныйРеквизит]: added (a column of a tabular section is added, dropped or moved)  (Catalogs/_ДемоПартнеры.xml)
+  [structure] Catalog.ВидыКонтактнойИнформации: ChildObjects/Attribute[ДемоТестСтрока]: added (a column is added or dropped)  (Catalogs/ВидыКонтактнойИнформации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоБулево]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоДатаВремя]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоДата]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоЧисло]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоЧисло3]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоСтрокаФикс]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоСтрокаНеогр]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоСсылкаСправочник]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоСсылкаПеречисление]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоСоставной]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоХранилище]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+  [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ДемоУИД]: added (a column is added or dropped)  (Catalogs/КлючевыеОперации.xml)
+
+=== e: String(50) -> String(100) (against the state after a2 and c)
+Реструктуризация нужна: применять штатным config apply.
+Файлов в базе -> в дереве: 9839 -> 1; различающихся описаний: 1; добавлено 0, удалено 0; описаний сравнено 1, тел с данными сравнено 0.
+Объектов с отличиями: 1 (из них с причинами: 1).
+Причины (1):
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоНовыйРеквизит]/Properties/Type/StringQualifiers/Length: 50 -> 100 (a property of an attribute no rule covers)  (Catalogs/_ДемоПартнеры.xml)
+
+=== f: the attribute deleted
+Реструктуризация нужна: применять штатным config apply.
+Файлов в базе -> в дереве: 9839 -> 1; различающихся описаний: 1; добавлено 0, удалено 0; описаний сравнено 1, тел с данными сравнено 0.
+Объектов с отличиями: 1 (из них с причинами: 1).
+Причины (1):
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоНовыйРеквизит]: removed (a column is added or dropped)  (Catalogs/_ДемоПартнеры.xml)
+
+=== g: widened and the index flag on
+Реструктуризация нужна: применять штатным config apply.
+Файлов в базе -> в дереве: 9839 -> 1; различающихся описаний: 1; добавлено 0, удалено 0; описаний сравнено 1, тел с данными сравнено 0.
+Объектов с отличиями: 1 (из них с причинами: 1).
+Причины (2):
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоНовыйРеквизит]/Properties/Type/StringQualifiers/Length: 50 -> 100 (a property of an attribute no rule covers)  (Catalogs/_ДемоПартнеры.xml)
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоНовыйРеквизит]/Properties/Indexing: DontIndex -> Index (a property of an attribute no rule covers)  (Catalogs/_ДемоПартнеры.xml)
+
+=== W11: the whole native-staged image of case a2 (9 839 rows of ConfigSave), classified by the check
+Реструктуризация нужна: применять штатным config apply.
+Файлов в конфигурации: 9838 -> 9835; строк в ConfigSave: 9839; добавлено 0, удалено 3; описаний сравнено 517, тел с данными сравнено 28.
+Объектов с отличиями: 398 (из них с причинами: 398).
+Тела без влияния на структуру: ClientApplicationInterface 1, CommandInterface 79, CommandModule 245, ExternalConnectionModule 1, Form 1108, Help 628, HomePageWorkArea 1, MainSectionCommandInterface 1, MainSectionPicture 1, ManagedApplicationModule 1, ManagerModule 440, Module 817, ObjectModule 264, OrdinaryApplicationModule 1, Package 62, ParentConfigurations 1, Picture 611, RecordSetModule 91, Rights 160, Schedule 66, SessionModule 1, Splash 1, StandaloneConfigurationContent 1, Template 217, ValueManagerModule 79.
+Причины (400):
+  [unknown] Configuration: the descriptors could not all be read: the Configuration row: Configuration fields 26 and 43 hold 80324 and 80327; no corpus shows which one the platform prints  ()
+  [unknown] Enum.СпособыОтображенияПодсказок: the Enum row differs (5190 -> 5444 bytes) but both sides decode to the same XML  (00605607-03ab-43fc-ba08-9fc32f582d0a)
+...
+reasons by class: unknown 399 (of which "the row differs but both sides decode to the same XML": 396), structure 1
+  [structure] Catalog._ДемоПартнеры: ChildObjects/Attribute[ДемоНовыйРеквизит]: added (a column is added or dropped)  (5eab8a1b-070f-4dcf-bdcc-a259c62c3693)
+

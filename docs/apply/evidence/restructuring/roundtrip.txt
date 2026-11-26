@@ -1,0 +1,7 @@
+# parse -> dumps (the platform's brace layout) is byte-exact
+## 8.3.27 БСП (a2_after)
+DBSchema roundtrip equal: True 977749 977749
+DBNames roundtrip equal: True 347221 347221
+## 8.5 БСП (s85_restored)
+DBSchema roundtrip equal: True 959507 959507
+DBNames roundtrip equal: True 335508 335508

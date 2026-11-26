@@ -1,0 +1,185 @@
+S1 combinations — release completion evidence, 2026-10-01
+
+BASE: f9505a8c (unfinished handover checkpoint).
+Code tested: f5c7a250a3fcc6452e34b2ddf69b1d3bba98070f
+(clean merge of origin/feat/0.4 9d1d615855037a3bb938c4552111b7dbf06dcc92).
+Binary: F:/ibcmd/lab/04/restructure/bin/ibcmd-rs-mix-20261001.exe
+Built: cargo build --locked --profile iter, CARGO_BUILD_JOBS=4.
+SHA256: 738556187640EC8B051C5027BAE9CFB876A41C94E5AF66F585D90CAB172AEFFB
+No Rust edits followed the build: changes after it are lab-verifier scripts and docs.
+
+Lab verifiers now fail on invalid refusal results, failed native no-op/export,
+unexpected export differences, or missing/empty native schema-order evidence.
+Python compile and PowerShell parse checks PASS. Negative export-path verifier
+(unexpected.xml) exits1, positive ConfigDumpInfo-only verifier exits0.
+Negative UH comparator (before versus unchanged before) exits1.
+
+The fresh f1 OUR route uses the delta importer (9 staged rows). Native stage/apply
+reference remains the saved September native snapshot; its drop-in twin is freshly
+restored/applied with this binary. Data is checked against that twin by EXCEPT in
+both directions; native follow-up apply reports no update required. All differences
+in native exports are ConfigDumpInfo.xml (object version hashes) only.
+
+UH proof scope: same b1 files as the saved native twin, fresh uha8327 disposable
+clone, native partial staging and our drop-in apply. Compares all16,857 table names:
+six moved entries at exact native positions; other entries preserve relative order.
+The saved native result source is restructure-check/suha/logs/b1_schema_order.txt.
+This is a targeted order proof, not a fresh full UH data/export twin protocol.
+
+Known limitations preserved: S1-F c4629235 cache ordering approximation (15/16 si
+rows equal, the differing cache has documented order differences); F+B and F+E
+combinations still refused atomically; Config binary encoding differs for compiled
+rows but f1 native exports are identical apart from ConfigDumpInfo.xml.
+
+
+=== out/gates-20261001/summary.txt ===
+
+PASS fmt 10s
+PASS guard 5s
+PASS clippy-1.95 1s
+PASS test-root-lib 245s
+DONE
+
+
+=== out/r7-stage-20261001.log ===
+
+[2026-10-01T06:49:45] restore ibcmd_rs_04_ddl_s2_r7_base
+ready: ibcmd_rs_04_ddl_s2_r7_base (from F:\ibcmd\lab\04\restructure\bak\ibcmd_rs_04_ddl_bsp8327_c2_native_after.bak)
+[2026-10-01T06:49:48] import the files of the case
+[native lock] native released by ddl
+import files exit=0 in 50,1s: [INFO] Импорт файлов конфигурации из XML... | [INFO] Импорт файлов конфигурации из XML успешно завершен
+ConfigSave rows after import: 30
+[2026-10-01T06:50:48] snapshot the staged state
+snapshot ibcmd_rs_04_ddl_s2_r7_base/r7_staged: 2239 tables, Config=9839 ConfigSave=30 Params=38
+[2026-10-01T06:50:53] backup F:\ibcmd\lab\04\restructure\bak\ibcmd_rs_04_ddl_s2_r7_base_r7_staged.bak
+BACKUP DATABASE успешно обработал 80298 страниц за 0.429 секунд (1462.294 MБ/сек).
+[2026-10-01T06:50:54] restore the nat twin
+ready: ibcmd_rs_04_ddl_s2_r7_nat (from F:\ibcmd\lab\04\restructure\bak\ibcmd_rs_04_ddl_s2_r7_base_r7_staged.bak)
+[2026-10-01T06:50:57] restore the own twin
+ready: ibcmd_rs_04_ddl_s2_r7_own (from F:\ibcmd\lab\04\restructure\bak\ibcmd_rs_04_ddl_s2_r7_base_r7_staged.bak)
+[2026-10-01T06:50:59] done: ibcmd_rs_04_ddl_s2_r7_base, _nat, _own
+
+
+=== out/mix_r7/summary.txt ===
+
+case r7 (must be refused), binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix-20261001.exe
+dry run exit 1
+  dry.err: Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 7 blocker(s)
+  dry.err:   1153ba8d-0ff5-4da1-97d8-8ddd4b6c7422: [structure] Document.ДемоДокН4: added (Document; an object that owns tables or stored data is added or dropped)
+  dry.err:   344cb0de-315d-4d05-93f8-8a1f53208470: [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ИмяХеш]/Properties/Type/StringQualifiers/Length: 40 -> 100 (a property of an attribute no rule covers)
+  dry.err:   66193438-abc5-410b-a1f1-a204102d1a62: [structure] Configuration: ChildObjects/Document[ДемоДокН4]: added (an object that owns tables or stored data is added or dropped)
+  blocker: S1: a new object together with removed attributes of existing objects is not built: the caches of the new object are chained on the additions only (N3, N6 and N7 trace additions)
+drop-in exit 1 in 2.2s, backup file not made
+  apply.out: [INFO] Обновление конфигурации базы данных...
+  apply.err: [ERROR] требуется штатный config apply: 1153ba8d-0ff5-4da1-97d8-8ddd4b6c7422: [structure] Document.ДемоДокН4: added (Document; an object that owns tables or stored data is added or dropped); 344cb0de-315d-4d05-93f8-8a1f53208470: [structure] Catalog.КлючевыеОперации: ChildObjects/Attribute[ИмяХеш]/Properties/Type/StringQualifiers/Length: 40 -> 100 (a property of an attribute no rule covers); 66193438-abc5-410b-a1f1-a204102d1a62: [structure] Configuration: ChildObjects/Document[ДемоДокН4]: added (an object that owns tables or stored data is added or dropped); b56f25d2-72a9-4d80-8998-77ac3097c873: [structure] Catalog.КлассификаторБанков: ChildObjects/Attribute[КоррСчет]: removed (a column is added or dropped); S1: a new object together with removed attributes of existing objects is not built: the caches of the new object are chained on the additions only (N3, N6 and N7 trace additions); 66193438-abc5-410b-a1f1-a204102d1a62: the descriptor changes more than the list of its forms and templates: a metadata change, possibly structural; 1153ba8d-0ff5-4da1-97d8-8ddd4b6c7422: a new object that no staged descriptor of an existing object lists
+refused as required: exit 1 (want 1); the database digest unchanged: True
+done r7
+
+
+=== out/ours_f1/summary.txt ===
+
+case f1, the route through our import, binary F:\ibcmd\lab\04\restructure\bin\ibcmd-rs-mix-20261001.exe
+dry run exit 0
+plan: catalog КлассификаторБанков (Reference2565): switched indexes Fld2569 = Телефоны (DontIndex -> IndexWithAdditionalOrder) | catalog КлючевыеОперации (Reference2598): widened attributes Fld5283 = ИмяХеш (40 -> 100) | catalog ТомаХраненияФайлов (Reference576): switched indexes Fld1355 = МаксимальныйРазмер (DontIndex -> Index) | document _ДемоСписаниеБезналичныхДенежныхСредств (Document5028): widened attributes Fld5031 = НазначениеПлатежа (210 -> 300); switched indexes Fld5030 = НомерВходящегоДокумента (DontIndex -> Index) | catalog ДемоКатН1 (Reference11041): new catalog, tables _Reference11041
+drop-in exit 0 in 16.8s
+own: added (0):
+own: removed (0):
+own: changed (4):
+own: only in 1: []  only in 2: []
+own: entries that differ (0): []
+own: DBNames text equal: True 347975 347975
+own: 15 of 16 `.si` rows have the same text (compared after inflate)
+our import exit 0 in 15.3s, 9 rows in ConfigSave
+ours: drop-in exit 0 in 8.3s
+  ours apply.out: [INFO] Обновление конфигурации базы данных...
+  ours apply.out: [INFO] Создано поколение конфигурации: 2b5aadcf56c52d418c30f0adc8f9a5e300000000
+  ours apply.out: [INFO] Обновление конфигурации базы данных успешно завершено
+ours: check 3 (EXCEPT both ways, 5 tables): no row differs
+ours: added (0):
+ours: removed (0):
+ours: changed (4):
+ours: only in 1: []  only in 2: []
+ours: entries that differ (0): []
+ours: DBNames text equal: True 347975 347975
+ours: 15 of 16 `.si` rows have the same text (compared after inflate)
+ours: check 4 (Config rows, informative until #395): rows: 9840 in A, 9840 in B
+ours: check 4 (Config rows, informative until #395): equal bytes: 9792; equal after inflate only: 21; different text: 27; only in A: 0; only in B: 0
+ours: check 4 (Config rows, informative until #395): different text by kind: {'0': 17, 'uuid': 6, '3': 2, '2': 1, 'versions': 1}
+ours: check 7: native apply exit=0 in 37,6s
+ours: check 7: [INFO] Обновление конфигурации базы данных не требуется
+ours: export ibcmd_rs_04_ddl_s2_f1_own : export exit=0 in 23,1s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: export ibcmd_rs_04_ddl_s2_f1_ours : export exit=0 in 15,7s: [INFO] Экспорт конфигурации в XML... | [INFO] Экспорт конфигурации в XML успешно завершен
+ours: check 8 (source-diff of the drop-in twin and ours): {'left_only': 0, 'right_only': 0, 'different': 1, 'unchanged': 12199}
+ours: check 8: 1 file(s) differ; exactly the edited forms and ConfigDumpInfo.xml: True
+ours: check 8: 0 of 0 edited forms come back from the twin's export byte for byte
+done f1 (all)
+
+
+=== out/ours_f1/ours_except.txt ===
+
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference576	rows 2 / 2	only in A 0	only in B 0
+_Document5028	rows 6 / 6	only in A 0	only in B 0
+_Reference11041	rows 0 / 0	only in A 0	only in B 0
+
+
+=== out/uha-order-20261001.console.log ===
+
+[2026-10-01T06:54:44] restore ibcmd_rs_04_ddl_uha_b1 (corpus uha8327)
+ready: ibcmd_rs_04_ddl_uha_b1 (from F:\ibcmd\lab\dbbak\uha_parity2_20260924.bak)
+[2026-10-01T06:54:50] native import files --partial (6 files)
+[native lock] native acquired by ddl
+[native lock] native released by ddl
+[2026-10-01T06:55:49] import exit 0
+[2026-10-01T06:55:49] ConfigSave rows: 10
+16857 tables -> F:\ibcmd\lab\04\restructure\out\uha_b1\order_before.txt
+[2026-10-01T06:55:58] the drop-in apply
+[2026-10-01T06:57:02] drop-in exit 0 in 64.6 s
+16857 tables -> F:\ibcmd\lab\04\restructure\out\uha_b1\order_after.txt
+tables: 16857 before, 16857 after
+moved to the end: 6 tables at positions 16851-16856: Reference226, Reference237, Reference308, Reference491, Document1923, Document1927
+ConfigChngR: position 4809 before, 4803 after (of 16857)
+the order of the other tables is the stored one: True
+the platform's positions (rcheck's twin, 6 tables): all equal
+[2026-10-01T06:57:05] cleanup
+ibcmd_rs_04_ddl_uha_b1                             SKIP  written 0 min ago
+0 to drop, 0,0 GB
+done; F: free 1 012,5 GB
+
+
+=== root lib result ===
+
+test result: ok. 3586 passed; 0 failed; 9 ignored; 0 measured; 0 filtered out; finished in 129.20s
+
+=== saved native twin order ===
+
+tables: 16857 16857
+Reference226             pos in 1: 16851  pos in 2: 4803
+Reference237             pos in 1: 16852  pos in 2: 4804
+Reference308             pos in 1: 16853  pos in 2: 4805
+Reference491             pos in 1: 16854  pos in 2: 4806
+Document1923             pos in 1: 16855  pos in 2: 4807
+Document1927             pos in 1: 16856  pos in 2: 4808
+Reference237_VT7820      pos in 1: None  pos in 2: None
+Document1923_VT61531     pos in 1: None  pos in 2: None
+Document1923_VT61545     pos in 1: None  pos in 2: None
+Document1927_VT61735     pos in 1: None  pos in 2: None
+without the named tables the orders are equal: True
+1: Reference226 between ExtensionsInfoNGS and Reference237
+2: Reference226 between Node71 and Reference237
+1: Reference237 between Reference226 and Reference308
+2: Reference237 between Reference226 and Reference308
+1: Reference308 between Reference237 and Reference491
+2: Reference308 between Reference237 and Reference491
+1: Reference491 between Reference308 and Document1923
+2: Reference491 between Reference308 and Document1923
+tail of 1: ['ExtensionsInfo', 'ExtensionsInfoNGS', 'Reference226', 'Reference237', 'Reference308', 'Reference491', 'Document1923', 'Document1927']
+tail of 2: ['ODataSettings', 'AccSInf93173', 'AccSInf93204', 'AccSInf93222', 'ExtensionsRestruct', 'ExtensionsRestructNGS', 'ExtensionsInfo', 'ExtensionsInfoNGS']
+
+=== delayed clone cleanup ===
+
+ibcmd_rs_04_ddl_uha_b1                             DROP   4 560 MB
+1 to drop, 4,5 GB
+dropped ibcmd_rs_04_ddl_uha_b1
+done; F: free 1 014,9 GB

@@ -1,0 +1,18 @@
+[package]
+name = "ibcmd-edt"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Bounded offline EDT project adapter over ibcmd canonical metadata and source trees"
+
+[dependencies]
+ibcmd-core = { path = "../ibcmd-core" }
+ibcmd-xml = { path = "../ibcmd-xml" }
+morph1c-pipeline = "=0.1.0"
+morph1c-core = "=0.1.0"
+formats-xml = "=0.1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+quick-xml = "0.38"

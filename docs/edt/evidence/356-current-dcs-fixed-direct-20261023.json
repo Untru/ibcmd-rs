@@ -1,0 +1,64 @@
+{
+  "scope": "Fast direct fixed-candidate conversion of genuine current nonempty project; no SDK/JVM/build",
+  "status": "FAIL_CLOSED_AT_NEXT_DCSS_ENVELOPE_BOUNDARY",
+  "candidate_sha256": "6da274e498d6b21ef017c00bc8698cf6c14596d996604acce40a77bfe8431016",
+  "candidate_built_head": "5e5b5bcdb2a2e56c685ea25d2893ac34734c1434",
+  "installed_edt_build": "2026.2.1.3",
+  "native_sdk_build": "8.5.1.1592",
+  "source_profile": "edt-2025.2.3-xml-2.21",
+  "reference_reuse": "Complete file inventories of new installed export and original fresh-native import input are equal; original native reference rehashed; actual native create/import/export receipts checked",
+  "inventories": {
+    "project": {
+      "file_count": 19,
+      "total_bytes": 79140,
+      "tree_sha256": "c9781c7a36e856978b337d695dd92abf0c5d93ee89eefb6523a6fc0cce897a80"
+    },
+    "current-installed-export": {
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2"
+    },
+    "old-installed-export": {
+      "file_count": 18,
+      "total_bytes": 82953,
+      "tree_sha256": "b26c1242dd90250b8271d5b7b2adf500918e1a003e81d6431f83d163da146cb2"
+    },
+    "native-reference": {
+      "file_count": 19,
+      "total_bytes": 86112,
+      "tree_sha256": "8628cfab808f7414be1e6e8912ff7912fe7c027b95ab4c303cf451d17141cc67"
+    }
+  },
+  "immutability": {
+    "all_inputs_unchanged": true,
+    "candidate_unchanged": true,
+    "bound_command_receipts_and_build_unchanged": true
+  },
+  "convert_exit_code": 2,
+  "failure": {
+    "code": "conversion.edt-encode-preflight-failed",
+    "decode_completed": true,
+    "output_published": false,
+    "owner": "#355 shared dcss codec; coordinated with #357",
+    "path": "Catalogs/FilterProbe/Forms/ListForm/Attributes/Список/ExtInfo/ListSettings.dcss",
+    "reason": "dcss envelope requires CRLF but authentic current serializer emits LF"
+  },
+  "minimal_public_fixtures": [
+    {
+      "source_relative": "src/Catalogs/FilterProbe/Forms/ListForm/Attributes/Список/ExtInfo/ListSettings.dcss",
+      "fixture": "01-ListSettings.dcss",
+      "bytes": 1869,
+      "sha256": "ba5415251a911a56c85350f53a8b8d82938852f77a758c7e0908af7e35995d90",
+      "has_crlf": false,
+      "has_lf": true
+    }
+  ],
+  "limits": [
+    "No direct output available for native equality or raw 3-way report",
+    "No BSP/UH acceptance",
+    "No current-model semantic support claim",
+    "Prior SDK diagnostics remain unsuppressed",
+    "No fresh SDK/JVM run or full configuration custody added retroactively"
+  ],
+  "retained_first_attempt": "direct-001 failed receipt-route assertion before converter execution; unchanged artifacts retained"
+}

@@ -1,0 +1,102 @@
+{
+  "source": "ibcmd_rs_05_p85_w3_ext_version_native_20261001",
+  "files": [
+    {
+      "bytes": 8204,
+      "sha256": "F2D8D187843B8C6C882259578EF99FF9B49B8A1C31A458370D4FF2676F92C384",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\preserve_extension_settled_A.ps1"
+    },
+    {
+      "bytes": 2700,
+      "sha256": "E19B1BE153F802F7251443EA0A630C924A25D6A692BA14F18677B163028689AD",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\verify_extension_backup_header.py"
+    },
+    {
+      "bytes": 6811,
+      "sha256": "F376181945FB172BC97E27CE90AB7FC77FE4B89D41C9EC21E7C5DFFB62D5BC7D",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\extension-v2-kit\\process.ps1"
+    },
+    {
+      "bytes": 2853,
+      "sha256": "EAB374CABEC4861983154339FCF455018A17B533CDA5858C7D29AA197F1E5896",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\snapshot_storage.py"
+    },
+    {
+      "bytes": 3909,
+      "sha256": "47B04BAD2C9CB5E58F3ECB875AE1E1161DA74A249F682F952396ED0F8BEE4C82",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\compare_full_snapshots.py"
+    },
+    {
+      "bytes": 585044,
+      "sha256": "DEADB195C84BFE3EAF0061072B2339E49ADA75ABD5A9FEC8DC4D05F0746171CA",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-result-checkpoint.json"
+    },
+    {
+      "bytes": 345,
+      "sha256": "CF57BBB2343A909C1AF9058F52251DBC480D177B9C76146D305D24A4A1D42408",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\extension-v4-cleanup-postcheck.json"
+    },
+    {
+      "bytes": 2664,
+      "sha256": "3F44AFB60753142AABD4A939B48B1CBEE7501F1EF66C328376671DFB28792074",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\cluster\\stopped-state-20261002004805224.json"
+    },
+    {
+      "bytes": 26109866,
+      "sha256": "DA8733A423870403CF72030CAC82075A3D8FF56A5C2D32F4C8E3DD1610C1051F",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_native_v4_postfailed\\inventory.json"
+    },
+    {
+      "bytes": 199201514,
+      "sha256": "45F8AF98339795B1C7BE9FD7E6DB4F1EBF60576FBA70D91490012EB21D998F4F",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_native_v4_postfailed\\Config.pack"
+    },
+    {
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_native_v4_postfailed\\ConfigSave.pack"
+    },
+    {
+      "bytes": 1607836,
+      "sha256": "C96EAE2055788B9FF5B9429D55ECAAFA3A24DE0123B6E25539385D2011235AD6",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_native_v4_postfailed\\Files.pack"
+    },
+    {
+      "bytes": 4711265,
+      "sha256": "E65E3C4DA1C530E1E7493071B298367F34B9CA951B4B745B99DC35627B34C6B9",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_native_v4_postfailed\\Params.pack"
+    },
+    {
+      "bytes": 38845613,
+      "sha256": "EDEDC0B0D9FE781FC554F6D0F10A142C96E3A1BB6281396F7062565552710000",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_native_v4_postfailed\\ConfigCAS.pack"
+    },
+    {
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_native_v4_postfailed\\ConfigCASSave.pack"
+    },
+    {
+      "bytes": 5800,
+      "sha256": "9AD06F2A8178E81D3C59D7AD84AB7F744D5330D32D98BE6EF28E8BBFF47FDF8E",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\test_extension_preservation_v5.ps1"
+    },
+    {
+      "bytes": 268296,
+      "sha256": "5D5B6C6D6109594659CF04413B5EB234D19A19C8B9672F6516006E0E405531A0",
+      "file": "C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\180\\Tools\\Binn\\SQLCMD.EXE"
+    },
+    {
+      "bytes": 105840,
+      "sha256": "7D96A4ED35D6E596CD9DD8933FEAFC66349CC21F75BE3B15C89FD336E50140C1",
+      "file": "C:\\Program Files\\Python313\\python.exe"
+    }
+  ],
+  "format": 1,
+  "executables": {
+    "sqlcmd": "C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\180\\Tools\\Binn\\SQLCMD.EXE",
+    "python": "C:\\Program Files\\Python313\\python.exe"
+  },
+  "source_created": "2026-10-01T21:34:46",
+  "scope": "ONE exact unregistered owned COPY_ONLY preservation, no native/worker/restore/register"
+}

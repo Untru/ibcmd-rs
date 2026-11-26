@@ -1,0 +1,118 @@
+# S1-I through mssql-config-apply --allow-restructure s1 --i-have-a-backup (branch feat/0.4-s1-ext2 on feat/0.4 04e76742), БСП 8.3.27 clone after a native baseline apply
+
+## case n: ours before -> ours after (real run)
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (1):
+  T _Reference23
+     + C _Fld11034 nvarchar(50) NOT NULL COLLATE Cyrillic_General_CI_AS
+== data: tables whose rowcount/checksum changed
+(7)
+  Config: (9841, '-522052874') -> (9841, '-1985331325')
+  ConfigSave: (4, '-271364256') -> (0, 'None')
+  DBSchema: (1, '-1619277553') -> (1, '-2112997926')
+  Files: (44, '441091314') -> (44, '-615573962')
+  Params: (38, '-191149080') -> (38, '-1351555611')
+  SchemaStorage: (2, '448743385') -> (2, '1866699460')
+  _Reference23: (2, '-401396840') -> (2, '-1590511218')
+== service blobs
+DBSchema same: False ['ba56d560791813ee2063f55501d866dd05efda500d6eea9a0ad97f1db094aaef'] ['a8bb72e2ecb0aaba6a73d70309f85ae3f837526f76829eed61083933f2ca6e58']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 5 meta-only 0
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 447544 -> 449471 bytes  f362a522 -> adbfd799
+    ~ DBNames [0] 143619 -> 144945 bytes  e1d48608 -> b70c0202
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  ac10b5b7 -> 464c6a2c
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2996649 -> 2978148 bytes  b1697b60 -> a82f3121
+    ~ siVersions [0] 1273 -> 1273 bytes  4432331d -> 8f07a997
+Config: rows 9841 -> 9841; added 0 removed 0 changed 2 meta-only 2
+    ~ b78a9e4c-2486-4e73-81ed-3ee6ad7e3055 [0] 2135 -> 2220 bytes  ac34d117 -> 7fd1c50c
+    ~ versions [0] 340593 -> 340597 bytes  634b2821 -> 5f5243e0
+ConfigSave: rows 4 -> 0; added 0 removed 4 changed 0 meta-only 0
+
+## case n: native after -> ours after
+== schema: tables added / removed / changed
+added (0): 
+removed (0): 
+changed (3):
+  T _ConfigChngR
+     - I PK___ConfigC__AC8ED0C491A8A831 CLUSTERED [PK UNIQUE] (_IDRRef)
+     + I PK___ConfigC__AC8ED0C42CD5E2C3 CLUSTERED [PK UNIQUE] (_IDRRef)
+  T _DbCopies
+     - C _StorageVariant numeric(1,0) NOT NULL
+  T _DbCopiesUpdates
+     - C _UpdateId binary(16) NULL
+     - C _LastUpdateResult numeric(2,0) NULL
+     - C _LastUpdateError varbinary(max) NULL
+== data: tables whose rowcount/checksum changed
+(6)
+  DBSchema: (1, '538813404') -> (1, '-2112997926')
+  Files: (44, '778030700') -> (44, '-615573962')
+  Params: (38, '-2010905841') -> (38, '-1351555611')
+  SchemaStorage: (2, '2094371942') -> (2, '1866699460')
+  _ConfigChngR: (20685, '-1860952110') -> (20685, '-1860929853')
+  _ConfigChngR_ExtProps: (21357, '-1437182971') -> (21357, '-1522435579')
+== service blobs
+DBSchema same: False ['69e836f3ea9d24dcef4b9c0c49fa59e67be9b273195d4cfa63a9b9b3224aa1ba'] ['a8bb72e2ecb0aaba6a73d70309f85ae3f837526f76829eed61083933f2ca6e58']
+SchemaStorage id=0 status 100->100 cur same=False ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+IBVersion [[7, 80313]] [[7, 80313]]
+Params: rows 38 -> 38; added 0 removed 0 changed 7 meta-only 15
+    ~ 1a621f0f-5568-4183-bd9f-f6ef670e7090.si [0] 447588 -> 449471 bytes  596354c5 -> adbfd799
+    ~ 789702c6-d272-4008-9e55-db6f10687ae0.ui [0] 24301 -> 24301 bytes  17a835d2 -> 0918de05
+    ~ 97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui [0] 94 -> 94 bytes  abd7ec61 -> 8c3a7858
+    ~ DBNames [0] 143646 -> 144945 bytes  bde95cdc -> b70c0202
+    ~ DBNamesVersion-DBNames [0] 43 -> 43 bytes  4c09c11b -> 464c6a2c
+    ~ ea13a2c9-0c2f-40fa-b855-710387e3271d.si [0] 2998539 -> 2978148 bytes  39b3e15e -> a82f3121
+    ~ siVersions [0] 1273 -> 1273 bytes  94ddb5ff -> 8f07a997
+Config: rows 9841 -> 9841; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+ConfigCAS: rows 636 -> 636; added 0 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 44; added 0 removed 0 changed 2 meta-only 0
+    ~ MobileVersions.dat [0] 37009 -> 37009 bytes  b59a3eb6 -> 237f8708
+
+## case n: the .si rows, native -> ours
+== ibcmd_rs_05_ext_s1i_n3_nat/after  ->  ibcmd_rs_05_ext_s1i_n3_own/after
+16 of 16 `.si` rows have the same text (compared after inflate)
+
+## case c: the refusal (dry run; rehearsal and real run say the same)
+}
+Error: the staged configuration needs the platform's own config apply (a restructuring or a change this apply does not do): 2 blocker(s)
+  bb3d8c09-0a16-47ae-a113-d33038c15948: the descriptor's text differs from the active one: a metadata change, possibly structural
+  : S1: catalog _ДемоНоменклатура is adopted by the extension _ДемоРасширение (object _ДемоНоменклатура 2cb40f25-2c61-41e9-9689-e1e4c639e8cb, active image); the extension keeps tables of its own for it (_Reference18X1): the own restructure does not change an object an extension adopts, the platform's apply does
+
+## case c: before -> after the three refused runs
+added (0): 
+removed (0): 
+changed (0):
+(0)
+SchemaStorage id=0 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+Params: rows 38 -> 38; added 0 removed 0 changed 0 meta-only 0
+Config: rows 9841 -> 9841; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 4 -> 4; added 0 removed 0 changed 0 meta-only 0
+ConfigCAS: rows 636 -> 636; added 0 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 44; added 0 removed 0 changed 0 meta-only 0
+
+## check 12: the generated script with an injected failure, on a fresh twin
+(a) UPDATE dbo._ExtensionsInfo SET _ExtName = _ExtName before the extension check:
+    Msg 57406, Level 16, State 1, line 112: the restructure changed what the extensions keep
+(b) THROW 59999 before COMMIT:
+    Msg 59999, Level 16, State 1, line 138: injected failure before COMMIT
+after both: before -> after_failures
+added (0): 
+removed (0): 
+changed (0):
+(0)
+SchemaStorage id=0 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+SchemaStorage id=1 status 100->100 cur same=True ngc 0d3ba39d->0d3ba39d ngd 0d3ba39d->0d3ba39d
+Params: rows 38 -> 38; added 0 removed 0 changed 0 meta-only 0
+Config: rows 9841 -> 9841; added 0 removed 0 changed 0 meta-only 0
+ConfigSave: rows 4 -> 4; added 0 removed 0 changed 0 meta-only 0
+ConfigCAS: rows 636 -> 636; added 0 removed 0 changed 0 meta-only 0
+ConfigCASSave: rows 0 -> 0; added 0 removed 0 changed 0 meta-only 0
+Files: rows 44 -> 44; added 0 removed 0 changed 0 meta-only 0

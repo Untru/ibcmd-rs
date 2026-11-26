@@ -1,0 +1,26 @@
+[package]
+name = "ibcmd-platform"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The portable platform registry: every 1C:Enterprise build ibcmd-rs knows, with the XML format, stored form layout, features and default-button spelling its bundled profile declares, the releases standing for them and the release of an XML dialect"
+
+[dependencies]
+# Registry errors, as in the root.
+anyhow = "1.0"
+# The bundled profiles the registry reads its declarations from.
+ibcmd-compiler-families = { path = "../ibcmd-compiler-families" }
+ibcmd-core = { path = "../ibcmd-core" }
+# `FormLayout`, the stored layout a build declares.
+ibcmd-form-body = { path = "../ibcmd-form-body" }
+# A platform and its features serialize as their names, as in the root.
+serde = { version = "1.0", features = ["derive"] }
+# A declared feature uuid is parsed and written hyphenated, as in the root.
+uuid = "1.19"
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[lints.rust]
+unsafe_code = "forbid"

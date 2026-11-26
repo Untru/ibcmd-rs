@@ -1,0 +1,28 @@
+{
+  "pid": 112180,
+  "handle_birth_utc": "2026-10-02T08:32:07.1059450Z",
+  "cim_birth_utc": "2026-10-02T08:32:07.1059450Z",
+  "executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  "command": "\"C:/Program Files/PowerShell/7/pwsh.exe\" -NoProfile -File F:/ibcmd/lab/05/wave3/load/compact8-runtime-v1/compact8_lifetime_v2.ps1 -Binary F:/ibcmd/lab/05/wave3/coordinator/final-packaging-v5/ibcmd-rs-7aebba15-release.exe -SourceHead 7aebba150e20c9b47b5956f4ca09e6cc62b28bef -BinarySha256 44513F752CB946644C856B69D740189A045452682989C6E7FC955A59035D0E38 -ManifestSha256 30F33F9BC97B11524412F87E72B12061A7D2C4D19C4D40CCB01B4F2224B63D8E -ControllerHead fc5c9e445cffc028aff686a93bcd499959996bdb -RuntimeManifestSha256 E1CBFE6576104C9B641DAD6D3A3B3908679F670FEB9FA348C4A7E69B50BEC9AD",
+  "parent_pid": 34452,
+  "arguments": [
+    "-NoProfile",
+    "-File",
+    "F:/ibcmd/lab/05/wave3/load/compact8-runtime-v1/compact8_lifetime_v2.ps1",
+    "-Binary",
+    "F:/ibcmd/lab/05/wave3/coordinator/final-packaging-v5/ibcmd-rs-7aebba15-release.exe",
+    "-SourceHead",
+    "7aebba150e20c9b47b5956f4ca09e6cc62b28bef",
+    "-BinarySha256",
+    "44513F752CB946644C856B69D740189A045452682989C6E7FC955A59035D0E38",
+    "-ManifestSha256",
+    "30F33F9BC97B11524412F87E72B12061A7D2C4D19C4D40CCB01B4F2224B63D8E",
+    "-ControllerHead",
+    "fc5c9e445cffc028aff686a93bcd499959996bdb",
+    "-RuntimeManifestSha256",
+    "E1CBFE6576104C9B641DAD6D3A3B3908679F670FEB9FA348C4A7E69B50BEC9AD"
+  ],
+  "stdin": "redirected EOF",
+  "single_authorized_attempt": true,
+  "started_utc": "2026-10-02T08:32:07.4801873Z"
+}

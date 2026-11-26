@@ -1,0 +1,47 @@
+2026-09-30T14:51:01 == f9_f10 green with F:\ibcmd\lab\05\live\ibcmd-rs-live.exe on ibcmd_rs_05_apply_wlab1_20260930 (worker lab cluster 16caf1f1-147f-49bf-9106-842b0be60c8c)
+2026-09-30T14:51:01 tool: ibcmd-rs 0.3.0
+2026-09-30T14:51:01 ---- case chain
+2026-09-30T14:51:08 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=no probe_rows=5 versions=8E9BA09442EF053D
+2026-09-30T14:51:15 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=no probe_rows=5 versions=8E9BA09442EF053D
+2026-09-30T14:51:15 exit 1 in 4.5 s; error: Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'live activation needs a log backup chain: take a full backup of the database (BACKUP DATABASE ... TO DISK=...) after the recovery model was set; the tail-log backup would fail with error 4214 after the promotion was committed' on server DESKTOP-SMI5N4O executing on line 6 (code: 57235, state: 1, class: 16)
+2026-09-30T14:51:15 PASS  F-9 chain: refused before the stage, nothing changed (committed=False staged=0)
+2026-09-30T14:51:15 ---- case nodir
+2026-09-30T14:51:24 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=5 versions=8E9BA09442EF053D
+2026-09-30T14:51:33 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=5 versions=8E9BA09442EF053D
+2026-09-30T14:51:33 exit 1 in 5.5 s; error: Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'the directory of the tail-log output does not exist on the SQL Server host' on server DESKTOP-SMI5N4O executing on line 7 (code: 57236, state: 1, class: 16)
+2026-09-30T14:51:33 PASS  F-9 nodir: refused before the stage, nothing changed (committed=False staged=0)
+2026-09-30T14:51:33 ---- case nowrite
+2026-09-30T14:51:40 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=5 versions=8E9BA09442EF053D
+2026-09-30T14:51:48 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=5 versions=8E9BA09442EF053D
+2026-09-30T14:51:48 exit 1 in 5.2 s; error: Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'невозможно открыть устройство резервного копирования C:\Windows\System32\config\ibcmdrs-live-probe-270B9079-ADE4-4D7C-8F31-EFCC73A39ACF.ibcmdrsprobe. Ошибка операционной системы 5(Отказано в доступе.).' on server DESKTOP-SMI5N4O executing on line 9 (code: 3201, state: 1, class: 16) [the SQL Server service account cannot write a backup to the directory of the tail-log output, or cannot remove the probe file from it; the tail-log backup would fail the same way after the promotion was committed]
+2026-09-30T14:51:48 PASS  F-9 nowrite: refused before the stage, nothing changed (committed=False staged=0)
+2026-09-30T14:51:48 ---- case sessions
+2026-09-30T14:51:53 holder: READY session 146 holds an open transaction with one row in dbo.IbcmdRsLiveProbe
+2026-09-30T14:51:55 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=5 versions=8E9BA09442EF053D
+2026-09-30T14:52:03 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=5 versions=8E9BA09442EF053D
+2026-09-30T14:52:03 exit 1 in 6.1 s; error: Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'live activation refused: 1 session(s) of the database have an open transaction or a running request; the live switch would roll their work back (ROLLBACK IMMEDIATE). Wait until they are idle, or accept the interruption with --interrupt-sessions' on server DESKTOP-SMI5N4O executing on line 12 (code: 57238, state: 1, class: 16) [1 session(s) with open work: session 146 of "DESKTOP-SMI5N4O\\Pavel" on "DESKTOP-SMI5N4O" ("ibcmd-lab-writer", sleeping, 1 open transaction(s))]
+2026-09-30T14:52:03 the session: READY session 146 holds an open transaction with one row in dbo.IbcmdRsLiveProbe | COMMITTED
+2026-09-30T14:52:05 after the session ended: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=6 versions=8E9BA09442EF053D
+2026-09-30T14:52:05 PASS  F-10: refused before the stage, the session names its work, nothing changed, the session commits (committed=False, held=READY session 146 holds an open transaction with one row in dbo.IbcmdRsLiveProbe | COMMITTED, row=True)
+2026-09-30T14:52:05 ---- case accepted
+2026-09-30T14:52:13 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=6 versions=8E9BA09442EF053D
+2026-09-30T14:52:31 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=6 versions=5E19D018DC3F3673
+2026-09-30T14:52:31 exit 1 in 17 s; error: Error: SQL script F:\ibcmd\lab\05\live\out\green_145101_accepted.sql failed Caused by: 0: the script failed 1: SQL Server request failed 2: Token error: '1C SQL connections did not recover before the live activation deadline; database is online and the second recovery was not started' on server DESKTOP-SMI5N4O executing on line 84 (code: 57234, state: 1, class: 16)
+2026-09-30T14:52:31 the session: READY session 121 holds an open transaction with one row in dbo.IbcmdRsLiveProbe | LOST A transport-level error has occurred when sending the request to the server. (provider: Shared Memory Provider, error: 0 - С обоих концов канала отсутствуют процессы.)Исключение при вызове "Commit" с аргументами "0": "A transport-level error has occurred when sending the request to the server. (provider: Shared Memory Provider, error: 0 - С обоих концов канала отсутствуют процессы.)"
+2026-09-30T14:52:31 PASS  F-10 accepted: with --interrupt-sessions the switch is not refused for the open work and the promotion is committed (exit 1, held=READY session 121 holds an open transaction with one row in dbo.IbcmdRsLiveProbe | LOST A transport-level error has occurred when sending the request to the server. (provider: Shared Memory Provider, error: 0 - С обоих концов канала отсутствуют процессы.)Исключение при вызове "Commit" с аргументами "0": "A transport-level error has occurred when sending the request to the server. (provider: Shared Memory Provider, error: 0 - С обоих концов канала отсутствуют процессы.)")
+2026-09-30T14:52:32 PASS  F-10 accepted: the interrupted session lost its row, as it was told 
+2026-09-30T14:52:32 ---- case activate
+2026-09-30T14:52:38 PASS  activate: the module is staged (exit 0)
+2026-09-30T14:52:39 before: staged=5 markers=0 state=ONLINE recovery=FULL chain=no probe_rows=6 versions=5E19D018DC3F3673
+2026-09-30T14:52:43 after:  staged=5 markers=0 state=ONLINE recovery=FULL chain=no probe_rows=6 versions=5E19D018DC3F3673
+2026-09-30T14:52:43 exit 1; error: Error: live activation refused before any write: the script failed: SQL Server request failed: Token error: 'live activation needs a log backup chain: take a full backup of the database (BACKUP DATABASE ... TO DISK=...) after the recovery model was set; the tail-log backup would fail with error 4214 after the promotion was committed' on server DESKTOP-SMI5N4O executing on line 6 (code: 57235, state: 1, class: 16)
+2026-09-30T14:52:43 PASS  activate: refused by the gate of the direct route; the stage stays where it is (it was staged before), nothing is promoted (staged=5)
+2026-09-30T14:52:43 ---- case dryrun
+2026-09-30T14:53:00 exit 0; live_gate: recovery=FULL log_chain=True write_probe=False connections=1 1c=1 open_tx=0 running=0 directory=F:\ibcmd\lab\05\live\bak
+2026-09-30T14:53:00 PASS  dry run: the gate reports what it found, writes no probe and changes nothing (probe files: 0)
+2026-09-30T14:53:00 ---- case clean
+2026-09-30T14:53:03 before: staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=6 versions=5E19D018DC3F3673
+2026-09-30T14:53:21 after:  staged=0 markers=0 state=ONLINE recovery=FULL chain=yes probe_rows=6 versions=973D8A502DB8426C
+2026-09-30T14:53:21 exit 1 in 16.8 s; error: Error: SQL script F:\ibcmd\lab\05\live\out\green_145101_clean.sql failed Caused by: 0: the script failed 1: SQL Server request failed 2: Token error: '1C SQL connections did not recover before the live activation deadline; database is online and the second recovery was not started' on server DESKTOP-SMI5N4O executing on line 87 (code: 57234, state: 1, class: 16)
+2026-09-30T14:53:21 PASS  clean: nothing wrong, so the gate passes and the promotion is committed; the database is online (exit 1; tail backup sets: 1; exit 1 with 57234 is the F-5 readiness gate, which the old and the new tool share until F-5 is fixed)
+2026-09-30T14:53:21 RESULT: all checks passed

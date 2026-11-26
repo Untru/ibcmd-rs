@@ -1,0 +1,11 @@
+{
+  "left_root": "tests/fixtures/source-parity/ut-native",
+  "right_root": "tests/fixtures/source-parity/ut-candidate",
+  "summary": { "left_only": 1, "right_only": 1, "different": 1, "unchanged": 1 },
+  "differences": [
+    { "status": "unchanged", "path": "Catalogs/Products.xml", "left_sha256": "aa", "right_sha256": "aa", "left_size_bytes": 10, "right_size_bytes": 10, "kind": "metadata_xml", "object_hint": "Catalog.Products" },
+    { "status": "different", "path": "CommonForms/Entry/Ext/Form.xml", "left_sha256": "bb", "right_sha256": "cc", "left_size_bytes": 11, "right_size_bytes": 12, "kind": "form", "object_hint": "CommonForm.Entry" },
+    { "status": "left_only", "path": "CommonTemplates/Invoice/Ext/Template.xml", "left_sha256": "dd", "right_sha256": null, "left_size_bytes": 13, "right_size_bytes": null, "kind": "template", "object_hint": "CommonTemplate.Invoice" },
+    { "status": "right_only", "path": "Ext/Logo.bin", "left_sha256": null, "right_sha256": "ee", "left_size_bytes": null, "right_size_bytes": 14, "kind": "binary", "object_hint": null }
+  ]
+}

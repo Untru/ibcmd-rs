@@ -1,0 +1,11 @@
+{
+  "equal": [
+    "CovRestructureBaseline",
+    "CovRestructureUpdate",
+    "CovRestructureTwoJobs",
+    "CovRestructureTwoPlainJobs",
+    "CovRestructureDialogBaseline",
+    "CovRestructureDialogUpdate",
+    "CovRestructureDialogDefaults"
+  ]
+}

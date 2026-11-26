@@ -1,0 +1,31 @@
+[2026-10-01T07:16:10] restore ibcmd_rs_04_rcheck_dn_alias2_ownnew20261001 from the staged state
+ready: ibcmd_rs_04_rcheck_dn_alias2_ownnew20261001 (from F:\ibcmd\lab\04\restructure-check\dn\bak\alias2_staged.bak)
+[2026-10-01T07:16:12] drop-in apply (new20261001 build)
+exit=0 in 2,6 s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Создано поколение конфигурации: 5e92606b5cbbf44f9198b79e35b18f6600000000
+[INFO] Обновление конфигурации базы данных успешно завершено
+gate: apply-check; synonym_records: 2; timings: {"storage_check_ms":74,"inventory_ms":99,"gate_ms":334,"synonyms_ms":99,"fingerprints_ms":36,"recovery_ms":115,"backup_ms":0,"sql_ms":837,"total_ms":1777}
+[2026-10-01T07:16:14] check 4: Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+[2026-10-01T07:16:16] checks 5 and 6
+snapshot ibcmd_rs_04_rcheck_dn_alias2_ownnew20261001/after: 2234 tables, Config=9841 ConfigSave=0 Params=38
+--- check 5
+tables: 1761 / 1761
+only in 1: []  only in 2: []
+entries that differ (0): []
+order of the common entries is the same: True
+DBNames text equal: True 347170 347170
+--- check 6 (exact text, then order-insensitive)
+== ibcmd_rs_04_rcheck_dn_alias2_nat20261001/after  ->  ibcmd_rs_04_rcheck_dn_alias2_ownnew20261001/after
+16 of 16 `.si` rows have the same text (compared after inflate)
+identical text: 16, same up to order: 0, different: 0
+[2026-10-01T07:16:21] check 7: the platform applies on our twin
+exit=0 seconds=2.2
+[INFO] Обновление конфигурации базы данных не требуется
+[2026-10-01T07:16:26] check 8: native exports and source-diff
+exit=0 seconds=11.4
+exit=0 seconds=11.6
+export diff {'left_only': 0, 'right_only': 0, 'different': 0, 'unchanged': 12198}
+[2026-10-01T07:16:53] done alias2 new20261001

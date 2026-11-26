@@ -1,0 +1,137 @@
+{
+  "own_tag": "remdemo85own",
+  "native_tag": "remdemo85nativeroot",
+  "own_cycle": {
+    "tag": "remdemo85own",
+    "database": "ibcmd_rs_04_import_remdemo85_own",
+    "tree": "F:\\ibcmd\\lab\\04\\import\\tree\\b85remdemo",
+    "exe": "F:\\ibcmd\\lab\\04\\import\\bin\\ibcmd-rs-release85.exe",
+    "platform": "8.5",
+    "apply_with": "native",
+    "import": {
+      "exit": 0,
+      "seconds": 13.3,
+      "rows": 7,
+      "tail": "model export: name index of 10642 names, 4595 types, 315 predefined items in 29 ms; object_names read 4968 rows (0 failed) of 46 kinds, 1415 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types) | model export: every descriptor through the model: true; still legacy by kind: {}; left out: recalculation refs true, root recalculation refs true, functional option refs true | model export: name index of 10640 names, 4595 types, 315 predefined items in 27 ms; object_names read 4966 rows (0 failed) of 46 kinds, 1413 owned objects named through their owner; the legacy indexes not consulted (0 names, 0 types) | [INFO] Импорт конфигурации из XML успешно завершен",
+      "overrides": {
+        "built_objects": 0,
+        "new_objects": 0,
+        "compiled_descriptors": 2,
+        "removed_rows": 4,
+        "deleted_names": 4,
+        "built_files": [],
+        "compiled_files": [
+          "Catalogs/_ДемоКонтрагенты.xml",
+          "DataProcessors/_ДемоШаблонСообщенияДляЗаказаПокупателя.xml"
+        ],
+        "differing_files": 3,
+        "objects_left_out": 4745,
+        "rows_left_out": 6,
+        "compare_seconds": 2.1848173,
+        "all_rows_because": null
+      },
+      "verification": {
+        "checked_files": 12331,
+        "identical_files": 12331,
+        "state_rows": 9931,
+        "read_seconds": 0.695,
+        "export_seconds": 1.514,
+        "total_seconds": 2.2159605
+      },
+      "error": null
+    },
+    "configsave": {
+      "database": "ibcmd_rs_04_import_remdemo85_own",
+      "rows": 7,
+      "names": 7,
+      "parts_over_one": [],
+      "creation_years": {
+        "4026": 7
+      },
+      "deleted": {
+        "text_head": "4,\"003a167f-7580-4cc8-b575-b33646df01c5\",0,\"003a167f-7580-4cc8-b575-b33646df01c5",
+        "count": 4,
+        "names": [
+          [
+            "003a167f-7580-4cc8-b575-b33646df01c5",
+            "0"
+          ],
+          [
+            "003a167f-7580-4cc8-b575-b33646df01c5.0",
+            "0"
+          ],
+          [
+            "3b52d3f8-ae42-4a80-a24e-33753712eb7f",
+            "0"
+          ],
+          [
+            "3b52d3f8-ae42-4a80-a24e-33753712eb7f.0",
+            "0"
+          ]
+        ]
+      },
+      "versions_count": 9932,
+      "versions_entries": 9931
+    },
+    "apply": {
+      "Exit": 0,
+      "Tail": "[INFO] Сбор служебной информации... | [INFO] Принятие изменений... | [INFO] Создано поколение конфигурации: 001e33368734bf498ec75cd7fb56a5fd00000000 | [INFO] Обновление конфигурации базы данных успешно завершено",
+      "Seconds": 30.6
+    },
+    "config_rows_after": "9944,0",
+    "export": {
+      "Seconds": 12.8,
+      "Exit": 0
+    },
+    "diff_summary": {
+      "left_only": 0,
+      "right_only": 0,
+      "different": 1,
+      "unchanged": 12331
+    },
+    "differing_files": [],
+    "equal_but_dump_info": true,
+    "dump_info_reference": "F:\\ibcmd\\lab\\04\\import\\tree\\b85remdemo\\ConfigDumpInfo.xml",
+    "dump_info": {
+      "equal_except_config_version": false
+    },
+    "equal_except_config_version": false,
+    "total_seconds": 61.2
+  },
+  "native_cycle": {
+    "database": "ibcmd_rs_04_import_remdemo85_native",
+    "tree": "F:\\ibcmd\\lab\\04\\import\\tree\\b85remdemo",
+    "platform": "8.5",
+    "import_files": [
+      "Catalogs/_ДемоКонтрагенты.xml",
+      "DataProcessors/_ДемоШаблонСообщенияДляЗаказаПокупателя.xml",
+      "Configuration.xml"
+    ],
+    "import": {
+      "Tail": "[INFO] Импорт файлов конфигурации из XML... | [INFO] Импорт файлов конфигурации из XML успешно завершен",
+      "Exit": 0,
+      "Rows": 9945,
+      "Seconds": 49.9
+    },
+    "apply": {
+      "Tail": "[INFO] Создано поколение конфигурации: 8775977ece85bf4794b776c2505195e500000000 | [INFO] Построение индекса справки... | [INFO] Построение индекса справки успешно завершено | [INFO] Обновление конфигурации базы данных успешно завершено",
+      "Exit": 0,
+      "Seconds": 45.9
+    },
+    "export": {
+      "Exit": 0,
+      "Seconds": 11.7
+    }
+  },
+  "twin_diff_summary": {
+    "left_only": 0,
+    "right_only": 0,
+    "different": 1,
+    "unchanged": 12331
+  },
+  "differing_files": [],
+  "twin_dump_info": {
+    "equal_except_config_version": true
+  },
+  "equal_except_config_version": true
+}

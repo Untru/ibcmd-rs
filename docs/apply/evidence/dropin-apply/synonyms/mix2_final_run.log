@@ -1,0 +1,34 @@
+[2026-10-01T07:18:25] restore ibcmd_rs_04_rcheck_dn_mix2_ownfinal20261001 from the staged state
+ready: ibcmd_rs_04_rcheck_dn_mix2_ownfinal20261001 (from F:\ibcmd\lab\04\restructure-check\dn\bak\mix2_staged.bak)
+[2026-10-01T07:18:26] drop-in apply (final20261001 build)
+exit=0 in 6,1 s
+[INFO] Обновление конфигурации базы данных...
+[INFO] Создано поколение конфигурации: 54f119c32045534d8221a95c428669fd00000000
+[INFO] Обновление конфигурации базы данных успешно завершено
+gate: s1 (the conservative rule and the S1 restructurings); synonym_records: 3; timings: {"storage_check_ms":68,"inventory_ms":91,"gate_ms":1821,"synonyms_ms":84,"fingerprints_ms":31,"recovery_ms":120,"backup_ms":463,"sql_ms":3259,"total_ms":6054}
+[2026-10-01T07:18:33] check 4: Config rows
+== only in A (0 rows)
+== only in B (0 rows)
+[2026-10-01T07:18:34] check 3: the rebuilt tables
+_Reference23	rows 2 / 2	only in A 0	only in B 0
+_Reference2565	rows 4840 / 4840	only in A 0	only in B 0
+_Reference2598	rows 716 / 716	only in A 0	only in B 0
+_Reference7444	rows 0 / 0	only in A 0	only in B 0
+_Reference3408	rows 0 / 0	only in A 0	only in B 0
+_Document1564	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT1962	rows 1 / 1	only in A 0	only in B 0
+_Document1564_VT2440	rows 1 / 1	only in A 0	only in B 0
+[2026-10-01T07:18:35] checks 5 and 6
+snapshot ibcmd_rs_04_rcheck_dn_mix2_ownfinal20261001/after: 2234 tables, Config=9841 ConfigSave=0 Params=38
+--- check 5
+tables: 1761 / 1761
+only in 1: []  only in 2: []
+entries that differ (2): ['DbCopiesUpdates', 'DbCopies']
+order of the common entries is the same: False
+first positions that differ (1 vs 2): [('DbCopiesSettings', 'DbCopies'), ('DbCopiesTrLogs', 'DbCopiesSettings'), ('DbCopiesTablesStates', 'DbCopiesTrLogs'), ('DbCopiesInitialLast', 'DbCopiesUpdates'), ('DbCopiesTrChObj', 'DbCopiesTablesStates'), ('Ch
+DBNames text equal: True 347276 347276
+--- check 6 (exact text, then order-insensitive)
+== ibcmd_rs_04_rcheck_dn_mix2_nat20261001/after  ->  ibcmd_rs_04_rcheck_dn_mix2_ownfinal20261001/after
+16 of 16 `.si` rows have the same text (compared after inflate)
+identical text: 16, same up to order: 0, different: 0
+[2026-10-01T07:18:39] done mix2 final20261001

@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "database": "ibcmd_rs_05_online_a1",
+  "claimed_platform_profile": "platform-8.3.27.2214",
+  "verified_platform_profile": "platform-8.3.27.2214",
+  "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+  "target": "main",
+  "selected_path": "CommonModules/ОбсужденияСлужебныйКлиентСервер/Ext/Module.bsl",
+  "mode": "online",
+  "dry_run": false,
+  "executed": true,
+  "no_op": false,
+  "changed_paths": [
+    "CommonModules/ОбсужденияСлужебныйКлиентСервер/Ext/Module.bsl"
+  ],
+  "selected_storage_file_names": [
+    "313d9858-3995-4a4c-b2b0-15d2350417b4",
+    "313d9858-3995-4a4c-b2b0-15d2350417b4.0"
+  ],
+  "active_generation_or_root": "848a0a59-8803-445f-b89d-3cfae4f98bbd",
+  "proposed_generation_or_root": "4832dd20-0b9e-45e3-a3e7-095525bf9b3f",
+  "tables_changed": [
+    "ConfigSave",
+    "Config",
+    "Params"
+  ],
+  "recovery_token": "FB1CABBCD772F457CB6E781FF654C2B04338597B627084A8EEB2A739D1C1E2C0",
+  "staging": {
+    "after": {
+      "binary_bytes": 345154,
+      "file_name": "ConfigSave.bcp",
+      "row_checksum": 1948872451,
+      "row_count": 5,
+      "table_name": "ConfigSave"
+    },
+    "before": {
+      "binary_bytes": 0,
+      "file_name": "ConfigSave.bcp",
+      "row_count": 0,
+      "table_name": "ConfigSave"
+    },
+    "common_modules": [
+      {
+        "metadata_blob": {
+          "bytes": 165,
+          "sha256": "68173761147FEB4F08F70888C846710869E4B683FD5696550561E82ECAAA77FA"
+        },
+        "metadata_plain_bytes": 272,
+        "module_blob": {
+          "bytes": 704,
+          "sha256": "edba3df255288882280416a5e952befd9ff9a8f5c8f683d825b0d02cfcb08e5c"
+        },
+        "module_body_id": "313d9858-3995-4a4c-b2b0-15d2350417b4.0",
+        "module_id": "313d9858-3995-4a4c-b2b0-15d2350417b4",
+        "properties": {
+          "client_managed_application": true,
+          "client_ordinary_application": true,
+          "comment": "",
+          "external_connection": true,
+          "global": false,
+          "name": "ОбсужденияСлужебныйКлиентСервер",
+          "privileged": false,
+          "return_values_reuse": "DontUse",
+          "server": true,
+          "server_call": false,
+          "synonyms": [
+            {
+              "content": "Обсуждения служебный клиент сервер",
+              "lang": "ru"
+            }
+          ],
+          "uuid": "313d9858-3995-4a4c-b2b0-15d2350417b4"
+        },
+        "text": "C:\\Users\\Pavel\\AppData\\Local\\Temp\\ibcmd-rs\\apply-source-5a3d484b4f8c4c0ab6ce7911502de37f\\proposed\\CommonModules/ОбсужденияСлужебныйКлиентСервер\\Ext/Module.bsl",
+        "text_bytes": 1346,
+        "xml": "C:\\Users\\Pavel\\AppData\\Local\\Temp\\ibcmd-rs\\apply-source-5a3d484b4f8c4c0ab6ce7911502de37f\\proposed\\CommonModules/ОбсужденияСлужебныйКлиентСервер.xml"
+      }
+    ],
+    "database": "ibcmd_rs_05_online_a1",
+    "metadata_objects": [],
+    "script": "C:\\temp\\ibcmd-rs\\stage_ibcmd_rs_05_online_a1_source_objects_batch1.sql",
+    "scripts": [
+      "C:\\temp\\ibcmd-rs\\stage_ibcmd_rs_05_online_a1_source_objects_batch1.sql"
+    ],
+    "source_version": "2.20",
+    "version_replacements": [
+      {
+        "name": "<generation>",
+        "new_uuid": "4832dd20-0b9e-45e3-a3e7-095525bf9b3f",
+        "old_uuid": "848a0a59-8803-445f-b89d-3cfae4f98bbd"
+      },
+      {
+        "name": "root",
+        "new_uuid": "39a02e4e-d881-4f2a-a22f-d06fbe4ffa01",
+        "old_uuid": "9a3159b0-2b3f-436f-bdc0-b6e01272b560"
+      },
+      {
+        "name": "version",
+        "new_uuid": "b66f4df2-f350-4a98-85ac-c7f9ffdeb395",
+        "old_uuid": "30424fa4-6704-4ce4-807c-b62386988f97"
+      },
+      {
+        "name": "versions",
+        "new_uuid": "df664ed8-6c38-4a12-bbed-6d2493f21dbc",
+        "old_uuid": "ee353752-4462-450c-9b1c-fef4a89ea3f4"
+      },
+      {
+        "name": "313d9858-3995-4a4c-b2b0-15d2350417b4",
+        "new_uuid": "af35bc75-28b4-4189-9dde-bcabbbe6880b",
+        "old_uuid": "8157c25b-98e9-40f4-9b7e-c69909ac86c3"
+      },
+      {
+        "name": "313d9858-3995-4a4c-b2b0-15d2350417b4.0",
+        "new_uuid": "b8b5c7f1-ab15-49c9-ad8f-79d1f66dcab6",
+        "old_uuid": "151cc9e7-c526-4df2-ba1c-996280ae6451"
+      }
+    ],
+    "versions_blob": {
+      "bytes": 344212,
+      "sha256": "46CF96CAF89193D71FFBCCEDD59202337FB95D696B0ACEA5DC4AC3E2E3FCBBA5"
+    }
+  },
+  "activation": {
+    "activation": {
+      "changed_targets": [
+        "313d9858-3995-4a4c-b2b0-15d2350417b4",
+        "313d9858-3995-4a4c-b2b0-15d2350417b4.0"
+      ],
+      "existing_sessions_retain_generation": true,
+      "live_session_switch_expected": false,
+      "mode": "online",
+      "new_generation": "4832dd20-0b9e-45e3-a3e7-095525bf9b3f",
+      "no_op": false,
+      "old_generation": "848a0a59-8803-445f-b89d-3cfae4f98bbd",
+      "online_protocol_verified": true,
+      "recovery_token": "FB1CABBCD772F457CB6E781FF654C2B04338597B627084A8EEB2A739D1C1E2C0",
+      "requires_tail_log_artifact": false,
+      "staged_bytes": 345154,
+      "staged_rows": 5,
+      "touched_tables": [
+        "Config",
+        "ConfigSave",
+        "Params"
+      ]
+    },
+    "claimed_platform_profile": "platform-8.3.27.2214",
+    "database": "ibcmd_rs_05_online_a1",
+    "dry_run": false,
+    "executed": true,
+    "live_recovery_command": null,
+    "recovery": "F:\\ibcmd\\lab\\05\\online\\runs\\online\\online-v1.recovery.json",
+    "script": "F:\\ibcmd\\lab\\05\\online\\runs\\online\\online-v1.sql",
+    "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+    "tail_log_output": null,
+    "verified_platform_profile": "platform-8.3.27.2214",
+    "worker_switch": null
+  },
+  "timings": {
+    "active_export_ms": 2021,
+    "classification_ms": 66,
+    "staging_ms": 1049,
+    "activation_ms": 2737,
+    "total_ms": 10419
+  }
+}

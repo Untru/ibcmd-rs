@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:f="urn:ibcmd-rs:xml-corpus:future" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+  <CommonModule uuid="20000000-0000-4000-8000-000000000001">
+    <Properties>
+      <Name>CorpusModule</Name>
+      <Synonym>
+        <v8:item>
+          <v8:lang>en</v8:lang>
+          <v8:content>Corpus module</v8:content>
+        </v8:item>
+      </Synonym>
+      <Comment>Portable module metadata</Comment>
+      <Global>false</Global>
+      <ClientManagedApplication>false</ClientManagedApplication>
+      <Server>true</Server>
+      <ExternalConnection>false</ExternalConnection>
+      <ClientOrdinaryApplication>false</ClientOrdinaryApplication>
+      <ServerCall>true</ServerCall>
+      <Privileged>false</Privileged>
+      <ReturnValuesReuse>DontUse</ReturnValuesReuse>
+      <f:FutureModuleSetting f:mode="preserve">module-opaque</f:FutureModuleSetting>
+    </Properties>
+  </CommonModule>
+</MetaDataObject>

@@ -1,0 +1,31 @@
+diff --git a/F:/ibcmd/lab/05/cluster/drop-lab-dbs.ps1.before-worker-cluster b/F:/ibcmd/lab/04/tools/drop-lab-dbs.ps1
+index 013e5037..49fc041b 100644
+--- a/F:/ibcmd/lab/05/cluster/drop-lab-dbs.ps1.before-worker-cluster
++++ b/F:/ibcmd/lab/04/tools/drop-lab-dbs.ps1
+@@ -11,7 +11,8 @@
+ #   - nothing was written to it for -MinIdleMinutes (index usage since the
+ #     SQL Server start; reads do not count: read-only surveys of all lab
+ #     databases would otherwise keep every one of them "busy");
+-#   - it is not registered as an infobase in the 8.3.27 or 8.5 cluster.
++#   - it is not registered as an infobase in the 8.3.27 or 8.5 cluster, nor -- while it RUNS -- in the worker lab cluster (scripts/apply-lab/cluster
++#     of the repo, RAS localhost:5545). A stopped worker cluster cannot be asked: unregister from it (register-ib.ps1 -Cluster worker) before you stop it.
+ # DROP DATABASE also deletes the files. Each drop is logged in databases.tsv.
+ #
+ # usage:
+@@ -41,9 +42,14 @@ foreach ($row in Import-Csv -Delimiter "`t" -LiteralPath $registry) {
+     if ($row.database -and -not $owner.ContainsKey($row.database)) { $owner[$row.database] = $row.track }
+ }
+ 
+-# Registered infobases of both clusters.
++# Registered infobases of the two service clusters, and of the worker lab cluster when it runs (only if its RAS listens: rac against a port
++# with nothing behind it would wait).
+ $registered = @{}
+-foreach ($c in @(@('C:\Program Files\1cv8\8.3.27.2214\bin\rac.exe', 'localhost:2545'), @('C:\Program Files\1cv8\8.5.1.1150\bin\rac.exe', 'localhost:3545'))) {
++$clusters = @(@('C:\Program Files\1cv8\8.3.27.2214\bin\rac.exe', 'localhost:2545'), @('C:\Program Files\1cv8\8.5.1.1150\bin\rac.exe', 'localhost:3545'))
++if (Get-NetTCPConnection -State Listen -LocalPort 5545 -ErrorAction SilentlyContinue) {
++    $clusters += , @('C:\Program Files\1cv8\8.3.27.2214\bin\rac.exe', 'localhost:5545')
++}
++foreach ($c in $clusters) {
+     $cl = ((& $c[0] $c[1] cluster list) | Select-String '^cluster\s*:' | Select-Object -First 1) -replace '^cluster\s*:\s*', ''
+     if (-not $cl) { continue }
+     foreach ($line in & $c[0] $c[1] infobase summary list "--cluster=$cl") {

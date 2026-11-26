@@ -1,0 +1,159 @@
+{
+  "full_snapshots_verified": 9,
+  "per_snapshot_tables": 6,
+  "auxiliary_tables": 10,
+  "all_pack_and_row_digests_verified": true,
+  "all_raw_headers_unnormalized": true,
+  "physical_changes": {
+    "Config": {
+      "added": [],
+      "removed": [],
+      "changed": [
+        [
+          "16b3681c-426d-4d6f-9ffe-588a23974222",
+          0
+        ],
+        [
+          "16b3681c-426d-4d6f-9ffe-588a23974222.0",
+          0
+        ],
+        [
+          "root",
+          0
+        ],
+        [
+          "version",
+          0
+        ],
+        [
+          "versions",
+          0
+        ]
+      ],
+      "unchanged": 9836
+    },
+    "ConfigSave": {
+      "added": [],
+      "removed": [
+        [
+          "16b3681c-426d-4d6f-9ffe-588a23974222",
+          0
+        ],
+        [
+          "16b3681c-426d-4d6f-9ffe-588a23974222.0",
+          0
+        ],
+        [
+          "root",
+          0
+        ],
+        [
+          "version",
+          0
+        ],
+        [
+          "versions",
+          0
+        ]
+      ],
+      "changed": [],
+      "unchanged": 0
+    },
+    "Params": {
+      "added": [],
+      "removed": [],
+      "changed": [
+        [
+          "54ba7662-8bac-49ee-b00f-0f5125fbfeab.ui",
+          0
+        ],
+        [
+          "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+          0
+        ],
+        [
+          "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+          0
+        ]
+      ],
+      "unchanged": 36
+    },
+    "Files": {
+      "added": [],
+      "removed": [],
+      "changed": [
+        [
+          "MobileVersions.dat",
+          0
+        ]
+      ],
+      "unchanged": 352
+    },
+    "ConfigCAS": {
+      "added": [],
+      "removed": [],
+      "changed": [],
+      "unchanged": 12797
+    },
+    "ConfigCASSave": {
+      "added": [],
+      "removed": [],
+      "changed": [],
+      "unchanged": 0
+    }
+  },
+  "auxiliary_changes": {
+    "_ExtensionsInfo": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "_ExtensionsInfoNGS": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "_ExtensionsRestruct": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "_ExtensionsRestructNGS": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "_ConfigChngR": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "_ConfigChngR_ExtProps": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "_ExtsChngR": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "_ExtsChngR_ExtProps": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "SchemaStorage": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    },
+    "IBVersion": {
+      "removed_multiset": 0,
+      "added_multiset": 0
+    }
+  },
+  "marker_bytes": 156,
+  "marker_sha256": "a6a4becf0894197ff52642b07a26dafd9c9b5298e084a615a031a54b4906a1e6",
+  "marker_fullheader_and_payload_equal": true,
+  "numbered_receipts": 58,
+  "zero_children": 57,
+  "failed_child": [
+    "058-n1-marker-observation.json",
+    1
+  ],
+  "native_import_apply_release_all_known0": true,
+  "console_failure_preserved": true,
+  "SQL_native_resources_by_reviewer": 0
+}

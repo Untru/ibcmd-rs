@@ -1,0 +1,1662 @@
+{
+  "snapshot": "2026-10-25",
+  "scope": "Current Coverage; CF export and XML compilation only, no SQL writes",
+  "product_commit": "8e4d14305b91051088523142fb3b841c0cfd356d",
+  "product_binary_sha256": "ae4fff3244359c581fe51f373c5023bf60f8a125cd132993959cce3d1c6d373c",
+  "corpus_commit": "afcdcb010841f89f07c04a99aa07120a76b7116f",
+  "all_sets_measured": 177,
+  "full_matrix_profile": "debug test harness",
+  "iter_regression_sets": 66,
+  "all_combined_sets": 4,
+  "separate_sets": 173,
+  "separate_variant_instances": {
+    "generated": 1728,
+    "platform_proven": 1679,
+    "platform_refused": 49,
+    "equal": 1249,
+    "different": 293,
+    "refused": 137
+  },
+  "lab_diagnostic_classes_reproduced": {
+    "native_cf": 99,
+    "xml_probe": 5
+  },
+  "source_probes": 7,
+  "combined": [
+    {
+      "set": "8.3.27.2214/combined",
+      "native_files": 607,
+      "equal_files": 513,
+      "different_files": 74,
+      "missing_files": 20,
+      "extra_files": 0,
+      "xml_compile_failure_count": 54,
+      "diagnostic_classes": 46,
+      "native_cf_sha256": "8a79cc8e6ec5a6a8e52780b0cbdfef4d9ab33ac3c12cf634c1b47e8ead4a5120",
+      "manifest_sha256": "deb5e75e915c75e6b36cd6282293641600c1250f4746a86fa54efa6cd509c74f",
+      "cf_export_exit_code": 2
+    },
+    {
+      "set": "8.5.1.1150/combined",
+      "native_files": 616,
+      "equal_files": 519,
+      "different_files": 75,
+      "missing_files": 22,
+      "extra_files": 0,
+      "xml_compile_failure_count": 55,
+      "diagnostic_classes": 47,
+      "native_cf_sha256": "c163d76f6970afd946e0d1a13430ff4dd2f005496560e70dd37842b84d22b4c1",
+      "manifest_sha256": "ef1216fcfd2451fd3220c622d6435c4b4d519026d64a267a1ee069ca2c9bff29",
+      "cf_export_exit_code": 2
+    },
+    {
+      "set": "8.5.1.1529/combined",
+      "native_files": 939,
+      "equal_files": 736,
+      "different_files": 133,
+      "missing_files": 70,
+      "extra_files": 0,
+      "xml_compile_failure_count": 158,
+      "diagnostic_classes": 100,
+      "native_cf_sha256": "a9459561aec93cdbd06509ece439ddf51ad9219965e7d95a9154320cb7228003",
+      "manifest_sha256": "bf7d67c7c431b75fd68a5cfde5ed455f5d9bad52e73f126df947720bee3d684b",
+      "cf_export_exit_code": 2
+    }
+  ],
+  "class_matches": [
+    {
+      "class": "I001",
+      "diagnostic": "MXL: <verticalPageBreak> of a SpreadsheetDocument has no writer",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetVerticalPageBreak.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetVerticalPageBreak.xml"
+        }
+      ]
+    },
+    {
+      "class": "I002",
+      "diagnostic": "no code for UseInInterfaceCompatibilityMode \"Version85\"",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridModeVersion85.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernModeVersion85.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml"
+        }
+      ]
+    },
+    {
+      "class": "I003",
+      "diagnostic": "no code for UseInInterfaceCompatibilityMode \"Taxi\"",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridModeTaxi.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernModeTaxi.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml"
+        }
+      ]
+    },
+    {
+      "class": "I004",
+      "diagnostic": "form <UsualGroup>: ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridParentButton.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernParentButton.xml"
+        }
+      ]
+    },
+    {
+      "class": "I005",
+      "diagnostic": "the form's tail names something the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyChildrenAlign.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyVerticalSingle.xml"
+        }
+      ]
+    },
+    {
+      "class": "I006",
+      "diagnostic": "MXL: colour pal:<name> names an unknown namespace",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetPalette.xml"
+        }
+      ]
+    },
+    {
+      "class": "I007",
+      "diagnostic": "<LabelDecoration> names a font the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationTitleLevel4.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationTitleLevel4.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernLabelDecorationFont.xml"
+        }
+      ]
+    },
+    {
+      "class": "I008",
+      "diagnostic": "MXL: drawing line style Dashed has no stored code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetDashed.xml"
+        }
+      ]
+    },
+    {
+      "class": "I009",
+      "diagnostic": "MXL: built-in StyleItem font reference read as a file",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetBuiltinFont.xml"
+        }
+      ]
+    },
+    {
+      "class": "I010",
+      "diagnostic": "<Table> excludes SelectAll, which has no measured uuid",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovTableOnlySelectAll.xml"
+        }
+      ]
+    },
+    {
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorTomato.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorTomato.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationTextColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelDecorationTextColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationTextColorPalette.xml"
+        }
+      ]
+    },
+    {
+      "class": "I012",
+      "diagnostic": "an embedded mxl:SpreadsheetDocument with cells has no writer yet",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovEmbeddedSpreadsheetCells.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovEmbeddedSpreadsheetCells.xml"
+        }
+      ]
+    },
+    {
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorTomato.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorTomato.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridUsualGroupBackColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyUsualGroupBackColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernUsualGroupBackColorPalette.xml"
+        }
+      ]
+    },
+    {
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxWidth.xml"
+        },
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxHeight.xml"
+        },
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartMaxWidth.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxWidth.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxHeight.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartMaxWidth.xml"
+        }
+      ]
+    },
+    {
+      "class": "I015",
+      "diagnostic": "form <PictureDecoration>: PictureColor: the writer cannot place the colour pal:<name>",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureDecorationPictureColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyPictureDecorationPictureColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureDecorationPictureColorPalette.xml"
+        }
+      ]
+    },
+    {
+      "class": "I016",
+      "diagnostic": "MXL: <printSettings><pageSize> has no writer",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetPageSizeA4.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetPageSizeA4.xml"
+        }
+      ]
+    },
+    {
+      "class": "I017",
+      "diagnostic": "MXL: an AutoFont <font> spells members",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetAutoFontHeight.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetAutoFontHeight.xml"
+        }
+      ]
+    },
+    {
+      "class": "I018",
+      "diagnostic": "form <InputField>: TextSize: the 2.21 value Some(\"Reduced\") has no 8.5 code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridReducedText.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernReducedText.xml"
+        }
+      ]
+    },
+    {
+      "class": "I019",
+      "diagnostic": "form <LabelField>: UseCopy: the 2.21 value Some(\"false\") has no 8.5 code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldUseCopy.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldUseCopy.xml"
+        }
+      ]
+    },
+    {
+      "class": "I020",
+      "diagnostic": "<Table> excludes DeselectAll, which has no measured uuid",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesDeselectAll.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovTableOnlyDeselectAll.xml"
+        }
+      ]
+    },
+    {
+      "class": "I021",
+      "diagnostic": "unsupported Form VerticalScroll: use",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-form-settings",
+          "source": "CommonForms/CovVerticalScrollAlways.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-cross-forms-from27",
+          "source": "CommonForms/CovVerticalScrollAlways.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-settings",
+          "source": "CommonForms/CovVerticalScrollAlways.xml"
+        }
+      ]
+    },
+    {
+      "class": "I022",
+      "diagnostic": "unsupported colour \"pal:<name>\"",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "StyleItems/CovPaletteViolet.xml"
+        }
+      ]
+    },
+    {
+      "class": "I023",
+      "diagnostic": "<LabelField> cannot encode a bound path",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml"
+        }
+      ]
+    },
+    {
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorTomato.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorTomato.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldTextColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelFieldTextColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldTextColorPalette.xml"
+        }
+      ]
+    },
+    {
+      "class": "I025",
+      "diagnostic": "MXL: standard picture reference read as a file",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetAppearanceCheckIcon.xml"
+        },
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-standard-picture",
+          "source": "CommonTemplates/CovSpreadsheetStandardPicture.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetAppearanceCheckIcon.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-standard-picture",
+          "source": "CommonTemplates/CovSpreadsheetStandardPicture.xml"
+        }
+      ]
+    },
+    {
+      "class": "I026",
+      "diagnostic": "a <GraphicalSchemaField> names a property whose slot is not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml"
+        }
+      ]
+    },
+    {
+      "class": "I027",
+      "diagnostic": "no base-free compiler for Interface yet",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2342/interfaces",
+          "source": "Interfaces/CovTemplate.xml",
+          "route": "unchanged_native_cf_xml"
+        },
+        {
+          "set": "8.5.1.1150/interfaces",
+          "source": "Interfaces/CovTemplate.xml",
+          "route": "unchanged_native_cf_xml"
+        }
+      ]
+    },
+    {
+      "class": "I028",
+      "diagnostic": "no measured value for StdPicture.NewConversation",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureNewConversation.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureNewConversation.xml"
+        }
+      ]
+    },
+    {
+      "class": "I029",
+      "diagnostic": "the form names an event the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-task-form-events",
+          "source": "Tasks/CovEventTask/Forms/EventsForm.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-task-form-events",
+          "source": "Tasks/CovEventTask/Forms/EventsForm.xml"
+        }
+      ]
+    },
+    {
+      "class": "I030",
+      "diagnostic": "unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-catalog-additional-index",
+          "source": "Catalogs/CovIndexedCatalog.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-catalog-additional-index",
+          "source": "Catalogs/CovIndexedCatalog.xml"
+        }
+      ]
+    },
+    {
+      "class": "I031",
+      "diagnostic": "<InputField> cannot encode a bound path",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml"
+        }
+      ]
+    },
+    {
+      "class": "I032",
+      "diagnostic": "<LabelField> names a font the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldTitleLevel4.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelFieldTitleLevel4.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldTitleLevel4.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernLabelFieldFont.xml"
+        }
+      ]
+    },
+    {
+      "class": "I033",
+      "diagnostic": "form <InputField>: WidthInCard: the 2.21 value Some(\"Full\") has no 8.5 code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldWidthInCard.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldWidthInCard.xml"
+        }
+      ]
+    },
+    {
+      "class": "I034",
+      "diagnostic": "form <InputField>: no measured value for StdPicture.CollaborationSystemExternalUser",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputPictureExternalUser.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputPictureExternalUser.xml"
+        }
+      ]
+    },
+    {
+      "class": "I035",
+      "diagnostic": "form <RadioButtonField>: HorizontalStretch: the 2.21 value Some(\"false\") has no 8.5 code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridRadioButtonFieldHorizontalStretch.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernRadioButtonFieldHorizontalStretch.xml"
+        }
+      ]
+    },
+    {
+      "class": "I036",
+      "diagnostic": "no measured value for StdPicture.Char",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureChar.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernPictureChar.xml"
+        }
+      ]
+    },
+    {
+      "class": "I037",
+      "diagnostic": "no measured value for StdPicture.Today",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureToday.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureToday.xml"
+        }
+      ]
+    },
+    {
+      "class": "I038",
+      "diagnostic": "<ChartField> names an event the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartOnActivate.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartOnActivate.xml"
+        }
+      ]
+    },
+    {
+      "class": "I039",
+      "diagnostic": "<CheckBoxField> cannot encode a bound path",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-form-deep-bindings",
+          "source": "CommonForms/CovDeepComposerBinding.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-deep-bindings",
+          "source": "CommonForms/CovDeepComposerBinding.xml"
+        }
+      ]
+    },
+    {
+      "class": "I040",
+      "diagnostic": "<PeriodField> has no writer yet",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovPeriodField.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovPeriodField.xml"
+        }
+      ]
+    },
+    {
+      "class": "I041",
+      "diagnostic": "<PlannerField> names an event the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml"
+        }
+      ]
+    },
+    {
+      "class": "I042",
+      "diagnostic": "<SpreadSheetDocumentField> excludes FormattedString, which has no measured uuid",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridSheetFormattedString.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernSheetFormattedString.xml"
+        }
+      ]
+    },
+    {
+      "class": "I043",
+      "diagnostic": "<Table> excludes AddAutoSelectedField, which has no measured uuid",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml"
+        }
+      ]
+    },
+    {
+      "class": "I044",
+      "diagnostic": "ClientApplicationInterface: unsupported layout property",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-client-application-interface",
+          "source": "Configuration.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-client-application-interface",
+          "source": "Configuration.xml"
+        }
+      ]
+    },
+    {
+      "class": "I045",
+      "diagnostic": "InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-mobile-permission-messages",
+          "source": "Configuration.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-mobile-permission-messages",
+          "source": "Configuration.xml"
+        }
+      ]
+    },
+    {
+      "class": "I046",
+      "diagnostic": "MXL: <chart:chartType> spells Column, which the chart writer has not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetChartColumn.xml"
+        }
+      ]
+    },
+    {
+      "class": "I047",
+      "diagnostic": "MXL: a <line> with a gap has no writer",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetGapLine.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetGapLine.xml"
+        }
+      ]
+    },
+    {
+      "class": "I048",
+      "diagnostic": "MXL: a value of type v8:ValueListType has no writer",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetValueListDetail.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetValueListDetail.xml"
+        }
+      ]
+    },
+    {
+      "class": "I049",
+      "diagnostic": "MXL: drawing line style DashDotted has no stored code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetDashDotted.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetDashDotted.xml"
+        }
+      ]
+    },
+    {
+      "class": "I050",
+      "diagnostic": "MXL: system font sys:OEMFixedFont has no stored code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetOEMFixedFont.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetOEMFixedFont.xml"
+        }
+      ]
+    },
+    {
+      "class": "I051",
+      "diagnostic": "MXL: web colour SandyBrown has no stored code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetSandyBrown.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-spreadsheet-facets",
+          "source": "CommonTemplates/CovSheetSandyBrown.xml"
+        }
+      ]
+    },
+    {
+      "class": "I052",
+      "diagnostic": "MXL: web colour SkyBlue has no stored code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetSkyBlue.xml"
+        }
+      ]
+    },
+    {
+      "class": "I053",
+      "diagnostic": "a command names the shortcut Space, which is not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml"
+        }
+      ]
+    },
+    {
+      "class": "I054",
+      "diagnostic": "a dynamic list's <KeyType>RowNumber is not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-form-settings",
+          "source": "CommonForms/CovDynamicListRowNumber.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-cross-forms-from27",
+          "source": "CommonForms/CovDynamicListRowNumber.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-settings",
+          "source": "CommonForms/CovDynamicListRowNumber.xml"
+        }
+      ]
+    },
+    {
+      "class": "I055",
+      "diagnostic": "a progress bar's <Representation>BrokenTilt is not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridBrokenTilt.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernBrokenTilt.xml"
+        }
+      ]
+    },
+    {
+      "class": "I056",
+      "diagnostic": "a table's <RowPictureDataPath> names <path>, which the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovRecordSetRowPicture.xml"
+        }
+      ]
+    },
+    {
+      "class": "I057",
+      "diagnostic": "command: unknown standard picture StdPicture.QueryWizardTempTableDescription",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-reference-network",
+          "source": "InformationRegisters/CovNetworkOptions.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-reference-network",
+          "source": "InformationRegisters/CovNetworkOptions.xml"
+        }
+      ]
+    },
+    {
+      "class": "I058",
+      "diagnostic": "form <ColumnGroup>: ShowTitleInCard: the 2.21 value Some(\"true\") has no 8.5 code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridColumnGroupCard.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernColumnGroupCard.xml"
+        }
+      ]
+    },
+    {
+      "class": "I059",
+      "diagnostic": "form <CommandBar>: AppearanceMode: the 2.21 value Some(\"UsualGroup\") has no 8.5 code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridCommandBarAppearance.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernCommandBarAppearance.xml"
+        }
+      ]
+    },
+    {
+      "class": "I060",
+      "diagnostic": "form <LabelField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldCellHyperlinkRepresentation.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldCellHyperlinkRepresentation.xml"
+        }
+      ]
+    },
+    {
+      "class": "I061",
+      "diagnostic": "no measured ordinal for AccountingRegister.StandardCommand.OpenList",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovNavigationAccountingRegister.xml"
+        }
+      ]
+    },
+    {
+      "class": "I062",
+      "diagnostic": "no measured value for StdPicture.AccountingRegister",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAccountingRegister.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAccountingRegister.xml"
+        }
+      ]
+    },
+    {
+      "class": "I063",
+      "diagnostic": "no measured value for StdPicture.AppearanceStarHalfFilled",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml"
+        }
+      ]
+    },
+    {
+      "class": "I064",
+      "diagnostic": "no measured value for StdPicture.FormattedString",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureFormattedString.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureFormattedString.xml"
+        }
+      ]
+    },
+    {
+      "class": "I065",
+      "diagnostic": "no measured value for StdPicture.GotoURL",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureGotoURL.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureGotoURL.xml"
+        }
+      ]
+    },
+    {
+      "class": "I066",
+      "diagnostic": "no measured value for StdPicture.QueryWizardTempTableDescription",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml"
+        }
+      ]
+    },
+    {
+      "class": "I067",
+      "diagnostic": "no stored value for StdPicture.GotoURL",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-catalog-pictures",
+          "source": "Catalogs/CovCatalogPictureTemplate.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-catalog-pictures",
+          "source": "Catalogs/CovCatalogPictureTemplate.xml"
+        }
+      ]
+    },
+    {
+      "class": "I068",
+      "diagnostic": "the exporter names no `ExchangePlan` standard command `Create`",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "Subsystems/CovCommandSubsystem.xml"
+        }
+      ]
+    },
+    {
+      "class": "I069",
+      "diagnostic": "unresolved reference -2",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-orphan-characteristics",
+          "source": "Catalogs/CovOrphanCharacteristics.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-orphan-characteristics",
+          "source": "Catalogs/CovOrphanCharacteristics.xml"
+        }
+      ]
+    },
+    {
+      "class": "I070",
+      "diagnostic": "unsupported colour \"web:MediumGreen\"",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorMediumGreen.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorMediumGreen.xml"
+        }
+      ]
+    },
+    {
+      "class": "I071",
+      "diagnostic": "unsupported colour \"web:Tomato\"",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorTomato.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorTomato.xml"
+        }
+      ]
+    },
+    {
+      "class": "I072",
+      "diagnostic": "unsupported picture reference 0",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-orphan-catalog-facets",
+          "source": "Catalogs/CovOrphanCatalogTemplate.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-orphan-catalog-facets",
+          "source": "Catalogs/CovOrphanCatalogTemplate.xml"
+        }
+      ]
+    },
+    {
+      "class": "I073",
+      "diagnostic": "<AutofillHint>PhoneNumber is not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldAutofillHint.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldAutofillHint.xml"
+        }
+      ]
+    },
+    {
+      "class": "I074",
+      "diagnostic": "<Button> names a colour the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridButtonTextColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyButtonTextColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernButtonTextColorPalette.xml"
+        }
+      ]
+    },
+    {
+      "class": "I075",
+      "diagnostic": "<GeographicalSchemaField> has no writer yet",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridGeographicalSchema.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernGeographicalSchema.xml"
+        }
+      ]
+    },
+    {
+      "class": "I076",
+      "diagnostic": "<InputField> names an event the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputMultipleValueEvent.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputMultipleValueEvent.xml"
+        }
+      ]
+    },
+    {
+      "class": "I077",
+      "diagnostic": "<LabelDecoration> names a background colour it cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationBackColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelDecorationBackColorPalette.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationBackColorPalette.xml"
+        }
+      ]
+    },
+    {
+      "class": "I078",
+      "diagnostic": "<PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPdfGray.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPdfGray.xml"
+        }
+      ]
+    },
+    {
+      "class": "I079",
+      "diagnostic": "<Settings> names <chart:selectionMode>, which the chart writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartSelectionMode.xml"
+        }
+      ]
+    },
+    {
+      "class": "I080",
+      "diagnostic": "<UsualGroup> names a font the writer cannot place",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyGroupTitleFont.xml"
+        }
+      ]
+    },
+    {
+      "class": "I081",
+      "diagnostic": "<chart:chartType> spells Column, which the chart writer has not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartTypeColumn.xml"
+        }
+      ]
+    },
+    {
+      "class": "I082",
+      "diagnostic": "<chart:chartType> spells Pie3D, which the chart writer has not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartTypePie3D.xml"
+        }
+      ]
+    },
+    {
+      "class": "I083",
+      "diagnostic": "Configuration <InterfaceCompatibilityMode> \"TaxiEnableVersion8_5\" has no known V76 pair",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "Configuration.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "Configuration.xml"
+        }
+      ]
+    },
+    {
+      "class": "I084",
+      "diagnostic": "Help: stored-page read-back differs",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "Catalogs/CovHelpCatalog.xml"
+        }
+      ]
+    },
+    {
+      "class": "I085",
+      "diagnostic": "MXL: <embeddedTable> of a SpreadsheetDocument has no writer",
+      "scope": "xml_probe",
+      "reproductions": [
+        {
+          "probe": "embedded-table",
+          "native_behavior": "accepted_then_normalized_away"
+        }
+      ]
+    },
+    {
+      "class": "I086",
+      "diagnostic": "MXL: the exporter cannot read back the chart the writer built",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetChartLine.xml"
+        }
+      ]
+    },
+    {
+      "class": "I087",
+      "diagnostic": "a <ChoiceList> item names <variant>",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridChoicePeriod.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernChoicePeriod.xml"
+        }
+      ]
+    },
+    {
+      "class": "I088",
+      "diagnostic": "a table settles into <panel>, which the form does not declare",
+      "scope": "xml_probe",
+      "reproductions": [
+        {
+          "probe": "generated-user-settings-group",
+          "native_behavior": "accepted_then_normalized_away"
+        }
+      ]
+    },
+    {
+      "class": "I089",
+      "diagnostic": "a track bar's marking appearance is not measured",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridTrackBarFieldMarkingAppearance.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernTrackBarFieldMarkingAppearance.xml"
+        }
+      ]
+    },
+    {
+      "class": "I090",
+      "diagnostic": "form <InputField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldCellHyperlinkRepresentation.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldCellHyperlinkRepresentation.xml"
+        }
+      ]
+    },
+    {
+      "class": "I091",
+      "diagnostic": "no flowchart code for Shape \"VerticalBrackets\"",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-template-bodies",
+          "source": "CommonTemplates/CovVerticalBrackets.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-template-bodies",
+          "source": "CommonTemplates/CovVerticalBrackets.xml"
+        }
+      ]
+    },
+    {
+      "class": "I092",
+      "diagnostic": "no measured ordinal for ChartOfAccounts.StandardCommand.OpenList",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovNavigationChartOfAccounts.xml"
+        }
+      ]
+    },
+    {
+      "class": "I093",
+      "diagnostic": "no measured uuid for <ExcludedCommand>ChangeHistory</ExcludedCommand> on cfg:ExchangePlanObject",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovExchangePlanHistory.xml"
+        }
+      ]
+    },
+    {
+      "class": "I094",
+      "diagnostic": "no measured uuid for Form.Item.<name>.StandardCommand.Back on <PlannerField>",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovPlannerBackCommand.xml"
+        }
+      ]
+    },
+    {
+      "class": "I095",
+      "diagnostic": "no measured uuid for Form.StandardCommand.CreateByParameter on cfg:DynamicList",
+      "scope": "xml_probe",
+      "reproductions": [
+        {
+          "probe": "legacy-create-by-parameter",
+          "native_behavior": "refused_by_current_native"
+        }
+      ]
+    },
+    {
+      "class": "I096",
+      "diagnostic": "no measured value for StdPicture.AppearanceUpArrowGray",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureAppearanceUpArrowGray.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureAppearanceUpArrowGray.xml"
+        }
+      ]
+    },
+    {
+      "class": "I097",
+      "diagnostic": "no measured value for StdPicture.DontNotify",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureDontNotify.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureDontNotify.xml"
+        }
+      ]
+    },
+    {
+      "class": "I098",
+      "diagnostic": "no measured value for StdPicture.GrayedAll",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureGrayedAll.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureGrayedAll.xml"
+        }
+      ]
+    },
+    {
+      "class": "I099",
+      "diagnostic": "no measured value for StdPicture.StartVideoconference",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureStartVideoconference.xml"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureStartVideoconference.xml"
+        }
+      ]
+    },
+    {
+      "class": "I100",
+      "diagnostic": "the chart declares 1 series and spells 0",
+      "scope": "xml_probe",
+      "reproductions": [
+        {
+          "probe": "series-count",
+          "native_behavior": "accepted_then_normalized_away"
+        }
+      ]
+    },
+    {
+      "class": "I101",
+      "diagnostic": "unsupported Form ExcludedCommand: EditList",
+      "scope": "xml_probe",
+      "reproductions": [
+        {
+          "probe": "legacy-edit-list",
+          "native_behavior": "refused_by_current_native"
+        }
+      ]
+    },
+    {
+      "class": "I102",
+      "diagnostic": "unsupported Form ExcludedCommand: Preview",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovReportExcludePreview.xml"
+        }
+      ]
+    },
+    {
+      "class": "I103",
+      "diagnostic": "unsupported colour \"web:Linen\"",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorLinen.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorLinen.xml"
+        }
+      ]
+    },
+    {
+      "class": "I104",
+      "diagnostic": "unsupported enum value colour pal:<name>",
+      "scope": "native_cf",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "Enums/CovPaletteEnum.xml"
+        }
+      ]
+    }
+  ]
+}

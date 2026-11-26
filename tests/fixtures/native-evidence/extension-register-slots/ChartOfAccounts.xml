@@ -1,0 +1,95 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<ChartOfAccounts uuid="b4bcb6f1-afc2-464e-af01-038624d119d6">
+		<InternalInfo>
+			<xr:GeneratedType name="ChartOfAccountsObject._ДемоПланСчетовРасширение" category="Object">
+				<xr:TypeId>b41e6ec8-c65f-4e25-b0de-881661234d3f</xr:TypeId>
+				<xr:ValueId>adc2b76d-1847-40f0-b888-cc008c37007c</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsRef._ДемоПланСчетовРасширение" category="Ref">
+				<xr:TypeId>858d1e2b-bc2e-4be2-b385-e76715e2b4c0</xr:TypeId>
+				<xr:ValueId>4fe4cbd1-8e1c-4f89-911b-9c0a97354ee8</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsSelection._ДемоПланСчетовРасширение" category="Selection">
+				<xr:TypeId>bbc756bb-ab98-4a84-8ab3-8c03c95a7801</xr:TypeId>
+				<xr:ValueId>1b587894-a522-42c8-ae97-db64be0e8723</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsList._ДемоПланСчетовРасширение" category="List">
+				<xr:TypeId>50f53e59-d3a7-43b7-bc8f-829ca7b77a46</xr:TypeId>
+				<xr:ValueId>2c8e9810-1ad3-4af8-b523-731ea162ba93</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsManager._ДемоПланСчетовРасширение" category="Manager">
+				<xr:TypeId>4b97f33d-061f-4e1d-956d-a55cb4bfba59</xr:TypeId>
+				<xr:ValueId>9e57d90b-7382-40d9-8e7d-a61d4521f88f</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsExtDimensionTypes._ДемоПланСчетовРасширение" category="ExtDimensionTypes">
+				<xr:TypeId>55ce2032-44e7-4a25-86c9-cd3272a84d82</xr:TypeId>
+				<xr:ValueId>e65885d4-4d39-4dde-8d9e-352c1bd1c0bc</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfAccountsExtDimensionTypesRow._ДемоПланСчетовРасширение" category="ExtDimensionTypesRow">
+				<xr:TypeId>c34ec38f-34d8-4a88-9676-9eb9631d3d54</xr:TypeId>
+				<xr:ValueId>639986e4-92e9-4a64-aa3e-0d1414d40c69</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>_ДемоПланСчетовРасширение</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Демо: План счетов (из расширения)</v8:content>
+				</v8:item>
+			</Synonym>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<BasedOn/>
+			<ExtDimensionTypes/>
+			<MaxExtDimensionCount>0</MaxExtDimensionCount>
+			<CodeMask/>
+			<CodeLength>9</CodeLength>
+			<DescriptionLength>25</DescriptionLength>
+			<CodeSeries>WholeChartOfAccounts</CodeSeries>
+			<CheckUnique>true</CheckUnique>
+			<DefaultPresentation>AsCode</DefaultPresentation>
+			<Characteristics/>
+			<PredefinedDataUpdate>Auto</PredefinedDataUpdate>
+			<EditType>InDialog</EditType>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<InputByString>
+				<xr:Field>ChartOfAccounts._ДемоПланСчетовРасширение.StandardAttribute.Description</xr:Field>
+				<xr:Field>ChartOfAccounts._ДемоПланСчетовРасширение.StandardAttribute.Code</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<DefaultObjectForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<AutoOrderByCode>false</AutoOrderByCode>
+			<OrderLength>0</OrderLength>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+			<ObjectPresentation>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Демо: Счет (из расширения)</v8:content>
+				</v8:item>
+			</ObjectPresentation>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+		</Properties>
+		<ChildObjects/>
+	</ChartOfAccounts>
+</MetaDataObject>

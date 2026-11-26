@@ -1,0 +1,9 @@
+run=live
+tag=live-v1
+mode=live
+dry_run=False
+database=ibcmd_rs_05_online_b1
+start_utc=2026-09-29T17:55:53.627Z
+end_utc=2026-09-29T17:56:21.531Z
+wall_ms=27774
+exit=1

@@ -1,0 +1,10 @@
+{
+  "started_utc": "2026-10-01T22:23:18.3158001Z",
+  "executable": "python",
+  "deadline_seconds": 90,
+  "arguments": [
+    "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\snapshot_storage.py",
+    "ibcmd_rs_05_p85_w3_ext_version_native_20261001",
+    "ext_version_settled_backup_before_v5"
+  ]
+}

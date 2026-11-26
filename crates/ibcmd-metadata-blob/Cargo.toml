@@ -1,0 +1,39 @@
+[package]
+name = "ibcmd-metadata-blob"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The packers of a 1C configuration's stored bodies from their XML sources (metadata objects, forms over the native form body writer, templates, rights, styles, pictures, help, predefined data and the rest), the source context they read, the role-rights writer they call, the base-free command-interface writers, and the metadata XML element tree"
+
+[dependencies]
+# Errors as in the root, whose callers add their own context.
+anyhow = "1.0"
+ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-1c-vocab = { path = "../ibcmd-1c-vocab" }
+# The command-interface and interface-asset codecs the base-free writers
+# serialize through.
+ibcmd-compiler-families = { path = "../ibcmd-compiler-families" }
+ibcmd-core = { path = "../ibcmd-core" }
+ibcmd-form-body = { path = "../ibcmd-form-body" }
+ibcmd-form-native = { path = "../ibcmd-form-native" }
+# The native form body writer, whose helpers the packers share.
+ibcmd-form-writer = { path = "../ibcmd-form-writer" }
+# The source bytes and the source context's memoised answers.
+ibcmd-metadata-source = { path = "../ibcmd-metadata-source" }
+ibcmd-module-blob = { path = "../ibcmd-module-blob" }
+# The brace model of a configuration row.
+ibcmd-restructure = { path = "../ibcmd-restructure" }
+ibcmd-schema = { path = "../ibcmd-schema" }
+quick-xml = "0.38"
+# The packers' reports, which the root prints.
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
+uuid = "1.19"
+
+[dev-dependencies]
+# Fresh item uuids in a form test, as in the root.
+uuid = { version = "1.19", features = ["v4"] }
+
+[lints.rust]
+unsafe_code = "forbid"

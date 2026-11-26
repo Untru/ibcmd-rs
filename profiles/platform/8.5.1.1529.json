@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "platform-8.5.1.1529",
+  "status": "experimental",
+  "platform_build": "8.5.1.1529",
+  "constants": {
+    "platform.xml_format": "2.21",
+    "platform.form_layout": "8.5.1",
+    "platform.feature.palette-colors": "2dd2d9e1-40c8-430b-a433-a81ec6856ab0",
+    "platform.form.default_button_importance": "main"
+  },
+  "evidence": [
+    "tests/fixtures/external/v85_extension/v85_form/input.cfe",
+    "tests/fixtures/external/extension_roots/values_v85/input.cfe",
+    "_onecdec/make_v85_extension_fixtures.py"
+  ]
+}

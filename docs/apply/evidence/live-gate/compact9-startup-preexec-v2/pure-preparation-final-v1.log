@@ -1,0 +1,63 @@
+PASS 28 pure identity cases; starts/signals/moves/deletes/acquires=0
+PASS 27 archive worker binding cases; realReads/acquires/signals/moves/deletes0
+PASS actual parent issuer validates own proof/raw/current parent before emitting context; no filesystem/OS actions
+PASS actual issuer duplicate refusal; acquires/signals/writes0
+PASS actual issuer late-parent refusal; acquires/signals/writes0
+PASS actual issuer nonzero refusal; acquires/signals/writes0
+PASS actual tree function all5485 nodes/613 byte witnesses; no ownership or signal authority
+PASS actual streaming tree missing-empty refuses/disposes; no filesystem/SQL/FIFO actions
+PASS actual streaming tree missing-file refuses/disposes; no filesystem/SQL/FIFO actions
+PASS actual streaming tree extra-dir refuses/disposes; no filesystem/SQL/FIFO actions
+PASS actual streaming tree extra-file refuses/disposes; no filesystem/SQL/FIFO actions
+PASS actual streaming tree reparse-dir refuses/disposes; no filesystem/SQL/FIFO actions
+PASS actual streaming tree reparse-file refuses/disposes; no filesystem/SQL/FIFO actions
+PASS actual streaming tree raw-change refuses/disposes; no filesystem/SQL/FIFO actions
+PASS actual streaming tree budget refuses/disposes; no filesystem/SQL/FIFO actions
+PASS9 actual tree pure cases; real FS/starts/signals/SQL/FIFO/moves/deletes0
+PASS exact 613 raw/597 retained archive validation is read-only
+PASS archive-replay refusal; moves/copies/deletes/creates0
+PASS active-state refusal; moves/copies/deletes/creates0
+PASS old6-receipt refusal; moves/copies/deletes/creates0
+PASS foreign-lease refusal; moves/copies/deletes/creates0
+PASS saved-PID refusal; moves/copies/deletes/creates0
+PASS listener refusal; moves/copies/deletes/creates0
+PASS reparse refusal; moves/copies/deletes/creates0
+PASS raw-change refusal; moves/copies/deletes/creates0
+PASS archive-extra refusal; moves/copies/deletes/creates0
+PASS foreign-input refusal; moves/copies/deletes/creates0
+PASS old-restore refusal; moves/copies/deletes/creates0
+PASS unknown-child refusal; moves/copies/deletes/creates0
+ALL PASS; realStarts=realSignals=SQLcalls=registryWrites=Moves=Deletes=0
+PASS actual authority saved Case5 raw + complete synthetic foreign reused PID; no signal authority
+PASS actual prior-archive lease-drift refusal; starts/signals/moves/deletes/acquires0
+PASS actual prior-archive state-drift refusal; starts/signals/moves/deletes/acquires0
+PASS actual prior-archive late-child refusal; starts/signals/moves/deletes/acquires0
+PASS actual copied private context nonce + separate exact restore manifest Trackload classification
+PASS actual old/foreign/replaced lease + foreign DB refusal; acquisitions/SQL/signals0
+PASS stdin Close fault retains original started child/receipt uncertainty; no real process/filesystem/SQL/signals
+PASS normal child preserves result schema/nonzero output, signals0
+PASS rapid child preserves result schema/nonzero output, signals0
+PASS race-exit child preserves result schema/nonzero output, signals0
+PASS initialmissing live refusal + unresolved receipt, signals0
+PASS initialunbound live refusal + unresolved receipt, signals0
+PASS exact direct child Kill(no args), bounded5000 reap; wrapper descendants remain unproved, lifecycle retained
+PASS timeoutbirthday live refusal/retained identity, signals0
+PASS timeoutexe live refusal/retained identity, signals0
+PASS timeoutcmd live refusal/retained identity, signals0
+PASS timeoutparent live refusal/retained identity, signals0
+PASS timeoutmissing live refusal/retained identity, signals0
+PASS unreaped child unresolved, original direct identity retained, no descendants signalled
+PASS inherited output pipe deadline5000 retains unresolved descendants/lifetime; no unbounded GetResult or signal
+PASS pure child mocks; realStarts=realSignals=SQLcalls=registryWrites=0
+PASS actual worker acquire/finally known success captures bytes and releases exact lease
+PASS actual acquire/finally preexisting retains potential hold; release0
+Exception: F:\ibcmd\lab\05\wave3\load\compact9-runtime-v1\test_compact9_locks.ps1:41
+Line |
+  41 |  … e-Object {$_ -like 'release-*'}).Count){throw "Unsafe release $mode"}
+     |                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Unsafe release preexisting-LOAD8-F8BD7D065A2C
+Exception: F:\ibcmd\lab\05\wave3\load\compact9-runtime-v1\run_pure_preparation.ps1:5
+Line |
+   5 |   if($LASTEXITCODE){throw "pure suite failed $test"}
+     |                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | pure suite failed test_compact9_locks.ps1

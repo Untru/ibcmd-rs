@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovExtendedListPresentation_Cov",
+    "CovIncludeHelpInContents_true",
+    "CovListPresentation_Cov",
+    "CovTemplate",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

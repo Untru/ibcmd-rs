@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "mode": "offline_research_only",
+  "source_version": "2.21",
+  "tool_versions": {
+    "native_ibcmd": "8.5.1.1592",
+    "edt_import_export": "2026.2.1.3",
+    "ibcmd_rs": "ibcmd-rs 0.4.1"
+  },
+  "limits": {
+    "max_files": 100000,
+    "max_total_bytes": 4294967296,
+    "max_file_bytes": 536870912
+  },
+  "native": {
+    "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue356-current-server-dcs-001/native-xml",
+    "file_count": 19,
+    "total_bytes": 86112,
+    "tree_sha256": "32c1510aeea38b1ce6a58d207db8ef50e44d93b8741dedfa9e7d3ad786067754"
+  },
+  "edt": {
+    "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/authentic-xml",
+    "file_count": 18,
+    "total_bytes": 82953,
+    "tree_sha256": "6a46a633ff82e4fe20e7b5ba66059e70a621f81c9c116cf741479fdcc85a8aad"
+  },
+  "ours": {
+    "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/installed-generated-xml",
+    "file_count": 18,
+    "total_bytes": 82953,
+    "tree_sha256": "6a46a633ff82e4fe20e7b5ba66059e70a621f81c9c116cf741479fdcc85a8aad"
+  },
+  "summary": {
+    "all_equal": 16,
+    "native_edt_not_ours": 0,
+    "native_ours_not_edt": 0,
+    "edt_ours_not_native": 3,
+    "all_different": 0
+  },
+  "rows": [
+    {
+      "path": "Catalogs/CorpusList.xml",
+      "native_sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac",
+      "native_size_bytes": 15353,
+      "edt_sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac",
+      "edt_size_bytes": 15353,
+      "ours_sha256": "05c3dff287e7baa586936d3c3623ae7f0da02071a38b272059b13789a954bdac",
+      "ours_size_bytes": 15353,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/CorpusList/Ext/ObjectModule.bsl",
+      "native_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "native_size_bytes": 3,
+      "edt_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "edt_size_bytes": 3,
+      "ours_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "ours_size_bytes": 3,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm.xml",
+      "native_sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797",
+      "native_size_bytes": 1624,
+      "edt_sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797",
+      "edt_size_bytes": 1624,
+      "ours_sha256": "5653d19149abbf920e0b7936f91ea5bd4673b8fd737a0ce25eb7363a6475f797",
+      "ours_size_bytes": 1624,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form.xml",
+      "native_sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb",
+      "native_size_bytes": 19444,
+      "edt_sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb",
+      "edt_size_bytes": 19444,
+      "ours_sha256": "ce6b05b53a7b5ef05ccd5b3f3a40abb1fc84cfe8db46193963dde2c3bea750eb",
+      "ours_size_bytes": 19444,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/CorpusList/Forms/ListForm/Ext/Form/Module.bsl",
+      "native_sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805",
+      "native_size_bytes": 492,
+      "edt_sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805",
+      "edt_size_bytes": 492,
+      "ours_sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805",
+      "ours_size_bytes": 492,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/FilterProbe.xml",
+      "native_sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b",
+      "native_size_bytes": 15364,
+      "edt_sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b",
+      "edt_size_bytes": 15364,
+      "ours_sha256": "85f16f0277fe5afbbc4ca2dfd9b793ed733247519ac9adf6a445a75006370d8b",
+      "ours_size_bytes": 15364,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Ext/ObjectModule.bsl",
+      "native_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "native_size_bytes": 3,
+      "edt_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "edt_size_bytes": 3,
+      "ours_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "ours_size_bytes": 3,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm.xml",
+      "native_sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715",
+      "native_size_bytes": 1624,
+      "edt_sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715",
+      "edt_size_bytes": 1624,
+      "ours_sha256": "d1db71626b3de259bc0cce7bcdfd1649416bc921b5e999fb5b3586f3cb7ca715",
+      "ours_size_bytes": 1624,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form.xml",
+      "native_sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88",
+      "native_size_bytes": 8283,
+      "edt_sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88",
+      "edt_size_bytes": 8283,
+      "ours_sha256": "6096a14ddaf5e0d4feb62992296155123bfcd341f3cb48a9fafaef498fb10e88",
+      "ours_size_bytes": 8283,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Catalogs/FilterProbe/Forms/ListForm/Ext/Form/Module.bsl",
+      "native_sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805",
+      "native_size_bytes": 492,
+      "edt_sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805",
+      "edt_size_bytes": 492,
+      "ours_sha256": "a484a6eb7807068684a82463043cad6a07666e4903c44c509f7bfd16cbee9805",
+      "ours_size_bytes": 492,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "ConfigDumpInfo.xml",
+      "native_sha256": "7301e7124e132fc5119c4a4c809b84187f475d8f89ec7a89a6085ea4e4447b7d",
+      "native_size_bytes": 3084,
+      "edt_sha256": null,
+      "edt_size_bytes": null,
+      "ours_sha256": null,
+      "ours_size_bytes": null,
+      "agreement": "edt_ours_not_native",
+      "candidate_interpretation": "candidate: native export, storage state, or version divergence; hashes alone do not prove a cause"
+    },
+    {
+      "path": "Configuration.xml",
+      "native_sha256": "9de0688e13c30f49d1780faa75b58a60b6f5af0272ce5fd1be4e3f72f65ae6c7",
+      "native_size_bytes": 11305,
+      "edt_sha256": "4ad07d2fb94927e39066a326ad83d73a35a18fd1dc76b076ea094107491f2054",
+      "edt_size_bytes": 11305,
+      "ours_sha256": "4ad07d2fb94927e39066a326ad83d73a35a18fd1dc76b076ea094107491f2054",
+      "ours_size_bytes": 11305,
+      "agreement": "edt_ours_not_native",
+      "candidate_interpretation": "candidate: native export, storage state, or version divergence; hashes alone do not prove a cause"
+    },
+    {
+      "path": "Ext/ClientApplicationInterface.xml",
+      "native_sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8",
+      "native_size_bytes": 836,
+      "edt_sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8",
+      "edt_size_bytes": 836,
+      "ours_sha256": "0a84b26395fff630f14b8f18797442a56711213444fcd8ba69d28f5e42c100e8",
+      "ours_size_bytes": 836,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Languages/Русский.xml",
+      "native_sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06",
+      "native_size_bytes": 1306,
+      "edt_sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06",
+      "edt_size_bytes": 1306,
+      "ours_sha256": "57c30856c0f6893b25bef065015689424ba9901ef89d173b31d10073a0248d06",
+      "ours_size_bytes": 1306,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Reports/FilterProbeReport.xml",
+      "native_sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0",
+      "native_size_bytes": 2312,
+      "edt_sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0",
+      "edt_size_bytes": 2312,
+      "ours_sha256": "a6ae7fe2b099a0264b3c0f17fe65130a1e30281d829194e47ec7c0832634d6f0",
+      "ours_size_bytes": 2312,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Reports/FilterProbeReport/Ext/ManagerModule.bsl",
+      "native_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "native_size_bytes": 3,
+      "edt_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "edt_size_bytes": 3,
+      "ours_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "ours_size_bytes": 3,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Reports/FilterProbeReport/Ext/ObjectModule.bsl",
+      "native_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "native_size_bytes": 3,
+      "edt_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "edt_size_bytes": 3,
+      "ours_sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5",
+      "ours_size_bytes": 3,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Reports/FilterProbeReport/Templates/MainSchema.xml",
+      "native_sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958",
+      "native_size_bytes": 1317,
+      "edt_sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958",
+      "edt_size_bytes": 1317,
+      "ours_sha256": "f762a38bb0712dc14d58bb968261fa04b48cdbdb06fd8366421ab36f200de958",
+      "ours_size_bytes": 1317,
+      "agreement": "all_equal",
+      "candidate_interpretation": "no raw divergence observed"
+    },
+    {
+      "path": "Reports/FilterProbeReport/Templates/MainSchema/Ext/Template.xml",
+      "native_sha256": "05c5fe4b67aaf6eb46bbf644fe8872f281a046ff1c236714c7ea0e675d58c635",
+      "native_size_bytes": 3264,
+      "edt_sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000",
+      "edt_size_bytes": 3189,
+      "ours_sha256": "29dc3ec2160d38c248765ee330453eae47e3277e478e4d6b0ad90e05e8fda000",
+      "ours_size_bytes": 3189,
+      "agreement": "edt_ours_not_native",
+      "candidate_interpretation": "candidate: native export, storage state, or version divergence; hashes alone do not prove a cause"
+    }
+  ]
+}

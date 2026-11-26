@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "storage_profile": "mssql-extensions-info-8.3.27",
+  "database": "Тестовая база",
+  "extensions": [
+    {
+      "registry_id": "347eea01-0773-11e8-8780-107b44a2858a",
+      "name": "Русское расширение с пробелом",
+      "version": "",
+      "order": 1,
+      "active": true,
+      "purpose": "customization",
+      "scope": "infobase",
+      "safe_mode": {
+        "availability": "available",
+        "value": false
+      },
+      "security_profile_name": {
+        "availability": "unavailable"
+      },
+      "unsafe_action_protection": {
+        "availability": "available",
+        "value": false
+      },
+      "used_in_distributed_infobase": false,
+      "update_timestamp": "2026-08-29T10:00:00",
+      "active_cas_root": "4d6d417ad243f0cb8ecc3969cbd7aa2b429fd1af"
+    }
+  ]
+}

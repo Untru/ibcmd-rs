@@ -1,0 +1,2 @@
+PASS actual negative block all5 unavailable endpoints/exact input refusals under FIFO; original SHA checks; realStarts=realSignals=SQLcalls=registryWrites=0
+PASS prior unknown child refuses negative execution before acquire/spawn

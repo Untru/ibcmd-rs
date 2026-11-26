@@ -1,0 +1,8 @@
+CMD: C:\Program Files\1cv8\8.3.27.2214\bin\ibcmd.exe infobase config apply --dbms=MSSQLServer --db-server=localhost --db-name=ibcmd_rs_04_rcheck_dn_syn2_ownnew20261001 --data=F:\ibcmd\lab\04\restructure-check\ibdata\ibcmd_rs_04_rcheck_dn_syn2_ownnew20261001 --force --dynamic=disable --session-terminate=disable --user=Администратор
+--- stdout
+[INFO] Обновление конфигурации базы данных...
+[INFO] Проверка корректности метаданных...
+[INFO] Обновление конфигурации базы данных не требуется
+
+--- stderr
+

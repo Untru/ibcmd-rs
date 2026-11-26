@@ -1,0 +1,37 @@
+S1 combinations (docs/apply/restructuring.md 12.15), check 12 on the largest stage, m6: 17 objects, 30 tables rebuilt, 5 676 rows, three cache rows and siVersions.
+A fresh twin of the staged state (restored from the COPY_ONLY backup of m6_staged); the script of a real run of
+`mssql-config-apply --platform-profile platform-8.3.27.2214 --allow-restructure s1 --i-have-a-backup --script-output` (1 612 lines, 9.9 MB) with
+`THROW 51999` put before COMMIT (inject_failure.ps1), run with sqlcmd; the digest of the whole database before and after.
+
+the script ran for 46,7 s and said: Контекст базы данных изменен на "ibcmd_rs_04_ddl_s2_m6_chkb". | Сообщение 51999, уровень 16, состояние 1, сервер DESKTOP-SMI5N4O, строка 1607 | injected failure before COMMIT
+before:
+Config rows|9847
+ConfigSave rows|21
+Params rows|39
+Config checksum|522196957
+ConfigSave checksum|-1365632410
+Params checksum|369288792
+SchemaStorage 0 status|100
+SchemaStorage 0 schema|-970237343
+DBSchema|-970237343
+DBNames|-2047740313
+columns|188573852
+indexes|-513582142
+tables *NG|0
+tables|2234
+after:
+Config rows|9847
+ConfigSave rows|21
+Params rows|39
+Config checksum|522196957
+ConfigSave checksum|-1365632410
+Params checksum|369288792
+SchemaStorage 0 status|100
+SchemaStorage 0 schema|-970237343
+DBSchema|-970237343
+DBNames|-2047740313
+columns|188573852
+indexes|-513582142
+tables *NG|0
+tables|2234
+digest unchanged: True

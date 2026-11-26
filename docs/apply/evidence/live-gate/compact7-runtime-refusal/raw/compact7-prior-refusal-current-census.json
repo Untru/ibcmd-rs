@@ -1,0 +1,40 @@
+{
+  "scope": "fresh readonly post-refusal census; not the historical admission census",
+  "listeners": [],
+  "matches": [
+    {
+      "parent": 40344,
+      "root_marker_match": false,
+      "saved_identity": [
+        {
+          "pid": 99324,
+          "born": "2026-10-01T21:15:13.035463Z",
+          "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ras.exe",
+          "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ras.exe\" cluster --port=5545 localhost:5540",
+          "parent_key": ""
+        },
+        {
+          "pid": 99324,
+          "born": "2026-10-01T21:15:13.035463Z",
+          "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ras.exe",
+          "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ras.exe\" cluster --port=5545 localhost:5540",
+          "parent_key": ""
+        }
+      ],
+      "saved_pid_match": true,
+      "pid": 99324,
+      "executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "command_sha256": "816E6DE5AFEB08BE49E031980B1E8640B9AE1B48B1882EDD92821CBDDE906B12",
+      "born_utc": "2026-10-02T06:38:27.2300620Z"
+    }
+  ],
+  "captured_utc": "2026-10-02T06:54:05.1954998Z",
+  "saved_pids": [
+    53256,
+    66908,
+    88008,
+    92468,
+    94720,
+    99324
+  ]
+}

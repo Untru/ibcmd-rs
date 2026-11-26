@@ -1,0 +1,372 @@
+{
+  "scope": "Read-only retained public evidence; no native/JVM/converter/build",
+  "source_native_cdi": {
+    "path": "fixtures/issue358-nonempty-source-001/native/ConfigDumpInfo.xml",
+    "sha256": "771c0f4553afce1ead3ba889e700195eefc319ea81f75ca57cf746c4427a7aef",
+    "rows": [
+      {
+        "name": "Catalog.CorpusList",
+        "id": "a4d6ccbb-a666-4217-ad1a-174221faba2b",
+        "configVersion": "f7e8b2db148f6c45a082a2a350c722f900000000"
+      },
+      {
+        "name": "Catalog.CorpusList.Attribute.SortKey",
+        "id": "8fb04e13-6093-42e6-8fba-1dc09683eeed"
+      },
+      {
+        "name": "Catalog.CorpusList.Form.ListForm",
+        "id": "c099c30b-8a08-45b0-be7d-9594366e78a5",
+        "configVersion": "0869536886169f47a78f5c85ac25fff300000000"
+      },
+      {
+        "name": "Catalog.CorpusList.Form.ListForm.Form",
+        "id": "c099c30b-8a08-45b0-be7d-9594366e78a5.0",
+        "configVersion": "a699a47de678704097a5c9b4b32740a600000000"
+      },
+      {
+        "name": "Catalog.CorpusList.ObjectModule",
+        "id": "a4d6ccbb-a666-4217-ad1a-174221faba2b.0",
+        "configVersion": "6ed762d44670394781e1c8f738e0e73800000000"
+      },
+      {
+        "name": "Catalog.FilterProbe",
+        "id": "48c419f7-37b9-4185-bdc3-18e9f1e86d5e",
+        "configVersion": "96c927e4a09313438f9782665829f64500000000"
+      },
+      {
+        "name": "Catalog.FilterProbe.Attribute.SortKey",
+        "id": "0b0e6feb-09a2-406f-acde-15d8845880e0"
+      },
+      {
+        "name": "Catalog.FilterProbe.Form.ListForm",
+        "id": "c5de5590-395f-4f83-99ad-804a46463cf3",
+        "configVersion": "cddb6b926d6b764a956f44195e723dc300000000"
+      },
+      {
+        "name": "Catalog.FilterProbe.Form.ListForm.Form",
+        "id": "c5de5590-395f-4f83-99ad-804a46463cf3.0",
+        "configVersion": "2cfe78189b462e47860025a53dc011b600000000"
+      },
+      {
+        "name": "Catalog.FilterProbe.ObjectModule",
+        "id": "48c419f7-37b9-4185-bdc3-18e9f1e86d5e.0",
+        "configVersion": "b793cbb20c12f84cbe9e833660560ae500000000"
+      },
+      {
+        "name": "Configuration.DcsFilterEvidence",
+        "id": "1994fb56-f288-4fd9-9e7b-a58bc0c84bb2",
+        "configVersion": "f3530384e0b87c439e1a42a75ade9ebc00000000"
+      },
+      {
+        "name": "Configuration.DcsFilterEvidence.ClientApplicationInterface",
+        "id": "00000000-0000-0000-0000-000000000002.b",
+        "configVersion": "e3117478d220f1469bfb44774e8b113a00000000"
+      },
+      {
+        "name": "Language.Русский",
+        "id": "00000000-0000-0000-0000-000000000001",
+        "configVersion": "f804d3af8de35a44bdfee038487766e300000000"
+      },
+      {
+        "name": "Report.FilterProbeReport",
+        "id": "bbccef6f-f4ca-49fd-b3ba-e5f7b7bc26a3",
+        "configVersion": "b64919304102f94da7d74acc359f68e500000000"
+      },
+      {
+        "name": "Report.FilterProbeReport.ManagerModule",
+        "id": "bbccef6f-f4ca-49fd-b3ba-e5f7b7bc26a3.2",
+        "configVersion": "f0cafcc337968b4ca28f8e8b97b9b58e00000000"
+      },
+      {
+        "name": "Report.FilterProbeReport.ObjectModule",
+        "id": "bbccef6f-f4ca-49fd-b3ba-e5f7b7bc26a3.0",
+        "configVersion": "83e5d3a451cef845aa2b26a653cd699f00000000"
+      },
+      {
+        "name": "Report.FilterProbeReport.Template.MainSchema",
+        "id": "952a4216-9b06-42b0-b0c4-2f3a13aa00d7",
+        "configVersion": "22b1c4fe510f78408f637babd7a65c7800000000"
+      },
+      {
+        "name": "Report.FilterProbeReport.Template.MainSchema.Template",
+        "id": "952a4216-9b06-42b0-b0c4-2f3a13aa00d7.0",
+        "configVersion": "0bc222c84eae6845b705fd44f77f3d9500000000"
+      }
+    ]
+  },
+  "fresh_database_native_cdi": {
+    "path": "fixtures/issue356-current-server-dcs-001/native-xml/ConfigDumpInfo.xml",
+    "sha256": "7301e7124e132fc5119c4a4c809b84187f475d8f89ec7a89a6085ea4e4447b7d",
+    "rows": [
+      {
+        "name": "Catalog.CorpusList",
+        "id": "a4d6ccbb-a666-4217-ad1a-174221faba2b",
+        "configVersion": "d5c3e41d558e8d49bc674123537fce3000000000"
+      },
+      {
+        "name": "Catalog.CorpusList.Attribute.SortKey",
+        "id": "8fb04e13-6093-42e6-8fba-1dc09683eeed"
+      },
+      {
+        "name": "Catalog.CorpusList.Form.ListForm",
+        "id": "c099c30b-8a08-45b0-be7d-9594366e78a5",
+        "configVersion": "fefa6f27bbfad444821b09e9c42ee9ce00000000"
+      },
+      {
+        "name": "Catalog.CorpusList.Form.ListForm.Form",
+        "id": "c099c30b-8a08-45b0-be7d-9594366e78a5.0",
+        "configVersion": "434801500f15ee4196d05f92c466ecee00000000"
+      },
+      {
+        "name": "Catalog.CorpusList.ObjectModule",
+        "id": "a4d6ccbb-a666-4217-ad1a-174221faba2b.0",
+        "configVersion": "327fbd619893e445b202688da836609900000000"
+      },
+      {
+        "name": "Catalog.FilterProbe",
+        "id": "48c419f7-37b9-4185-bdc3-18e9f1e86d5e",
+        "configVersion": "1aeb8292f2942745b606b92cafb76bac00000000"
+      },
+      {
+        "name": "Catalog.FilterProbe.Attribute.SortKey",
+        "id": "0b0e6feb-09a2-406f-acde-15d8845880e0"
+      },
+      {
+        "name": "Catalog.FilterProbe.Form.ListForm",
+        "id": "c5de5590-395f-4f83-99ad-804a46463cf3",
+        "configVersion": "b806169ca0388e46bf0e5c72807183d000000000"
+      },
+      {
+        "name": "Catalog.FilterProbe.Form.ListForm.Form",
+        "id": "c5de5590-395f-4f83-99ad-804a46463cf3.0",
+        "configVersion": "718ffc3372ceb5459e8d25d31f01d47f00000000"
+      },
+      {
+        "name": "Catalog.FilterProbe.ObjectModule",
+        "id": "48c419f7-37b9-4185-bdc3-18e9f1e86d5e.0",
+        "configVersion": "4be0fc6f7ba38345a318a585388c102a00000000"
+      },
+      {
+        "name": "Configuration.DcsFilterEvidence",
+        "id": "1994fb56-f288-4fd9-9e7b-a58bc0c84bb2",
+        "configVersion": "51d3c4cce291d345bde4fc5d35edd4f000000000"
+      },
+      {
+        "name": "Configuration.DcsFilterEvidence.ClientApplicationInterface",
+        "id": "00000000-0000-0000-0000-000000000002.b",
+        "configVersion": "8b7832028457764badd02d95ec29b10f00000000"
+      },
+      {
+        "name": "Language.Русский",
+        "id": "00000000-0000-0000-0000-000000000001",
+        "configVersion": "613080736a7c8d4e90227ba996b77c7c00000000"
+      },
+      {
+        "name": "Report.FilterProbeReport",
+        "id": "bbccef6f-f4ca-49fd-b3ba-e5f7b7bc26a3",
+        "configVersion": "a12611ca0dd65d4099d7469488c1ea0700000000"
+      },
+      {
+        "name": "Report.FilterProbeReport.ManagerModule",
+        "id": "bbccef6f-f4ca-49fd-b3ba-e5f7b7bc26a3.2",
+        "configVersion": "2d2f15ab78ae7e4ebb02a8c1c473227700000000"
+      },
+      {
+        "name": "Report.FilterProbeReport.ObjectModule",
+        "id": "bbccef6f-f4ca-49fd-b3ba-e5f7b7bc26a3.0",
+        "configVersion": "b302389fd7fe194a863a91ba80362b4700000000"
+      },
+      {
+        "name": "Report.FilterProbeReport.Template.MainSchema",
+        "id": "952a4216-9b06-42b0-b0c4-2f3a13aa00d7",
+        "configVersion": "73fe835ee8f72a43b57540f1fed421db00000000"
+      },
+      {
+        "name": "Report.FilterProbeReport.Template.MainSchema.Template",
+        "id": "952a4216-9b06-42b0-b0c4-2f3a13aa00d7.0",
+        "configVersion": "1000aac2b55b6c40a4452589771df38300000000"
+      }
+    ]
+  },
+  "same_names_and_ids": true,
+  "changed_configVersion_rows": [
+    "Catalog.CorpusList",
+    "Catalog.CorpusList.Form.ListForm",
+    "Catalog.CorpusList.Form.ListForm.Form",
+    "Catalog.CorpusList.ObjectModule",
+    "Catalog.FilterProbe",
+    "Catalog.FilterProbe.Form.ListForm",
+    "Catalog.FilterProbe.Form.ListForm.Form",
+    "Catalog.FilterProbe.ObjectModule",
+    "Configuration.DcsFilterEvidence",
+    "Configuration.DcsFilterEvidence.ClientApplicationInterface",
+    "Language.Русский",
+    "Report.FilterProbeReport",
+    "Report.FilterProbeReport.ManagerModule",
+    "Report.FilterProbeReport.ObjectModule",
+    "Report.FilterProbeReport.Template.MainSchema",
+    "Report.FilterProbeReport.Template.MainSchema.Template"
+  ],
+  "project_file_count": 19,
+  "fresh_native_token_literal_occurrences_in_project": {
+    "d5c3e41d558e8d49bc674123537fce3000000000": 0,
+    "fefa6f27bbfad444821b09e9c42ee9ce00000000": 0,
+    "434801500f15ee4196d05f92c466ecee00000000": 0,
+    "327fbd619893e445b202688da836609900000000": 0,
+    "1aeb8292f2942745b606b92cafb76bac00000000": 0,
+    "b806169ca0388e46bf0e5c72807183d000000000": 0,
+    "718ffc3372ceb5459e8d25d31f01d47f00000000": 0,
+    "4be0fc6f7ba38345a318a585388c102a00000000": 0,
+    "51d3c4cce291d345bde4fc5d35edd4f000000000": 0,
+    "8b7832028457764badd02d95ec29b10f00000000": 0,
+    "613080736a7c8d4e90227ba996b77c7c00000000": 0,
+    "a12611ca0dd65d4099d7469488c1ea0700000000": 0,
+    "2d2f15ab78ae7e4ebb02a8c1c473227700000000": 0,
+    "b302389fd7fe194a863a91ba80362b4700000000": 0,
+    "73fe835ee8f72a43b57540f1fed421db00000000": 0,
+    "1000aac2b55b6c40a4452589771df38300000000": 0
+  },
+  "project_manifest": {
+    "root": "/Volumes/Work/Dev/ibcmd-rs-lab/fixtures/issue357-current-server-dcs-002/native-workspace/NativeControl",
+    "file_count": 19,
+    "total_bytes": 79140,
+    "tree_sha256": "c9781c7a36e856978b337d695dd92abf0c5d93ee89eefb6523a6fc0cce897a80",
+    "files": [
+      {
+        "path": ".project",
+        "bytes": 451,
+        "sha256": "f05c1b6b74a2564d30a8c11a8f771c70b723dd6ac76f4e8e2221251ca65cc814"
+      },
+      {
+        "path": ".settings/org.eclipse.core.resources.prefs",
+        "bytes": 55,
+        "sha256": "4238e4eafab8309d5f1ee3c167db1e6bf254d5587daa652f1495da7c3942b4c4"
+      },
+      {
+        "path": "DT-INF/PROJECT.PMF",
+        "bytes": 45,
+        "sha256": "9a5cfd945838f1ef6cdbe8f0e1b5d13c280a431f999d3ef4321ee56251c12560"
+      },
+      {
+        "path": "src/Catalogs/CorpusList/CorpusList.mdo",
+        "bytes": 5240,
+        "sha256": "7acf0c000917c66f9c97697dda928d07eedac4a68ef6c0e6f473aec020aafa57"
+      },
+      {
+        "path": "src/Catalogs/CorpusList/Forms/ListForm/Form.form",
+        "bytes": 45086,
+        "sha256": "a0c41501b9547767b6864b2615c477a8e186ffb026b4380c961955a935b6a076"
+      },
+      {
+        "path": "src/Catalogs/CorpusList/Forms/ListForm/Module.bsl",
+        "bytes": 471,
+        "sha256": "b38afa66c68dcb2771ba095f6a55b1030a2c32c8aad621a7f7d8c94df72e0f23"
+      },
+      {
+        "path": "src/Catalogs/CorpusList/ObjectModule.bsl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "src/Catalogs/FilterProbe/FilterProbe.mdo",
+        "bytes": 5209,
+        "sha256": "3afed4e53127b78201ef28be41f94f0d37d8ea30cc02c0ba959823d4a9d95653"
+      },
+      {
+        "path": "src/Catalogs/FilterProbe/Forms/ListForm/Attributes/Список/ExtInfo/ListSettings.dcss",
+        "bytes": 1869,
+        "sha256": "ba5415251a911a56c85350f53a8b8d82938852f77a758c7e0908af7e35995d90"
+      },
+      {
+        "path": "src/Catalogs/FilterProbe/Forms/ListForm/ConditionalAppearance.dcssca",
+        "bytes": 1317,
+        "sha256": "c6e6e9b8b6055d5103a49a944f2d2cf2a6913b5678bbb648170beac6a71c7373"
+      },
+      {
+        "path": "src/Catalogs/FilterProbe/Forms/ListForm/Form.form",
+        "bytes": 11724,
+        "sha256": "d52f1ea2df0e3b9347314d3d356d0d6036ffc0efc4a36f3d138f984ebfc04637"
+      },
+      {
+        "path": "src/Catalogs/FilterProbe/Forms/ListForm/Module.bsl",
+        "bytes": 471,
+        "sha256": "b38afa66c68dcb2771ba095f6a55b1030a2c32c8aad621a7f7d8c94df72e0f23"
+      },
+      {
+        "path": "src/Catalogs/FilterProbe/ObjectModule.bsl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "src/Configuration/ClientApplicationInterface.cai",
+        "bytes": 639,
+        "sha256": "f1659827aed39cb1240e6dc9e4252c8efa66559a3c5448e7e75e96d29e52d62b"
+      },
+      {
+        "path": "src/Configuration/Configuration.mdo",
+        "bytes": 2432,
+        "sha256": "11f966bfff1cbe1cfd8d13b28369646f701d8131d2e2c7d9029410489cd969cf"
+      },
+      {
+        "path": "src/Reports/FilterProbeReport/FilterProbeReport.mdo",
+        "bytes": 945,
+        "sha256": "ba6f13776da89dd77653f1bd761b12915e9ce317200042e35da5aa5b4fc5436a"
+      },
+      {
+        "path": "src/Reports/FilterProbeReport/ManagerModule.bsl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "src/Reports/FilterProbeReport/ObjectModule.bsl",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "src/Reports/FilterProbeReport/Templates/MainSchema/Template.dcs",
+        "bytes": 3186,
+        "sha256": "73c60d6c95f79d6f23648f2c9ecf01e1142e225458450f9ca98901e4fea2c32b"
+      }
+    ]
+  },
+  "matched_phase_diagnostics": {
+    "no_new_error_records": true,
+    "phases": {
+      "export": {
+        "no_new_error_records": true,
+        "exact_error_multiset_equal": true,
+        "added": [],
+        "removed": []
+      },
+      "validate": {
+        "no_new_error_records": true,
+        "exact_error_multiset_equal": true,
+        "added": [],
+        "removed": []
+      }
+    },
+    "rule": "Match same-build, same-INI, same-phase fresh-workspace error multisets by stream kind and exact record text/count. Only Eclipse !ENTRY timestamp is omitted. No message, stack, severity, bundle, project path or stream normalization; no cancellation between phases. Raw error-free acceptance remains separate."
+  },
+  "validation_differential": {
+    "no_new_diagnostics": true,
+    "exact_multiset_equal": true,
+    "ignored_columns": [
+      "timestamp",
+      "project_label"
+    ],
+    "original_sha256": "aebd9024427035274a9370364dc6f998cb273c60721c749b55d7c4b2952b280f",
+    "generated_sha256": "cb22c32105e932669cf7f5c3cfa61a8148fbb29dd2b603e34354718862fcba71",
+    "original_row_count": 24,
+    "generated_row_count": 24,
+    "added_diagnostics": [],
+    "removed_diagnostics": []
+  },
+  "diagnostic_candidate_scope": "Historical combined candidate6da274e4 capture; not an installed acceptance run of latest ba118d90",
+  "conclusion": "Exact storage generations are not justified by source-only EDT data; no manufactured CDI or acceptance waiver",
+  "limits": [
+    "No proof of platform random generation algorithm",
+    "Absence of literal tokens alone does not prove mathematical impossibility",
+    "Fatal parser source/root cause is not identified by retained stdout",
+    "Raw diagnostics and strict CDI mismatch remain acceptance blockers"
+  ]
+}

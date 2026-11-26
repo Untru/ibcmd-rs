@@ -1,0 +1,11 @@
+PASS actual CloseCohort exact PID/start/exe/command/parent + UUID/IB/session/app/start bound; only owned UUID terminated
+PASS unknown refused; termination0/retained ownership
+PASS pid-command refused; termination0/retained ownership
+PASS pid-exe refused; termination0/retained ownership
+PASS pid-parent refused; termination0/retained ownership
+PASS pid-birth refused; termination0/retained ownership
+PASS wrong-session-id refused; termination0/retained ownership
+PASS wrong-ib refused; termination0/retained ownership
+PASS wrong-start refused; termination0/retained ownership
+PASS wrong-app refused; termination0/retained ownership
+ALL PASS exact close/unknown mocks; realStarts=realSignals=SQLcalls=registryWrites=0

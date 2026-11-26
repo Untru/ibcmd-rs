@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "contract": "8.3.27-xml-2.20-dcs-form-attributes-conditional-appearance-v1",
+  "bodyContract": "8.3.27-xml-2.20-dcs-settings-conditional-appearance-v1",
+  "source": {
+    "product": "1C:Enterprise Platform",
+    "release": "8.3.27 / XML 2.20",
+    "derivation": "wrapper contract synthesized from one two-round clean-room Form experiment with ru_RU pinned; the existing conditional-appearance contract remains the body authority"
+  },
+  "sources": {
+    "comparison": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "two fresh isolated file-infobase round-trips from a one-wrapper clean-room delta; raw rows and the complete selected Catalog tree were byte-stable",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-form-attributes-conditional-appearance",
+      "formRawBodySha256": "cc3faff64a404929bd09f208a07751876f3448f1313f500f5cf8d1a55ae59a18",
+      "formNativeXmlSha256": "4260e513e185a8cc09854327958a6ec39309d1a607ca2166dbc0be3e672ef23a",
+      "wrapperSha256": "720d2f5d2e2edc8276f43f943ee4ce7d3119f9f393be105dd14a7b35c251ad55",
+      "storageSettingsSha256": "73a7cf10d9e6532d1f91f03bdb2c5202178174d8f5754fe5bb991d76390f5ea0",
+      "databaseLocale": "ru_RU",
+      "roundTrips": 2
+    },
+    "absent": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "the clean-room base fixture has no direct Form Attributes wrapper; its exact inactive tail is marker 0,0 followed by one empty Settings payload",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-conditional-appearance",
+      "formRawBodySha256": "f3ba8e137652de596fb5d773b021d29ccb39cbf9875fcd2fd0ea4da9916b92bd",
+      "formNativeXmlSha256": "fbb4dbd511bf7ca07c875a80b55132661e051addb41a371395431999e9bab0eb",
+      "roundTrips": 2
+    },
+    "sourceVersion": "2.20",
+    "platformLine": "8.3.27",
+    "ibcmdSha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "policy": {
+    "formNamespace": "http://v8.1c.ru/8.3/xcf/logform",
+    "settingsNamespace": "http://v8.1c.ru/8.1/data-composition-system/settings",
+    "coreNamespace": "http://v8.1c.ru/8.1/data-composition-system/core",
+    "styleNamespace": "http://v8.1c.ru/8.1/data/ui/style",
+    "systemFontNamespace": "http://v8.1c.ru/8.1/data/ui/fonts/system",
+    "coreDataNamespace": "http://v8.1c.ru/8.1/data/core",
+    "uiNamespace": "http://v8.1c.ru/8.1/data/ui",
+    "webColorNamespace": "http://v8.1c.ru/8.1/data/ui/colors/web",
+    "windowsColorNamespace": "http://v8.1c.ru/8.1/data/ui/colors/windows",
+    "xmlSchemaNamespace": "http://www.w3.org/2001/XMLSchema",
+    "xsiNamespace": "http://www.w3.org/2001/XMLSchema-instance",
+    "wrapperQname": "{http://v8.1c.ru/8.3/xcf/logform}ConditionalAppearance",
+    "storageRootQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}Settings",
+    "storageChildQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}conditionalAppearance",
+    "wrapperPlacement": "after-last-Attribute-before-Attributes-end",
+    "storageEnvelope": "unkeyed-direct-base64-tail-with-active-descriptor-after-declared-attributes",
+    "storageContainerMarker": "4",
+    "storageAbsentContainerMarker": "0",
+    "storageInactiveMarker": ["0", "0"],
+    "storageActiveMarker": ["0", "1"],
+    "storageFieldOrder": ["selection", "filter"],
+    "storageSelectionTypeIndexes": [26, 9],
+    "storageFilterTypeIndexes": [26],
+    "storageRecordTypeUuid": null,
+    "containerMetadata": "forbidden",
+    "absenceRepresentation": "wrapper-absent-empty-settings-tail-present",
+    "maxEmittedItems": 1
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "equal": [
+    "CovCorrespondence_true",
+    "CovDataLockControlMode_Automatic",
+    "CovEnableTotalsSplitting_true",
+    "CovIncludeHelpInContents_true",
+    "CovTemplate",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

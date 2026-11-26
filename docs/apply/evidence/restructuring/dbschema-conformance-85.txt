@@ -1,0 +1,5 @@
+{'tables': 1922, 'cols_ok': 1922, 'implicit_idx_ok': 1769, 'idx_ok': 1922, 'extra_real_idx': 304}
+extra real index kinds: [(('_Reference#_S_HPK', True, True), 91), (('_Document#_S_HPK', True, True), 25), (('_Node#_S_HPK', True, True), 5), (('_Node#_S_PK', True, False), 5), (('PK___Enum#__AC#ED#C#E#', True, True), 4), (('_Chrc#_S_HPK', True, True), 4), (('_Reference#_S_PK', True, False), 3), (('PK___Enum#__AC#ED#C#F#', True, True), 3), (('PK___Enum#__AC#ED#C#D#', True, True), 3), (('PK___Enum#__AC#ED#C#A#', True, True), 3), (('PK___Enum#__AC#ED#C#F#A#', True, True), 2), (('PK___Enum#__AC#ED#C#C', True, True), 2)]
+== implicit index mismatches: 0
+== cols mismatches: 0
+== idx mismatches: 0

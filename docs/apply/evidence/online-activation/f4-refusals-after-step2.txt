@@ -1,0 +1,18 @@
+#408 step 2 -- what still refuses (2026-09-30, clone ibcmd_rs_04_apply_g4d_20260930: a marker base, a stage of one module in ConfigSave,
+before the platform's apply of the twin; `mssql-activate-staged-main --dry-run`, the plan is made before the dry-run branch, nothing is written).
+Excerpts of the first 420 characters of the error.
+
+== exclusive with --sqlcmd  (the script of mssql_main_activation.rs; the config apply needs the built-in SQL client)   exit 1
+Error: write safety gate rejected activation: exclusive promotion refused before any write: this database holds online (dynamic) generations (Config/Params `DynamicallyUpdated` markers are present).          A exclusive promotion replaces only the staged rows and deletes the markers, so the earlier online changes          would be lost. Use `mssql-config-apply`, which folds them as the native apply does, or the nativ...
+
+== live with --sqlcmd      exit 1
+Error: write safety gate rejected activation: live promotion refused before any write: this database holds online (dynamic) generations (Config/Params `DynamicallyUpdated` markers are present).          A live promotion replaces only the staged rows and deletes the markers, so the earlier online changes          would be lost. Use `mssql-config-apply`, which folds them as the native apply does, or the native...
+
+== worker with --sqlcmd    exit 1
+Error: write safety gate rejected activation: worker promotion refused before any write: this database holds online (dynamic) generations (Config/Params `DynamicallyUpdated` markers are present).          A worker promotion replaces only the staged rows and deletes the markers, so the earlier online changes          would be lost. Use `mssql-config-apply`, which folds them as the native apply does, or the native...
+
+== live, built-in client   exit 1
+Error: write safety gate rejected activation: live promotion refused before any write: this database holds online (dynamic) generations (Config/Params `DynamicallyUpdated` markers are present).          A live promotion replaces only the staged rows and deletes the markers, so the earlier online changes          would be lost. Use `mssql-config-apply`, which folds them as the native apply does, or the native...
+
+(the exclusive refusal of the `--sqlcmd` route got the sentence "the exclusive mode of this command does the same on the built-in SQL client: leave out --sqlcmd" after this run;
+unit test mssql_main_activation::tests::ordinary_promotion_refuses_a_database_with_online_generations)

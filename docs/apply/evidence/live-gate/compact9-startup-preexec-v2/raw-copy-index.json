@@ -1,0 +1,383 @@
+{
+  "scope": "Exact raw copies only; external V2 authoritative, runtime withheld",
+  "copies": [
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\private-startup-deadline-v1-tests.json",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\private-startup-deadline-v1-tests.json",
+      "bytes": 1934,
+      "sha256": "35B819566DE927E3F849499872BC1EF197D92046019DED15FFE489114A94DA4F"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\archive_identity.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\archive_identity.ps1",
+      "bytes": 4710,
+      "sha256": "8737F4D21C9A0EEDE249D4EA02EC086310E9BE05E96D786F083C7F5768BED39D"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\archive_tree.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\archive_tree.ps1",
+      "bytes": 5328,
+      "sha256": "2223C062E71C2EC2D219BF0EF599EEC3DE96FA055662A717D77166DEC81FD6DD"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\archive_worker.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\archive_worker.ps1",
+      "bytes": 7179,
+      "sha256": "95E170181E4A161E3E9C990B5AA9DAA42A63B8EC80B0B0C2982AA47E9E128B3B"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_activate.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9_activate.ps1",
+      "bytes": 2639,
+      "sha256": "DA42AE6BBD95173DF643C0E199C0B4E1E874BD8B675477783ADDED7392CAB186"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_checkpoint_v2.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9_checkpoint_v2.ps1",
+      "bytes": 21497,
+      "sha256": "F5BF8D91030B743F8EE26D57B3CB345984B4B9D22588E3A517249319C411B059"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_lifetime_v2.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9_lifetime_v2.ps1",
+      "bytes": 14412,
+      "sha256": "359759339698772C777F7C28E0D3E43EEE46609F1F3D3A371E260F8F2414E65B"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_locks.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9_locks.ps1",
+      "bytes": 8340,
+      "sha256": "F4C5DBAC5D1A11CE1C0347F630765F3B3D878E57A6EACDBD6646A990232EBC1D"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_native.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9_native.ps1",
+      "bytes": 7366,
+      "sha256": "B16684EEDD0F1EE6EC8CEE7159B849D84CF73607C2172F2F49FE6094164DF6C0"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_prior_archive.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9_prior_archive.ps1",
+      "bytes": 7248,
+      "sha256": "D8357403F87E3F4922A5D38324B9227BAF373C12D603A96124C439AD4E8005D1"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_receipts.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9_receipts.ps1",
+      "bytes": 3045,
+      "sha256": "196477E321A07E5CC7F7B5DADAE48BF5727DF3F3F0823C31A1432CD8928BDC9B"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_snapshot.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9_snapshot.ps1",
+      "bytes": 3106,
+      "sha256": "58C0FCF8400DBC87A4C99C62BF81063C099E320AB5405FEEF59B8E580ED9B06D"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\lib.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\cluster\\lib.ps1",
+      "bytes": 6339,
+      "sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\private-lib.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\cluster\\private-lib.ps1",
+      "bytes": 19956,
+      "sha256": "C450509EE3C22F48FBA11A9B6AAF0DD525AFBAFE66A8E9C88B6A7C710EE40149"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\private-register.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\cluster\\private-register.ps1",
+      "bytes": 1726,
+      "sha256": "18F2FF4EEF3924C31B4E9BA80B0F58B2C0635AAC1800C18EC417F27ED5583C75"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\private-start.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\cluster\\private-start.ps1",
+      "bytes": 4376,
+      "sha256": "4C15796B726CC19A2D7E716D01C724BB8E870CCB9F025AC895B86FC17586FB4E"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\private-stop.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\cluster\\private-stop.ps1",
+      "bytes": 2502,
+      "sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\start.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\cluster\\start.ps1",
+      "bytes": 5056,
+      "sha256": "70E41406DBBCC7C36759AE73CE4E556540036DA979203CEF09678244553093B2"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\stop.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\cluster\\stop.ps1",
+      "bytes": 3001,
+      "sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\live\\obs.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\live\\obs.ps1",
+      "bytes": 6792,
+      "sha256": "5FE59F242C51D4593FE83ECC57409AD80C845A8D44D31C87C2CDDA9E5DF12A55"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\live\\process.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\live\\process.ps1",
+      "bytes": 7061,
+      "sha256": "893ED2691C8FF2867CB97FC3703480DE9D6AF7E4DC8781913C34FBE67F8DBFD5"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\live\\test_process.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\live\\test_process.ps1",
+      "bytes": 6497,
+      "sha256": "7FEC361F2300C1FE81342D6E5E7F2021299CC67073B143790F5CC570D0AFA75F"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\live\\workload_lab.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-tools\\live\\workload_lab.ps1",
+      "bytes": 1648,
+      "sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\copy-provenance-final.json",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\copy-provenance-final.json",
+      "bytes": 26478,
+      "sha256": "630A1D3374D2B68A4F255E8992116A5A81C86ED344782C278ADECE9C23C01895"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\diagnostic-successor-v2-pures.log",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\diagnostic-successor-v2-pures.log",
+      "bytes": 538,
+      "sha256": "4A5CC9CD0EEF7F627627C8C6D7BFC0825F38BAE846510EF536D8BC55F08E91EF"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\freeze_preparation.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\freeze_preparation.ps1",
+      "bytes": 6656,
+      "sha256": "438DC4E04106E8F43B9B7666B453BF8DA2709E7E845C7752095D37E5AA647C38"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\make_compact9_negatives.py",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\make_compact9_negatives.py",
+      "bytes": 2419,
+      "sha256": "14D2F37E235578F17490264ADDFD378C6DDD78F6C09022B01E2CD9A98DE37090"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\parser-final-v1.log",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\parser-final-v1.log",
+      "bytes": 28,
+      "sha256": "DC162E84F9092B1F14BFE076370AF94082D698EA241F456DF113A1F669EE6107"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\pure-preparation-final-v1.log",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\pure-preparation-final-v1.log",
+      "bytes": 4601,
+      "sha256": "E84CFCB9D1AA4F15805C0C3F7D1376F61F29F6FDD7EB51FF0EDBDFC600EDB187"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\pure-preparation-final-v2.log",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\pure-preparation-final-v2.log",
+      "bytes": 11914,
+      "sha256": "8751A0457AE3D3963F31A60F8ECD8A65718FFE550B7C088FF8AD85706C7A74B9"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\read_compact9_recovery.py",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\read_compact9_recovery.py",
+      "bytes": 9859,
+      "sha256": "A5BA2786DC9E4A943D627A757ABE1770112F7C14BE3655062D3F5F1AAB7A182A"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\reader-uuid-final-v1.log",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\reader-uuid-final-v1.log",
+      "bytes": 955,
+      "sha256": "06F48641F973BDEA8522D04E8862F4E4B4922F2CF161A7426CB2A0401985BDAE"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\run_pure_preparation.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\run_pure_preparation.ps1",
+      "bytes": 761,
+      "sha256": "3E566D11A3E4D09BDC373396C0C0F5159315CA8AF596798A9B78D0AEDEF42996"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\runtime_child.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\runtime_child.ps1",
+      "bytes": 362,
+      "sha256": "A2462368A65721ECF63CDBA61496E0C26F2770CDD8662DBC604520B2BF5DA467"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\runtime_closure.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\runtime_closure.ps1",
+      "bytes": 4747,
+      "sha256": "097B250D3B6A1BDF248CF3F460BCEA41ADCF42B3E0AF005C457986A71FF63191"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\runtime-closure-pures-final-v1.log",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\runtime-closure-pures-final-v1.log",
+      "bytes": 1412,
+      "sha256": "10B1BB2EA72FF14F482194004CCCCEF603D57902AD7A40CA0E88B7028A90BA30"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\source-copy-provenance.json",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\source-copy-provenance.json",
+      "bytes": 1560,
+      "sha256": "23C3394DACBF30D4A8C74217B0D05AC4C4B8D2EB47D16989C0B959C42CB3B418"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\stdin-child-final-v1.log",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\stdin-child-final-v1.log",
+      "bytes": 119,
+      "sha256": "07986B78043E336F1EE44C99521EA3220EEF0AC331F17F6BE2673B52B66FD9FB"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_archive_context.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_archive_context.ps1",
+      "bytes": 2478,
+      "sha256": "61938B38CAD2569BCB4C2736F173EFCDF960B660D27915BD1D37DB7C41E3F5AB"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_archive_identity.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_archive_identity.ps1",
+      "bytes": 3946,
+      "sha256": "E90DE9B0B86D94D3C11A5E62DD71B80001A4BBAD99445B2AB151B40F34B2331B"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_archive_tree.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_archive_tree.ps1",
+      "bytes": 3261,
+      "sha256": "1DE305ECFF93E6945E043EBAD9BF4378F1C206B24C257B16E987BF098CC26A9F"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_archive_worker.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_archive_worker.ps1",
+      "bytes": 5508,
+      "sha256": "571D5A4886B5313FA0A9C51CBC8176AAB12AB8943B1EA7162DC11CE5364177AE"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_acquire_v2.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_compact9_acquire_v2.ps1",
+      "bytes": 4620,
+      "sha256": "58AE506C33DB4267EC2FF44D428A1F676DA35BAD981F6BF7720C48B2C77D22F8"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_close.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_compact9_close.ps1",
+      "bytes": 3085,
+      "sha256": "C5C73CD9822358AE6FBEFF705FB61441F009EFCAFB82C20DC8A20EF2CDDE18BC"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_header_v2.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_compact9_header_v2.ps1",
+      "bytes": 3651,
+      "sha256": "5738A8ABC02BF8ADE8E789223DF02A93A1732497950412B7CE7064FA1ED55201"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_invalid_control_v2.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_compact9_invalid_control_v2.ps1",
+      "bytes": 3162,
+      "sha256": "464D952DD813409F5393F47AAFE7CE5EB9B4F5314E106C2A9B86783D7468A4DD"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_locks.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_compact9_locks.ps1",
+      "bytes": 12301,
+      "sha256": "1D0A4F841B3EAC288A040DA52C105F9AABFF2E3D0BFDB9F15A8C2E5596B5A14C"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_postconditions.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_compact9_postconditions.ps1",
+      "bytes": 4027,
+      "sha256": "1584E4AB2F4496319937AE242CC930B7C2A65A1920748D0675BD8EE788F38E8B"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_receipts.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_compact9_receipts.ps1",
+      "bytes": 1661,
+      "sha256": "8FDB714A7285DC4898FF0C97232D576D9AB17AC7229863D429A7E709635B2017"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_safety_v2.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_compact9_safety_v2.ps1",
+      "bytes": 14630,
+      "sha256": "1001DAF1DA9880E061DD49CD6871F8B8F2B511DCB5E39081790EC2AD394A974F"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_prior_archive.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_prior_archive.ps1",
+      "bytes": 6903,
+      "sha256": "D896BF1CB8E358B481D3361865C66290180036A8CA8119AF322086303082D9D4"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_private_nonce.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_private_nonce.ps1",
+      "bytes": 1818,
+      "sha256": "0CC3D93DD80692A57A680DD01BFFFE7E337AACB8BD291B3B66AC581465D952D3"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_private_startup_deadline.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_private_startup_deadline.ps1",
+      "bytes": 7245,
+      "sha256": "ECD126B800849C12E2785D60B7F67BA5F65BF7C00587FAED85C9DE42E36C5AE2"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_reader_uuid.py",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_reader_uuid.py",
+      "bytes": 4060,
+      "sha256": "6BD54DB6F6CEE7423C63383FB33F3F0945DC14A50075084E9B11124EC693E8E0"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_runtime_closure.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_runtime_closure.ps1",
+      "bytes": 7877,
+      "sha256": "DBCE639A6001F4FC054FE91924FC622F06C285DD79BD97EE555BE979AF1F6FE3"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_startup_successor_v2.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_startup_successor_v2.ps1",
+      "bytes": 2581,
+      "sha256": "017ACB59CAE861BD2426B6643692A271260A7EA2DB2B5A91F0D02A749CC5D653"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_stdin_child.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_stdin_child.ps1",
+      "bytes": 1545,
+      "sha256": "D0674E3F06FD672D0FD79012D202E72A84CD031110314D49CA0C45F07F5B0942"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_stdin_close.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\test_stdin_close.ps1",
+      "bytes": 1510,
+      "sha256": "E510CCF2DBF797B1CA4F11EE079305185B951AD913A89C993E9AE8E65B55E28C"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\tree-preexec-actual-v2.log",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\tree-preexec-actual-v2.log",
+      "bytes": 258,
+      "sha256": "ADE4DBF58E8541E0106CB4C2E53D6E9D23AC91611B2D0AD283B69C80B43B4398"
+    },
+    {
+      "external": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\private-lib.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\diagnostic-shared\\private-lib.ps1",
+      "bytes": 19977,
+      "sha256": "743F07AB3D0501F848BF59A7A9C6C9E90E4CD53A9008C3631FA0B5D6A7742B99"
+    },
+    {
+      "external": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\private-start.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\diagnostic-shared\\private-start.ps1",
+      "bytes": 4254,
+      "sha256": "0B2F3DABD148713A56F8C63F3BAF6A0C16C133D5BEBFA57EF90AEDBF1CE4D821"
+    },
+    {
+      "external": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\test_private_startup_deadline.ps1",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\diagnostic-shared\\test_private_startup_deadline.ps1",
+      "bytes": 7199,
+      "sha256": "D5EA36DD87DF3856228D3DE32717F98F553E4657F77075D1204BC34CEA570419"
+    },
+    {
+      "external": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\compact9-runtime-frozen-v2.json",
+      "copy": "docs\\apply\\evidence\\live-gate\\compact9-startup-preexec-v2\\compact9-runtime-frozen-v2.json",
+      "bytes": 39351,
+      "sha256": "0D3AB1D2A54F89EB8CA1F10E19C6C10441D5CF405DC44252E9AA7BADB41E0CB7"
+    }
+  ]
+}
