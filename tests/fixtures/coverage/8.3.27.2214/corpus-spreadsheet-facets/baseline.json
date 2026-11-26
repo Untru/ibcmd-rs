@@ -3,6 +3,7 @@
     "CovSheetValueListDetail",
     "CovSheetVerticalPageBreak",
     "CovSpreadsheetFacetTemplate",
-    "configuration"
+    "configuration",
+    "CovSheetAppearanceCheckIcon"
   ]
 }

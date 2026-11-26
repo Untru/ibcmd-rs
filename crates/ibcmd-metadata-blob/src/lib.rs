@@ -345,7 +345,7 @@ pub trait OriginalSourceTree: std::fmt::Debug + Send + Sync {
     fn canonical_root(&self) -> &Path;
     /// The captured bytes of `path`, a path under the root, or why there are
     /// none: the path is outside the root or the census, or the file changed
-    /// while it was read.
+    /// while it was read. An absent census member reports an I/O NotFound.
     fn read_original_path(&self, path: &Path) -> Result<Arc<Vec<u8>>>;
     /// Fails when a file read so far, or the tree's census, changed since
     /// the tree was opened.
@@ -596,9 +596,13 @@ impl MetadataSourceContext {
             .source_root
             .join("CommonPictures")
             .join(format!("{name}.xml"));
-        let xml = self
-            .read_source(&path)
-            .with_context(|| format!("failed to read CommonPicture XML {}", path.display()))?;
+        // Preserve the reason a common picture could not be read so that
+        // a caller can distinguish an absent picture from a damaged tree.
+        let xml = match &self.original_source {
+            Some(source) => source.read_original_path(&path).map(SourceBytes::Shared),
+            None => self.read_source(&path).map_err(anyhow::Error::from),
+        }
+        .with_context(|| format!("failed to read CommonPicture XML {}", path.display()))?;
         let properties = parse_simple_metadata_xml_properties(&xml)?;
         if properties.kind != "CommonPicture" {
             return Err(anyhow!(
@@ -1161,6 +1165,26 @@ impl MetadataSourceContext {
         }
         Ok(properties.uuid)
     }
+}
+
+/// Resolve an MXL picture name to a UUID. A declared common picture has
+/// priority over the platform vocabulary. Only an absent file permits the
+/// built-in fallback, so a damaged common picture remains an error.
+pub fn resolve_mxl_picture_uuid(name: &str, source: Option<&dyn MetadataSource>) -> Result<String> {
+    let builtin =
+        || ibcmd_1c_vocab::standard_picture_uuid(&format!("StdPicture.{name}")).map(str::to_owned);
+    let Some(source) = source else {
+        return builtin().ok_or_else(|| anyhow!("picture ref v8ui:{name} needs the configuration"));
+    };
+    source
+        .resolve_common_picture_uuid(&format!("CommonPicture.{name}"))
+        .or_else(|error| {
+            if is_not_found(&error) {
+                builtin().ok_or(error)
+            } else {
+                Err(error)
+            }
+        })
 }
 
 /// Whether reading the tree failed because a file or a folder is not there.

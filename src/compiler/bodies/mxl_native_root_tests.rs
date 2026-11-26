@@ -326,6 +326,59 @@ mod tests {
         }
     }
 
+    #[test]
+    fn mxl_standard_picture_prefers_a_declared_common_picture() {
+        let xml = std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+                "tests/fixtures/1c-fixtures/coverage/8.3.27.2214/corpus-spreadsheet-standard-picture/native/CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml",
+            ),
+        )
+        .unwrap();
+        let standard = "{0,a064544f-6037-48ca-b19f-8ad63e43af23}";
+        let common = "12345678-0000-4000-8000-000000000001";
+        let root =
+            std::env::temp_dir().join(format!("ibcmd-rs-moxel-picture-{}", uuid::Uuid::new_v4()));
+        let _scratch = crate::test_scratch::TestScratch::adopt(&root);
+        std::fs::create_dir_all(root.join("CommonPictures")).unwrap();
+
+        let held_context = || {
+            let held =
+                crate::mssql_source_change::HeldSourceRoot::open_compiler_operation(&root).unwrap();
+            crate::module_blob::MetadataSourceContext::with_original_source(std::sync::Arc::new(
+                held,
+            ))
+        };
+        assert!(
+            write_native_moxel_body(&xml, None)
+                .unwrap()
+                .contains(standard)
+        );
+        {
+            let context = held_context();
+            assert!(
+                write_native_moxel_body(&xml, Some(&context))
+                    .unwrap()
+                    .contains(standard)
+            );
+        }
+        let picture_path = root.join("CommonPictures/ShowData.xml");
+        std::fs::write(
+            &picture_path,
+            format!(
+                r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses"><CommonPicture uuid="{common}"><Properties><Name>ShowData</Name></Properties></CommonPicture></MetaDataObject>"#,
+            ),
+        )
+        .unwrap();
+        {
+            let context = held_context();
+            let body = write_native_moxel_body(&xml, Some(&context)).unwrap();
+            assert!(body.contains(&format!("{{0,{common}}}")), "{body}");
+            assert!(!body.contains(standard), "{body}");
+        }
+        std::fs::write(picture_path, b"<invalid>").unwrap();
+        assert!(write_native_moxel_body(&xml, Some(&held_context())).is_err());
+    }
+
     /// The writer reads the configuration only through `MetadataSource`: a
     /// stub that answers a style colour the way a tree on disk does gives the
     /// body the source context gives over that tree, and a resolver's error

@@ -4,7 +4,7 @@
 //! decode the compressed compatible-MXL container first
 //! (`compiler::bodies::mxl`), apply the 8.5 primitive rewrite where the
 //! export path did before, and hand the crate the root's built-in platform
-//! type table (`builtin_type_reference`). `mssql_dump` reaches the crate's
+//! type and standard-picture tables. `mssql_dump` reaches the crate's
 //! items through this module, as it reached them when the decoder lived in
 //! `mssql_dump/moxel.rs`.
 
@@ -53,6 +53,7 @@ pub fn try_extract_moxel_spreadsheet_xml_with_generated_types(
         object_refs,
         generated_types,
         super::builtin_type_reference,
+        ibcmd_1c_vocab::standard_picture_name,
         None,
     )
 }
@@ -69,6 +70,7 @@ pub fn extract_moxel_spreadsheet_xml_with_line_trace(
         object_refs,
         &NO_MOXEL_GENERATED_TYPES,
         super::builtin_type_reference,
+        ibcmd_1c_vocab::standard_picture_name,
         trace_sink,
     )
     .ok()
@@ -88,6 +90,7 @@ pub fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
         object_refs,
         &NO_MOXEL_GENERATED_TYPES,
         super::builtin_type_reference,
+        ibcmd_1c_vocab::standard_picture_name,
         trace_sink,
     )
     .ok()
