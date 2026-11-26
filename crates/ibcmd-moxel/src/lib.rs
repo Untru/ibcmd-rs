@@ -10989,6 +10989,7 @@ pub fn parse_moxel_web_color(value: &str) -> Option<String> {
         121 => "RoyalBlue",
         122 => "SaddleBrown",
         128 => "Silver",
+        129 => "SkyBlue",
         130 => "SlateBlue",
         // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
         // `131` as its only kind-2 slot and publishes `SlateGray` five times
@@ -15819,6 +15820,7 @@ mod moxel_exact_parity_tests {
             ("86", "d3p1:MediumBlue"),
             ("87", "d3p1:MediumGray"),
             ("122", "d3p1:SaddleBrown"),
+            ("129", "d3p1:SkyBlue"),
         ] {
             assert_eq!(parse_moxel_web_color(ordinal).as_deref(), Some(name));
         }
