@@ -100,6 +100,73 @@ fn dump(rows: &Path, out: &Path, extra: &[&OsStr]) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[test]
+fn eds_inline_children_have_native_config_dump_info_names() {
+    let temp = common::temp_dir("eds-config-dump-info");
+    let rows = temp.join("rows");
+    let out = temp.join("out");
+    rows_of(&fixture("eds-matrix/configuration.cf"), &rows);
+    dump(&rows, &out, &[]);
+    let xml = config_dump_info(&out);
+    assert!(!xml.contains("02e16f33-60de-4fa4-a0a0-9550743d13ee"));
+    assert!(!xml.contains("38445275-c44f-4653-85a0-c7488ac3c6bd"));
+    for name in [
+        "Function.Функция1",
+        "DimensionTable.ТаблицаИзмерения1.Field.Поле1",
+        "Table.Таблица1.Field.Поле1",
+    ] {
+        assert!(xml.contains(&format!("{name}\" id=")), "missing {name}");
+    }
+}
+
+#[test]
+fn strict_model_export_reports_http_service_fallback() {
+    let temp = common::temp_dir("strict-model-fallback");
+    let rows = temp.join("rows");
+    rows_of(&fixture("eds-matrix/configuration.cf"), &rows);
+    let row = rows.join("839141d0-9eb6-4c48-a445-9d5a2d58f77e__part0.bin");
+    let mut decoded = String::new();
+    std::io::Read::read_to_string(
+        &mut flate2::read::DeflateDecoder::new(fs::File::open(&row).unwrap()),
+        &mut decoded,
+    )
+    .unwrap();
+    let invalid = decoded.replacen(",1000,", ",1001,", 1);
+    assert_ne!(invalid, decoded);
+    let mut encoded =
+        flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+    std::io::Write::write_all(&mut encoded, invalid.as_bytes()).unwrap();
+    fs::write(row, encoded.finish().unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .env("IBCMD_RS_FAIL_ON_MODEL_FALLBACK", "1")
+        .env_remove("IBCMD_RS_LEGACY_EXPORT")
+        .env_remove("IBCMD_RS_MODEL_EXPORT")
+        .args(["mssql-dump-config", "--rows-dir"])
+        .arg(&rows)
+        .args([
+            "--model-export",
+            "--extract-metadata-xml",
+            "--no-binary-rows",
+            "--source-version",
+            "2.21",
+            "-o",
+        ])
+        .arg(temp.join("strict"))
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(stderr.contains("metadata model refused"), "{stderr}");
+    assert!(
+        stderr.contains("839141d0-9eb6-4c48-a445-9d5a2d58f77e: code 1001 is not mapped"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("the legacy converter writes it"),
+        "{stderr}"
+    );
+}
+
 fn base_arg(path: &Path) -> Vec<&OsStr> {
     vec!["--base".as_ref(), path.as_os_str()]
 }

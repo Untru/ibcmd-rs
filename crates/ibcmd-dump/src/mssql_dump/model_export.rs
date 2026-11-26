@@ -43,12 +43,15 @@ pub(super) fn quiet_summaries() -> bool {
 pub(super) const MODEL_EXPORT_ENV: &str = "IBCMD_RS_MODEL_EXPORT";
 pub(super) const LEGACY_EXPORT_ENV: &str = "IBCMD_RS_LEGACY_EXPORT";
 
+fn env_is(name: &str, value: &str) -> bool {
+    std::env::var(name).is_ok_and(|set| set.trim() == value)
+}
+
 /// Whether a full export writes its descriptors through the model: yes,
 /// unless `--legacy-export`, `IBCMD_RS_LEGACY_EXPORT=1` or
 /// `IBCMD_RS_MODEL_EXPORT=0` asks for the legacy converters.
 /// (`--model-export` is the default spelled out.)
 pub(super) fn requested(model_flag: bool, legacy_flag: bool) -> bool {
-    let env_is = |name: &str, value: &str| std::env::var(name).is_ok_and(|set| set.trim() == value);
     if legacy_flag || env_is(LEGACY_EXPORT_ENV, "1") || env_is(MODEL_EXPORT_ENV, "0") {
         return false;
     }
@@ -63,6 +66,11 @@ pub(super) fn shadow() -> bool {
     *SHADOW.get_or_init(|| {
         std::env::var("IBCMD_RS_MODEL_EXPORT_SHADOW").is_ok_and(|value| value.trim() == "1")
     })
+}
+
+/// Refuse descriptor rows whose model conversion would fall back to legacy.
+pub(super) fn fail_on_fallback() -> bool {
+    env_is("IBCMD_RS_FAIL_ON_MODEL_FALLBACK", "1")
 }
 
 /// A text row's raw row: inflated as stored, with no rewriting.

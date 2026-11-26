@@ -127,6 +127,7 @@ use ibcmd_xml::config_dump_info::{
 pub(super) struct ConfigDumpInfoInventory<'a> {
     pub(super) file_names: &'a BTreeSet<String>,
     pub(super) metadata_texts: &'a [MetadataTextRow],
+    pub(super) eds_export: Option<&'a super::eds_export::EdsExport>,
     pub(super) object_refs: &'a BTreeMap<String, String>,
     pub(super) form_refs: &'a BTreeMap<String, FormSourceReference>,
     pub(super) template_refs: &'a BTreeMap<String, TemplateSourceReference>,
@@ -284,6 +285,13 @@ pub(super) fn canonical_reference_names(
         inventory.metadata_texts,
         inventory.object_refs,
     );
+    if let Some(eds) = inventory.eds_export {
+        for row in inventory.metadata_texts {
+            if let Some(name) = eds.reference_name(&row.file_name) {
+                canonical_refs.insert(row.file_name.clone(), name.to_owned());
+            }
+        }
+    }
     Ok(canonical_refs)
 }
 
@@ -307,6 +315,7 @@ pub(super) fn child_reference_names(
         canonical_refs,
         version_ids,
         inventory.configuration_module_groups,
+        inventory.eds_export,
         ConfigDumpInfoPartialInventoryPolicy::Skip,
     )?
     .map(|children| children.into_values().flatten().collect()))
@@ -332,6 +341,7 @@ fn write_config_dump_info_entries(
         &canonical_refs,
         &version_ids,
         inventory.configuration_module_groups,
+        inventory.eds_export,
         partial_inventory_policy,
     )?
     else {
@@ -935,6 +945,7 @@ fn build_config_dump_children(
     canonical_refs: &BTreeMap<String, String>,
     version_ids: &BTreeSet<&str>,
     configuration_module_groups: &BTreeSet<String>,
+    eds_export: Option<&super::eds_export::EdsExport>,
     partial_inventory_policy: ConfigDumpInfoPartialInventoryPolicy,
 ) -> Result<Option<BTreeMap<String, BTreeMap<String, String>>>> {
     let indexed_child_ids = object_refs
@@ -968,6 +979,13 @@ fn build_config_dump_children(
         // taken for an unnameable child, and ConfigDumpInfo.xml is skipped
         // whole. Reading it from the record that states it holds either way.
         let configuration_identity = parse_configuration_header_uuid(&row.text);
+        let dimension_builtin_fields = (row.kind.as_deref() == Some(
+            ibcmd_schema::external_data_source_children::DIMENSION_TABLE_KIND,
+        ))
+        .then(|| {
+            ibcmd_metadata_model::metadata_model::external_data_source_children::dimension_table_builtin_field_ids(&row.text).ok()
+        })
+        .flatten();
         for (header, _) in
             nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
         {
@@ -985,20 +1003,31 @@ fn build_config_dump_children(
             {
                 continue;
             }
-            let child_name = if let Some(child_name) = object_refs.get(&header.uuid) {
-                child_name.clone()
-            } else if row.kind.as_deref() == Some("DocumentJournal") {
-                format!("{owner_name}.Column.{}", header.name)
-            } else {
-                unresolved_child_roles.insert(format!(
-                    "{} {}: {} ({})",
-                    row.kind.as_deref().unwrap_or("<unknown>"),
-                    row.file_name,
-                    header.uuid,
-                    header.name
-                ));
+            // Native ConfigDumpInfo omits built-in dimension table fields,
+            // even though their layouts contain ordinary metadata headers.
+            if dimension_builtin_fields
+                .as_ref()
+                .is_some_and(|fields| fields.contains(&header.uuid))
+            {
                 continue;
-            };
+            }
+            let child_name =
+                if let Some(name) = eds_export.and_then(|eds| eds.reference_name(&header.uuid)) {
+                    name.to_owned()
+                } else if let Some(child_name) = object_refs.get(&header.uuid) {
+                    child_name.clone()
+                } else if row.kind.as_deref() == Some("DocumentJournal") {
+                    format!("{owner_name}.Column.{}", header.name)
+                } else {
+                    unresolved_child_roles.insert(format!(
+                        "{} {}: {} ({})",
+                        row.kind.as_deref().unwrap_or("<unknown>"),
+                        row.file_name,
+                        header.uuid,
+                        header.name
+                    ));
+                    continue;
+                };
             if !child_name
                 .strip_prefix(owner_name)
                 .is_some_and(|suffix| suffix.starts_with('.'))

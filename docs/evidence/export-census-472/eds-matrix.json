@@ -1,0 +1,518 @@
+{
+  "platform": "8.5.1.1529",
+  "xml_version": "2.21",
+  "fixture_sha256": "e66c3863907df1d059d891024289c4305864c74e7479007879b3d2295b6e11b8",
+  "exporter_sha256": "86babde097d9e534c7d0295ec1e3a606184fdea271fb3d784276d3c89df4ba5a",
+  "descriptor_audit": {
+    "AccountingRegister": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "AccumulationRegister": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Bot": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "BusinessProcess": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "CalculationRegister": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Catalog": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "ChartOfAccounts": {
+      "total": 1,
+      "identical": 0,
+      "different": 1,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "ChartOfCalculationTypes": {
+      "total": 1,
+      "identical": 0,
+      "different": 1,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "ChartOfCharacteristicTypes": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "CommandGroup": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "CommonAttribute": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "CommonCommand": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "CommonForm": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "CommonModule": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "CommonPicture": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "CommonTemplate": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Configuration": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "Constant": {
+      "total": 19,
+      "identical": 19,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 19,
+      "lossy": 0
+    },
+    "Cube": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "DataProcessor": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "DefinedType": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "DimensionTable": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "Document": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "DocumentJournal": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "DocumentNumerator": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Enum": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "EventSubscription": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "ExchangePlan": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "ExternalDataSource": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "FilterCriterion": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Form": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "FunctionalOption": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "FunctionalOptionsParameter": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "HTTPService": {
+      "total": 1,
+      "identical": 0,
+      "different": 0,
+      "failed": 1,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 0
+    },
+    "InformationRegister": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "IntegrationService": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Language": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Recalculation": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Report": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Role": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "ScheduledJob": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Sequence": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "SessionParameter": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "SettingsStorage": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Style": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "StyleItem": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Subsystem": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "Table": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "Task": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "WSReference": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "WebService": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    },
+    "WebSocketClient": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 0,
+      "lossy": 1
+    },
+    "XDTOPackage": {
+      "total": 1,
+      "identical": 1,
+      "different": 0,
+      "failed": 0,
+      "no_row": 0,
+      "lossless": 1,
+      "lossy": 0
+    }
+  },
+  "rows": 80,
+  "export_exit": 1,
+  "source_xml": {
+    "equal": 75,
+    "changed": [
+      "ChartsOfAccounts/ПланСчетов1.xml",
+      "ChartsOfCalculationTypes/ПланВидовРасчета1.xml"
+    ],
+    "missing": [
+      "ConfigDumpInfo.xml"
+    ],
+    "extra": []
+  },
+  "export_errors": [
+    "Error: ConfigDumpInfo has 7 children without canonical metadata roles [Cube 959bb0a7-39af-49f7-97cd-b9702bcf6cf0: 1857b75f-d9ef-4a20-99b6-d254ca3d5808 (Ресурс1), Cube 959bb0a7-39af-49f7-97cd-b9702bcf6cf0: 83f15bc2-33d6-4f3d-81e1-3d798dcdaa15 (Измерение1), DimensionTable 79581bb0-b72d-43bb-b988-8f45c602139a: 02e16f33-60de-4fa4-a0a0-9550743d13ee (PARENT_UNIQUE_NAME), DimensionTable 79581bb0-b72d-43bb-b988-8f45c602139a: 14f0fede-eb01-4d95-926e-81ae880d946d (Поле1), DimensionTable 79581bb0-b72d-43bb-b988-8f45c602139a: 38445275-c44f-4653-85a0-c7488ac3c6bd (MEMBER_UNIQUE_NAME), ExternalDataSource 35f0f3eb-6bc6-455e-8200-2a8c1664122b: c440675f-93d4-4013-8cd4-477a7f990c1b (Функция1), Table 87f7ae12-3120-4257-92a1-11beacd7b790: 63ec6041-a6b3-40b5-88d9-ba4a95747bbb (Поле1)]"
+  ],
+  "xml_field_counts": {
+    "equal": 46925,
+    "changed": 0,
+    "missing": 4859,
+    "extra": 2
+  },
+  "fallback_messages": [
+    "model export: 839141d0-9eb6-4c48-a445-9d5a2d58f77e: code 1000 is not mapped; the legacy converter writes it"
+  ],
+  "platform_steps": {
+    "native": {
+      "import": 4294967295
+    }
+  },
+  "template_bodies": {
+    "Макет": "6adb2e14-880e-4372-86bb-16a148de9096.0__part0"
+  }
+}

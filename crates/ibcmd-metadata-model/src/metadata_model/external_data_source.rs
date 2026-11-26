@@ -299,7 +299,7 @@ fn short_name(names: &NameIndex, uuid: &str) -> Result<String> {
 }
 
 /// Inline `{0,{27,...},<ReturnValue>,<tail>}` function of the root.
-fn function_element(node: &Brace, names: &NameIndex) -> Result<Element> {
+fn function_record(node: &Brace) -> Result<&[Brace]> {
     let wrapper = list(node)?;
     if wrapper.len() != 2 || atom(item(wrapper, 1)?)? != "0" {
         bail!("ExternalDataSource invalid Function collection item");
@@ -308,6 +308,11 @@ fn function_element(node: &Brace, names: &NameIndex) -> Result<Element> {
     if record.len() != 4 || atom(item(record, 0)?)? != "0" {
         bail!("ExternalDataSource invalid Function wrapper");
     }
+    Ok(record)
+}
+
+fn function_element(node: &Brace, names: &NameIndex) -> Result<Element> {
+    let record = function_record(node)?;
     let body = item(record, 1)?;
     let head = attribute_header(body)?;
     let typed = list(item(list(body)?, 1)?)?;
@@ -347,10 +352,19 @@ pub fn decode(row: &Brace, names: &NameIndex) -> Result<Element> {
 #[doc(hidden)]
 pub fn names(row: &Brace) -> Result<ObjectNames> {
     let record = Record::from_brace(row)?;
+    let full_name = format!("{}.{}", schema::KIND, record.head.name);
+    let children = record
+        .functions
+        .iter()
+        .map(|node| {
+            let head = attribute_header(item(function_record(node)?, 1)?)?;
+            Ok((format!("{full_name}.Function.{}", head.name), head.uuid))
+        })
+        .collect::<Result<_>>()?;
     Ok(ObjectNames {
         uuid: record.head.uuid.clone(),
-        full_name: format!("{}.{}", schema::KIND, record.head.name),
-        children: Vec::new(),
+        full_name,
+        children,
         types: schema::GENERATED_CATEGORIES
             .iter()
             .zip(&record.generated)

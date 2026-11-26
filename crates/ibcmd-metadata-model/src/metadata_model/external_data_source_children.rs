@@ -711,6 +711,24 @@ pub fn owned_names(kind: &str, row: &Brace, owner: &str) -> Result<ObjectNames> 
     })
 }
 
+/// IDs of the two built-in fields stored inside a dimension table payload.
+#[doc(hidden)]
+pub fn dimension_table_builtin_field_ids(text: &str) -> Result<[String; 2]> {
+    let tree = parse_row(text.as_bytes())?;
+    let row = Row::parse(&tree, schema::DIMENSION_TABLE_KIND)?;
+    let field_id = |slot| -> Result<String> {
+        let wrapper = list(item(row.payload, slot)?)?;
+        let field = list(item(wrapper, 0)?)?;
+        let record = list(item(field, 1)?)?;
+        let typed = list(item(record, 1)?)?;
+        Ok(header(item(typed, 1)?)?.uuid)
+    };
+    Ok([
+        field_id(schema::DIMENSION_MEMBER_FIELD_SLOT)?,
+        field_id(schema::DIMENSION_PARENT_FIELD_SLOT)?,
+    ])
+}
+
 fn inline_children(kind: &str, row: &Row<'_>, full_name: &str) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
     let mut add = |tag: &str, entry: &Brace| -> Result<()> {
