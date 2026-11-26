@@ -11929,7 +11929,7 @@ fn render_moxel_spreadsheet_xml(
     }
     for (role, (tag, _)) in MOXEL_GROUP_HEADER_COLOR_ROLES.iter().enumerate() {
         if let Some(color) = &spreadsheet.group_header_colors[role] {
-            _ = write!(xml, "\t<{tag}>{}</{tag}>\r\n", XmlText(color));
+            push_moxel_group_header_color_xml(&mut xml, tag, color);
         }
     }
     for line in &spreadsheet.lines {
@@ -11962,6 +11962,28 @@ fn render_moxel_spreadsheet_xml(
     }
     xml.push_str("</document>");
     xml
+}
+
+/// Emits a group/header color with its native document-local namespace.
+///
+/// The decoded palette uses `d3p1:` for web colors and `windows:` for Windows
+/// colors; both become locally bound `d2p1` QNames here. Style references and
+/// RGB literals keep their existing spelling and escaping. Format-level
+/// colors are serialized separately with their native `d3p1` binding.
+fn push_moxel_group_header_color_xml(xml: &mut String, tag: &str, color: &str) {
+    let qualified = color
+        .strip_prefix("d3p1:")
+        .map(|name| ("web", name))
+        .or_else(|| color.strip_prefix("windows:").map(|name| ("windows", name)));
+    if let Some((namespace, name)) = qualified {
+        _ = write!(
+            xml,
+            "\t<{tag} xmlns:d2p1=\"http://v8.1c.ru/8.1/data/ui/colors/{namespace}\">d2p1:{}</{tag}>\r\n",
+            XmlText(name)
+        );
+    } else {
+        _ = write!(xml, "\t<{tag}>{}</{tag}>\r\n", XmlText(color));
+    }
 }
 
 pub fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize {
@@ -15369,6 +15391,37 @@ mod moxel_exact_parity_tests {
         assert_eq!(font.bold, Some(true));
         assert_eq!(font.scale, Some(100));
         assert!(parse_moxel_font(&raw.replace(",1}", ",1,100}"), &refs).is_none());
+    }
+
+    #[test]
+    fn group_and_header_colors_bind_the_native_document_namespace() {
+        for (tag, _) in MOXEL_GROUP_HEADER_COLOR_ROLES {
+            for (color, attributes, text) in [
+                (
+                    "d3p1:White",
+                    " xmlns:d2p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\"",
+                    "d2p1:White",
+                ),
+                (
+                    "windows:ButtonShadow",
+                    " xmlns:d2p1=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"",
+                    "d2p1:ButtonShadow",
+                ),
+                ("style:FieldBackColor", "", "style:FieldBackColor"),
+                ("#12AB34", "", "#12AB34"),
+                ("style:A&<\"", "", "style:A&amp;&lt;&quot;"),
+            ] {
+                let mut xml = String::new();
+                push_moxel_group_header_color_xml(&mut xml, tag, color);
+                assert_eq!(xml, format!("\t<{tag}{attributes}>{text}</{tag}>\r\n"));
+            }
+        }
+        let mut format = String::new();
+        push_moxel_format_color(&mut format, "backColor", Some("d3p1:White"));
+        assert_eq!(
+            format,
+            "\t\t<backColor xmlns:d3p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\">d3p1:White</backColor>\r\n"
+        );
     }
 
     /// The built-in type table these tests decode with. None of their bodies

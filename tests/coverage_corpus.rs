@@ -662,6 +662,39 @@ fn coverage_sets_hold_their_baseline() {
     );
 }
 
+/// Compares complete group-color templates with the pinned native 2.20/2.21
+/// fixtures, protecting both QName declarations and their values.
+#[test]
+fn spreadsheet_group_colors_keep_native_local_namespaces() {
+    let relative = "CommonTemplates/CovObservedSheetGroupColours/Ext/Template.xml";
+    for (platform, source_version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-observed-spreadsheet-combinations");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("configuration.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join("export"), source_version).unwrap();
+        let actual = exported.files.get(relative).unwrap_or_else(|| {
+            panic!(
+                "{platform}: group-color template missing: {:?}",
+                exported.refusal
+            )
+        });
+        let native = fs::read(set.join("native").join(relative)).unwrap();
+        assert_eq!(
+            sha256_hex(actual),
+            sha256_hex(&native),
+            "{platform}: group-color template must match the complete native XML"
+        );
+    }
+}
+
 #[test]
 fn variant_files_are_attributed_by_object() {
     // `Catalogs/CovX.xml` and `Catalogs/CovX/…` belong to CovX; everything
