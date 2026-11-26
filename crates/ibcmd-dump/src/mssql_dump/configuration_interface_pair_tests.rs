@@ -154,6 +154,7 @@ fn compiled_v76_pairs_preserve_complete_xml_and_current_edits_in_admitted_profil
     let version = InfobaseConfigSourceVersion::V2_21;
     let modes = [
         ("Taxi", 3, 3),
+        ("TaxiEnableVersion8_5", 3, 4),
         ("TaxiEnableVersion8_2", 2, 2),
         ("Version8_5EnableTaxi", 3, 6),
     ];

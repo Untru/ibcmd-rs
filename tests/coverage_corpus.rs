@@ -864,3 +864,42 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn embedded_spreadsheet_cells_compile_from_public_native_forms() {
+    let coverage = coverage_paths::root().join("coverage");
+    let mut paths = Vec::new();
+    for platform in fs::read_dir(&coverage).unwrap() {
+        let platform = platform.unwrap().path();
+        if !platform.is_dir() {
+            continue;
+        }
+        for set in fs::read_dir(platform).unwrap() {
+            let path = set
+                .unwrap()
+                .path()
+                .join("native/CommonForms/CovEmbeddedSpreadsheetCells/Ext/Form.xml");
+            if path.is_file() {
+                paths.push(path);
+            }
+        }
+    }
+    paths.sort();
+    assert_eq!(paths.len(), 9, "all public target forms are exercised");
+    for path in paths {
+        let xml = fs::read(&path).unwrap();
+        let plain = ibcmd_form_writer::compile_native_form_body_through(&xml, None, None, None)
+            .unwrap_or_else(|error| panic!("{}: {error:#}", path.display()));
+        if !ibcmd_form_writer::form::load_8_5_1::is_xml_2_21_form(&xml) {
+            let blob = ibcmd_module_blob::deflate_raw(plain.as_bytes()).unwrap();
+            let written = ibcmd_dump::mssql_dump::extract_form_body_xml(&blob, &BTreeMap::new())
+                .expect("complete compiled native form can be read");
+            assert_eq!(
+                written.as_bytes(),
+                xml,
+                "entire form including spreadsheet contents: {}",
+                path.display()
+            );
+        }
+    }
+}

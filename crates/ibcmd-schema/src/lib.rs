@@ -598,6 +598,7 @@ impl FormChoiceListItem {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormChoiceListValue {
+    EmptyCustomStandardPeriod,
     Boolean(bool),
     Decimal(String),
     /// A date, already in the `xs:dateTime` spelling (`YYYY-MM-DDThh:mm:ss`).
@@ -675,6 +676,17 @@ impl FormChoiceListValue {
     /// shape: their distinction is parser provenance, not XML syntax.
     pub fn wire_shape(&self) -> FormChoiceListValueWireShape<'_> {
         match self {
+            Self::EmptyCustomStandardPeriod => FormChoiceListValueWireShape {
+                xml_opening: Cow::Borrowed(concat!(
+                    "<Value xsi:type=\"v8:StandardPeriod\">\r\n",
+                    "\t<v8:variant xsi:type=\"v8:StandardPeriodVariant\">Custom</v8:variant>\r\n",
+                    "\t<v8:startDate>0001-01-01T00:00:00</v8:startDate>\r\n",
+                    "\t<v8:endDate>0001-01-01T00:00:00</v8:endDate>\r\n",
+                    "</Value>",
+                )),
+                xml_closing: "",
+                text: None,
+            },
             Self::Boolean(value) => FormChoiceListValueWireShape {
                 xml_opening: Cow::Borrowed("<Value xsi:type=\"xs:boolean\">"),
                 xml_closing: "</Value>",
@@ -891,6 +903,17 @@ where
                 && parse_empty_form_value_list_payload(payload).is_some() =>
         {
             FormChoiceListValue::EmptyValueList
+        }
+        ("#", [_, class_id, period])
+            if mode.trim() == "1"
+                && class_id.trim() == "2fdc88ec-7c9b-43cd-8ba5-873f043bdd88"
+                && literal_ids_are(type_id, value_id, class_id)
+                && braced_fields_bounded(period, 3)?
+                    .iter()
+                    .map(|s| s.trim())
+                    .eq(["0", "00010101000000", "00010101000000"]) =>
+        {
+            FormChoiceListValue::EmptyCustomStandardPeriod
         }
         // A design-time value of a platform-defined type.  The value member
         // carries the type identifier and the member ordinal; the item's own
@@ -18506,7 +18529,7 @@ pub mod metadata_storage_facts {
                 .all(|byte| byte.is_ascii_digit())
     }
 
-    /// Direct Form headers have two measured revisions; revision 12 omits the final flag.
+    /// Direct Form headers have two measured revisions; revision 12 omits the interface mode.
     pub fn direct_form_header_layout(code: Option<&str>, field_count: usize) -> bool {
         matches!((code, field_count), (Some("12"), 5) | (Some("14"), 6))
     }
@@ -18842,6 +18865,28 @@ pub mod metadata_child_storage_facts {
     }
 
     impl FormMetadataRecordLayout {
+        /// Revision 14 appends the 8.5.1 interface mode; earlier records imply Any.
+        pub fn interface_mode(fields: &[&str]) -> Option<&'static str> {
+            use crate::external_named::{
+                FORM_INTERFACE_COMPATIBILITY_DEFAULT, INTERFACE_COMPATIBILITY_MODES,
+            };
+            match fields.first()?.trim() {
+                "12" | "13" => Some(FORM_INTERFACE_COMPATIBILITY_DEFAULT),
+                "14" => {
+                    // Older wrapped records without the trailing mode export as Any.
+                    // Direct records must first satisfy direct_form_header_layout.
+                    let Some(code) = fields.get(5).map(|field| field.trim()) else {
+                        return Some(FORM_INTERFACE_COMPATIBILITY_DEFAULT);
+                    };
+                    INTERFACE_COMPATIBILITY_MODES
+                        .iter()
+                        .find(|(_, value)| value.to_string() == code)
+                        .map(|(name, _)| *name)
+                }
+                _ => None,
+            }
+        }
+
         pub fn from_fields(fields: &[&str]) -> Option<Self> {
             match fields.first()?.trim() {
                 "13" | "14" => Some(Self {

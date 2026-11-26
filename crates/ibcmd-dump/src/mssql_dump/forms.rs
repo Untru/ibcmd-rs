@@ -246,6 +246,7 @@ pub(super) fn metadata_kind_for_source_folder(folder: &str) -> Option<&'static s
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct FormMetadataProperties {
+    pub(super) interface_mode: &'static str,
     pub(super) include_help_in_contents: bool,
     pub(super) use_purposes: Vec<&'static str>,
     pub(super) use_standard_commands: bool,
@@ -257,6 +258,7 @@ pub(super) struct FormMetadataProperties {
 impl Default for FormMetadataProperties {
     fn default() -> Self {
         Self {
+            interface_mode: ibcmd_schema::external_named::FORM_INTERFACE_COMPATIBILITY_DEFAULT,
             include_help_in_contents: false,
             use_purposes: default_form_use_purposes(),
             use_standard_commands: false,
@@ -308,11 +310,15 @@ pub(super) fn parse_form_metadata_properties_from_text(
     text: &str,
     kind: &str,
     uuid: &str,
-) -> FormMetadataProperties {
+) -> Option<FormMetadataProperties> {
     let mut properties = FormMetadataProperties::default();
     if let Some((form_fields, form_extended_presentation)) =
         form_metadata_fields_and_extended_presentation_from_text(text, uuid)
     {
+        properties.interface_mode =
+            ibcmd_schema::metadata_child_storage_facts::FormMetadataRecordLayout::interface_mode(
+                &form_fields,
+            )?;
         properties.include_help_in_contents =
             parse_1c_bool_field(form_fields.get(2).copied()).unwrap_or(false);
         properties.use_purposes = parse_form_use_purposes(form_fields.get(4).copied())
@@ -337,7 +343,7 @@ pub(super) fn parse_form_metadata_properties_from_text(
             parse_1c_bool_field(common_form_fields.get(4).copied()).unwrap_or(false);
     }
 
-    properties
+    Some(properties)
 }
 
 fn form_metadata_fields_and_extended_presentation_from_text<'a>(
@@ -481,9 +487,10 @@ pub(super) fn format_form_source_xml(
     }
     xml.push_str("\t\t\t</UsePurposes>\r\n");
     if source_version == InfobaseConfigSourceVersion::V2_21 {
-        xml.push_str(
-            "\t\t\t<UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>\r\n",
-        );
+        xml.push_str(&format!(
+            "\t\t\t<UseInInterfaceCompatibilityMode>{}</UseInInterfaceCompatibilityMode>\r\n",
+            properties.interface_mode
+        ));
     }
     if kind == "CommonForm" {
         xml.push_str(&format!(

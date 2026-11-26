@@ -511,7 +511,7 @@ fn fact_object_xml(
 /// One property the 2.21 writer reads from an appended member: its element,
 /// the elements of the 2.20 reading it supersedes, and its full value table
 /// (`None` writes no element).
-struct FactRule {
+pub(super) struct FactRule {
     tags: &'static [&'static str],
     source: FactSource,
     element: &'static str,
@@ -531,6 +531,7 @@ pub const FIELD_TAGS: &[&str] = &[
     "HTMLDocumentField",
     "CalendarField",
     "GraphicalSchemaField",
+    "GeographicalSchemaField",
     "ProgressBarField",
     "TrackBarField",
     "ChartField",
@@ -550,6 +551,35 @@ pub const GROUPING: &[(&str, Option<&str>)] = &[
 /// `0` false, `1` true, `2` unset.
 pub const TRI_STATE: &[(&str, Option<&str>)] =
     &[("0", Some("false")), ("1", Some("true")), ("2", None)];
+
+impl FactRule {
+    pub(super) fn values_for(&self, tag: &str) -> &[(&str, Option<&str>)] {
+        // Only the named classes have measurements for the final code in these tables.
+        match self.element {
+            "WidthInCard" if tag != "InputField" => &self.values[..2],
+            "CellHyperlinkRepresentation" if !matches!(tag, "InputField" | "LabelField") => {
+                &self.values[..2]
+            }
+            _ => self.values,
+        }
+    }
+}
+
+pub(super) const WIDTH_IN_CARD: FactRule = FactRule {
+    tags: FIELD_TAGS,
+    source: FactSource::Item("48", 8),
+    element: "WidthInCard",
+    replaces: &[],
+    values: &[("0", None), ("2", Some("Half")), ("1", Some("Full"))],
+};
+
+pub(super) const CELL_HYPERLINK_REPRESENTATION: FactRule = FactRule {
+    tags: FIELD_TAGS,
+    source: FactSource::Item("48", 13),
+    element: "CellHyperlinkRepresentation",
+    replaces: &[],
+    values: &[("0", None), ("1", Some("Show")), ("2", Some("DontShow"))],
+};
 
 const FACT_RULES: &[FactRule] = &[
     // Form root: appended trailer members. The 8.3.27 root slot of
@@ -614,13 +644,7 @@ const FACT_RULES: &[FactRule] = &[
         replaces: &[],
         values: &[("0", None), ("1", None), ("2", None), ("3", Some("true"))],
     },
-    FactRule {
-        tags: FIELD_TAGS,
-        source: FactSource::Item("48", 8),
-        element: "WidthInCard",
-        replaces: &[],
-        values: &[("0", None), ("2", Some("Half"))],
-    },
+    WIDTH_IN_CARD,
     FactRule {
         tags: FIELD_TAGS,
         source: FactSource::Item("48", 12),
@@ -633,16 +657,8 @@ const FACT_RULES: &[FactRule] = &[
             ("3", Some("ByDataAndTitle")),
         ],
     },
-    // Members 13 and 14 read the same code on every BSP item that carries
-    // either element; which element each names follows the elements' own
-    // written order, not a disagreeing record.
-    FactRule {
-        tags: FIELD_TAGS,
-        source: FactSource::Item("48", 13),
-        element: "CellHyperlinkRepresentation",
-        replaces: &[],
-        values: &[("0", None), ("1", Some("Show"))],
-    },
+    // In the 8.5.1.1529 DontShow probes only member 13 changes.
+    CELL_HYPERLINK_REPRESENTATION,
     FactRule {
         tags: FIELD_TAGS,
         source: FactSource::Item("48", 14),
@@ -655,14 +671,14 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("38", 3),
         element: "TextSize",
         replaces: &[],
-        values: &[("0", Some("Enlarged")), ("1", None)],
+        values: &[("0", Some("Enlarged")), ("1", None), ("2", Some("Reduced"))],
     },
     FactRule {
         tags: &["LabelField"],
         source: FactSource::Bag("12", 0),
         element: "UseCopy",
         replaces: &[],
-        values: &[("1", Some("true")), ("2", None)],
+        values: TRI_STATE,
     },
     // 8.5 has no `Auto` check box: the kind member reads `0` where 8.3.27
     // needed its set flag, and every BSP check box with a `0` writes nothing.
@@ -683,7 +699,7 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("11", 2),
         element: "HorizontalStretch",
         replaces: &[],
-        values: &[("1", Some("true")), ("2", None)],
+        values: TRI_STATE,
     },
     // The 8.3.27 reader reads `EditMode` for every field kind but these; the
     // member is the same on every 8.5 BSP field of any kind (0 `Directly`, 1
@@ -837,7 +853,11 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::BagMember("38", 11),
         element: "ControlRepresentation",
         replaces: &[],
-        values: &[("0", None), ("1", Some("Button"))],
+        values: &[
+            ("0", None),
+            ("1", Some("Button")),
+            ("2", Some("ButtonInParentElement")),
+        ],
     },
     FactRule {
         tags: &["UsualGroup"],
@@ -906,7 +926,7 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("5", 2),
         element: "ShowTitleInCard",
         replaces: &[],
-        values: &[("0", Some("false")), ("2", None)],
+        values: TRI_STATE,
     },
     FactRule {
         tags: &["ColumnGroup"],
@@ -920,7 +940,11 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Bag("2", 0),
         element: "AppearanceMode",
         replaces: &[],
-        values: &[("0", None), ("1", Some("CommandBar"))],
+        values: &[
+            ("0", None),
+            ("1", Some("CommandBar")),
+            ("2", Some("UsualGroup")),
+        ],
     },
     FactRule {
         tags: &["Popup"],
@@ -1256,7 +1280,7 @@ fn apply_rules(
         };
         let code = code.as_str();
         let value = rule
-            .values
+            .values_for(&tag)
             .iter()
             .find(|(known, _)| *known == code)
             .map(|(_, value)| *value)

@@ -27,7 +27,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use ibcmd_1c_text::{crlf_line_breaks, format_1c_string as quote_1c};
 
 use super::xml_2_21_writer::{
-    FIELD_TAGS, GROUPING, TRI_STATE, XmlEdits, child_text, element_name, simple_text,
+    CELL_HYPERLINK_REPRESENTATION, FIELD_TAGS, GROUPING, TRI_STATE, WIDTH_IN_CARD, XmlEdits,
+    child_text, element_name, simple_text,
 };
 use ibcmd_form_body::FormLayout;
 use ibcmd_form_body::layout_8_5_1::Node;
@@ -618,14 +619,8 @@ fn load_item(
         }
         "ColumnGroup" => {
             let card = take(edits, element, "ShowTitleInCard")?;
-            item.bag_tail.insert(
-                2,
-                code_of(
-                    &[("0", Some("false")), ("2", None)],
-                    card.as_deref(),
-                    "ShowTitleInCard",
-                )?,
-            );
+            item.bag_tail
+                .insert(2, code_of(TRI_STATE, card.as_deref(), "ShowTitleInCard")?);
             let title = peek(edits, element, "ShowTitle")?;
             item.bag_tail
                 .insert(3, code_of(TRI_STATE, title.as_deref(), "ShowTitle")?);
@@ -636,7 +631,11 @@ fn load_item(
             item.bag_tail.insert(
                 0,
                 code_of(
-                    &[("0", None), ("1", Some("CommandBar"))],
+                    &[
+                        ("0", None),
+                        ("1", Some("CommandBar")),
+                        ("2", Some("UsualGroup")),
+                    ],
                     mode.as_deref(),
                     "AppearanceMode",
                 )?,
@@ -719,7 +718,7 @@ fn load_field(
     item.tail.insert(
         8,
         code_of(
-            &[("0", None), ("2", Some("Half"))],
+            WIDTH_IN_CARD.values_for(tag),
             width.as_deref(),
             "WidthInCard",
         )?,
@@ -742,7 +741,7 @@ fn load_field(
     item.tail.insert(
         13,
         code_of(
-            &[("0", None), ("1", Some("Show"))],
+            CELL_HYPERLINK_REPRESENTATION.values_for(tag),
             representation.as_deref(),
             "CellHyperlinkRepresentation",
         )?,
@@ -774,7 +773,7 @@ fn load_field(
             item.bag_tail.insert(
                 3,
                 code_of(
-                    &[("0", Some("Enlarged")), ("1", None)],
+                    &[("0", Some("Enlarged")), ("1", None), ("2", Some("Reduced"))],
                     size.as_deref(),
                     "TextSize",
                 )?,
@@ -782,14 +781,8 @@ fn load_field(
         }
         "LabelField" => {
             let copy = take(edits, element, "UseCopy")?;
-            item.bag_tail.insert(
-                0,
-                code_of(
-                    &[("1", Some("true")), ("2", None)],
-                    copy.as_deref(),
-                    "UseCopy",
-                )?,
-            );
+            item.bag_tail
+                .insert(0, code_of(TRI_STATE, copy.as_deref(), "UseCopy")?);
         }
         "CheckBoxField" => {
             // 8.5 has no `Auto` check box: an unset type is 8.3.27's `Auto`
@@ -813,11 +806,7 @@ fn load_field(
             let stretch = take(edits, element, "HorizontalStretch")?;
             item.bag_tail.insert(
                 2,
-                code_of(
-                    &[("1", Some("true")), ("2", None)],
-                    stretch.as_deref(),
-                    "HorizontalStretch",
-                )?,
+                code_of(TRI_STATE, stretch.as_deref(), "HorizontalStretch")?,
             );
         }
         "PictureField" => {
@@ -1060,6 +1049,10 @@ fn load_usual_group(edits: &mut XmlEdits<'_>, element: usize, item: &mut ItemFac
     match peek(edits, element, "ControlRepresentation")?.as_deref() {
         None => {}
         Some("Button") => put(edits, element, "ControlRepresentation", "Picture")?,
+        Some("ButtonInParentElement") => {
+            take(edits, element, "ControlRepresentation")?;
+            item.bag.insert(11, "2".to_owned());
+        }
         Some(other) => bail!("ControlRepresentation {other} has no 8.3.27 spelling"),
     }
     Ok(())
@@ -1551,6 +1544,7 @@ fn up_bag(
         ("37", "19", "1", 11) => ("1", vec![]),
         // Unmeasured under 8.5 (see `layout_8_5_1::bag_revision`): kept as is.
         ("37", "12", "3", 16) => ("3", vec![]),
+        ("37", "16", "2", 13) => ("2", vec![]),
         ("37", "20", "1", 14) => ("1", vec![]),
         ("12", "0", "5", 9) => ("5", vec![]),
         ("12", "1", "4", 13) => ("6", vec!["0", UNSET_COLOR]),
@@ -2120,6 +2114,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn field_values_require_measurements_for_the_field_class() {
+        let width = WIDTH_IN_CARD.values_for("LabelField");
+        assert!(code_of(width, Some("Full"), "WidthInCard").is_err());
+        assert_eq!(code_of(width, Some("Half"), "WidthInCard").unwrap(), "2");
+
+        let hyperlink = CELL_HYPERLINK_REPRESENTATION.values_for("CheckBoxField");
+        assert!(code_of(hyperlink, Some("DontShow"), "CellHyperlinkRepresentation").is_err());
+        assert_eq!(
+            code_of(hyperlink, Some("Show"), "CellHyperlinkRepresentation").unwrap(),
+            "1"
+        );
+    }
+
+    #[test]
     fn an_unset_table_line_member_is_a_true_slot_only_in_the_8_3_layout() {
         let form = |members: &str| {
             format!(
@@ -2196,7 +2204,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(checked, 28);
+        assert_eq!(checked, 29);
     }
 
     #[test]

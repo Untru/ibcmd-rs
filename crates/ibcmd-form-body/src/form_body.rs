@@ -2971,6 +2971,8 @@ pub(super) fn extract_form_command_set_excluded_commands(
 
 fn form_root_table_excluded_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
+        "1ba5803f-cfd6-4fd4-b31f-8f98015de04d" => Some("Preview"),
+        "174e58ce-82ad-4787-b956-9367937f7971" => Some("ChangeHistory"),
         // These table command UUIDs are evidenced in root Form/CommandSet lists.
         "8969c93a-23e5-4bef-941d-aaef315858d2"
         | "daa306cd-a78a-4e74-a14c-739daba624cb"
@@ -9253,7 +9255,10 @@ pub(super) fn parse_form_dynamic_list_key_fields(field: &str) -> Vec<String> {
 /// the only type id the property carries across UT 11.5.27.75's 1 947 bags.
 const FORM_DYNAMIC_LIST_KEY_FIELDS_TYPE_ID: &str = "51e7a0d2-530b-11d4-b98a-008048da3034";
 
-pub(super) fn parse_form_spreadsheet_document_settings(
+/// The embedded spreadsheet projection, also used to reject a compiled
+/// record which cannot retain its complete admitted settings document.
+#[doc(hidden)]
+pub fn parse_form_spreadsheet_document_settings(
     field: &str,
     value_types: &[ConstantValueType],
     object_refs: &BTreeMap<String, String>,
@@ -15829,6 +15834,7 @@ fn parse_form_child_item_with_metadata_owners(
                     .trim()
                 {
                     "1" => Some("FullName"),
+                    "17" => Some("PhoneNumber"),
                     _ => None,
                 }
             }),
@@ -16523,6 +16529,7 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "FormattedDocumentField"
             | "CalendarField"
             | "GraphicalSchemaField"
+            | "GeographicalSchemaField"
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
             | "PDFDocumentField"
@@ -21850,7 +21857,12 @@ fn parse_form_field_command_set_excluded_commands(
         return Vec::new();
     }
     let offset = form_input_field_top_level_offset(fields);
-    if fields.len() != 59 + offset
+    let field_count = if item_tag == "PDFDocumentField" {
+        60
+    } else {
+        59
+    };
+    if fields.len() != field_count + offset
         || fields.get(47 + offset).map(|field| field.trim()) != Some("\"\"")
         || fields.get(49 + offset).map(|field| field.trim()) != Some("0")
     {
@@ -21864,6 +21876,7 @@ fn parse_form_field_command_set_excluded_commands(
             ("FormattedDocumentField", Some("17")) => {
                 form_formatted_document_standard_command_suffix
             }
+            ("PDFDocumentField", Some("20")) => form_pdf_document_standard_command_suffix,
             _ => return Vec::new(),
         };
     let Some(uuids) = fields
@@ -21872,7 +21885,16 @@ fn parse_form_field_command_set_excluded_commands(
     else {
         return Vec::new();
     };
-    map_known_form_excluded_commands(&uuids, mapper)
+    let mut commands = map_known_form_excluded_commands(&uuids, mapper);
+    if item_tag == "SpreadSheetDocumentField" {
+        extend_joint_form_excluded_commands(
+            &mut commands,
+            &uuids,
+            &ibcmd_form_schema::SPREADSHEET_FORMATTED_STRING_EXCLUSION,
+            &["FormattedString"],
+        );
+    }
+    commands
 }
 
 #[cfg(test)]
@@ -22348,6 +22370,7 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
                 "8" => (wrapper == "37").then_some("CalendarField"),
                 "14" => (wrapper == "37").then_some("GraphicalSchemaField"),
                 "15" => (wrapper == "37").then_some("HTMLDocumentField"),
+                "16" => (wrapper == "37").then_some("GeographicalSchemaField"),
                 "17" => Some("FormattedDocumentField"),
                 // The PDF viewer field. Census of UT 11.5.27.75: the
                 // configuration holds exactly five items whose wrapper-`37`
@@ -23973,6 +23996,7 @@ pub(super) fn parse_form_child_item_event_identifier(
         // Platform 8.5 events; each identifier pairs with the native name on
         // every 8.5.1.1150 BSP item that binds it (78, 6 and 5 bindings).
         "c676f87f-6c33-4dba-aad8-0526726d1bcf" => Some("OnHover".to_string()),
+        "26b8cded-3de1-4118-90ea-08e3cde193ec" => Some("MultipleValueURLProcessing".to_string()),
         "9d59f117-9183-4044-be98-829c9cd48754" => Some("MultipleValuesAdd".to_string()),
         "147fd867-8f22-4463-939d-4b48c5860c89" => Some("OnSelectedRowsSetChange".to_string()),
         "fe115cc8-9e33-4684-a166-bd5136fe7a9f" => Some("OnChange".to_string()),
@@ -30075,6 +30099,7 @@ pub(super) fn form_pdf_document_standard_command_suffix(uuid: &str) -> Option<&'
         "30f0b852-3284-4ae4-838b-f89b78388bdc" => Some("RotateClockwise"),
         "e28575de-9fe8-4a8e-a285-13250de33d49" => Some("RotateCounterclockwise"),
         "a4e92b1d-5e86-4a86-b276-00e71ecf3fd4" => Some("GoToBegin"),
+        "f42d80c5-9a19-4be3-9f32-91fa5100caeb" => Some("ConvertToGrayScale"),
         "32a87619-85ce-495a-a195-2719f5e9c71e" => Some("GoBack"),
         "85a1b7ee-e94d-4783-b519-4af123f58596" => Some("GoForward"),
         "3e80231d-e169-456e-8373-0b9d4c15c8ab" => Some("GoToEnd"),
@@ -33763,7 +33788,7 @@ pub(super) fn format_form_child_item_xml(
     ));
     if matches!(
         item.tag,
-        "SpreadSheetDocumentField" | "FormattedDocumentField"
+        "SpreadSheetDocumentField" | "FormattedDocumentField" | "PDFDocumentField"
     ) && !item.command_set_excluded_commands.is_empty()
     {
         xml.push_str(&format!("{tab}\t<CommandSet>\r\n"));
@@ -37377,9 +37402,19 @@ pub(super) fn format_form_choice_list_xml(
                     // and takes the element-text escaper: the platform writes
                     // the quote raw there, and writes `&quot;` nowhere in any
                     // of the eight stand corpora.
-                    item.value
-                        .wire_shape()
-                        .append_xml_escaped(&mut xml, escape_xml_character_data);
+                    let shape = item.value.wire_shape();
+                    if item.value == ibcmd_schema::FormChoiceListValue::EmptyCustomStandardPeriod {
+                        let indent = format!("{tab}{FORM_CHOICE_LIST_VALUE_INDENT}");
+                        for (index, line) in shape.xml_opening().split("\r\n").enumerate() {
+                            if index != 0 {
+                                xml.push_str(FORM_XML_LINE_ENDING);
+                                xml.push_str(&indent);
+                            }
+                            xml.push_str(line);
+                        }
+                    } else {
+                        shape.append_xml_escaped(&mut xml, escape_xml_character_data);
+                    }
                     xml.push_str(FORM_XML_LINE_ENDING);
                     xml.push_str(&format!("{tab}\t\t</xr:Value>\r\n"));
                 }

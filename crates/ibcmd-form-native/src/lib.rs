@@ -958,6 +958,12 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     (
         "InputField",
         "",
+        "MultipleValueURLProcessing",
+        "26b8cded-3de1-4118-90ea-08e3cde193ec",
+    ),
+    (
+        "InputField",
+        "",
         "Opening",
         "ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1",
     ),
@@ -1966,6 +1972,7 @@ pub fn native_field_kind(tag: &str) -> Option<u8> {
         "GanttChartField" => 12,
         "GraphicalSchemaField" => 14,
         "HTMLDocumentField" => 15,
+        "GeographicalSchemaField" => 16,
         "FormattedDocumentField" => 17,
         "PlannerField" => 19,
         "PDFDocumentField" => 20,
@@ -3519,6 +3526,12 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     (
         "PDFDocumentField",
         false,
+        "ConvertToGrayScale",
+        "f42d80c5-9a19-4be3-9f32-91fa5100caeb",
+    ),
+    (
+        "PDFDocumentField",
+        false,
         "GoBack",
         "32a87619-85ce-495a-a195-2719f5e9c71e",
     ),
@@ -4771,6 +4784,16 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
 /// two uuids, and the list's `<MainTable>` decides. See
 /// `form_excluded_command_uuid` in the root crate's `module_blob`.
 const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
+    (
+        "cfg:ReportObject",
+        "Preview",
+        "1ba5803f-cfd6-4fd4-b31f-8f98015de04d",
+    ),
+    (
+        "cfg:ExchangePlanObject",
+        "ChangeHistory",
+        "174e58ce-82ad-4787-b956-9367937f7971",
+    ),
     ("", "Cancel", "679b62d9-ff72-4329-bf3a-c0c32b311dd2"),
     ("", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
     ("", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
@@ -5699,6 +5722,9 @@ pub fn form_standard_command_uuid(main_attribute_class: &str, name: &str) -> Opt
         })
     {
         return Some(uuid);
+    }
+    if name == "Preview" {
+        return None;
     }
     let mut uuids = FORM_STANDARD_COMMAND_UUIDS
         .iter()
@@ -8560,7 +8586,7 @@ pub struct NativeRootTail<'a> {
     pub horizontal_align: Option<&'a str>,
     /// `<VerticalAlign>`: `Top`, `Center` or `Bottom`.
     pub vertical_align: Option<&'a str>,
-    /// `<ChildrenAlign>`, of which only `None` is ever stored.
+    /// `<ChildrenAlign>`, including `TitlesLeftDataAuto` on 8.5.1.1529.
     pub children_align: Option<&'a str>,
     /// `<Group>`, read twice and again not the same way: `AlwaysHorizontal`
     /// writes 1 in the first place and 3 in the second.
@@ -8656,6 +8682,7 @@ fn root_code(value: Option<&str>, table: &[(&str, &str)], absent: &'static str) 
 const ROOT_SPACING: &[(&str, &str)] = &[
     ("None", "1"),
     ("Half", "2"),
+    ("Single", "3"),
     ("OneAndHalf", "4"),
     ("Double", "5"),
 ];
@@ -8711,7 +8738,11 @@ pub fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
             &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
             "3",
         )?,
-        root_code(tail.children_align, &[("None", "1")], "0")?,
+        root_code(
+            tail.children_align,
+            &[("None", "1"), ("TitlesLeftDataAuto", "6")],
+            "0",
+        )?,
         group,
         scroll_again,
         // `<Scale>`, 100 when unwritten (the exporter's `extract_form_scale`).
@@ -9146,6 +9177,7 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("AccountingRegister", "PeriodAdjustment", "-30"),
     ("AccountingRegister", "Filter", "-60001"),
     ("AccumulationRegister", "Period", "-2"),
+    ("AccumulationRegister", "Active", "-5"),
     ("AccumulationRegister", "LineNumber", "-4"),
     ("AccumulationRegister", "RecordType", "-9"),
     // Calculation-register record-set markers are shared by direct record-set
