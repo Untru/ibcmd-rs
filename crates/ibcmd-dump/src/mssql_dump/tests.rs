@@ -14101,7 +14101,7 @@ fn rewrites_internal_help_links_to_metadata_references() {
     let unknown_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let refs = BTreeMap::from([(uuid.to_string(), "Catalog.Products".to_string())]);
     let html = format!(
-        r#"<a href="../id{uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Products</a><a href="../id{unknown_uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Unknown</a><a href="https://example.com">External</a>"#
+        r#"<a href="../id{uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Products</a><a href="../id{unknown_uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Unknown</a><a href="https://example.com">External</a><a href="about:../id{uuid}/038b5c85-fb1c-4082-9c4c-e69f8928bf3a">Keep</a>"#
     );
 
     let rewritten = String::from_utf8(rewrite_help_links(html.as_bytes(), &refs)).unwrap();
@@ -14109,6 +14109,7 @@ fn rewrites_internal_help_links_to_metadata_references() {
     assert!(rewritten.contains(r#"href="Catalog.Products/Help""#));
     assert!(rewritten.contains(&format!(r#"href="../id{unknown_uuid}/"#)));
     assert!(rewritten.contains(r#"href="https://example.com""#));
+    assert!(rewritten.contains(&format!(r#"href="about:../id{uuid}/"#)));
 }
 
 #[test]
@@ -36053,6 +36054,36 @@ fn selected_form_owner_rows_are_resolved_from_metadata_inventory() {
 }
 
 #[test]
+fn direct_revision_14_forms_decode_only_measured_interface_modes() {
+    let uuid = "44444444-4444-4444-8444-444444444441";
+    let row = |tail: &str| {
+        format!(
+            r##"{{1,{{14,{{3,{{1,0,{uuid}}},"ChoiceForm",{{0}},"",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{1,{{"#",1708fdaa-cbce-4289-b373-07a5a74bee91,1}}}}{tail}}},0}}"##
+        )
+    };
+    for (tail, mode) in [(",0", "Any"), (",1", "Taxi"), (",2", "Version85")] {
+        let text = row(tail);
+        assert!(is_direct_code14_form_metadata_text(&text, uuid));
+        let metadata = metadata_text_row_from_text(uuid, text.clone()).unwrap();
+        let properties = parse_form_metadata_properties_from_text(&text, "Form", uuid).unwrap();
+        let xml = format_form_source_xml(
+            "Form",
+            metadata.header.as_ref().unwrap(),
+            &properties,
+            DeclaredFormType::Managed,
+            InfobaseConfigSourceVersion::V2_21,
+        );
+        assert!(xml.contains(&format!(
+            "<UseInInterfaceCompatibilityMode>{mode}</UseInInterfaceCompatibilityMode>"
+        )));
+    }
+    let unknown = row(",3");
+    assert!(!is_direct_code14_form_metadata_text(&unknown, uuid));
+    assert!(parse_form_metadata_properties_from_text(&unknown, "Form", uuid).is_none());
+    assert!(!is_direct_code14_form_metadata_text(&row(""), uuid));
+}
+
+#[test]
 fn direct_code14_forms_are_indexed_only_with_one_metadata_owner() {
     let owner_uuid = "11111111-1111-4111-8111-111111111111";
     let form_uuid = "44444444-4444-4444-8444-444444444441";
@@ -53746,7 +53777,7 @@ fn legacy_v12_form_descriptor_is_not_a_common_module() {
         parse_declared_form_type(&text, uuid),
         Some(DeclaredFormType::Managed)
     ));
-    let properties = parse_form_metadata_properties_from_text(&text, "Form", uuid);
+    let properties = parse_form_metadata_properties_from_text(&text, "Form", uuid).unwrap();
     assert_eq!(
         properties.use_purposes,
         vec!["PlatformApplication", "MobilePlatformApplication"]

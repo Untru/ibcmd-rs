@@ -1813,17 +1813,22 @@ impl FormRecord {
             .flat_map(|list| list.children_named("Value"))
             .map(|value| code(&value.text, USE_PURPOSES, "UsePurposes"))
             .collect::<Result<Vec<_>>>()?;
+        let mode = match p.child_text("UseInInterfaceCompatibilityMode") {
+            Some(value) => code(
+                value,
+                INTERFACE_COMPATIBILITY_MODES,
+                "UseInInterfaceCompatibilityMode",
+            )?,
+            None => 0,
+        };
         let interface_compatibility_mode = if stores_layout_8_5_1(context) {
-            Some(match p.child_text("UseInInterfaceCompatibilityMode") {
-                Some(value) => code(
-                    value,
-                    INTERFACE_COMPATIBILITY_MODES,
-                    "UseInInterfaceCompatibilityMode",
-                )?,
-                None => 0,
-            })
-        } else {
+            Some(mode)
+        } else if mode == 0 {
             None
+        } else {
+            bail!(
+                "UseInInterfaceCompatibilityMode requires a revision 14 form record for code {mode}"
+            );
         };
         Ok(Self {
             header: Header::of(object)?,

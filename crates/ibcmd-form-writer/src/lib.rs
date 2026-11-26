@@ -14367,6 +14367,8 @@ pub fn native_object_standard_command(
 /// never in doubt: over 552 distinct owners not one stores two uuids.
 const OBJECT_STANDARD_COMMAND_ORDINALS: &[(&str, &str, u32)] = &[
     ("AccountingRegister", "OpenByRecorder", 1),
+    ("AccountingRegister", "OpenList", 0),
+    ("ChartOfAccounts", "OpenList", 0),
     ("AccumulationRegister", "OpenByRecorder", 1),
     ("BusinessProcess", "CreateBasedOn", 2),
     ("CalculationRegister", "OpenByRecorder", 1),

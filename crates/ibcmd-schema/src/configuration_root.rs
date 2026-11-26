@@ -76,6 +76,7 @@ pub fn child_xml_kind(kind: &str) -> Option<(usize, &'static str)> {
 pub enum V76InterfaceCompatibility {
     Taxi,
     Version8_5EnableTaxi,
+    TaxiEnableVersion8_5,
     TaxiEnableVersion8_2,
 }
 
@@ -83,6 +84,7 @@ impl V76InterfaceCompatibility {
     pub fn from_stored_codes(first: u8, second: u8) -> Option<Self> {
         match (first, second) {
             (3, 3) => Some(Self::Taxi),
+            (3, 4) => Some(Self::TaxiEnableVersion8_5),
             (3, 6) => Some(Self::Version8_5EnableTaxi),
             (2, 2) => Some(Self::TaxiEnableVersion8_2),
             _ => None,
@@ -92,6 +94,7 @@ impl V76InterfaceCompatibility {
     pub fn from_xml_name(name: &str) -> Option<Self> {
         match name {
             "Taxi" => Some(Self::Taxi),
+            "TaxiEnableVersion8_5" => Some(Self::TaxiEnableVersion8_5),
             "Version8_5EnableTaxi" => Some(Self::Version8_5EnableTaxi),
             "TaxiEnableVersion8_2" => Some(Self::TaxiEnableVersion8_2),
             _ => None,
@@ -101,6 +104,7 @@ impl V76InterfaceCompatibility {
     pub fn xml_name(self) -> &'static str {
         match self {
             Self::Taxi => "Taxi",
+            Self::TaxiEnableVersion8_5 => "TaxiEnableVersion8_5",
             Self::Version8_5EnableTaxi => "Version8_5EnableTaxi",
             Self::TaxiEnableVersion8_2 => "TaxiEnableVersion8_2",
         }
@@ -109,12 +113,13 @@ impl V76InterfaceCompatibility {
     /// The 8.5 interface lexeme was added in XML 2.21. Common Taxi modes
     /// retain the existing earlier-edition vocabulary.
     pub fn supports_xml_dialect(self, dialect: &str) -> bool {
-        self != Self::Version8_5EnableTaxi || dialect == "2.21"
+        matches!(self, Self::Taxi | Self::TaxiEnableVersion8_2) || dialect == "2.21"
     }
 
     pub fn stored_codes(self) -> (u8, u8) {
         match self {
             Self::Taxi => (3, 3),
+            Self::TaxiEnableVersion8_5 => (3, 4),
             Self::Version8_5EnableTaxi => (3, 6),
             Self::TaxiEnableVersion8_2 => (2, 2),
         }
@@ -164,24 +169,25 @@ mod tests {
         for (a, b, name) in [
             (3, 3, "Taxi"),
             (3, 6, "Version8_5EnableTaxi"),
+            (3, 4, "TaxiEnableVersion8_5"),
             (2, 2, "TaxiEnableVersion8_2"),
         ] {
             let mode = V76InterfaceCompatibility::from_stored_codes(a, b).unwrap();
             assert_eq!(mode.xml_name(), name);
             assert_eq!(mode.stored_codes(), (a, b));
             assert!(mode.supports_xml_dialect("2.21"));
-            assert_eq!(mode.supports_xml_dialect("2.20"), b != 6);
-            assert_eq!(mode.supports_xml_dialect("2.17"), b != 6);
+            assert_eq!(mode.supports_xml_dialect("2.20"), b <= 3);
+            assert_eq!(mode.supports_xml_dialect("2.17"), b <= 3);
             assert_eq!(V76InterfaceCompatibility::from_xml_name(name), Some(mode));
         }
         for a in 0..=9 {
             for b in 0..=9 {
-                if !matches!((a, b), (3, 3) | (3, 6) | (2, 2)) {
+                if !matches!((a, b), (3, 3) | (3, 4) | (3, 6) | (2, 2)) {
                     assert_eq!(V76InterfaceCompatibility::from_stored_codes(a, b), None);
                 }
             }
         }
-        for name in ["Version8_2", "TaxiEnableVersion8_5", "Taxi ", "taxi", ""] {
+        for name in ["Version8_2", "Version8_5", "Taxi ", "taxi", ""] {
             assert_eq!(V76InterfaceCompatibility::from_xml_name(name), None);
         }
     }
