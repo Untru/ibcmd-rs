@@ -2174,6 +2174,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         object_refs,
         generated_types,
         builtin_type_reference,
+        standard_picture_name,
         trace_sink,
         palette,
     ))
@@ -2185,6 +2186,7 @@ fn parse_moxel_spreadsheet_fields(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
     palette: Option<&mut Option<MxlPaletteProvenance>>,
 ) -> Option<MoxelSpreadsheet> {
