@@ -1313,7 +1313,7 @@ pub fn child_order(parent: &str) -> Option<&'static [&'static str]> {
             "SearchStringLocation",
             "ViewStatusLocation",
             "SearchControlLocation",
-            "HierarchyPanelLocation",
+            ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION,
             "CurrentRowUse",
             "ShowCommandBar",
             "ViewMode",

@@ -731,7 +731,7 @@ const FACT_RULES: &[FactRule] = &[
             "73",
             ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_SLOT,
         ),
-        element: "HierarchyPanelLocation",
+        element: ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION,
         replaces: &[],
         values: ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATIONS,
     },
