@@ -157,9 +157,15 @@ fn decode(oid: u32, bytes: Option<Vec<u8>>) -> Result<SqlValue> {
     if oid == 17 {
         return Ok(SqlValue::Binary(decode_binary(&bytes)?));
     }
+    if oid == 16 {
+        return match bytes.as_slice() {
+            [b't'] => Ok(SqlValue::Int(1)),
+            [b'f'] => Ok(SqlValue::Int(0)),
+            _ => bail!("invalid PostgreSQL boolean encoding"),
+        };
+    }
     let text = String::from_utf8(bytes).context("PostgreSQL result is not UTF-8")?;
     Ok(match oid {
-        16 => SqlValue::Int(i64::from(text == "t")),
         20 | 21 | 23 | 26 => SqlValue::Int(text.parse()?),
         700 | 701 => SqlValue::Float(text.parse()?),
         1700 => text.parse().map_or(SqlValue::Other(text), SqlValue::Int),
