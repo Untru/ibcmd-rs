@@ -899,6 +899,7 @@ dependencies = [
  "ibcmd-1c-text",
  "ibcmd-1c-vocab",
  "ibcmd-core",
+ "ibcmd-form-native",
  "ibcmd-form-schema",
  "ibcmd-moxel",
  "ibcmd-schema",

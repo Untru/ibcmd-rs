@@ -168,8 +168,8 @@ pub const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
 /// measured on 2 451 ERP УХ and 148 BSP command records and 112 item records:
 /// letters and digits are their upper-case ASCII, `F1`..`F12` 112..123,
 /// `Num 0`..`Num 9` 96..105, `Num *` 106, `Num +` 107, `Num -` 109, `Num .`
-/// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Any other key is
-/// refused.
+/// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Public coverage
+/// form command records additionally measure `Space` 32. Any other key is refused.
 pub fn format_native_shortcut(text: &str) -> Option<String> {
     let text = text.trim();
     // `Num +` ends in the separator itself, so it is split off first.
@@ -185,6 +185,7 @@ pub fn format_native_shortcut(text: &str) -> Option<String> {
         "BackSpace" => 8,
         "Enter" => 13,
         "Esc" => 27,
+        "Space" => 32,
         "Num *" => 106,
         "Num +" => 107,
         "Num -" => 109,
@@ -3216,6 +3217,10 @@ pub fn format_document_payload(wrapper: u8, width: &str, height: &str, tail: &st
 /// The uuid a `<Button>` stores for `Form.Item.<item>.StandardCommand.<name>`,
 /// by the target item's tag, whether it is bound to a dynamic list, and the
 /// command's name. Measured over every item button of ERP УХ.
+// Singleton command sets in native corpus-form-facets (8.3.27.2214 and 8.5.1.1150).
+pub const TABLE_ADD_AUTO_SELECTED_FIELD_UUID: &str = "eaab4e19-897e-464c-9674-262fddb1dce9";
+pub const TABLE_DESELECT_ALL_UUID: &str = "03022d03-1986-4dc4-93c2-03d995332357";
+
 const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     (
         "PlannerField",
@@ -4129,6 +4134,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
         "SearchHistory",
         "d96b0c03-b209-4d01-a3fc-17a14f873b64",
     ),
+    ("Table", false, "DeselectAll", TABLE_DESELECT_ALL_UUID),
     (
         "Table",
         false,
@@ -5651,6 +5657,9 @@ pub fn table_item_standard_command_uuid(
         let path = data_path.unwrap_or("").trim();
         let last = path.rsplit('.').next().unwrap_or("");
         match name {
+            "AddAutoSelectedField" if path.ends_with(".Settings.Selection") => {
+                return Some(TABLE_ADD_AUTO_SELECTED_FIELD_UUID);
+            }
             "Ungroup" if path.ends_with(".Settings") => {
                 return Some("23802256-7145-47c7-b379-8d60ca1b1262");
             }
@@ -10166,6 +10175,42 @@ fn resolve_metadata_data_path_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn space_shortcuts_keep_the_measured_key_and_modifiers() {
+        for (text, raw) in [
+            ("Space", "{0,32,0}"),
+            ("Shift+Space", "{0,32,4}"),
+            ("Ctrl+Space", "{0,32,8}"),
+            ("Ctrl+Alt+Shift+Space", "{0,32,28}"),
+        ] {
+            assert_eq!(format_native_shortcut(text).as_deref(), Some(raw));
+        }
+        for text in ["Spacebar", "Unknown+Space", "F13", "Num 10"] {
+            assert_eq!(format_native_shortcut(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn table_exclusions_use_native_singleton_command_ids() {
+        assert_eq!(
+            table_item_standard_command_uuid(
+                "Table",
+                false,
+                Some("Rows.SettingsComposer.Settings.Selection"),
+                "AddAutoSelectedField"
+            ),
+            Some("eaab4e19-897e-464c-9674-262fddb1dce9")
+        );
+        assert_eq!(
+            table_item_standard_command_uuid("Table", false, Some("Rows"), "DeselectAll"),
+            Some("03022d03-1986-4dc4-93c2-03d995332357")
+        );
+        assert_eq!(
+            table_item_standard_command_uuid("Table", false, Some("Rows"), "AddAutoSelectedField"),
+            None
+        );
+    }
 
     #[test]
     fn extension_activation_colors_match_native_coverage() {

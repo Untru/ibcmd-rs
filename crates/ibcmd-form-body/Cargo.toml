@@ -12,6 +12,7 @@ anyhow = "1.0"
 ibcmd-1c-text = { path = "../ibcmd-1c-text" }
 ibcmd-1c-vocab = { path = "../ibcmd-1c-vocab" }
 ibcmd-core = { path = "../ibcmd-core" }
+ibcmd-form-native = { path = "../ibcmd-form-native" }
 ibcmd-form-schema = { path = "../ibcmd-form-schema" }
 # The MOXCEL reader, for a spreadsheet document a form attribute holds.
 ibcmd-moxel = { path = "../ibcmd-moxel" }
