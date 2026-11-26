@@ -381,6 +381,7 @@
     "XDTOPackages/CovTemplate",
     "CommonTemplates/CovSheetValueListDetail",
     "CommonTemplates/CovSheetAutoFontHeight",
-    "CommonTemplates/CovSheetOEMFixedFont"
+    "CommonTemplates/CovSheetOEMFixedFont",
+    "CommonTemplates/CovSheetSandyBrown"
   ]
 }
