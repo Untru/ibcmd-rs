@@ -4877,6 +4877,7 @@ fn dump_table_rows_streamed(
     requested_descriptor: Option<&str>,
 ) -> Result<DumpedTable> {
     let table = inventory_plan.role().sql_name();
+    let inventory_only = sink.as_ref().is_some_and(|sink| sink.inventory_only());
     let generate_config_dump_info = inventory_plan.config_dump_info_eligible();
     if incremental.is_some() && (!generate_config_dump_info || sink.is_some()) {
         bail!(
@@ -5651,13 +5652,16 @@ fn dump_table_rows_streamed(
     );
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
-    let field_type_refs = Arc::new(
-        if extract_metadata_xml && source_reference_needs.field_refs {
-            build_metadata_field_type_reference_index_from_texts(&index_metadata_texts, &type_index)
-        } else {
-            BTreeMap::new()
-        },
-    );
+    // Source asset routing needs field names even for ConfigDumpInfo.
+    // Field types and declarations are used only by body conversion, after
+    // the inventory-only return.
+    let build_field_conversion_indexes =
+        !inventory_only && extract_metadata_xml && source_reference_needs.field_refs;
+    let field_type_refs = Arc::new(if build_field_conversion_indexes {
+        build_metadata_field_type_reference_index_from_texts(&index_metadata_texts, &type_index)
+    } else {
+        BTreeMap::new()
+    });
     timings.prepare_field_types_ms += elapsed_ms(field_part_started);
     cpu_add(
         &mut timings,
@@ -5667,7 +5671,7 @@ fn dump_table_rows_streamed(
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
     // One index, two readers -- see the sibling construction site.
-    let type_set_leaves = if extract_metadata_xml {
+    let type_set_leaves = if extract_metadata_xml && !inventory_only {
         build_metadata_type_set_leaf_index_from_texts(&index_metadata_texts, &type_index)
     } else {
         MetadataTypeSetLeafIndex::new()
@@ -5680,16 +5684,15 @@ fn dump_table_rows_streamed(
     );
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
-    let information_register_field_refs =
-        if extract_metadata_xml && source_reference_needs.field_refs {
-            build_information_register_field_reference_index_from_texts(
-                &index_metadata_texts,
-                &type_index,
-                &type_set_leaves,
-            )
-        } else {
-            BTreeMap::new()
-        };
+    let information_register_field_refs = if build_field_conversion_indexes {
+        build_information_register_field_reference_index_from_texts(
+            &index_metadata_texts,
+            &type_index,
+            &type_set_leaves,
+        )
+    } else {
+        BTreeMap::new()
+    };
     timings.prepare_register_fields_ms += elapsed_ms(field_part_started);
     cpu_add(
         &mut timings,
@@ -5698,20 +5701,18 @@ fn dump_table_rows_streamed(
     );
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
-    let information_register_master_dimensions = Arc::new(
-        if extract_metadata_xml && source_reference_needs.field_refs {
-            build_information_register_master_dimension_index_from_texts(
-                &index_metadata_texts,
-                &type_index,
-                &object_refs,
-                &form_refs,
-                XML_2_21_PRESERVES_RAW_REGISTER_DATA_PATHS
-                    && source_version == InfobaseConfigSourceVersion::V2_21,
-            )
-        } else {
-            InformationRegisterMasterDimensionIndex::new()
-        },
-    );
+    let information_register_master_dimensions = Arc::new(if build_field_conversion_indexes {
+        build_information_register_master_dimension_index_from_texts(
+            &index_metadata_texts,
+            &type_index,
+            &object_refs,
+            &form_refs,
+            XML_2_21_PRESERVES_RAW_REGISTER_DATA_PATHS
+                && source_version == InfobaseConfigSourceVersion::V2_21,
+        )
+    } else {
+        InformationRegisterMasterDimensionIndex::new()
+    });
     timings.prepare_master_dimensions_ms += elapsed_ms(field_part_started);
     cpu_add(
         &mut timings,
@@ -5720,7 +5721,7 @@ fn dump_table_rows_streamed(
     );
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
-    let metadata_field_declarations = if extract_metadata_xml && source_reference_needs.field_refs {
+    let metadata_field_declarations = if build_field_conversion_indexes {
         build_metadata_field_declaration_index_from_texts(
             &index_metadata_texts,
             &object_refs,
@@ -6105,7 +6106,7 @@ fn dump_table_rows_streamed(
     );
     // Native export info/status need the same inventory and writer as a full
     // export, but never fetch or convert the body batches below.
-    if sink.as_ref().is_some_and(|sink| sink.inventory_only()) {
+    if inventory_only {
         let blob = fetch_binary_rows(
             sql,
             database,
