@@ -13,11 +13,11 @@ use serde::{Serialize, Serializer};
 use sha2::{Digest, Sha256};
 
 use crate::asset::{Asset, AssetReference};
-use crate::diagnostic::{ObjectPath, PathSegment, PropertyPath};
+use crate::diagnostic::{DiagnosticReport, ObjectPath, PathSegment, PropertyPath};
 use crate::identity::ObjectUuid;
-use crate::model::{CanonicalConfiguration, CanonicalObject};
+use crate::model::{CanonicalConfiguration, CanonicalObject, ModelBuildError};
 use crate::opaque::OpaqueFacet;
-use crate::validate::ValidatedConfiguration;
+use crate::validate::{ValidatedConfiguration, validate_configuration};
 use crate::value::{CanonicalField, CanonicalValue, CanonicalValueKind};
 
 const SEMANTIC_DOMAIN_V2: &[u8] = b"ibcmd-canonical-semantic-v2\0";
@@ -103,6 +103,52 @@ fn object_digest(object: &CanonicalObject) -> SemanticDigest {
     let mut encoder = SemanticEncoder::new();
     encode_object(object, &mut encoder);
     encoder.finish()
+}
+
+/// Why an additive merge could not produce a valid canonical configuration.
+#[derive(Debug)]
+pub enum AdditiveMergeError {
+    /// Both inputs contain this UUID with different object content or provenance.
+    ConflictingObject(ObjectUuid),
+    /// The merged configuration exceeds a model limit.
+    Build(ModelBuildError),
+    /// The merged graph contains conflicting identities or invalid references.
+    InvalidGraph(DiagnosticReport),
+}
+
+/// Unions two validated configurations in UUID order.
+///
+/// Shared UUIDs must have identical canonical records, including provenance.
+/// Objects and opaque facets are copied whole. The result is validated before
+/// returning so that collisions between otherwise valid inputs fail closed.
+pub fn merge_additive(
+    left: &ValidatedConfiguration<'_>,
+    right: &ValidatedConfiguration<'_>,
+) -> Result<CanonicalConfiguration, AdditiveMergeError> {
+    use std::collections::btree_map::Entry;
+
+    let mut objects = BTreeMap::new();
+    for object in left
+        .configuration()
+        .objects()
+        .iter()
+        .chain(right.configuration().objects())
+    {
+        let uuid = object.identity().uuid();
+        match objects.entry(uuid) {
+            Entry::Vacant(entry) => {
+                entry.insert(object);
+            }
+            Entry::Occupied(entry) if *entry.get() != object => {
+                return Err(AdditiveMergeError::ConflictingObject(uuid));
+            }
+            Entry::Occupied(_) => {}
+        }
+    }
+    let merged = CanonicalConfiguration::new(objects.into_values().cloned().collect())
+        .map_err(AdditiveMergeError::Build)?;
+    validate_configuration(&merged).map_err(AdditiveMergeError::InvalidGraph)?;
+    Ok(merged)
 }
 
 impl ValidatedConfiguration<'_> {
@@ -524,6 +570,47 @@ mod tests {
         let left = validate_configuration(&left_configuration).unwrap();
         let right = validate_configuration(&right_configuration).unwrap();
         assert!(semantic_eq(&left, &right));
+    }
+
+    #[test]
+    fn additive_merge_validates_the_union_and_rejects_overlapping_edits() {
+        let original = golden_objects("profile:one", "text", b"opaque");
+        let subset = CanonicalConfiguration::new(vec![original[0].clone()]).unwrap();
+        let original = CanonicalConfiguration::new(original).unwrap();
+        let changed =
+            CanonicalConfiguration::new(golden_objects("profile:one", "text", b"changed")).unwrap();
+        let original = validate_configuration(&original).unwrap();
+        let subset = validate_configuration(&subset).unwrap();
+        let changed = validate_configuration(&changed).unwrap();
+
+        let merged = merge_additive(&subset, &original).unwrap();
+        assert_eq!(merged.objects(), original.configuration().objects());
+        assert!(matches!(
+            merge_additive(&original, &changed),
+            Err(AdditiveMergeError::ConflictingObject(id)) if id == uuid(1)
+        ));
+    }
+
+    #[test]
+    fn additive_merge_rejects_path_collisions_between_valid_inputs() {
+        fn single_object(id: u32) -> CanonicalConfiguration {
+            let object_path = path("shared");
+            let object = CanonicalObjectParts::new(
+                LogicalIdentity::new(uuid(id), object_path.clone()),
+                MetadataKind::new("Catalog").unwrap(),
+                provenance("profile:one", &object_path),
+            );
+            CanonicalConfiguration::new(vec![CanonicalObject::new(object).unwrap()]).unwrap()
+        }
+
+        let left = single_object(1);
+        let right = single_object(2);
+        let left = validate_configuration(&left).unwrap();
+        let right = validate_configuration(&right).unwrap();
+        assert!(matches!(
+            merge_additive(&left, &right),
+            Err(AdditiveMergeError::InvalidGraph(_))
+        ));
     }
 
     #[test]
