@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result, bail};
 
 use super::offline_rows::OfflineRows;
-use crate::sql::postgres::{PgConnection, PgTarget, decode_bytea};
+use crate::sql::postgres::{PgClient, PgConnection, PgTarget, decode_bytea};
 
 /// A single export operation's retained PostgreSQL rows. Clones share the same
 /// single-use slot; neither a target key nor credentials enter shared state.
@@ -88,23 +88,24 @@ pub(super) fn load_published(
 /// The configuration the database publishes, as offline rows; with
 /// `stored_only` its `config` table alone (`config save --db`).
 pub(crate) fn load(target: &PgTarget, stored_only: bool) -> Result<OfflineRows> {
-    let mut connection = PgConnection::connect(target)?;
-    connection.query(
-        "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",
-        &mut |_| Ok(()),
-    )?;
-    // CONFIG, the CONFIGSAVE census and its lazy payload must belong to the
-    // same database generation even when an import/apply commits meanwhile.
-    match read_published(&mut connection, stored_only) {
-        Ok(rows) => {
-            connection.query("COMMIT", &mut |_| Ok(()))?;
-            Ok(rows)
+    PgClient::new(target.clone()).with_session(|connection| {
+        connection.query(
+            "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",
+            &mut |_| Ok(()),
+        )?;
+        // CONFIG, the CONFIGSAVE census and its lazy payload must belong to the
+        // same database generation even when an import/apply commits meanwhile.
+        match read_published(connection, stored_only) {
+            Ok(rows) => {
+                connection.query("COMMIT", &mut |_| Ok(()))?;
+                Ok(rows)
+            }
+            Err(error) => {
+                let _ = connection.query("ROLLBACK", &mut |_| Ok(()));
+                Err(error)
+            }
         }
-        Err(error) => {
-            let _ = connection.query("ROLLBACK", &mut |_| Ok(()));
-            Err(error)
-        }
-    }
+    })
 }
 
 fn read_published(connection: &mut PgConnection, stored_only: bool) -> Result<OfflineRows> {

@@ -14,7 +14,8 @@ use ibcmd_filedb::{ConfigRow, Timestamp};
 
 use crate::cli::InfobaseConfigImportArgs;
 use crate::infobase::{ConnectionConfig, InfobaseConfigImportReport};
-use crate::sql::postgres::{PgConnection, decode_bytea};
+use crate::sql::SqlParam;
+use crate::sql::postgres::{PgClient, PgConnection, copy_rows, decode_bytea};
 
 pub(crate) fn import(
     config: &ConnectionConfig,
@@ -24,25 +25,27 @@ pub(crate) fn import(
         .postgres()?
         .ok_or_else(|| anyhow!("no PostgreSQL database"))?;
     let (source_root, source_version) = crate::file_infobase::import_source(config, args)?;
-    let mut connection = PgConnection::connect(&target)?;
-    begin_stage(&mut connection)?;
-    let stage = crate::file_infobase::plan_stage(
-        read_rows(&mut connection, "config")?,
-        &source_root,
-        source_version,
-        args,
-    )?;
-    let before = write_stage(&mut connection, &stage.rows)
-        .with_context(|| format!("не удалось записать configsave базы {}", target.database))?;
-    let after = stage.rows.len();
-    Ok(stage.report(
-        config,
-        source_root,
-        Some(source_version),
-        "postgres-configsave-stage",
-        (before, after),
-        None,
-    ))
+    let database = target.database.clone();
+    PgClient::new(target).with_session(|connection| {
+        begin_stage(connection)?;
+        let stage = crate::file_infobase::plan_stage(
+            read_rows(connection, "config")?,
+            &source_root,
+            source_version,
+            args,
+        )?;
+        let before = write_stage(connection, &stage.rows)
+            .with_context(|| format!("не удалось записать configsave базы {}", database))?;
+        let after = stage.rows.len();
+        Ok(stage.report(
+            config,
+            source_root,
+            Some(source_version),
+            "postgres-configsave-stage",
+            (before, after),
+            None,
+        ))
+    })
 }
 
 /// `infobase config load <file.cf>` into a PostgreSQL infobase (#353).
@@ -53,19 +56,21 @@ pub(crate) fn load_cf(
     let target = config
         .postgres()?
         .ok_or_else(|| anyhow!("no PostgreSQL database"))?;
-    let mut connection = PgConnection::connect(&target)?;
-    begin_stage(&mut connection)?;
-    let stage = crate::file_infobase::plan_cf_stage(read_rows(&mut connection, "config")?, input)?;
-    let before = write_stage(&mut connection, &stage.rows)
-        .with_context(|| format!("не удалось записать configsave базы {}", target.database))?;
-    let after = stage.rows.len();
-    Ok(stage.load_report(
-        config,
-        input,
-        "postgres-configsave-stage",
-        (before, after),
-        None,
-    ))
+    let database = target.database.clone();
+    PgClient::new(target).with_session(|connection| {
+        begin_stage(connection)?;
+        let stage = crate::file_infobase::plan_cf_stage(read_rows(connection, "config")?, input)?;
+        let before = write_stage(connection, &stage.rows)
+            .with_context(|| format!("не удалось записать configsave базы {}", database))?;
+        let after = stage.rows.len();
+        Ok(stage.load_report(
+            config,
+            input,
+            "postgres-configsave-stage",
+            (before, after),
+            None,
+        ))
+    })
 }
 
 /// Hold the configuration generation stable until its replacement stage commits.
@@ -118,18 +123,57 @@ fn read_rows(connection: &mut PgConnection, table: &str) -> Result<Vec<ConfigRow
 fn write_stage(connection: &mut PgConnection, rows: &[ConfigRow]) -> Result<usize> {
     let written = (|| -> Result<usize> {
         let mut before = 0;
-        connection.query("SELECT count(*) FROM configsave", &mut |row| {
-            before = row
-                .first()
-                .and_then(Option::as_deref)
-                .and_then(|value| std::str::from_utf8(value).ok()?.parse().ok())
-                .unwrap_or(0);
-            Ok(())
-        })?;
+        let mut can_copy = false;
+        connection.query(
+            "SELECT count(*), has_database_privilege(current_database(), 'TEMP') FROM configsave",
+            &mut |row| {
+                let count = row
+                    .first()
+                    .and_then(Option::as_deref)
+                    .context("missing configsave count")?;
+                before = std::str::from_utf8(count)?.parse()?;
+                can_copy = row.get(1).and_then(Option::as_deref) == Some(b"t");
+                Ok(())
+            },
+        )?;
         connection.query("DELETE FROM configsave", &mut |_| Ok(()))?;
-        for row in rows {
-            connection.query(&insert_statement(row), &mut |_| Ok(()))?;
+        if !can_copy {
+            for row in rows {
+                connection.query(&insert_statement(row), &mut |_| Ok(()))?;
+            }
+            return Ok(before);
         }
+        // Keep the platform-specific mvarchar cast and the database's local
+        // timestamp on the server. The wire representation uses core PG types.
+        connection.query(
+            "CREATE TEMP TABLE ibcmd_stage (name text, attributes int4, size int8, data bytea, part int4) ON COMMIT DROP",
+            &mut |_| Ok(()),
+        )?;
+        copy_rows(
+            connection,
+            "pg_temp.ibcmd_stage",
+            &["name", "attributes", "size", "data", "part"],
+            rows.iter().map(|row| {
+                [
+                    Ok(SqlParam::Text(&row.file_name)),
+                    i32::try_from(row.attributes)
+                        .map(SqlParam::I32)
+                        .map_err(Into::into),
+                    i64::try_from(row.data_size)
+                        .map(SqlParam::I64)
+                        .map_err(Into::into),
+                    Ok(SqlParam::Binary(&row.binary)),
+                    i32::try_from(row.part_no)
+                        .map(SqlParam::I32)
+                        .map_err(Into::into),
+                ]
+            }),
+        )?;
+        connection.query(
+            "INSERT INTO configsave (filename, creation, modified, attributes, datasize, binarydata, partno) \
+             SELECT name::mvarchar, LOCALTIMESTAMP(0), LOCALTIMESTAMP(0), attributes, size, data, part FROM pg_temp.ibcmd_stage",
+            &mut |_| Ok(()),
+        )?;
         Ok(before)
     })();
     match written {
@@ -162,6 +206,7 @@ mod tests {
     use super::*;
 
     fn wire_queries(
+        can_create_temp: bool,
         run: impl FnOnce(&ConnectionConfig) -> Result<InfobaseConfigImportReport>,
     ) -> Vec<String> {
         use std::io::{Read, Write};
@@ -187,6 +232,7 @@ mod tests {
             send(&mut stream, b'R', &0u32.to_be_bytes());
             send(&mut stream, b'Z', b"I");
             let mut queries = Vec::new();
+            let mut copy_frames = Vec::new();
             loop {
                 let mut header = [0; 5];
                 stream.read_exact(&mut header).unwrap();
@@ -196,8 +242,53 @@ mod tests {
                 if header[0] == b'X' {
                     break;
                 }
-                assert_eq!(header[0], b'Q');
+                match header[0] {
+                    b'd' => {
+                        copy_frames.push(body);
+                        continue;
+                    }
+                    b'c' => {
+                        assert_eq!(
+                            copy_frames.first().unwrap(),
+                            b"PGCOPY\n\xff\r\n\0\0\0\0\0\0\0\0\0"
+                        );
+                        assert_eq!(copy_frames.pop().unwrap(), (-1i16).to_be_bytes());
+                        assert!(copy_frames.len() > 1);
+                        for row in &copy_frames[1..] {
+                            let mut fields = row.as_slice();
+                            let mut count = [0; 2];
+                            fields.read_exact(&mut count).unwrap();
+                            assert_eq!(i16::from_be_bytes(count), 5);
+                            for expected in [None, Some(4), Some(8), None, Some(4)] {
+                                let mut length = [0; 4];
+                                fields.read_exact(&mut length).unwrap();
+                                let length = usize::try_from(i32::from_be_bytes(length)).unwrap();
+                                if let Some(expected) = expected {
+                                    assert_eq!(length, expected);
+                                }
+                                fields = &fields[length..];
+                            }
+                            assert!(fields.is_empty());
+                        }
+                        send(&mut stream, b'C', b"COPY\0");
+                        send(&mut stream, b'Z', b"T");
+                        continue;
+                    }
+                    b'Q' => {}
+                    tag => panic!("unexpected frontend message {tag}"),
+                }
                 queries.push(String::from_utf8(body[..body.len() - 1].to_vec()).unwrap());
+                if queries.last().unwrap().starts_with("SELECT count(*)") {
+                    let mut row = *b"\0\x02\0\0\0\x010\0\0\0\x01t";
+                    if !can_create_temp {
+                        *row.last_mut().unwrap() = b'f';
+                    }
+                    send(&mut stream, b'D', &row);
+                }
+                if queries.last().unwrap().starts_with("COPY ") {
+                    send(&mut stream, b'G', &[1, 0, 5, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]);
+                    continue;
+                }
                 send(&mut stream, b'C', b"OK\0");
                 send(&mut stream, b'Z', b"I");
             }
@@ -233,6 +324,8 @@ mod tests {
             Some("LOCK TABLE config, configsave IN SHARE ROW EXCLUSIVE MODE")
         );
         assert!(queries[2].ends_with("FROM config"));
+        assert!(queries.iter().any(|sql| sql
+            == "COPY pg_temp.ibcmd_stage (name, attributes, size, data, part) FROM STDIN BINARY"));
         assert_eq!(queries.last().map(String::as_str), Some("COMMIT"));
     }
 
@@ -272,20 +365,37 @@ mod tests {
             source_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/file-infobase/tiny-source"),
         };
-        assert_locked_stage(&wire_queries(|config| import(config, &args)));
+        assert_locked_stage(&wire_queries(true, |config| import(config, &args)));
     }
 
     #[test]
     fn a_cf_load_locks_both_tables_before_reading_its_base() {
         let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/file-infobase/tiny.cf");
-        let queries = wire_queries(|config| {
+        let queries = wire_queries(true, |config| {
             let report = load_cf(config, &input)?;
             assert_eq!(report.operation, "infobase config load");
             assert_eq!(report.format, "cf");
             Ok(report)
         });
         assert_locked_stage(&queries);
+    }
+    #[test]
+    fn a_role_without_temp_stages_rows_with_inserts() {
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/file-infobase/tiny.cf");
+        let queries = wire_queries(false, |config| load_cf(config, &input));
+        assert!(
+            !queries
+                .iter()
+                .any(|query| query.starts_with("COPY ") || query.starts_with("CREATE TEMP"))
+        );
+        assert!(
+            queries
+                .iter()
+                .any(|query| query.starts_with("INSERT INTO configsave"))
+        );
+        assert_eq!(queries.last().map(String::as_str), Some("COMMIT"));
     }
 
     #[test]

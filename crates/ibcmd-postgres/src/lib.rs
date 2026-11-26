@@ -2,12 +2,12 @@
 //! over TCP, enough to read the configuration tables of an infobase -- the
 //! startup, the password logins a server asks for (none, cleartext, MD5,
 //! SCRAM-SHA-256) and the simple query protocol, its rows streamed as they
-//! arrive. No TLS: a server that requires it refuses the login.
+//! arrive. With sslmode=verify-full the session uses authenticated TLS.
 //!
 //! The protocol is PostgreSQL's documented one ("Frontend/Backend Protocol",
 //! chapter 53 of the PostgreSQL 17 manual); SCRAM-SHA-256 is RFC 5802/7677.
 
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 pub struct PgTarget {
     pub host: String,
     pub port: u16,
+    pub verify_full: bool,
     pub database: String,
     pub user: String,
     pub password: Option<String>,
@@ -33,20 +34,20 @@ impl PgTarget {
         user: Option<&str>,
         password: Option<&str>,
     ) -> Result<Self> {
-        let server = server.trim();
-        let (host, port) = if let Some((host, rest)) = server.split_once(char::is_whitespace) {
-            let port = rest
-                .trim()
-                .strip_prefix("port=")
-                .ok_or_else(|| anyhow!("unrecognised PostgreSQL server `{server}`"))?;
-            (host, Some(port))
-        } else if let Some((host, port)) = server.rsplit_once(':')
-            && !host.contains(':')
-        {
-            (host, Some(port))
-        } else {
-            (server, None)
+        let mut parts = server.trim().trim_end_matches(';').split_ascii_whitespace();
+        let address = parts.next().unwrap_or_default().trim_end_matches(';');
+        let (host, mut port) = match address.rsplit_once(':') {
+            Some((host, port)) if !host.contains(':') => (host, Some(port)),
+            _ => (address, None),
         };
+        let mut verify_full = false;
+        for option in parts {
+            match option.trim_end_matches(';').split_once('=') {
+                Some(("port", value)) if port.is_none() => port = Some(value),
+                Some(("sslmode", "verify-full")) if !verify_full => verify_full = true,
+                _ => bail!("unrecognised PostgreSQL server `{server}`"),
+            }
+        }
         let port = match port {
             Some(port) => port
                 .trim()
@@ -57,6 +58,7 @@ impl PgTarget {
         Ok(Self {
             host: if host.is_empty() { "localhost" } else { host }.to_owned(),
             port,
+            verify_full,
             database: database.to_owned(),
             user: user.unwrap_or("postgres").to_owned(),
             password: password.map(str::to_owned),
@@ -66,8 +68,33 @@ impl PgTarget {
 
 /// One open session.
 pub struct PgConnection {
-    reader: BufReader<TcpStream>,
-    writer: BufWriter<TcpStream>,
+    stream: BufReader<Box<dyn Transport>>,
+}
+
+trait Transport: Read + Write + Send + Sync {}
+impl<T: Read + Write + Send + Sync> Transport for T {}
+
+fn tls_stream(mut socket: TcpStream, host: &str) -> Result<Box<dyn Transport>> {
+    socket.write_all(&[0, 0, 0, 8, 4, 210, 22, 47])?;
+    let mut response = [0];
+    socket.read_exact(&mut response)?;
+    if response != [b'S'] {
+        bail!("PostgreSQL refused TLS");
+    }
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
+    if roots.is_empty() {
+        bail!("no trusted TLS roots for PostgreSQL");
+    }
+    let config = rustls::ClientConfig::builder_with_provider(
+        rustls::crypto::aws_lc_rs::default_provider().into(),
+    )
+    .with_safe_default_protocol_versions()?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let name = rustls::pki_types::ServerName::try_from(host.to_owned())?;
+    let client = rustls::ClientConnection::new(config.into(), name)?;
+    Ok(Box::new(rustls::StreamOwned::new(client, socket)))
 }
 
 /// A server message: its type byte and body.
@@ -86,10 +113,16 @@ impl PgConnection {
                 )
             })?;
         stream.set_nodelay(true).ok();
-        stream.set_read_timeout(Some(Duration::from_secs(600))).ok();
+        let timeout = Some(Duration::from_secs(600));
+        stream.set_read_timeout(timeout)?;
+        stream.set_write_timeout(timeout)?;
+        let stream: Box<dyn Transport> = if target.verify_full {
+            tls_stream(stream, &target.host)?
+        } else {
+            Box::new(stream)
+        };
         let mut connection = Self {
-            reader: BufReader::with_capacity(1 << 20, stream.try_clone()?),
-            writer: BufWriter::new(stream),
+            stream: BufReader::with_capacity(1 << 20, stream),
         };
         connection.startup(target)?;
         Ok(connection)
@@ -110,8 +143,8 @@ impl PgConnection {
         body.push(0);
         let mut packet = ((body.len() + 4) as u32).to_be_bytes().to_vec();
         packet.extend_from_slice(&body);
-        self.writer.write_all(&packet)?;
-        self.writer.flush()?;
+        self.stream.get_mut().write_all(&packet)?;
+        self.stream.get_mut().flush()?;
         loop {
             let message = self.read_message()?;
             match message.tag {
@@ -255,6 +288,10 @@ impl PgConnection {
                         anyhow!("PostgreSQL query failed: {}", error_text(&message.body))
                     });
                 }
+                b'G' => self.send(b'f', b"use the binary COPY API\0")?,
+                b'H' => {
+                    failure = Some(anyhow!("COPY TO STDOUT is unsupported by query"));
+                }
                 b'Z' => return failure.map_or(Ok(()), Err),
                 // RowDescription, CommandComplete, EmptyQueryResponse,
                 // NoticeResponse, ParameterStatus; a DataRow after a failure.
@@ -263,18 +300,155 @@ impl PgConnection {
         }
     }
 
+    /// Execute one statement through Parse, Bind, Describe, Execute and Sync.
+    /// Parameters use their PostgreSQL type OID and the corresponding binary format.
+    pub fn query_params(
+        &mut self,
+        sql: &str,
+        params: &[(u32, &[u8])],
+        mut each: impl FnMut(&[u32], Vec<Option<Vec<u8>>>) -> Result<()>,
+    ) -> Result<u64> {
+        if sql.contains('\0') {
+            bail!("PostgreSQL statement contains NUL");
+        }
+        let count = i16::try_from(params.len()).context("too many PostgreSQL parameters")?;
+        let mut parse = vec![0];
+        put_cstr(&mut parse, sql);
+        parse.extend_from_slice(&count.to_be_bytes());
+        let mut bind = vec![0, 0, 0, 1, 0, 1];
+        bind.extend_from_slice(&count.to_be_bytes());
+        for (oid, value) in params {
+            parse.extend_from_slice(&oid.to_be_bytes());
+            bind.extend_from_slice(&i32::try_from(value.len())?.to_be_bytes());
+            bind.extend_from_slice(value);
+        }
+        bind.extend_from_slice(&[0, 0]); // text result columns
+        self.send(b'P', &parse)?;
+        self.send(b'B', &bind)?;
+        self.send(b'D', b"P\0")?;
+        self.send(b'E', &[0; 5])?;
+        self.send(b'H', &[])?;
+        let mut columns = Vec::new();
+        let mut affected = 0;
+        let mut failure = None;
+        loop {
+            let message = self.read_message()?;
+            match message.tag {
+                b'T' => columns = column_types(&message.body)?,
+                b'D' if failure.is_none() => {
+                    if let Err(error) = each(&columns, data_row(&message.body)?) {
+                        failure = Some(error);
+                    }
+                }
+                b'C' => {
+                    self.send(b'S', &[])?;
+                    affected = std::str::from_utf8(&message.body)?
+                        .trim_end_matches('\0')
+                        .rsplit(' ')
+                        .next()
+                        .and_then(|count| count.parse().ok())
+                        .unwrap_or(0);
+                }
+                b'E' => {
+                    self.send(b'S', &[])?;
+                    failure.get_or_insert_with(|| {
+                        anyhow!("PostgreSQL query failed: {}", error_text(&message.body))
+                    });
+                }
+                b'I' => self.send(b'S', &[])?,
+                b'G' => self.send(b'f', b"use the binary COPY API\0")?,
+                b'H' => {
+                    failure = Some(anyhow!("COPY TO STDOUT is unsupported by query_params"));
+                }
+                b'Z' => return failure.map_or(Ok(affected), Err),
+                _ => {}
+            }
+        }
+    }
+
+    /// Send a single binary COPY statement. On a producer error, abort COPY and
+    /// consume ReadyForQuery before returning control to the transaction owner.
+    /// This synchronous writer reads server notices at completion. Use it for
+    /// staging tables without triggers that emit messages for each input row.
+    pub fn copy_binary(
+        &mut self,
+        sql: &str,
+        produce: impl FnOnce(&mut BinaryCopy<'_>) -> Result<()>,
+    ) -> Result<()> {
+        let mut command = Vec::new();
+        put_cstr(&mut command, sql);
+        self.send(b'Q', &command)?;
+        let response = loop {
+            let message = self.read_message()?;
+            match message.tag {
+                b'G' => break message.body,
+                b'E' => {
+                    self.finish_copy()?;
+                    bail!("PostgreSQL COPY failed: {}", error_text(&message.body));
+                }
+                b'Z' => bail!("expected PostgreSQL CopyInResponse"),
+                _ => continue,
+            }
+        };
+        let sent = (|| {
+            let count = response.get(1..3).context("short CopyInResponse")?;
+            let columns = u16::from_be_bytes(count.try_into()?);
+            if response[0] != 1
+                || response.len() != 3 + usize::from(columns) * 2
+                || !response[3..].chunks_exact(2).all(|format| format == [0, 1])
+            {
+                bail!("expected binary PostgreSQL COPY columns");
+            }
+            self.send(b'd', b"PGCOPY\n\xff\r\n\0\0\0\0\0\0\0\0\0")?;
+            produce(&mut BinaryCopy {
+                connection: self,
+                columns,
+                buffer: Vec::new(),
+            })?;
+            self.send(b'd', &(-1i16).to_be_bytes())?;
+            self.send(b'c', &[])
+        })();
+        if let Err(error) = sent {
+            self.send(b'f', b"client aborted COPY\0")?;
+            let _ = self.finish_copy();
+            return Err(error);
+        }
+        self.finish_copy()
+    }
+
+    fn finish_copy(&mut self) -> Result<()> {
+        let mut failure = None;
+        loop {
+            let message = self.read_message()?;
+            match message.tag {
+                b'E' => {
+                    failure = Some(anyhow!(
+                        "PostgreSQL COPY failed: {}",
+                        error_text(&message.body)
+                    ))
+                }
+                b'Z' => return failure.map_or(Ok(()), Err),
+                _ => {}
+            }
+        }
+    }
+
     fn send(&mut self, tag: u8, body: &[u8]) -> Result<()> {
-        self.writer.write_all(&[tag])?;
-        self.writer
-            .write_all(&((body.len() + 4) as u32).to_be_bytes())?;
-        self.writer.write_all(body)?;
-        self.writer.flush()?;
+        let length = i32::try_from(body.len())
+            .ok()
+            .and_then(|n| n.checked_add(4))
+            .context("PostgreSQL message too large")?;
+        let mut header = [tag; 5];
+        header[1..].copy_from_slice(&length.to_be_bytes());
+        self.stream.get_mut().write_all(&header)?;
+        self.stream.get_mut().write_all(body)?;
+        self.stream.get_mut().flush()?;
         Ok(())
     }
 
     fn read_message(&mut self) -> Result<Message> {
         let mut head = [0u8; 5];
-        self.reader
+        self.stream
             .read_exact(&mut head)
             .context("PostgreSQL closed the connection")?;
         let length = u32::from_be_bytes([head[1], head[2], head[3], head[4]]) as usize;
@@ -282,17 +456,64 @@ impl PgConnection {
             bail!("malformed PostgreSQL message length {length}");
         }
         let mut body = vec![0u8; length - 4];
-        self.reader.read_exact(&mut body)?;
+        self.stream.read_exact(&mut body)?;
         Ok(Message { tag: head[0], body })
+    }
+}
+
+/// Row encoder for a server-accepted binary COPY.
+pub struct BinaryCopy<'a> {
+    connection: &'a mut PgConnection,
+    columns: u16,
+    buffer: Vec<u8>,
+}
+
+impl BinaryCopy<'_> {
+    /// Fields must already use the PostgreSQL binary format of their column.
+    pub fn row(&mut self, fields: &[Option<&[u8]>]) -> Result<()> {
+        if fields.len() != usize::from(self.columns) {
+            bail!("wrong number of PostgreSQL COPY fields");
+        }
+        self.buffer.clear();
+        self.buffer.extend_from_slice(&self.columns.to_be_bytes());
+        for field in fields {
+            let length = match field {
+                Some(bytes) => i32::try_from(bytes.len()).context("COPY field too large")?,
+                None => -1,
+            };
+            self.buffer.extend_from_slice(&length.to_be_bytes());
+            if let Some(bytes) = field {
+                self.buffer.extend_from_slice(bytes);
+            }
+        }
+        self.connection.send(b'd', &self.buffer)
     }
 }
 
 impl Drop for PgConnection {
     fn drop(&mut self) {
         // Terminate.
-        let _ = self.writer.write_all(&[b'X', 0, 0, 0, 4]);
-        let _ = self.writer.flush();
+        let _ = self.stream.get_mut().write_all(&[b'X', 0, 0, 0, 4]);
+        let _ = self.stream.get_mut().flush();
     }
+}
+
+fn column_types(mut body: &[u8]) -> Result<Vec<u32>> {
+    let mut count = [0; 2];
+    body.read_exact(&mut count)?;
+    let mut types = Vec::with_capacity(usize::from(u16::from_be_bytes(count)));
+    for _ in 0..u16::from_be_bytes(count) {
+        let end = body
+            .iter()
+            .position(|byte| *byte == 0)
+            .context("missing column name terminator")?;
+        body = &body[end + 1..];
+        types.push(be_u32(body, 6)?);
+        body = body
+            .get(18..)
+            .context("short PostgreSQL column description")?;
+    }
+    Ok(types)
 }
 
 fn data_row(body: &[u8]) -> Result<Vec<Option<Vec<u8>>>> {
@@ -463,10 +684,114 @@ mod tests {
             ("srv".into(), 5432)
         );
         assert_eq!(target("srv:5433").port, 5433);
-        let spaced = target("srv port=5434");
+        let tls = target("srv:5433; sslmode=verify-full");
+        assert_eq!(
+            (tls.host.as_str(), tls.port, tls.verify_full),
+            ("srv", 5433, true)
+        );
+        assert_eq!(target("srv; sslmode=verify-full").host, "srv");
+        let spaced = target("srv port=5434;");
+        assert!(target("srv port=5434; sslmode=verify-full").verify_full);
+        assert!(PgTarget::new("srv sslmode=prefer", "db", None, None).is_err());
         assert_eq!((spaced.host.as_str(), spaced.port), ("srv", 5434));
         assert_eq!(target("srv").user, "postgres");
         assert!(PgTarget::new("srv other", "db", None, None).is_err());
+    }
+
+    #[test]
+    fn delivers_the_first_row_before_the_server_completes_the_query() {
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+
+        fn read_frame(socket: &mut TcpStream) -> Vec<u8> {
+            let mut length = [0; 4];
+            socket.read_exact(&mut length).unwrap();
+            let mut body = vec![0; u32::from_be_bytes(length) as usize - 4];
+            socket.read_exact(&mut body).unwrap();
+            body
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let server = listener.local_addr().unwrap().to_string();
+        let (consumed, gate) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            read_frame(&mut socket);
+            socket
+                .write_all(b"R\0\0\0\x08\0\0\0\0Z\0\0\0\x05I")
+                .unwrap();
+            let mut tag = [0];
+            socket.read_exact(&mut tag).unwrap();
+            assert_eq!(tag, [b'Q']);
+            assert_eq!(read_frame(&mut socket), b"SELECT 1\0");
+            socket.write_all(b"D\0\0\0\x0b\0\x01\0\0\0\x011").unwrap();
+            gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            socket
+                .write_all(b"C\0\0\0\x0dSELECT 1\0Z\0\0\0\x05I")
+                .unwrap();
+        });
+        let target = PgTarget::new(&server, "synthetic", None, None).unwrap();
+        let mut connection = PgConnection::connect(&target).unwrap();
+        connection
+            .query("SELECT 1", &mut |row| {
+                assert_eq!(row, [Some(b"1".to_vec())]);
+                consumed.send(())?;
+                Ok(())
+            })
+            .unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn extended_query_sends_sync_after_a_server_error() {
+        use std::net::TcpListener;
+
+        fn receive(socket: &mut TcpStream) -> Vec<u8> {
+            let mut length = [0; 4];
+            socket.read_exact(&mut length).unwrap();
+            let mut body = vec![0; u32::from_be_bytes(length) as usize - 4];
+            socket.read_exact(&mut body).unwrap();
+            body
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let server = listener.local_addr().unwrap().to_string();
+        let worker = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            receive(&mut socket);
+            socket
+                .write_all(b"R\0\0\0\x08\0\0\0\0Z\0\0\0\x05I")
+                .unwrap();
+            let mut tag = [0];
+            for expected in b"PBDEH" {
+                socket.read_exact(&mut tag).unwrap();
+                assert_eq!(tag, [*expected]);
+                receive(&mut socket);
+            }
+            let error = b"SERROR\0C23505\0Mduplicate\0\0";
+            socket.write_all(b"E").unwrap();
+            socket
+                .write_all(&(4 + error.len() as u32).to_be_bytes())
+                .unwrap();
+            socket.write_all(error).unwrap();
+            socket.read_exact(&mut tag).unwrap();
+            assert_eq!(tag, [b'S']);
+            assert!(receive(&mut socket).is_empty());
+            socket.write_all(b"Z\0\0\0\x05I").unwrap();
+        });
+        let target = PgTarget::new(&server, "synthetic", None, None).unwrap();
+        let mut connection = PgConnection::connect(&target).unwrap();
+        let error = connection
+            .query_params(
+                "INSERT INTO dummy VALUES ($1)",
+                &[(23, &1i32.to_be_bytes())],
+                |_, _| Ok(()),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("23505"));
+        worker.join().unwrap();
     }
 
     #[test]

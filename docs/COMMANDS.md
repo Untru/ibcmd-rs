@@ -306,9 +306,15 @@ ibcmd infobase config export --dbms=PostgreSQL --db-server=pg01 --db-name=demo -
 ibcmd infobase config import --dbms=PostgreSQL --db-server=pg01 --db-name=demo --db-user=postgres /srv/export/demo
 ```
 
-- `--db-server`: `host`, `host:port` или `host port=N` (порт по умолчанию 5432).
+- `--db-server`: `host`, `host:port` или `host port=N;` (порт по умолчанию 5432).
 - Пароль (`--db-pwd`, `IBCMD_DB_PSW`) нужен, только если его спрашивает сервер:
-  поддерживаются вход без пароля, cleartext, MD5 и SCRAM-SHA-256. TLS нет.
+  поддерживаются вход без пароля, cleartext, MD5 и SCRAM-SHA-256.
+- Для TLS укажите `--db-server="pg01 port=5433; sslmode=verify-full"`.
+  Клиент проверяет цепочку сертификатов и имя сервера. Для собственного
+  центра сертификации задайте `SSL_CERT_FILE` с путём к PEM-файлу.
+  По умолчанию используется обычное TCP-соединение.
+- Импорт XML и загрузка CF передают строки через `COPY FROM STDIN BINARY`.
+  Для роли без права `TEMP` на базу сохраняется запись отдельными `INSERT`.
 - Выгружается таблица `config` с законченной подготовкой из `configsave`,
   как для SQL Server.
 - Загрузка подготавливает в `configsave` всю конфигурацию, как штатная

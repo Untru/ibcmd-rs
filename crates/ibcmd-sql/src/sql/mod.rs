@@ -7,8 +7,7 @@
 //! through rustls and Windows logins through SSPI -- neither sqlcmd.exe,
 //! bcp.exe nor an ODBC/OLE DB driver has to be installed. Everything that is
 //! SQL Server's own (TDS, instance names, `GO`, `sp_executesql`, `FOR JSON`
-//! rows, `varbinary(max)` writes) lives in [`mssql`]; a PostgreSQL client can
-//! implement the same interface beside it.
+//! rows, `varbinary(max)` writes) lives in [`mssql`]. PostgreSQL uses the backend in [`postgres`].
 //!
 //! A command given `--sqlcmd <path>` keeps the behaviour of ibcmd-rs 0.2
 //! instead ([`SqlBackend::Tools`]): statements and scripts go through that
@@ -45,6 +44,7 @@ const MAX_CONNECTIONS: usize = 64;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dbms {
     SqlServer,
+    PostgreSql,
 }
 
 /// How a script treats the client-side variables of its command-line tool
@@ -321,6 +321,24 @@ impl SqlExec {
     pub fn sql_server(target: SqlTarget) -> Result<Self> {
         let client = mssql::MssqlClient::new(target.clone(), connections_from_env())?;
         Ok(Self::with_client(target, Box::new(client)))
+    }
+
+    /// The built-in PostgreSQL client for a named database.
+    pub fn postgres(target: SqlTarget) -> Result<Self> {
+        let database = target
+            .database
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("PostgreSQL needs a database name"))?;
+        let pg = postgres::PgTarget::new(
+            &target.server,
+            database,
+            target.login.user(),
+            target.login.password(),
+        )?;
+        Ok(Self::with_client(
+            target,
+            Box::new(postgres::PgClient::new(pg)),
+        ))
     }
 
     /// A handle whose every request fails with `reason`.

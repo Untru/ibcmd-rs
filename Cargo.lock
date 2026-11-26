@@ -1094,6 +1094,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "md5",
+ "rustls",
+ "rustls-native-certs",
  "sha2",
  "stringprep",
  "uuid",
