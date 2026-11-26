@@ -6,7 +6,7 @@
 //! `Configuration.distr` and its export writes the designer file again with the
 //! items in the `.distr` order. Six dumps fix the mapping: a configuration with
 //! no supplier (`{6,0,0,0,1,0}`) and five with one supplier, covering every
-//! item mode below. A file outside these shapes is refused, never guessed.
+//! item mode below. EDT 2026.2.2 omits `used="true"` on every item.
 //!
 //! Designer file: a BOM and one flat brace list
 //! `{6,<distributive>,<suppliers>,` then per supplier
@@ -74,7 +74,8 @@ pub(super) fn bin_from_distr(source: &[u8]) -> Result<Vec<u8>, String> {
     let model = read_distr(source)?;
     // Every byte must be the spelling EDT writes for this model, so nothing in
     // the file is left unaccounted for.
-    if write_distr(&model)? != source {
+    let canonical = write_distr(&model, true)?;
+    if canonical != source && write_distr(&model, false)? != source {
         return Err(format!(
             "{EDT_FILE} is not in the witnessed EDT spelling of its model"
         ));
@@ -91,7 +92,7 @@ pub(super) fn distr_from_bin(bin: &[u8]) -> Result<Option<Vec<u8>>, String> {
     if write_bin(&model) != bin {
         return Ok(None);
     }
-    write_distr(&model).map(Some)
+    write_distr(&model, true).map(Some)
 }
 
 fn mode_value(table: &[(&'static str, Option<&str>)], edt: Option<&str>) -> Option<&'static str> {
@@ -307,7 +308,7 @@ fn escape(value: &str) -> Result<String, String> {
     Ok(out)
 }
 
-fn write_distr(model: &Distribution) -> Result<Vec<u8>, String> {
+fn write_distr(model: &Distribution, explicit_used: bool) -> Result<Vec<u8>, String> {
     let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
     out.push_str(&format!(
         "<distributionSupport:DistributionSupport xmlns:distributionSupport=\"{NAMESPACE}\" version=\"6\"{} updateAvailable=\"true\"",
@@ -350,7 +351,10 @@ fn write_distr(model: &Distribution) -> Result<Vec<u8>, String> {
         if let Some(Some(mode)) = mode_name(USER_MODES, item.user_mode) {
             out.push_str(&format!(" userMode=\"{mode}\""));
         }
-        out.push_str(" used=\"true\"/>\r\n");
+        if explicit_used {
+            out.push_str(" used=\"true\"");
+        }
+        out.push_str("/>\r\n");
     }
     out.push_str("  </parentConfigurationInfos>\r\n");
     out.push_str("</distributionSupport:DistributionSupport>\r\n");
@@ -495,6 +499,16 @@ mod tests {
         assert!(distr.contains("parentMode=\"NotIncludeInUserConfigByDefault\" userMode=\"Cancelled\" used=\"true\"/>"));
         assert!(distr.contains("parentId=\"b7ebf08a-d6be-42db-b28a-460df037d7ba\" parentMode=\"WarningMode\" used=\"true\"/>"));
         assert_eq!(bin_from_distr(distr.as_bytes()).unwrap(), bin);
+    }
+
+    #[test]
+    fn recent_edt_omits_used_from_every_item() {
+        let bin = one_bin();
+        let explicit = String::from_utf8(distr_from_bin(&bin).unwrap().unwrap()).unwrap();
+        let implicit = explicit.replace(" used=\"true\"", "");
+        assert_eq!(bin_from_distr(implicit.as_bytes()).unwrap(), bin);
+        let mixed = explicit.replacen(" used=\"true\"", "", 1);
+        assert!(bin_from_distr(mixed.as_bytes()).is_err());
     }
 
     #[test]
