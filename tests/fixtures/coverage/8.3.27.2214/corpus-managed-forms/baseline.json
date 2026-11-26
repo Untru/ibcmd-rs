@@ -2,7 +2,10 @@
   "equal": [
     "CovChartField",
     "CovEmbeddedSpreadsheetCells",
+    "CovFormCommandSpace",
     "CovFormEventOnOpen",
+    "CovGraphicalSchemaFieldBorderColorMediumGreen",
+    "CovGraphicalSchemaFieldBorderColorTomato",
     "CovManagedFormTemplate",
     "CovPlannerField",
     "configuration"

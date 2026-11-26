@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovFormattedNestedDefault",
+    "CovFormattedNestedEnabledFalse",
+    "CovFormattedNestedReadOnlyTrue",
+    "CovFormattedNestedStyleFont",
+    "CovFormattedNestedUserVisibleFalse",
+    "CovFormattedNestedVisibleFalse"
+  ]
+}

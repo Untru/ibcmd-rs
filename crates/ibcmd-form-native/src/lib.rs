@@ -168,8 +168,8 @@ pub const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
 /// measured on 2 451 ERP УХ and 148 BSP command records and 112 item records:
 /// letters and digits are their upper-case ASCII, `F1`..`F12` 112..123,
 /// `Num 0`..`Num 9` 96..105, `Num *` 106, `Num +` 107, `Num -` 109, `Num .`
-/// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Any other key is
-/// refused.
+/// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Public coverage
+/// form command records additionally measure `Space` 32. Any other key is refused.
 pub fn format_native_shortcut(text: &str) -> Option<String> {
     let text = text.trim();
     // `Num +` ends in the separator itself, so it is split off first.
@@ -185,6 +185,7 @@ pub fn format_native_shortcut(text: &str) -> Option<String> {
         "BackSpace" => 8,
         "Enter" => 13,
         "Esc" => 27,
+        "Space" => 32,
         "Num *" => 106,
         "Num +" => 107,
         "Num -" => 109,
@@ -484,6 +485,12 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
         "",
         "Selection",
         "2feb1ee9-b750-4352-bb4c-67ba1c608dc6",
+    ),
+    (
+        "ChartField",
+        "",
+        "OnActivate",
+        "97b47b15-7987-4fb4-915f-3ed53d69adfa",
     ),
     (
         "ChartField",
@@ -822,6 +829,12 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     // The planner's drag events share the item-wide drag identifiers
     // (form_schema.rs `FORM_ITEM_DRAG_*_EVENT_UUID`); Управление задачами
     // `Reports/узПланированиеПроекта/Forms/ФормаУправляемая` names all three.
+    (
+        "PlannerField",
+        "",
+        "CommandGenerateProcessing",
+        "b34abb58-ee89-4119-945c-6432e9ef04a9",
+    ),
     (
         "PlannerField",
         "",
@@ -2276,6 +2289,7 @@ pub fn format_graphical_schema_payload(
     edit: bool,
     auto_max_width: bool,
     events: &str,
+    border_color: &str,
 ) -> Option<String> {
     let output = match output {
         None => "0",
@@ -2283,7 +2297,7 @@ pub fn format_graphical_schema_payload(
         Some(_) => return None,
     };
     Some(format!(
-        "{{3,{width},{height},{output},{edit},{{3,4,{{0}}}},{events},{auto_max_width},0,0,1,0,1,1}}",
+        "{{3,{width},{height},{output},{edit},{border_color},{events},{auto_max_width},0,0,1,0,1,1}}",
         edit = u8::from(edit),
         auto_max_width = u8::from(auto_max_width),
     ))
@@ -2317,10 +2331,44 @@ pub fn format_chart_payload(
     events: &str,
     max_height: &str,
 ) -> String {
+    format_chart_payload_with_limits(
+        width,
+        height,
+        horizontal_stretch,
+        vertical_stretch,
+        events,
+        ChartLimits {
+            auto_max_width: true,
+            max_width: "0",
+            auto_max_height: true,
+            max_height,
+        },
+    )
+}
+
+pub struct ChartLimits<'a> {
+    pub auto_max_width: bool,
+    pub max_width: &'a str,
+    pub auto_max_height: bool,
+    pub max_height: &'a str,
+}
+
+pub fn format_chart_payload_with_limits(
+    width: &str,
+    height: &str,
+    horizontal_stretch: bool,
+    vertical_stretch: bool,
+    events: &str,
+    limits: ChartLimits<'_>,
+) -> String {
     format!(
-        "{{1,{width},{height},{horizontal},{vertical},{events},1,0,0,1,{max_height}}}",
+        "{{1,{width},{height},{horizontal},{vertical},{events},{auto_width},{max_width},0,{auto_height},{max_height}}}",
         horizontal = u8::from(horizontal_stretch),
         vertical = u8::from(vertical_stretch),
+        auto_width = u8::from(limits.auto_max_width),
+        auto_height = u8::from(limits.auto_max_height),
+        max_width = limits.max_width,
+        max_height = limits.max_height,
     )
 }
 
@@ -3169,12 +3217,22 @@ pub fn format_document_payload(wrapper: u8, width: &str, height: &str, tail: &st
 /// The uuid a `<Button>` stores for `Form.Item.<item>.StandardCommand.<name>`,
 /// by the target item's tag, whether it is bound to a dynamic list, and the
 /// command's name. Measured over every item button of ERP УХ.
+// Singleton command sets in native corpus-form-facets (8.3.27.2214 and 8.5.1.1150).
+pub const TABLE_ADD_AUTO_SELECTED_FIELD_UUID: &str = "eaab4e19-897e-464c-9674-262fddb1dce9";
+pub const TABLE_DESELECT_ALL_UUID: &str = "03022d03-1986-4dc4-93c2-03d995332357";
+
 const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     (
         "PlannerField",
         false,
         "Preview",
         "2c75e90f-36f0-48c8-913d-0d92afdb4b93",
+    ),
+    (
+        "PlannerField",
+        false,
+        "Back",
+        "8e2632b7-adee-4525-9254-7c4d971944de",
     ),
     (
         "FormattedDocumentField",
@@ -4076,6 +4134,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
         "SearchHistory",
         "d96b0c03-b209-4d01-a3fc-17a14f873b64",
     ),
+    ("Table", false, "DeselectAll", TABLE_DESELECT_ALL_UUID),
     (
         "Table",
         false,
@@ -5598,6 +5657,9 @@ pub fn table_item_standard_command_uuid(
         let path = data_path.unwrap_or("").trim();
         let last = path.rsplit('.').next().unwrap_or("");
         match name {
+            "AddAutoSelectedField" if path.ends_with(".Settings.Selection") => {
+                return Some(TABLE_ADD_AUTO_SELECTED_FIELD_UUID);
+            }
             "Ungroup" if path.ends_with(".Settings") => {
                 return Some("23802256-7145-47c7-b379-8d60ca1b1262");
             }
@@ -10113,6 +10175,42 @@ fn resolve_metadata_data_path_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn space_shortcuts_keep_the_measured_key_and_modifiers() {
+        for (text, raw) in [
+            ("Space", "{0,32,0}"),
+            ("Shift+Space", "{0,32,4}"),
+            ("Ctrl+Space", "{0,32,8}"),
+            ("Ctrl+Alt+Shift+Space", "{0,32,28}"),
+        ] {
+            assert_eq!(format_native_shortcut(text).as_deref(), Some(raw));
+        }
+        for text in ["Spacebar", "Unknown+Space", "F13", "Num 10"] {
+            assert_eq!(format_native_shortcut(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn table_exclusions_use_native_singleton_command_ids() {
+        assert_eq!(
+            table_item_standard_command_uuid(
+                "Table",
+                false,
+                Some("Rows.SettingsComposer.Settings.Selection"),
+                "AddAutoSelectedField"
+            ),
+            Some("eaab4e19-897e-464c-9674-262fddb1dce9")
+        );
+        assert_eq!(
+            table_item_standard_command_uuid("Table", false, Some("Rows"), "DeselectAll"),
+            Some("03022d03-1986-4dc4-93c2-03d995332357")
+        );
+        assert_eq!(
+            table_item_standard_command_uuid("Table", false, Some("Rows"), "AddAutoSelectedField"),
+            None
+        );
+    }
 
     #[test]
     fn extension_activation_colors_match_native_coverage() {

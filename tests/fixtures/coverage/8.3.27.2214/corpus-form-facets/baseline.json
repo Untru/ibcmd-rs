@@ -1,14 +1,21 @@
 {
   "equal": [
+    "CovFacetChartAutoMaxHeight",
+    "CovFacetChartAutoMaxWidth",
+    "CovFacetChartMaxWidth",
+    "CovFacetChartOnActivate",
     "CovFacetCollapseItemsByImportanceVariant",
+    "CovFacetCommandSpace",
     "CovFacetConversationsRepresentation",
     "CovFacetPlannerBeforeCreate",
     "CovFacetPlannerBeforeStartQuickEdit",
+    "CovFacetPlannerCommandGenerateProcessing",
     "CovFacetPlannerSelection",
     "CovFacetRootFillCheckProcessingAtServer",
     "CovFacetRootNotificationProcessing",
     "CovFacetRootOnLoadDataFromSettingsAtServer",
     "CovFacetRootURLProcessing",
+    "CovFacetTableExcludesAddAutoSelectedField",
     "CovFacetTableExcludesSelectAll",
     "CovFacetTemplate",
     "configuration"

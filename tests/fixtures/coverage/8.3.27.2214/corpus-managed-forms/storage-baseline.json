@@ -12,6 +12,7 @@
     "CommonForms/CovEmbeddedSpreadsheetCells.xml",
     "CommonForms/CovEmbeddedSpreadsheetCells/Ext/Form.xml",
     "CommonForms/CovFormCommandSpace.xml",
+    "CommonForms/CovFormCommandSpace/Ext/Form.xml",
     "CommonForms/CovFormEventOnOpen.xml",
     "CommonForms/CovFormEventOnOpen/Ext/Form.xml",
     "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
@@ -29,6 +30,6 @@
     "CommonForms/CovUsualGroupBackColorTomato.xml",
     "CommonForms/CovValueTableChildDataPath.xml",
     "Configuration.xml",
-    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+    "Languages/Русский.xml"
   ]
 }

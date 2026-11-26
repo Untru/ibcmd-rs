@@ -665,6 +665,12 @@ impl FormPopupColorSchema {
     }
 }
 
+/// The managed form's built-in navigator group is never published, and its
+/// anonymous service items do not take part in emitted item numbering.
+pub fn form_item_is_hidden_navigator(wrapper: &str, kind: &str) -> bool {
+    matches!((wrapper, kind), ("22", "7"))
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FormNestedAutoCommandBarSchema {
     marker: FormAutoCommandBarMarker,
@@ -777,7 +783,7 @@ impl FormRootAutoCommandBarSchema {
         }
         let marker = match fields.get(FormNestedAutoCommandBarSchema::MARKER_SLOT) {
             Some(raw) => Some(
-                parse_root_auto_command_bar_marker(raw)
+                parse_revision_one_auto_command_bar_marker(raw)
                     .or_else(|| parse_nested_auto_command_bar_marker(raw))?,
             ),
             None => None,
@@ -828,6 +834,10 @@ fn parse_auto_command_bar_marker_fields<const N: usize>(raw: &str) -> Option<[&s
 }
 
 fn parse_nested_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarMarker> {
+    // Revision one is shared by the root and nested panels in 8.5 records.
+    if let Some(marker) = parse_revision_one_auto_command_bar_marker(raw) {
+        return Some(marker);
+    }
     let marker = parse_auto_command_bar_marker_fields::<3>(raw)?;
     if marker[0] != "0" {
         return None;
@@ -850,7 +860,7 @@ fn parse_nested_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarM
     })
 }
 
-fn parse_root_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarMarker> {
+fn parse_revision_one_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarMarker> {
     let marker = parse_auto_command_bar_marker_fields::<4>(raw)?;
     if marker[0] != "1" || marker[3] != "0" {
         return None;
@@ -907,6 +917,24 @@ mod nested_auto_command_bar_tests {
         assert_eq!(configured.horizontal_align(), Some("Right"));
         assert!(!configured.autofill());
         assert!(!configured.is_empty_shape());
+    }
+
+    #[test]
+    fn revision_one_nested_command_bars_preserve_empty_and_configured_shapes() {
+        let empty = parse(&fixture("{1,0,1,0}", 29), Some("9")).unwrap();
+        assert!(empty.is_empty_shape());
+        assert!(empty.autofill());
+        assert_eq!(empty.horizontal_align(), None);
+        for marker in ["{1,2,1,0}", "{1,0,0,0}"] {
+            assert!(
+                !parse(&fixture(marker, 29), Some("9"))
+                    .unwrap()
+                    .is_empty_shape()
+            );
+        }
+        for marker in ["{1,0,1,1}", "{1,0,1}", "{1,0,1,0,0}", "{2,0,1,0}"] {
+            assert!(parse(&fixture(marker, 29), Some("9")).is_none(), "{marker}");
+        }
     }
 
     #[test]
@@ -4085,6 +4113,10 @@ impl FormChildItemEventCollectionSchema {
                 (FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
             ],
             FormChildItemEventCollectionOwner::PlannerField => &[
+                (
+                    "b34abb58-ee89-4119-945c-6432e9ef04a9",
+                    "CommandGenerateProcessing",
+                ),
                 (FORM_ITEM_DRAG_CHECK_EVENT_UUID, "DragCheck"),
                 (FORM_ITEM_DRAG_START_EVENT_UUID, "DragStart"),
                 (FORM_ITEM_DRAG_END_EVENT_UUID, "DragEnd"),
@@ -4104,6 +4136,7 @@ impl FormChildItemEventCollectionSchema {
                 (FORM_PLANNER_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
             ],
             FormChildItemEventCollectionOwner::ChartField => &[
+                ("97b47b15-7987-4fb4-915f-3ed53d69adfa", "OnActivate"),
                 (FORM_CHART_SELECTION_EVENT_UUID, "Selection"),
                 (FORM_CHART_DETAIL_PROCESSING_EVENT_UUID, "DetailProcessing"),
             ],
@@ -10050,6 +10083,7 @@ impl FormStandardBindingMember {
 pub fn form_planner_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
         "2c75e90f-36f0-48c8-913d-0d92afdb4b93" => Some("Preview"),
+        "8e2632b7-adee-4525-9254-7c4d971944de" => Some("Back"),
         _ => None,
     }
 }
