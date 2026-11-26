@@ -706,9 +706,9 @@ fn run_import(mut request: ImportRequest) -> i32 {
     let report = request.common.report.clone();
     if let Some(profile) = &request.edt_profile {
         IMPORT.start();
-        let path = Path::new(&request.path);
+        let path = PathBuf::from(&request.path);
         let result =
-            crate::conversion::read_edt_import(path, profile).and_then(|(tree, profile)| {
+            crate::conversion::read_edt_import(&path, profile).and_then(|(tree, profile)| {
                 let Some(tree) = tree else {
                     return Ok(None);
                 };
