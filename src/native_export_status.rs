@@ -2,7 +2,7 @@
 use crate::mssql_dump::incremental::DumpInfo;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,11 +16,32 @@ pub struct ConfigVersionEntry {
 #[serde(rename_all = "camelCase")]
 pub struct ConfigDumpInfoSnapshot {
     pub entries: Vec<ConfigVersionEntry>,
+    /// Parts use their ID as the key. A shared ID is qualified by its owner
+    /// ID and a slash, so all occurrences can be represented in JSON.
     pub parts: BTreeMap<String, String>,
 }
 impl ConfigDumpInfoSnapshot {
     pub fn parse(xml: &[u8]) -> Result<Self> {
         let parsed = DumpInfo::parse(xml)?;
+        let mut seen = BTreeSet::new();
+        let shared = parsed
+            .parts
+            .keys()
+            .filter_map(|(_, id)| (!seen.insert(id)).then_some(id))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let parts = parsed
+            .parts
+            .into_iter()
+            .map(|((owner, id), name)| {
+                let key = if shared.contains(&id) {
+                    format!("{owner}/{id}")
+                } else {
+                    id
+                };
+                (key, name)
+            })
+            .collect();
         Ok(Self {
             entries: parsed
                 .entries
@@ -31,7 +52,7 @@ impl ConfigDumpInfoSnapshot {
                     config_version: entry.config_version,
                 })
                 .collect(),
-            parts: parsed.parts,
+            parts,
         })
     }
     /// Maps each versioned row to its metadata object, using canonical
@@ -120,6 +141,18 @@ impl ConfigDumpInfoSnapshot {
         }
     }
 
+    fn canonical_parts(&self) -> BTreeSet<(&str, &str)> {
+        // The canonical name contains the owning object's path. An ID can
+        // switch from qualified to bare when another occurrence is removed.
+        self.parts
+            .iter()
+            .map(|(key, name)| {
+                let id = key.rsplit_once('/').map_or(key.as_str(), |(_, id)| id);
+                (id, name.as_str())
+            })
+            .collect()
+    }
+
     /// Native status ignores a reference-only XML dialect header difference.
     /// An ID removal or rename requires a full export; version changes can
     /// occur even when the exported XML bytes are identical.
@@ -137,10 +170,9 @@ impl ConfigDumpInfoSnapshot {
         let full_required = reference.entries.iter().any(|entry| {
             now.get(&entry.id)
                 .is_none_or(|current| current.name != entry.name)
-        }) || reference
-            .parts
-            .iter()
-            .any(|(id, name)| self.parts.get(id) != Some(name));
+        }) || !reference
+            .canonical_parts()
+            .is_subset(&self.canonical_parts());
         let mut changes = self
             .entries
             .iter()

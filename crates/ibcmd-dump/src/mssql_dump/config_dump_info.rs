@@ -288,7 +288,7 @@ pub(super) fn canonical_reference_names(
 }
 
 /// The parts of the rows (the nested `<Metadata>` of ConfigDumpInfo.xml:
-/// attributes, tabular sections, commands, ...), id -> name, as
+/// attributes, tabular sections, commands, ...), (owner id, part id) -> name, as
 /// [`write_config_dump_info`] lists them under the rows `version_ids`.
 /// `None` when a part cannot be named (the export of a partly recognized
 /// image skips ConfigDumpInfo.xml then).
@@ -300,7 +300,7 @@ pub(super) fn child_reference_names(
     inventory: &ConfigDumpInfoInventory<'_>,
     canonical_refs: &BTreeMap<String, String>,
     version_ids: &BTreeSet<&str>,
-) -> Result<Option<BTreeMap<String, String>>> {
+) -> Result<Option<BTreeMap<(String, String), String>>> {
     Ok(build_config_dump_children(
         inventory.metadata_texts,
         inventory.object_refs,
@@ -309,7 +309,16 @@ pub(super) fn child_reference_names(
         inventory.configuration_module_groups,
         ConfigDumpInfoPartialInventoryPolicy::Skip,
     )?
-    .map(|children| children.into_values().flatten().collect()))
+    .map(|children| {
+        children
+            .into_iter()
+            .flat_map(|(owner, parts)| {
+                parts
+                    .into_iter()
+                    .map(move |(id, name)| ((owner.clone(), id), name))
+            })
+            .collect()
+    }))
 }
 
 fn write_config_dump_info_entries(
@@ -968,7 +977,7 @@ fn build_config_dump_children(
         // taken for an unnameable child, and ConfigDumpInfo.xml is skipped
         // whole. Reading it from the record that states it holds either way.
         let configuration_identity = parse_configuration_header_uuid(&row.text);
-        for (header, _) in
+        for (header, offset) in
             nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
         {
             if version_ids.contains(header.uuid.as_str()) {
@@ -985,8 +994,38 @@ fn build_config_dump_children(
             {
                 continue;
             }
-            let child_name = if let Some(child_name) = object_refs.get(&header.uuid) {
-                child_name.clone()
+            let child_name = if let Some(indexed) = object_refs.get(&header.uuid) {
+                if indexed
+                    .strip_prefix(owner_name)
+                    .is_some_and(|suffix| suffix.starts_with('.'))
+                {
+                    indexed.clone()
+                } else if let Some(local) =
+                    row.kind
+                        .as_deref()
+                        .zip(row.header.as_ref())
+                        .and_then(|(kind, owner)| {
+                            let _brace_jumps = register_brace_jumps([row.text.as_str()]);
+                            standalone_child_reference(
+                                kind,
+                                &owner.name,
+                                &owner.uuid,
+                                &row.text,
+                                offset,
+                                &header,
+                                &BTreeMap::new(),
+                                &BTreeMap::new(),
+                            )
+                        })
+                {
+                    local
+                } else {
+                    bail!(
+                        "ConfigDumpInfo child {} ({indexed}) has no known role under {} ({owner_name})",
+                        header.uuid,
+                        row.file_name
+                    );
+                }
             } else if row.kind.as_deref() == Some("DocumentJournal") {
                 format!("{owner_name}.Column.{}", header.name)
             } else {
@@ -1009,16 +1048,15 @@ fn build_config_dump_children(
                     row.file_name
                 );
             }
-            if !discovered_child_ids.insert(header.uuid.clone()) {
+            discovered_child_ids.insert(header.uuid.clone());
+            let children = children_by_owner.entry(row.file_name.clone()).or_default();
+            if children.insert(header.uuid.clone(), child_name).is_some() {
                 bail!(
-                    "ConfigDumpInfo child {} is present under multiple metadata owners",
-                    header.uuid
+                    "ConfigDumpInfo child {} is repeated under {} ({owner_name})",
+                    header.uuid,
+                    row.file_name
                 );
             }
-            children_by_owner
-                .entry(row.file_name.clone())
-                .or_default()
-                .insert(header.uuid, child_name);
         }
     }
 
@@ -1099,6 +1137,77 @@ fn format_config_dump_info_xml(
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_register_part_id_retains_each_native_owner() {
+        let shared = "11111111-2222-4222-8222-111111111111";
+        let first = "55555555-6666-4666-8666-555555555555";
+        let second = "77777777-8888-4888-8888-777777777777";
+        let native = ibcmd_xml::config_dump_info::ConfigDumpInfo::parse(
+            format!(r#"<ConfigDumpInfo version="2.21"><ConfigVersions>
+            <Metadata name="AccumulationRegister.OpenOrders" id="{first}" configVersion="v1">
+              <Metadata name="AccumulationRegister.OpenOrders.Attribute.Order" id="{shared}"/>
+            </Metadata>
+            <Metadata name="AccumulationRegister.ClosedOrders" id="{second}" configVersion="v2">
+              <Metadata name="AccumulationRegister.ClosedOrders.Attribute.OriginalOrder" id="{shared}"/>
+            </Metadata>
+            </ConfigVersions></ConfigDumpInfo>"#).as_bytes(),
+        ).unwrap();
+        let row = |id: &str, owner: &str, name: &str| MetadataTextRow {
+            file_name: id.to_owned(),
+            text: format!(
+                "{{4,\n{{27,\n{{2,\n{{3,\n{{1,0,{shared}}},\"{name}\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\n}}\n}}\n}}"
+            ),
+            object_code: None,
+            header: Some(MetadataHeader {
+                uuid: id.to_owned(),
+                name: owner.to_owned(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("AccumulationRegister".to_owned()),
+            folder: None,
+        };
+        let rows = [
+            row(first, "OpenOrders", "Order"),
+            row(second, "ClosedOrders", "OriginalOrder"),
+        ];
+        let canonical = native
+            .entries
+            .iter()
+            .map(|entry| (entry.id.clone(), entry.name.clone()))
+            .collect();
+        let refs = BTreeMap::from([(
+            shared.to_owned(),
+            "AccumulationRegister.ClosedOrders.Attribute.OriginalOrder".to_owned(),
+        )]);
+        let actual = build_config_dump_children(
+            &rows,
+            &refs,
+            &canonical,
+            &BTreeSet::from([first, second]),
+            &BTreeSet::new(),
+            ConfigDumpInfoPartialInventoryPolicy::Fail,
+        )
+        .unwrap()
+        .unwrap();
+        let expected = native
+            .entries
+            .into_iter()
+            .map(|entry| {
+                (
+                    entry.id,
+                    entry
+                        .children
+                        .into_iter()
+                        .map(|part| (part.id, part.name))
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn common_command_empty_help_has_typed_route_and_unknown_suffix_stays_closed() {

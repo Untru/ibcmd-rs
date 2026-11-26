@@ -93,8 +93,8 @@ pub struct DumpInfo {
     /// The rows: the top-level `<Metadata>` of `<ConfigVersions>`.
     pub entries: Vec<DumpInfoEntry>,
     /// The parts of the rows: the `<Metadata>` nested in them (attributes,
-    /// tabular sections, commands, ...), id -> name. They have no version.
-    pub parts: BTreeMap<String, String>,
+    /// tabular sections, commands, ...), (owner id, part id) -> name. They have no version.
+    pub parts: BTreeMap<(String, String), String>,
 }
 
 impl DumpInfo {
@@ -107,7 +107,9 @@ impl DumpInfo {
         };
         for entry in document.entries {
             for part in entry.children {
-                info.parts.entry(part.id).or_insert(part.name);
+                info.parts
+                    .entry((entry.id.clone(), part.id))
+                    .or_insert(part.name);
             }
             info.entries.push(DumpInfoEntry {
                 name: entry.name,
@@ -174,8 +176,8 @@ pub(crate) struct ConfigurationNames {
     /// (`canonical_reference_names`); a row it lacks is its owner's name and
     /// a role.
     pub(crate) rows: BTreeMap<String, String>,
-    /// The parts of the rows, id -> name (`child_reference_names`).
-    pub(crate) parts: BTreeMap<String, String>,
+    /// The parts of the rows, (owner id, part id) -> name (`child_reference_names`).
+    pub(crate) parts: BTreeMap<(String, String), String>,
 }
 
 /// Which rows an export converts.
@@ -434,8 +436,20 @@ fn renamed_since(
             renamed.push(format!("{} -> {now}", entry.name));
         }
     }
-    for (id, name) in &base.parts {
-        if let Some(now) = names.parts.get(id)
+    // A part can move to another owner. Match stable owner/part pairs first,
+    // then look only at newly added pairs when checking for moves.
+    let added_parts = names
+        .parts
+        .iter()
+        .filter(|(key, _)| !base.parts.contains_key(*key))
+        .map(|((_, part), name)| (part, name))
+        .collect::<BTreeMap<_, _>>();
+    for (key, name) in &base.parts {
+        let now = names
+            .parts
+            .get(key)
+            .or_else(|| added_parts.get(&key.1).copied());
+        if let Some(now) = now
             && now != name
         {
             renamed.push(format!("{name} -> {now}"));
@@ -817,7 +831,10 @@ mod tests {
         );
         assert_eq!(
             info.parts,
-            BTreeMap::from([("b".to_owned(), "Catalog.Товары.Attribute.Цена".to_owned())])
+            BTreeMap::from([(
+                ("a".to_owned(), "b".to_owned()),
+                "Catalog.Товары.Attribute.Цена".to_owned()
+            )])
         );
         // an empty configuration lists nothing
         let empty =
@@ -943,6 +960,33 @@ mod tests {
     }
 
     #[test]
+    fn shared_parts_distinguish_deletion_from_a_change_of_owner() {
+        let parts = |entries: &[(&str, &str)]| {
+            entries
+                .iter()
+                .map(|(owner, name)| ((owner.to_string(), "p".to_owned()), name.to_string()))
+                .collect()
+        };
+        let mut base = DumpInfo {
+            parts: parts(&[
+                ("a", "Catalog.A.Attribute.X"),
+                ("b", "Catalog.B.Attribute.X"),
+            ]),
+            ..DumpInfo::default()
+        };
+        let names = ConfigurationNames {
+            rows: BTreeMap::new(),
+            parts: parts(&[("b", "Catalog.B.Attribute.X")]),
+        };
+        assert!(renamed_since(&base, &BTreeMap::new(), &names).is_empty());
+        base.parts.remove(&("b".to_owned(), "p".to_owned()));
+        assert_eq!(
+            renamed_since(&base, &BTreeMap::new(), &names),
+            ["Catalog.A.Attribute.X -> Catalog.B.Attribute.X"]
+        );
+    }
+
+    #[test]
     fn a_part_renamed_exports_every_row() {
         let mut base = dump_info(
             "2.20",
@@ -951,23 +995,27 @@ mod tests {
                 entry("Configuration.К", "c", V1),
             ],
         );
-        base.parts
-            .insert("p".to_owned(), "Catalog.Товары.Attribute.Цена".to_owned());
         base.parts.insert(
-            "q".to_owned(),
+            ("a".to_owned(), "p".to_owned()),
+            "Catalog.Товары.Attribute.Цена".to_owned(),
+        );
+        base.parts.insert(
+            ("a".to_owned(), "q".to_owned()),
             "Catalog.Товары.Attribute.Удалённый".to_owned(),
         );
         let current = versions(&[("a", V2), ("c", V1)]);
         let mut refs = named(&[("a", "Catalog.Товары"), ("c", "Configuration.К")]);
         // a part removed is no rename
-        refs.parts
-            .insert("p".to_owned(), "Catalog.Товары.Attribute.Цена".to_owned());
+        refs.parts.insert(
+            ("a".to_owned(), "p".to_owned()),
+            "Catalog.Товары.Attribute.Цена".to_owned(),
+        );
         let export = with_base(base, false);
         let kept = export.select(&current, Some(&refs), InfobaseConfigSourceVersion::V2_20);
         assert_eq!(kept.full_reason, None);
         assert_eq!(kept.unchanged, BTreeSet::from(["c".to_owned()]));
         refs.parts.insert(
-            "p".to_owned(),
+            ("a".to_owned(), "p".to_owned()),
             "Catalog.Товары.Attribute.Стоимость".to_owned(),
         );
         let renamed = export.select(&current, Some(&refs), InfobaseConfigSourceVersion::V2_20);
