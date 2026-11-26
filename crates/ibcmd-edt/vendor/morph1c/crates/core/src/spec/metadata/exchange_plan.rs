@@ -4,7 +4,7 @@
 //! Catalog (`ir_child` base-реквизит для детей, Command/FormRef/TemplateRef-паттерн,
 //! children-рекурсию, value/type/cpl/ref-list/value/help/producedTypes-кодеки,
 //! TabularSection recursion) + ExchangePlan-дельту:
-//! * std_attrs_exchange_plan — 8-атрибутный набор `ExchangeDate/ThisNode/ReceivedNo/
+//! * std_attrs_exchange_plan — набор `ExchangeDate/ThisNode/ReceivedNo/
 //!   SentNo/Ref/DeletionMark/Description/Code` (ВАРИАТИВНЫЕ fillChecking И
 //!   fullTextSearch — ERP-witness, Catalog-паттерн; см. декларацию ниже);
 //! * `content` — EDT-only состав плана обмена (codec `ExchangePlanContent`, X-исключён);
@@ -69,7 +69,7 @@ pub const F_AUX_OBJECT_FORM: FieldId = FieldId(18);
 pub const F_AUX_LIST_FORM: FieldId = FieldId(19);
 /// `auxiliaryChoiceForm` — Designer-only. Default "".
 pub const F_AUX_CHOICE_FORM: FieldId = FieldId(20);
-/// `standardAttributes` — ВАРИАТИВНЫЙ блок (8 атрибутов). Required (всегда present).
+/// `standardAttributes` — блок из семи или восьми атрибутов. Required (всегда present).
 pub const F_STANDARD_ATTRIBUTES: FieldId = FieldId(21);
 /// `characteristics` — список связок. Default [].
 pub const F_CHARACTERISTICS: FieldId = FieldId(22);
@@ -166,7 +166,7 @@ fn build_fields() -> Vec<FieldSpec> {
         s(F_AUX_OBJECT_FORM, "auxiliaryObjectForm"),
         s(F_AUX_LIST_FORM, "auxiliaryListForm"),
         s(F_AUX_CHOICE_FORM, "auxiliaryChoiceForm"),
-        // standardAttributes — вариативный const-блок (8 атрибутов), всегда present.
+        // standardAttributes — вариативный блок из семи или восьми атрибутов, всегда present.
         FieldSpec::required(F_STANDARD_ATTRIBUTES, "standardAttributes", ValueKind::List),
         list(F_CHARACTERISTICS, "characteristics"),
         list(F_BASED_ON, "basedOn"),
@@ -226,9 +226,8 @@ const S_FILL_VALUE: usize = 4;
 const S_FILL_CHECKING: usize = 5;
 const S_FULL_TEXT: usize = 6;
 
-/// 8 предопределённых атрибута КОРНЯ (name-констант больше нет — оба enum-листа
-/// вариативны, ERP-witness).
-const ROOT_ATTRS: &[AttrDecl] = &[
+/// Порядок из EDT и Designer. В БСП 3.1.9.232 блок начинается с ThisNode.
+const ROOT_ATTRS: [AttrDecl; 8] = [
     AttrDecl { name: "ExchangeDate", name_consts: &[] },
     AttrDecl { name: "ThisNode", name_consts: &[] },
     AttrDecl { name: "ReceivedNo", name_consts: &[] },
@@ -237,6 +236,11 @@ const ROOT_ATTRS: &[AttrDecl] = &[
     AttrDecl { name: "DeletionMark", name_consts: &[] },
     AttrDecl { name: "Description", name_consts: &[] },
     AttrDecl { name: "Code", name_consts: &[] },
+];
+
+const ROOT_VARIANTS: &[&[AttrDecl]] = &[
+    &ROOT_ATTRS,
+    match &ROOT_ATTRS { [_, without_exchange_date @ ..] => without_exchange_date },
 ];
 
 const VAR_SLOTS: &[VarSlotKind] = &[
@@ -293,9 +297,8 @@ const DENSE_LEAVES: &[(&str, DenseLeaf)] = &[
 
 /// Декларация `standardAttributes` вида `ExchangePlan` (data-driven; Root-only).
 pub const STD_ATTRS: StdAttrsDecl = StdAttrsDecl {
-    root_attrs: ROOT_ATTRS,
-    // Фиксированный набор (не вариадный) — все атрибуты присутствуют всегда.
-    root_variants: &[],
+    root_attrs: &[],
+    root_variants: ROOT_VARIANTS,
     tabular_attrs: &[],
     var_slots: VAR_SLOTS,
     edt_leaves: EDT_LEAVES,
