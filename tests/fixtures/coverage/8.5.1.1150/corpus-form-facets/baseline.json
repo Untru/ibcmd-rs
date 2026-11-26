@@ -5,6 +5,7 @@
     "CovFacetChartMaxWidth",
     "CovFacetChartOnActivate",
     "CovFacetCollapseItemsByImportanceVariant",
+    "CovFacetCommandSpace",
     "CovFacetConversationsRepresentation",
     "CovFacetPlannerBeforeCreate",
     "CovFacetPlannerBeforeStartQuickEdit",
@@ -14,6 +15,7 @@
     "CovFacetRootNotificationProcessing",
     "CovFacetRootOnLoadDataFromSettingsAtServer",
     "CovFacetRootURLProcessing",
+    "CovFacetTableExcludesSelectAll",
     "CovFacetTemplate",
     "configuration"
   ]

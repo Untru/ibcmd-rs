@@ -1,0 +1,17 @@
+{
+  "equal": [
+    "CovBoundPageChildrenAlign_None",
+    "CovBoundPageEnableContentChange_true",
+    "CovBoundPageGroup_AlwaysHorizontal",
+    "CovBoundPageGroup_Horizontal",
+    "CovBoundPageHorizontalSpacing_Half",
+    "CovBoundPageHorizontalStretch_false",
+    "CovBoundPageHorizontalStretch_true",
+    "CovBoundPageReadOnly_true",
+    "CovBoundPageScrollOnCompress_true",
+    "CovBoundPageShowTitle_false",
+    "CovBoundPageVerticalAlign_Center",
+    "CovBoundPageVerticalStretch_false",
+    "CovBoundPageVerticalStretch_true"
+  ]
+}
