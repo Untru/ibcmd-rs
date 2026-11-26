@@ -2361,7 +2361,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
         };
         match namespace {
             Some(WEB_COLORS_NS) => {
-                let code = web_color_code(name)
+                let code = ibcmd_moxel::moxel_web_color_code(name)
                     .ok_or_else(|| anyhow!("web colour {name} has no stored code"))?;
                 Ok((format!("{{3,2,{{{code}}}}}"), None))
             }
@@ -3071,71 +3071,6 @@ fn report_style_color(name: &str) -> Option<(i32, u32)> {
     })
 }
 
-fn web_color_code(name: &str) -> Option<u32> {
-    Some(match name {
-        "AliceBlue" => 1,
-        "AntiqueWhite" => 2,
-        "Azure" => 5,
-        "Beige" => 6,
-        "Black" => 8,
-        "Blue" => 10,
-        "Cream" => 20,
-        "Crimson" => 21,
-        "DarkBlue" => 23,
-        "DarkGray" => 26,
-        "DarkGreen" => 27,
-        "DarkRed" => 33,
-        "DarkSlateGray" => 37,
-        "DimGray" => 42,
-        "FireBrick" => 44,
-        "FloralWhite" => 45,
-        "ForestGreen" => 46,
-        "Gainsboro" => 48,
-        "GhostWhite" => 49,
-        "Gray" => 52,
-        "Green" => 53,
-        "GreenYellow" => 54,
-        "HoneyDew" => 55,
-        "Ivory" => 59,
-        "Lavender" => 61,
-        "LemonChiffon" => 64,
-        "LightCyan" => 67,
-        "LightGoldenRod" => 68,
-        "LightGoldenRodYellow" => 69,
-        "LightGreen" => 70,
-        "LightGray" => 71,
-        "LightPink" => 72,
-        "LightSalmon" => 73,
-        "LightSkyBlue" => 75,
-        "LightSlateGray" => 77,
-        "LightYellow" => 79,
-        "Maroon" => 84,
-        "MediumBlue" => 86,
-        "MediumGray" => 87,
-        "MediumGreen" => 88,
-        "MediumSpringGreen" => 93,
-        "MintCream" => 97,
-        "MistyRose" => 98,
-        "PaleGoldenrod" => 108,
-        "Red" => 119,
-        "RosyBrown" => 120,
-        "RoyalBlue" => 121,
-        "SaddleBrown" => 122,
-        "Silver" => 128,
-        "SkyBlue" => 129,
-        "SlateBlue" => 130,
-        "SlateGray" => 131,
-        "SteelBlue" => 134,
-        "Tomato" => 138,
-        "Violet" => 140,
-        "VioletRed" => 141,
-        "White" => 143,
-        "WhiteSmoke" => 144,
-        "Yellow" => 145,
-        _ => return None,
-    })
-}
-
 fn windows_color_code(name: &str) -> Option<u32> {
     Some(match name {
         "ActiveTitleBar" => 2,
@@ -3154,7 +3089,7 @@ mod tests {
 
     #[test]
     fn sky_blue_maps_to_native_web_color_code() {
-        assert_eq!(web_color_code("SkyBlue"), Some(129));
+        assert_eq!(ibcmd_moxel::moxel_web_color_code("SkyBlue"), Some(129));
     }
 
     fn patch_fixture(name: &str) -> Vec<u8> {

@@ -10867,6 +10867,120 @@ fn parse_moxel_windows_color(value: &str) -> Option<String> {
     }
 }
 
+const MOXEL_WEB_COLORS: &[(u32, &str)] = &[
+    // `1` is pinned by a palette with one kind-2 slot and one published
+    // web colour: ERP УХ 3.3.3.3 `DataProcessors/
+    // РасшифровкаРассчитанныхЗначений/Templates/МакетРасшифровкиУсловийОплаты`
+    // carries `-1`, `-3`, a configuration style item and `1`, and its
+    // whole published pool holds one `d3p1:AliceBlue` and thirteen
+    // `style:СерыйФонШапкиОтчета`. Leaving it unnamed refused the whole
+    // palette, so that template published none of its colours or borders.
+    (1, "AliceBlue"),
+    (2, "AntiqueWhite"),
+    (5, "Azure"),
+    (6, "Beige"),
+    (8, "Black"),
+    (10, "Blue"),
+    (20, "Cream"),
+    (21, "Crimson"),
+    (23, "DarkBlue"),
+    (26, "DarkGray"),
+    (27, "DarkGreen"),
+    (31, "DarkGreen"),
+    (33, "DarkRed"),
+    (37, "DarkSlateGray"),
+    (42, "DimGray"),
+    (44, "FireBrick"),
+    (45, "FloralWhite"),
+    (46, "ForestGreen"),
+    (48, "Gainsboro"),
+    (49, "GhostWhite"),
+    (52, "Gray"),
+    (53, "Green"),
+    (54, "GreenYellow"),
+    (55, "HoneyDew"),
+    (59, "Ivory"),
+    (61, "Lavender"),
+    (64, "LemonChiffon"),
+    (67, "LightCyan"),
+    (68, "LightGoldenRod"),
+    (69, "LightGoldenRodYellow"),
+    // `70` and `138` are the two codes ERP УХ 3.2.12.6's `DataProcessors/
+    // ДиспетчированиеГрафикаПроизводства/Templates/ДиагностикаГрафика`
+    // and `Reports/ДиагностикаЭтапаПроизводства/Templates/
+    // ДиагностикаЭтапа` leave unnamed, and their two unaccounted
+    // published names -- `LightGreen` and `Tomato` -- are cited once
+    // each, so counting cannot orient them. Position can: the stored
+    // format records `{3008,0,48,6,0,7}` and `{3968,80,6,0,9,12}` are the
+    // only ones whose member set is "backColor = palette slot 7" and
+    // "textColor = slot 9, backColor = slot 12", and the published pool
+    // holds exactly one format carrying nothing but
+    // `backColor d3p1:LightGreen` and exactly one carrying
+    // `textColor d3p1:White` beside `backColor d3p1:Tomato`. Slot 9 is
+    // code `143` (`White`), already known, which pins the second pairing.
+    // (Note that `70` and `71` do not sit in ASCII order here; the
+    // enumeration's own order is not this table's evidence.)
+    (70, "LightGreen"),
+    (71, "LightGray"),
+    (72, "LightPink"),
+    // `73`/`75` are paired by position, not by count: `Reports/
+    // СхемаМаршрутнойКарты/Templates/Макет` cites its palette slots 2..11
+    // in one format record each, in order, and the published `<format>`
+    // pool spells `HoneyDew`, `AntiqueWhite`, `PaleGoldenrod`,
+    // `LightCyan`, `MediumGreen`, `#EBD0EB`, `Gainsboro`, `LightSkyBlue`,
+    // `LightSalmon`, `LightYellow` in the same order -- so the slot
+    // holding code `75` is `LightSkyBlue` and the one holding `73` is
+    // `LightSalmon`.
+    (73, "LightSalmon"),
+    (75, "LightSkyBlue"),
+    // `77` is pinned the same way, by a palette that leaves it alone:
+    // ERP УХ 3.3.3.3
+    // `Catalogs/ШаблоныНазначенийПлатежей/Templates/МакетТегов` carries
+    // the eight slots `-1, -3, -7, -10, 55, 77, -15, -14`, of which `55`
+    // is the already-known `HoneyDew` and `77` the only other kind-2 one,
+    // and the published pool holds exactly two `d3p1:HoneyDew` and one
+    // `d3p1:LightSlateGray`. Leaving it unnamed refused the whole palette
+    // -- a slot this table cannot name makes the candidate span
+    // unparseable -- so that template published none of its eight colours
+    // at all.
+    (77, "LightSlateGray"),
+    (79, "LightYellow"),
+    (84, "Maroon"),
+    (86, "MediumBlue"),
+    (87, "MediumGray"),
+    (88, "MediumGreen"),
+    (93, "MediumSpringGreen"),
+    (97, "MintCream"),
+    (98, "MistyRose"),
+    (108, "PaleGoldenrod"),
+    (119, "Red"),
+    (120, "RosyBrown"),
+    (121, "RoyalBlue"),
+    (122, "SaddleBrown"),
+    (128, "Silver"),
+    (129, "SkyBlue"),
+    (130, "SlateBlue"),
+    // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
+    // `131` as its only kind-2 slot and publishes `SlateGray` five times
+    // as its only web colour.
+    (131, "SlateGray"),
+    (134, "SteelBlue"),
+    // Paired together with `70` -- see the note there.
+    (138, "Tomato"),
+    (140, "Violet"),
+    (141, "VioletRed"),
+    (143, "White"),
+    (144, "WhiteSmoke"),
+    (145, "Yellow"),
+];
+
+/// Returns the stored ordinal for a web colour supported by the MXL palette.
+pub fn moxel_web_color_code(name: &str) -> Option<u32> {
+    MOXEL_WEB_COLORS
+        .iter()
+        .find_map(|&(code, spelling)| (spelling == name).then_some(code))
+}
+
 /// The web-colour palette slot's own enumeration.
 ///
 /// Measured per document by pairing the palette's kind-2 slots with the
@@ -10899,112 +11013,10 @@ fn parse_moxel_windows_color(value: &str) -> Option<String> {
 /// A code the corpus does not spell stays a typed refusal: an unresolvable
 /// slot makes the whole palette unusable rather than being guessed at.
 pub fn parse_moxel_web_color(value: &str) -> Option<String> {
-    let name = match value.parse::<u32>().ok()? {
-        // `1` is pinned by a palette with one kind-2 slot and one published
-        // web colour: ERP УХ 3.3.3.3 `DataProcessors/
-        // РасшифровкаРассчитанныхЗначений/Templates/МакетРасшифровкиУсловийОплаты`
-        // carries `-1`, `-3`, a configuration style item and `1`, and its
-        // whole published pool holds one `d3p1:AliceBlue` and thirteen
-        // `style:СерыйФонШапкиОтчета`. Leaving it unnamed refused the whole
-        // palette, so that template published none of its colours or borders.
-        1 => "AliceBlue",
-        2 => "AntiqueWhite",
-        5 => "Azure",
-        6 => "Beige",
-        8 => "Black",
-        10 => "Blue",
-        20 => "Cream",
-        21 => "Crimson",
-        23 => "DarkBlue",
-        26 => "DarkGray",
-        27 | 31 => "DarkGreen",
-        33 => "DarkRed",
-        37 => "DarkSlateGray",
-        42 => "DimGray",
-        44 => "FireBrick",
-        45 => "FloralWhite",
-        46 => "ForestGreen",
-        48 => "Gainsboro",
-        49 => "GhostWhite",
-        52 => "Gray",
-        53 => "Green",
-        54 => "GreenYellow",
-        55 => "HoneyDew",
-        59 => "Ivory",
-        61 => "Lavender",
-        64 => "LemonChiffon",
-        67 => "LightCyan",
-        68 => "LightGoldenRod",
-        69 => "LightGoldenRodYellow",
-        // `70` and `138` are the two codes ERP УХ 3.2.12.6's `DataProcessors/
-        // ДиспетчированиеГрафикаПроизводства/Templates/ДиагностикаГрафика`
-        // and `Reports/ДиагностикаЭтапаПроизводства/Templates/
-        // ДиагностикаЭтапа` leave unnamed, and their two unaccounted
-        // published names -- `LightGreen` and `Tomato` -- are cited once
-        // each, so counting cannot orient them. Position can: the stored
-        // format records `{3008,0,48,6,0,7}` and `{3968,80,6,0,9,12}` are the
-        // only ones whose member set is "backColor = palette slot 7" and
-        // "textColor = slot 9, backColor = slot 12", and the published pool
-        // holds exactly one format carrying nothing but
-        // `backColor d3p1:LightGreen` and exactly one carrying
-        // `textColor d3p1:White` beside `backColor d3p1:Tomato`. Slot 9 is
-        // code `143` (`White`), already known, which pins the second pairing.
-        // (Note that `70` and `71` do not sit in ASCII order here; the
-        // enumeration's own order is not this table's evidence.)
-        70 => "LightGreen",
-        71 => "LightGray",
-        72 => "LightPink",
-        // `73`/`75` are paired by position, not by count: `Reports/
-        // СхемаМаршрутнойКарты/Templates/Макет` cites its palette slots 2..11
-        // in one format record each, in order, and the published `<format>`
-        // pool spells `HoneyDew`, `AntiqueWhite`, `PaleGoldenrod`,
-        // `LightCyan`, `MediumGreen`, `#EBD0EB`, `Gainsboro`, `LightSkyBlue`,
-        // `LightSalmon`, `LightYellow` in the same order -- so the slot
-        // holding code `75` is `LightSkyBlue` and the one holding `73` is
-        // `LightSalmon`.
-        73 => "LightSalmon",
-        75 => "LightSkyBlue",
-        // `77` is pinned the same way, by a palette that leaves it alone:
-        // ERP УХ 3.3.3.3
-        // `Catalogs/ШаблоныНазначенийПлатежей/Templates/МакетТегов` carries
-        // the eight slots `-1, -3, -7, -10, 55, 77, -15, -14`, of which `55`
-        // is the already-known `HoneyDew` and `77` the only other kind-2 one,
-        // and the published pool holds exactly two `d3p1:HoneyDew` and one
-        // `d3p1:LightSlateGray`. Leaving it unnamed refused the whole palette
-        // -- a slot this table cannot name makes the candidate span
-        // unparseable -- so that template published none of its eight colours
-        // at all.
-        77 => "LightSlateGray",
-        79 => "LightYellow",
-        84 => "Maroon",
-        86 => "MediumBlue",
-        87 => "MediumGray",
-        88 => "MediumGreen",
-        93 => "MediumSpringGreen",
-        97 => "MintCream",
-        98 => "MistyRose",
-        108 => "PaleGoldenrod",
-        119 => "Red",
-        120 => "RosyBrown",
-        121 => "RoyalBlue",
-        122 => "SaddleBrown",
-        128 => "Silver",
-        129 => "SkyBlue",
-        130 => "SlateBlue",
-        // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
-        // `131` as its only kind-2 slot and publishes `SlateGray` five times
-        // as its only web colour.
-        131 => "SlateGray",
-        134 => "SteelBlue",
-        // Paired together with `70` -- see the note there.
-        138 => "Tomato",
-        140 => "Violet",
-        141 => "VioletRed",
-        143 => "White",
-        144 => "WhiteSmoke",
-        145 => "Yellow",
-        _ => return None,
-    };
+    let code = value.parse::<u32>().ok()?;
+    let (_, name) = MOXEL_WEB_COLORS
+        .iter()
+        .find(|(ordinal, _)| *ordinal == code)?;
     Some(format!("d3p1:{name}"))
 }
 
@@ -15811,6 +15823,7 @@ mod moxel_exact_parity_tests {
 
     #[test]
     fn every_stored_web_colour_ordinal_resolves() {
+        assert_eq!(moxel_web_color_code("DarkGreen"), Some(27));
         // The six ordinals the reader used to refuse; a refused palette slot
         // costs the document its whole palette, not just one colour.
         for (ordinal, name) in [
