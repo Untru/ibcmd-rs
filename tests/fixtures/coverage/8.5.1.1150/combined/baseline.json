@@ -200,6 +200,7 @@
     "CommonTemplates/CovGraphicalSchemaBody",
     "CommonTemplates/CovGraphicalSchemaImage",
     "CommonTemplates/CovGraphicalSchemaPng",
+    "CommonTemplates/CovObservedSheetGroupColours",
     "CommonTemplates/CovSheetVerticalPageBreak",
     "CommonTemplates/CovSpreadsheetFacetTemplate",
     "CommonTemplates/CovSpreadsheetMergedCells",
@@ -379,6 +380,10 @@
     "WebSocketClients/CovTemplate",
     "WebSocketClients/CovUseOSAuthentication_true",
     "WebSocketClients/CovUseOSProxy_true",
-    "XDTOPackages/CovTemplate"
+    "XDTOPackages/CovTemplate",
+    "CommonTemplates/CovSheetValueListDetail",
+    "CommonTemplates/CovSheetAutoFontHeight",
+    "CommonTemplates/CovSheetOEMFixedFont",
+    "CommonTemplates/CovSheetSandyBrown"
   ]
 }

@@ -10,8 +10,8 @@
 //! (`compiler::bodies::mxl::decode_compatible_mxl`) and the 8.5 primitive
 //! rewrite (`mssql_dump::form::layout_8_5_1`) stay in the root, whose thin
 //! entry points hand this crate the decoded body text. The root also passes
-//! its built-in platform type table as a function, the one table the decoder
-//! asks about a `{"#",<uuid>}` value type. The crate depends on nothing in the
+//! its built-in platform type and picture tables as lookup functions. The
+//! crate depends on nothing in the
 //! root, so a root rebuild reuses it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -616,7 +616,7 @@ struct RootShapes {
     len: usize,
     shapes: Vec<RootFieldShape>,
     /// The palette span, once located.
-    palette: std::cell::OnceCell<Option<(usize, usize)>>,
+    palette: std::cell::OnceCell<Result<Option<(usize, usize)>, ()>>,
 }
 
 thread_local! {
@@ -1227,9 +1227,19 @@ pub struct MoxelFont {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MoxelLine {
+    pub gap: bool,
     pub style: &'static str,
     pub line_type: &'static str,
     pub width: usize,
+}
+
+impl MoxelLine {
+    const UNSTYLED: Self = Self {
+        gap: false,
+        style: "",
+        line_type: "",
+        width: 0,
+    };
 }
 
 /// Internal provenance carried until the final `MoxelLine` projection.
@@ -1381,7 +1391,7 @@ impl From<&ResolvedMoxelLine> for MoxelLineTraceEvent {
             final_style: line.style,
             final_type: line.line_type,
             final_width: line.width,
-            final_gap: false,
+            final_gap: line.gap,
             ambiguous: line.ambiguous,
             fail_closed: line.fail_closed,
         }
@@ -1782,6 +1792,7 @@ pub struct MoxelPrintSettings {
     pub black_and_white: Option<bool>,
     pub printer_name: Option<String>,
     pub paper: Option<usize>,
+    pub page_size: Option<String>,
     pub paper_source: Option<usize>,
     /// Page geometry is a decimal, not an integer: key 16 stores `60.5` in
     /// three of the corpus's 56 print-settings records, and reading the whole
@@ -2006,6 +2017,7 @@ pub fn extract_moxel_body_xml(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Result<String, MxlDiagnostic> {
     let _scope = SplitCacheScope::new(text);
@@ -2014,6 +2026,7 @@ pub fn extract_moxel_body_xml(
         object_refs,
         generated_types,
         builtin_type_reference,
+        standard_picture_name,
         trace_sink,
     )?;
     write_moxel_spreadsheet_xml(&decoded)
@@ -2027,6 +2040,7 @@ fn decode_moxel_spreadsheet_ir(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Result<DecodedMoxelSpreadsheet, MxlDiagnostic> {
     // The palette is read off the same root fields the spreadsheet is.
@@ -2036,9 +2050,10 @@ fn decode_moxel_spreadsheet_ir(
         object_refs,
         generated_types,
         builtin_type_reference,
+        standard_picture_name,
         trace_sink,
         Some(&mut palette),
-    )
+    )?
     .ok_or_else(|| {
         MxlDiagnostic::decoder(
             "mxl.decoder.canonical-ir",
@@ -2098,11 +2113,25 @@ pub fn parse_moxel_spreadsheet_text(
     object_refs: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
 ) -> Option<MoxelSpreadsheet> {
+    try_parse_moxel_spreadsheet_text(text, object_refs, builtin_type_reference)
+        .ok()
+        .flatten()
+}
+
+/// Keeps an unsupported palette distinct from legacy bodies that do not
+/// decode as a spreadsheet. Embedded documents must retain and reject Err.
+pub fn try_parse_moxel_spreadsheet_text(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    builtin_type_reference: BuiltinTypeReference,
+) -> Result<Option<MoxelSpreadsheet>, MxlDiagnostic> {
+    let _scope = SplitCacheScope::new(text);
     parse_moxel_spreadsheet_text_with_line_trace(
         text,
         object_refs,
         &NO_MOXEL_GENERATED_TYPES,
         builtin_type_reference,
+        |_| None,
         None,
         None,
     )
@@ -2113,17 +2142,76 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
     builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
+    trace_sink: Option<&dyn MoxelLineTraceSink>,
+    palette: Option<&mut Option<MxlPaletteProvenance>>,
+) -> Result<Option<MoxelSpreadsheet>, MxlDiagnostic> {
+    let body = text.trim_start_matches('\u{feff}');
+    let Some(fields) = split_braced_bytes(body, 0) else {
+        return Ok(None);
+    };
+    let _root_shapes = RootShapesScope::new(&fields);
+    if fields.first().map(|field| field.trim()) != Some("8") {
+        return Ok(None);
+    }
+    // A present but undecodable palette must not become a compact-style
+    // fallback: palette index zero can name a web colour, not a tooltip.
+    locate_moxel_style_ref_palette_span(&fields, object_refs).map_err(|()| {
+        MxlDiagnostic::decoder(
+            "mxl.decoder.canonical-ir",
+            "native MOXCEL palette contains an unsupported web colour",
+        )
+    })?;
+    if !moxel_palette_overrides_are_supported(&fields, object_refs) {
+        return Err(MxlDiagnostic::decoder(
+            "mxl.decoder.canonical-ir",
+            "native MOXCEL palette override contains an unsupported web colour",
+        ));
+    }
+    Ok(parse_moxel_spreadsheet_fields(
+        body,
+        fields,
+        object_refs,
+        generated_types,
+        MoxelVocabularyLookups {
+            builtin_type_reference,
+            standard_picture_name,
+        },
+        trace_sink,
+        palette,
+    ))
+}
+
+struct MoxelVocabularyLookups {
+    builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
+}
+
+fn parse_moxel_spreadsheet_fields(
+    body: &str,
+    fields: Vec<&str>,
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+    lookups: MoxelVocabularyLookups,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
     palette: Option<&mut Option<MxlPaletteProvenance>>,
 ) -> Option<MoxelSpreadsheet> {
-    let body = text.trim_start_matches('\u{feff}');
-    let fields = split_braced_bytes(body, 0)?;
-    let _root_shapes = RootShapesScope::new(&fields);
-    if fields.first()?.trim() != "8" {
-        return None;
-    }
+    let MoxelVocabularyLookups {
+        builtin_type_reference,
+        standard_picture_name,
+    } = lookups;
     let raw_declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
     let mut rows = parse_moxel_rows(&fields);
+    // Keep an unmeasured list in its row until admission: returning None for
+    // the cell would let the legacy row scanner silently truncate the stream.
+    if rows.iter().flat_map(|row| &row.cells).any(|cell| {
+        cell.value
+            .iter()
+            .chain(&cell.detail_value)
+            .any(MoxelCellValue::has_unmeasured_value_list)
+    }) {
+        return None;
+    }
     if rows.is_empty() {
         return None;
     }
@@ -2155,7 +2243,8 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     }
     compact_moxel_empty_row_ranges(&mut rows);
     let fonts = parse_moxel_fonts(&fields, object_refs);
-    let pictures = parse_moxel_pictures(&fields, object_refs);
+    let pictures =
+        parse_moxel_pictures_with_standard_names(&fields, object_refs, standard_picture_name);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
     let mut default_format = parse_moxel_default_format(&fields, object_refs);
     let print_settings = parse_moxel_print_settings(&fields);
@@ -2569,7 +2658,21 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs));
     // The document's own line table is authoritative wherever it decodes; the
     // legacy reconstruction below only runs when the slot refuses.
-    let resolved_lines = match parse_moxel_line_table(&fields)
+    let mut stored_lines = parse_moxel_line_table(&fields);
+    // CovObservedSheetDrawingBorder has one drawing line and a cell border
+    // referring to the next slot. Native export publishes that missing slot
+    // as an unstyled line. Importing that XML stores the nil descriptor.
+    if let Some(lines) = &mut stored_lines
+        && let [only] = lines.as_slice()
+        && only.line_type == "v8ui:SpreadsheetDocumentDrawingLineType"
+        && all_formats
+            .iter()
+            .chain(leading_default_format.iter())
+            .any(|format| format.left_border == Some(1))
+    {
+        lines.push(MoxelLine::UNSTYLED);
+    }
+    let resolved_lines = match stored_lines
         .filter(|lines| moxel_line_table_covers_references(lines, &all_formats))
     {
         Some(lines) => {
@@ -4318,10 +4421,33 @@ pub enum MoxelCellValue {
     Reference(usize),
     Structure(Vec<(String, MoxelCellValue)>),
     Array(Vec<MoxelCellValue>),
+    EmptyValueList,
+    /// Decoder quarantine; a spreadsheet containing this never reaches XML.
+    UnmeasuredValueList,
+}
+
+impl MoxelCellValue {
+    fn has_unmeasured_value_list(&self) -> bool {
+        match self {
+            Self::UnmeasuredValueList => true,
+            Self::Array(values) => values.iter().any(Self::has_unmeasured_value_list),
+            Self::Structure(properties) => properties
+                .iter()
+                .any(|(_, value)| value.has_unmeasured_value_list()),
+            _ => false,
+        }
+    }
 }
 
 pub fn parse_moxel_cell_value(text: &str) -> Option<MoxelCellValue> {
     let fields = split_1c_braced_fields(text, 0)?;
+    if let Some(known) = ibcmd_schema::spreadsheet_value_list::classify_fields(&fields) {
+        return Some(if known {
+            MoxelCellValue::EmptyValueList
+        } else {
+            MoxelCellValue::UnmeasuredValueList
+        });
+    }
     // A tag is one letter, and nothing but the quoted letter unescapes to it.
     let tag = match fields.first()?.trim() {
         "\"U\"" => "U",
@@ -4914,9 +5040,11 @@ pub fn parse_moxel_fonts(
     fields
         .iter()
         .enumerate()
-        // A font descriptor leads with `7`.
+        // Legacy absolute descriptors start with 6, current descriptors with 7.
         .filter(|(index, _)| {
-            root_shape_allows(shapes.as_deref(), *index, |shape| shape.leads_with(7))
+            root_shape_allows(shapes.as_deref(), *index, |shape| {
+                shape.leads_with(7) || shape.leads_with(6)
+            })
         })
         .filter_map(|(_, field)| parse_moxel_font(field, object_refs))
         .collect()
@@ -4932,6 +5060,8 @@ pub fn parse_moxel_fonts(
 /// bits reproduces all 683 published tables with no counterexample.
 const MOXCEL_FONT_FACE_NAME_BIT: usize = 0;
 const MOXCEL_FONT_HEIGHT_BIT: usize = 1;
+/// Presence mask of the height member in a MOXCEL font descriptor.
+pub const MOXCEL_FONT_HEIGHT_MASK: usize = 1 << MOXCEL_FONT_HEIGHT_BIT;
 const MOXCEL_FONT_WEIGHT_BIT: usize = 2;
 const MOXCEL_FONT_ITALIC_BIT: usize = 3;
 const MOXCEL_FONT_UNDERLINE_BIT: usize = 4;
@@ -4957,6 +5087,108 @@ const MOXCEL_FONT_BOLD_WEIGHT: usize = 700;
 
 fn moxel_font_mask_has(mask: usize, bit: usize) -> bool {
     mask >> bit & 1 == 1
+}
+
+#[cfg(test)]
+mod native_font_tests {
+    use super::*;
+
+    fn xml(record: &str) -> Option<String> {
+        parse_moxel_font(record, &BTreeMap::new()).map(|font| {
+            let mut output = String::new();
+            push_moxel_font_xml(&mut output, &font);
+            output
+        })
+    }
+
+    #[test]
+    fn auto_font_retains_the_measured_height_member() {
+        assert_eq!(
+            xml("{7,3,2,90,1,100}"),
+            Some("\t<font height=\"9\" kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+        assert_eq!(
+            xml("{7,3,0,1,100}"),
+            Some("\t<font kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+        assert_eq!(
+            xml("{7,3,2,95,1,100}"),
+            Some("\t<font height=\"9.5\" kind=\"AutoFont\"/>\r\n".to_owned())
+        );
+    }
+
+    #[test]
+    fn oem_fixed_font_retains_reference_and_explicit_members() {
+        assert_eq!(
+            xml("{7,1,3,{1},120,\"Arial\",1,100}"),
+            Some(
+                concat!(
+                    "\t<font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"",
+                    " ref=\"sys:OEMFixedFont\" faceName=\"Arial\" height=\"12\"",
+                    " kind=\"WindowsFont\"/>\r\n"
+                )
+                .to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn chart_system_font_references_declare_their_namespace() {
+        for (code, name) in [
+            (1, "OEMFixedFont"),
+            (0, "DefaultGUIFont"),
+            (2, "ANSIFixedFont"),
+        ] {
+            let font = parse_moxel_font(
+                &format!("{{7,1,3,{{{code}}},120,\"Arial\",1,100}}"),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            for tag in ["ttlFont", "legFont", "chFont"] {
+                let mut output = String::new();
+                push_moxel_chart_font_xml(&mut output, tag, &font);
+                assert_eq!(
+                    output,
+                    format!(
+                        "\t\t\t<d3p1:{tag} xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:{name}\" faceName=\"Arial\" height=\"12\" kind=\"WindowsFont\"/>\r\n"
+                    )
+                );
+            }
+        }
+        let font = parse_moxel_font("{7,3,2,90,1,100}", &BTreeMap::new()).unwrap();
+        let mut output = String::new();
+        push_moxel_chart_font_xml(&mut output, "ttlFont", &font);
+        assert_eq!(
+            output,
+            "\t\t\t<d3p1:ttlFont height=\"9\" kind=\"AutoFont\"/>\r\n"
+        );
+    }
+
+    #[test]
+    fn font_profiles_reject_unknown_members_and_keep_existing_system_refs() {
+        for record in [
+            "{7,3,0,90,1,100}",
+            "{7,3,2,1,100}",
+            "{7,3,2,90,91,1,100}",
+            "{7,3,4,90,1,100}",
+            "{7,3,514,90,1,100}",
+            "{7,3,2,\"90\",1,100}",
+            "{7,3,2,90,0,100}",
+            "{7,3,2,90,1,101}",
+            "{7,1,0,{999},1,100}",
+            "{7,1,3,{1},120,1,100}",
+        ] {
+            assert_eq!(xml(record), None, "{record}");
+        }
+        for (code, name) in [(0, "DefaultGUIFont"), (2, "ANSIFixedFont")] {
+            assert_eq!(
+                xml(&format!("{{7,1,0,{{{code}}},1,100}}")),
+                Some(format!(
+                    "\t<font xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ref=\"sys:{name}\" kind=\"WindowsFont\"/>\r\n"
+                ))
+            );
+        }
+    }
 }
 
 /// Style items a font descriptor can name by predefined index. A code no
@@ -5035,6 +5267,7 @@ pub fn with_v85_style_fonts_by_code(
 fn moxel_system_font_ref(index: &str) -> Option<&'static str> {
     match index {
         "0" => Some("sys:DefaultGUIFont"),
+        "1" => Some("sys:OEMFixedFont"),
         "2" => Some("sys:ANSIFixedFont"),
         _ => None,
     }
@@ -5042,25 +5275,36 @@ fn moxel_system_font_ref(index: &str) -> Option<&'static str> {
 
 pub fn parse_moxel_font(text: &str, object_refs: &BTreeMap<String, String>) -> Option<MoxelFont> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "7" {
-        return None;
-    }
+    let legacy_absolute = match fields.first()?.trim() {
+        "6" if fields.len() == 18 && fields[1].trim() == "0" && fields[17].trim() == "1" => true,
+        "7" => false,
+        _ => return None,
+    };
     match fields.get(1)?.trim() {
-        // `AutoFont`: no ref, no explicit member. Evidence: native UT
-        // 11.5.27.75's `GanttChart` template
-        // `ДлительностьОтложенногоОбновления/ДиаграммаГанта` stores
-        // `ttlFont`/`legFont` as this exact five-field shape and publishes
-        // `<d3p1:ttlFont kind="AutoFont"/>` (no `ref`, no explicit member
-        // attribute) for both.
-        "3" if fields.len() == 5
-            && fields.get(2)?.trim() == "0"
-            && fields.get(3)?.trim() == "1"
-            && fields.get(4)?.trim() == "100" =>
-        {
+        // AutoFont omits the reference field. Preserve the empty profile and
+        // the native height-only member mask; other profiles stay unsupported.
+        "3" => {
+            let height = match &*fields {
+                [_, _, mask, tail, scale]
+                    if mask.trim() == "0" && tail.trim() == "1" && scale.trim() == "100" =>
+                {
+                    None
+                }
+                [_, _, mask, height, tail, scale]
+                    if mask.trim().parse::<usize>().ok() == Some(MOXCEL_FONT_HEIGHT_MASK)
+                        && tail.trim() == "1"
+                        && scale.trim() == "100" =>
+                {
+                    Some(format_moxel_font_height(
+                        height.trim().parse::<usize>().ok()?,
+                    ))
+                }
+                _ => return None,
+            };
             Some(MoxelFont {
                 ref_name: None,
                 face_name: None,
-                height: None,
+                height,
                 bold: None,
                 italic: None,
                 underline: None,
@@ -5079,7 +5323,7 @@ pub fn parse_moxel_font(text: &str, object_refs: &BTreeMap<String, String>) -> O
         // publishes unchanged - the arity (`fields.len() == 19`) already
         // names this shape, so an extra equality on an unused field only
         // rejected valid records.
-        "0" if fields.len() == 19 => {
+        "0" if fields.len() == 19 || legacy_absolute => {
             let height_raw = fields.get(3)?.trim().parse::<usize>().ok()?;
             let weight = fields.get(7)?.trim().parse::<usize>().ok()?;
             Some(MoxelFont {
@@ -5091,7 +5335,11 @@ pub fn parse_moxel_font(text: &str, object_refs: &BTreeMap<String, String>) -> O
                 underline: Some(fields.get(9)?.trim() != "0"),
                 strikeout: Some(fields.get(10)?.trim() != "0"),
                 kind: "Absolute",
-                scale: Some(fields.get(18)?.trim().parse::<usize>().ok()?),
+                scale: Some(if legacy_absolute {
+                    100
+                } else {
+                    fields.get(18)?.trim().parse::<usize>().ok()?
+                }),
             })
         }
         kind @ ("1" | "2") => {
@@ -5277,7 +5525,7 @@ pub fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
             || descriptor.first()?.trim() != "4"
             || descriptor.get(1)?.trim() != "0"
             || descriptor.get(2)?.trim() != "{0}"
-            || descriptor.get(7)?.trim() != "0"
+            || !matches!(descriptor.get(7)?.trim(), "0" | "1")
         {
             return None;
         }
@@ -5308,21 +5556,19 @@ pub fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
         // its eight-slot table stores `{4,0,{0},0,0,0,00000000-…,0}` at slot 6
         // among seven ordinary cell descriptors, and the platform publishes
         // four lines -- `Solid`, `Double`, `None` and `Dotted`, all width 1 --
-        // which are exactly the four cell descriptors its formats cite. The
-        // placeholder is read as the cell enumeration's own `None` so it can
-        // be dropped with the other uncited entries rather than guessed at.
-        let placeholder =
-            kind == MOXEL_NIL_LINE_KIND && descriptor.get(3)?.trim() == "0" && width == 0;
+        // which are exactly the four cell descriptors its formats cite.
+        if kind == MOXEL_NIL_LINE_KIND
+            && descriptor[3].trim() == "0"
+            && width == 0
+            && descriptor[7].trim() == "0"
+        {
+            lines.push(MoxelLine::UNSTYLED);
+            continue;
+        }
         let line_type = match kind {
             MOXEL_CELL_LINE_KIND => "v8ui:SpreadsheetDocumentCellLineType",
             MOXEL_DRAWING_LINE_KIND => "v8ui:SpreadsheetDocumentDrawingLineType",
-            _ if placeholder => "v8ui:SpreadsheetDocumentCellLineType",
             _ => return None,
-        };
-        let kind = if placeholder {
-            MOXEL_CELL_LINE_KIND
-        } else {
-            kind
         };
         let style = match (kind, descriptor.get(3)?.trim()) {
             (MOXEL_CELL_LINE_KIND, "0") => "None",
@@ -5335,9 +5581,11 @@ pub fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> {
             (MOXEL_DRAWING_LINE_KIND, "0") => "None",
             (MOXEL_DRAWING_LINE_KIND, "1") => "Solid",
             (MOXEL_DRAWING_LINE_KIND, "3") => "Dotted",
+            (MOXEL_DRAWING_LINE_KIND, "4") => "DashDotted",
             _ => return None,
         };
         lines.push(MoxelLine {
+            gap: descriptor[7].trim() == "1",
             style,
             line_type,
             width,
@@ -5417,6 +5665,7 @@ fn parse_moxel_lines_with_raw_spans(
             vec![resolved_moxel_line_from_parents(
                 std::slice::from_ref(source),
                 MoxelLine {
+                    gap: source.gap,
                     style: source.style,
                     line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                     width: source.width,
@@ -5474,6 +5723,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5485,6 +5735,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 3,
@@ -5496,6 +5747,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5507,6 +5759,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5536,6 +5789,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "ThinDashed",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 1,
@@ -5547,6 +5801,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "None",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 0,
@@ -5558,6 +5813,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "Solid",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 2,
@@ -5569,6 +5825,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "None",
                             line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                             width: 1,
@@ -5586,6 +5843,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5597,6 +5855,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5608,6 +5867,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5619,6 +5879,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                         width: 1,
@@ -5641,6 +5902,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5652,6 +5914,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5663,6 +5926,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                         width: 1,
@@ -5689,6 +5953,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5700,6 +5965,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[2..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5726,6 +5992,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5737,6 +6004,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5748,6 +6016,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 3,
@@ -5774,6 +6043,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5785,6 +6055,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5796,6 +6067,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 0,
@@ -5821,6 +6093,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5832,6 +6105,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Dotted",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5854,6 +6128,7 @@ fn parse_moxel_lines_with_raw_spans(
             vec![resolved_moxel_line_from_parents(
                 &lines[0..1],
                 MoxelLine {
+                    gap: false,
                     style: "Solid",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -5871,6 +6146,7 @@ fn parse_moxel_lines_with_raw_spans(
     finalize_moxel_line_slots(
         vec![ResolvedMoxelLine {
             line: MoxelLine {
+                gap: false,
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
                 width: 1,
@@ -6088,6 +6364,14 @@ pub fn parse_moxel_pictures(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<MoxelPicture> {
+    parse_moxel_pictures_with_standard_names(fields, object_refs, |_| None)
+}
+
+fn parse_moxel_pictures_with_standard_names(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
+) -> Vec<MoxelPicture> {
     let shapes = root_shapes(fields);
     for index in 0..fields.len() {
         let count = match shapes
@@ -6122,7 +6406,9 @@ pub fn parse_moxel_pictures(
         }
         let mut pictures = Vec::with_capacity(count);
         for (picture_index, field) in fields[index + 1..=index + count].iter().enumerate() {
-            let Some(mut picture) = parse_moxel_picture(field, object_refs) else {
+            let Some(mut picture) =
+                parse_moxel_picture_with_standard_names(field, object_refs, standard_picture_name)
+            else {
                 pictures.clear();
                 break;
             };
@@ -6142,6 +6428,14 @@ const MOXEL_PICTURE_TRANSPARENCY_FIELD: usize = 6;
 pub fn parse_moxel_picture(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+) -> Option<MoxelPicture> {
+    parse_moxel_picture_with_standard_names(text, object_refs, |_| None)
+}
+
+fn parse_moxel_picture_with_standard_names(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
 ) -> Option<MoxelPicture> {
     let fields = split_1c_braced_fields(text, 0)?;
     // The older spreadsheets (root revisions 8/9) store the record one member
@@ -6197,6 +6491,7 @@ pub fn parse_moxel_picture(
             object_refs
                 .get(&uuid)
                 .and_then(|reference| reference.strip_prefix("CommonPicture."))
+                .or_else(|| standard_picture_name(&uuid)?.strip_prefix("StdPicture."))
                 .map(|name| format!("v8ui:{name}"))
         });
     let payload = fields
@@ -7100,7 +7395,12 @@ fn parse_gantt_points_data(text: &str) -> Option<MoxelGanttSeriesLikeData> {
     if compact_moxel_chart_token(value.get(2)?) != "{4,0,{0},\"\",-1,-1,1,0,\"\"}" {
         return None;
     }
-    parse_moxel_font(value.get(3)?, &BTreeMap::new())?;
+    let font = parse_moxel_font(value.get(3)?, &BTreeMap::new())?;
+    // The points-value emitter represents only a plain AutoFont. Refuse
+    // other fonts until their members can be retained through the model.
+    if font.kind != "AutoFont" || font.height.is_some() {
+        return None;
+    }
     if compact_moxel_chart_token(inner.get(5)?)
         != "{0,1,{0,{0,{3,0,{0}},{3,0,{0}}},{3,4,{0}},{3,4,{0}}}}"
     {
@@ -7269,6 +7569,28 @@ fn parse_gantt_time_scale(text: &str) -> Option<MoxelGanttTimeScale> {
 #[cfg(test)]
 mod gantt_multilevel_tests {
     use super::*;
+
+    #[test]
+    fn native_font_tests_gantt_points_refuse_unrepresented_font_members() {
+        let text = include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object-payload.txt"
+        );
+        let fields = split_1c_braced_fields(text, 0).unwrap();
+        let points = fields[2];
+        assert!(parse_gantt_points_data(points).is_some());
+        let mut accepted = Vec::new();
+        for font in ["{7,3,2,90,1,100}", "{7,1,3,{1},120,\"Arial\",1,100}"] {
+            let changed = points.replacen("{7,3,0,1,100}", font, 1);
+            assert_ne!(changed, points);
+            if parse_gantt_points_data(&changed).is_some() {
+                accepted.push(font);
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "unrepresented fonts accepted: {accepted:?}"
+        );
+    }
 
     #[test]
     fn native_four_level_gantt_components_decode() {
@@ -9024,7 +9346,10 @@ pub fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintSettings
             // reader cannot spell refuses the record rather than dropping the
             // member - the strictness the value parser used to get by refusing
             // any `"N"` that was not an integer.
-            0 => settings.paper = Some(value.as_usize()?),
+            0 => match value {
+                MoxelPrintSettingsValue::Text(name) => settings.page_size = Some(name),
+                number => settings.paper = Some(number.as_usize()?),
+            },
             1 => settings.page_orientation = value.as_usize().and_then(moxel_page_orientation),
             2 => settings.scale = Some(value.as_usize()?),
             3 => settings.collate = Some(value.as_bool()?),
@@ -10385,9 +10710,7 @@ pub fn parse_moxel_style_refs(
     let shapes = root_shapes(fields);
     for (index, field) in fields.iter().enumerate().skip(palette_end) {
         // `{count, (slot, ref) * count}`, `1 <= count <= 2048`.
-        if !root_shape_allows(shapes.as_deref(), index, |shape| {
-            shape.may_be_counted(1, MAX_MOXCEL_STYLE_REFS, 2, 1)
-        }) {
+        if !moxel_palette_override_shape_allows(shapes.as_deref(), index) {
             continue;
         }
         if let Some(overrides) = parse_moxel_indexed_style_ref_overrides(field, object_refs) {
@@ -10426,6 +10749,35 @@ fn parse_moxel_raw_palette_provenance(
 
 const MAX_MOXCEL_STYLE_REFS: usize = 2048;
 
+fn moxel_palette_override_shape_allows(shapes: Option<&RootShapes>, index: usize) -> bool {
+    root_shape_allows(shapes, index, |shape| {
+        shape.may_be_counted(1, MAX_MOXCEL_STYLE_REFS, 2, 1)
+    })
+}
+
+fn moxel_palette_overrides_are_supported(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> bool {
+    let shapes = root_shapes(fields);
+    for (index, field) in fields.iter().enumerate() {
+        if !moxel_palette_override_shape_allows(shapes.as_deref(), index) {
+            continue;
+        }
+        if parse_moxel_indexed_style_ref_overrides_with(
+            field,
+            object_refs,
+            parse_moxel_palette_slot_for_location,
+        )
+        .is_some()
+            && parse_moxel_indexed_style_ref_overrides(field, object_refs).is_none()
+        {
+            return false;
+        }
+    }
+    true
+}
+
 fn parse_moxel_canonical_positive_count(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     if bytes.is_empty() || bytes.first() == Some(&b'0') || !bytes.iter().all(u8::is_ascii_digit) {
@@ -10439,16 +10791,7 @@ fn locate_moxel_style_ref_palette(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<(usize, usize, Vec<Option<String>>)> {
-    let Some(shapes) = root_shapes(fields) else {
-        return locate_moxel_style_ref_palette_in(fields, None, object_refs);
-    };
-    // Which run is the palette does not depend on the object references -- a
-    // slot that names a style item reads with or without them -- so the run
-    // is located once per conversion and only its slots are read per call.
-    let (start, end) = (*shapes.palette.get_or_init(|| {
-        locate_moxel_style_ref_palette_in(fields, Some(&*shapes), &BTreeMap::new())
-            .map(|(start, end, _)| (start, end))
-    }))?;
+    let (start, end) = locate_moxel_style_ref_palette_span(fields, object_refs).ok()??;
     let refs = fields
         .get(start + 1..end)?
         .iter()
@@ -10457,11 +10800,26 @@ fn locate_moxel_style_ref_palette(
     Some((start, end, refs))
 }
 
+fn locate_moxel_style_ref_palette_span(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Result<Option<(usize, usize)>, ()> {
+    let Some(shapes) = root_shapes(fields) else {
+        return locate_moxel_style_ref_palette_in(fields, None, object_refs);
+    };
+    // Which run is the palette does not depend on the object references -- a
+    // slot that names a style item reads with or without them -- so the run
+    // is located once per conversion and only its slots are read per call.
+    *shapes
+        .palette
+        .get_or_init(|| locate_moxel_style_ref_palette_in(fields, Some(&*shapes), &BTreeMap::new()))
+}
+
 fn locate_moxel_style_ref_palette_in(
     fields: &[&str],
     shapes: Option<&RootShapes>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<(usize, usize, Vec<Option<String>>)> {
+) -> Result<Option<(usize, usize)>, ()> {
     // A MOXCEL palette is a single, count-prefixed run in the root.  Do not
     // scan arbitrary nested/positional descriptors: those are common in row,
     // drawing and format data and used to corrupt the palette silently.
@@ -10496,29 +10854,46 @@ fn locate_moxel_style_ref_palette_in(
         let Some(entries) = fields.get(start + 1..end) else {
             continue;
         };
-        let Some(refs) = entries
+        if !entries
             .iter()
-            .map(|entry| parse_moxel_style_ref_slot(entry, object_refs))
-            .collect::<Option<Vec<_>>>()
-        else {
+            .all(|entry| parse_moxel_palette_slot_for_location(entry, object_refs).is_some())
+        {
             continue;
         };
         // A count which stops in the middle of a typed run is not canonical.
         if fields
             .get(end)
-            .and_then(|entry| parse_moxel_style_ref_slot(entry, object_refs))
+            .and_then(|entry| parse_moxel_palette_slot_for_location(entry, object_refs))
             .is_some()
         {
             continue;
         }
-        candidates.push((start, end, refs));
+        if entries
+            .iter()
+            .any(|entry| parse_moxel_style_ref_slot(entry, object_refs).is_none())
+        {
+            return Err(());
+        }
+        candidates.push((start, end));
     }
     // Multiple plausible spans are ambiguous by definition.  Preserve no
     // palette instead of guessing which unrelated root section won.
     if candidates.len() != 1 {
-        return None;
+        return Ok(None);
     }
-    candidates.pop()
+    Ok(candidates.pop())
+}
+
+/// Locate a complete typed run even when a web ordinal cannot be named.
+/// The unresolved slot is rejected before formats can use compact defaults.
+fn parse_moxel_palette_slot_for_location(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<String>> {
+    parse_moxel_style_ref_slot(text, object_refs).or_else(|| {
+        let (kind, payload) = moxel_style_ref_slot_fields(text)?;
+        (kind == "2" && payload.len() == 1).then_some(None)
+    })
 }
 
 /// The palette-override container is one count-prefixed table of
@@ -10541,6 +10916,14 @@ pub fn parse_moxel_indexed_style_ref_overrides(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<(usize, Option<String>)>> {
+    parse_moxel_indexed_style_ref_overrides_with(text, object_refs, parse_moxel_style_ref_slot)
+}
+
+fn parse_moxel_indexed_style_ref_overrides_with(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    parse_slot: fn(&str, &BTreeMap<String, String>) -> Option<Option<String>>,
+) -> Option<Vec<(usize, Option<String>)>> {
     let fields = split_1c_braced_fields(text, 0)?;
     let count = fields.first()?.trim().parse::<usize>().ok()?;
     if count == 0 || count > MAX_MOXCEL_STYLE_REFS || fields.len() != count * 2 + 1 {
@@ -10549,7 +10932,7 @@ pub fn parse_moxel_indexed_style_ref_overrides(
     let mut overrides = Vec::with_capacity(count);
     for pair in fields.get(1..)?.chunks_exact(2) {
         let slot_index = pair.first()?.trim().parse::<usize>().ok()?;
-        let style_ref = parse_moxel_style_ref_slot(pair.get(1)?, object_refs)?;
+        let style_ref = parse_slot(pair.get(1)?, object_refs)?;
         overrides.push((slot_index, style_ref));
     }
     Some(overrides)
@@ -10614,12 +10997,8 @@ pub fn parse_moxel_style_ref_slot(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Option<String>> {
-    let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 3 || fields.first()?.trim() != "3" {
-        return None;
-    }
-    let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
-    match fields.get(1)?.trim() {
+    let (kind, payload) = moxel_style_ref_slot_fields(text)?;
+    match kind {
         "0" if payload.len() == 1 => payload
             .first()
             .filter(|value| value.trim().parse::<u32>().is_ok())
@@ -10703,6 +11082,17 @@ pub fn parse_moxel_style_ref_slot(
         }
         _ => None,
     }
+}
+
+fn moxel_style_ref_slot_fields(text: &str) -> Option<(&str, BracedFields<'_>)> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let [revision, kind, payload] = &*fields else {
+        return None;
+    };
+    if revision.trim() != "3" {
+        return None;
+    }
+    Some((kind.trim(), split_1c_braced_fields(payload, 0)?))
 }
 
 #[doc(hidden)]
@@ -10988,6 +11378,13 @@ pub fn parse_moxel_web_color(value: &str) -> Option<String> {
         120 => "RosyBrown",
         121 => "RoyalBlue",
         122 => "SaddleBrown",
+        // Both pinned corpus-spreadsheet-facets profiles pair the sole
+        // kind-2 palette ordinal 124 with native SandyBrown XML (#610).
+        124 => "SandyBrown",
+        // The public 8.5.1.1529 modern-spreadsheet coverage set pairs its
+        // sole kind-2 slot, ordinal 129, with native SkyBlue backColor.
+        // Keep this existing document readable when unknown ordinals fail.
+        129 => "SkyBlue",
         128 => "Silver",
         130 => "SlateBlue",
         // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
@@ -11277,6 +11674,7 @@ pub fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
         _ => return None,
     };
     Some(MoxelLine {
+        gap: false,
         style,
         line_type: "v8ui:SpreadsheetDocumentCellLineType",
         width: 1,
@@ -11542,9 +11940,15 @@ pub fn parse_moxel_bounds_area(bounds: &[&str], name: String) -> Option<MoxelAre
     })
 }
 
-pub fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
-    // Isolated unchanged renderer for the legacy embedded-form caller. It does
-    // not construct a typed plan and therefore cannot panic on plan admission.
+/// Render a complete document, refusing unmeasured cell values even when the
+/// caller constructed the spreadsheet without decoder admission.
+pub fn format_moxel_spreadsheet_xml(
+    spreadsheet: &MoxelSpreadsheet,
+) -> Result<String, MxlDiagnostic> {
+    // Public callers may construct a spreadsheet without decoder admission.
+    for row in &spreadsheet.rows {
+        validate_moxel_row_values(row)?;
+    }
     let output_format_indices = moxel_output_format_indices(spreadsheet);
     let output_format_index_map = moxel_output_format_index_map(&output_format_indices);
     render_moxel_spreadsheet_xml(
@@ -11613,11 +12017,11 @@ fn format_moxel_spreadsheet_xml_with_plan(
     // writer migration.  This renderer only receives their already-resolved
     // output projection and does not inspect raw MOXCEL values.
     let _ = (&plan.palette, &plan.format_map);
-    Ok(render_moxel_spreadsheet_xml(
+    render_moxel_spreadsheet_xml(
         spreadsheet,
         &plan.output_format_indices,
         &plan.output_format_index_map,
-    ))
+    )
 }
 
 /// The four packed drawing-border flags, in publication order. Their weights
@@ -11662,7 +12066,10 @@ fn render_moxel_spreadsheet_xml(
     spreadsheet: &MoxelSpreadsheet,
     output_format_indices: &[usize],
     output_format_index_map: &BTreeMap<usize, usize>,
-) -> String {
+) -> Result<String, MxlDiagnostic> {
+    for row in &spreadsheet.rows {
+        validate_moxel_row_values(row)?;
+    }
     let emit_first_row_format_index =
         moxel_column_format_slots(&spreadsheet.column_sets, spreadsheet.column_count) == 0;
     let font_projection = moxel_font_projection(spreadsheet, output_format_indices);
@@ -11743,7 +12150,7 @@ fn render_moxel_spreadsheet_xml(
             row,
             output_format_index_map,
             emit_first_row_format_index,
-        );
+        )?;
     }
     for drawing in &spreadsheet.drawings {
         push_moxel_drawing_xml(&mut xml, drawing, output_format_index_map);
@@ -11921,7 +12328,7 @@ fn render_moxel_spreadsheet_xml(
     }
     for (role, (tag, _)) in MOXEL_GROUP_HEADER_COLOR_ROLES.iter().enumerate() {
         if let Some(color) = &spreadsheet.group_header_colors[role] {
-            _ = write!(xml, "\t<{tag}>{}</{tag}>\r\n", XmlText(color));
+            push_moxel_group_header_color_xml(&mut xml, tag, color);
         }
     }
     for line in &spreadsheet.lines {
@@ -11953,7 +12360,29 @@ fn render_moxel_spreadsheet_xml(
         push_moxel_picture_xml(&mut xml, picture);
     }
     xml.push_str("</document>");
-    xml
+    Ok(xml)
+}
+
+/// Emits a group/header color with its native document-local namespace.
+///
+/// The decoded palette uses `d3p1:` for web colors and `windows:` for Windows
+/// colors; both become locally bound `d2p1` QNames here. Style references and
+/// RGB literals keep their existing spelling and escaping. Format-level
+/// colors are serialized separately with their native `d3p1` binding.
+fn push_moxel_group_header_color_xml(xml: &mut String, tag: &str, color: &str) {
+    let qualified = color
+        .strip_prefix("d3p1:")
+        .map(|name| ("web", name))
+        .or_else(|| color.strip_prefix("windows:").map(|name| ("windows", name)));
+    if let Some((namespace, name)) = qualified {
+        _ = write!(
+            xml,
+            "\t<{tag} xmlns:d2p1=\"http://v8.1c.ru/8.1/data/ui/colors/{namespace}\">d2p1:{}</{tag}>\r\n",
+            XmlText(name)
+        );
+    } else {
+        _ = write!(xml, "\t<{tag}>{}</{tag}>\r\n", XmlText(color));
+    }
 }
 
 pub fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize {
@@ -13211,6 +13640,7 @@ pub fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPrintSett
     push_moxel_format_bool(xml, "blackAndWhite", settings.black_and_white);
     push_moxel_format_text(xml, "printerName", settings.printer_name.as_deref());
     push_moxel_format_usize(xml, "paper", settings.paper);
+    push_moxel_format_text(xml, "pageSize", settings.page_size.as_deref());
     push_moxel_format_usize(xml, "paperSource", settings.paper_source);
     push_moxel_format_text(xml, "pageWidth", settings.page_width.as_deref());
     push_moxel_format_text(xml, "pageHeight", settings.page_height.as_deref());
@@ -13241,6 +13671,7 @@ impl MoxelPrintSettings {
             && self.black_and_white.is_none()
             && self.printer_name.is_none()
             && self.paper.is_none()
+            && self.page_size.is_none()
             && self.paper_source.is_none()
             && self.page_width.is_none()
             && self.page_height.is_none()
@@ -14516,6 +14947,9 @@ fn push_moxel_chart_font_xml_indented(
 ) {
     _ = write!(xml, "{}<d3p1:{tag}", "\t".repeat(indent));
     if let Some(ref_name) = &font.ref_name {
+        if ref_name.starts_with("sys:") {
+            xml.push_str(" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"");
+        }
         _ = write!(xml, " ref=\"{}\"", XmlText(ref_name));
     }
     if let Some(face_name) = &font.face_name {
@@ -14907,7 +15341,15 @@ pub fn push_moxel_merge_body_xml(xml: &mut String, merge: &MoxelMerge) {
 }
 
 pub fn push_moxel_line_xml(xml: &mut String, line: &MoxelLine) {
-    _ = write!(xml, "\t<line width=\"{}\" gap=\"false\">\r\n", line.width);
+    if line == &MoxelLine::UNSTYLED {
+        xml.push_str("\t<line width=\"0\" gap=\"false\"/>\r\n");
+        return;
+    }
+    _ = write!(
+        xml,
+        "\t<line width=\"{}\" gap=\"{}\">\r\n",
+        line.width, line.gap
+    );
     _ = write!(
         xml,
         "\t\t<v8ui:style xsi:type=\"{}\">{}</v8ui:style>\r\n",
@@ -15006,12 +15448,33 @@ pub fn push_moxel_document_area_xml(xml: &mut String, tag: &str, area: &MoxelAre
     _ = write!(xml, "\t</{tag}>\r\n");
 }
 
+fn unmeasured_value_list_writer_error() -> MxlDiagnostic {
+    MxlDiagnostic::writer(
+        "mxl.writer.value-list-profile",
+        "an unmeasured ValueList profile cannot be published",
+    )
+}
+
+fn validate_moxel_row_values(row: &MoxelRow) -> Result<(), MxlDiagnostic> {
+    if row.cells.iter().any(|cell| {
+        cell.value
+            .iter()
+            .chain(&cell.detail_value)
+            .any(MoxelCellValue::has_unmeasured_value_list)
+    }) {
+        return Err(unmeasured_value_list_writer_error());
+    }
+    Ok(())
+}
+
+/// Append a complete row, or leave `xml` unchanged on an unmeasured value.
 pub fn push_moxel_row_xml(
     xml: &mut String,
     row: &MoxelRow,
     output_format_index_map: &BTreeMap<usize, usize>,
     emit_first_format_index: bool,
-) {
+) -> Result<(), MxlDiagnostic> {
+    validate_moxel_row_values(row)?;
     // Every element below is appended piece by piece: a template of ERP УХ
     // publishes hundreds of thousands of cells, and formatting each element
     // through `write!` cost more than the rest of the writer together.
@@ -15054,7 +15517,7 @@ pub fn push_moxel_row_xml(
     if row.cells.is_empty() {
         xml.push_str("\t\t\t<empty>true</empty>\r\n");
         xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
-        return;
+        return Ok(());
     }
     let mut expected_column = 0usize;
     for cell in &row.cells {
@@ -15144,7 +15607,7 @@ pub fn push_moxel_row_xml(
         if let Some(value) = &cell.value
             && !value_is_reference
         {
-            push_moxel_cell_value_xml(xml, "v", value);
+            push_moxel_cell_value_xml(xml, "v", value)?;
         }
         if let Some(detail_parameter) = &cell.detail_parameter {
             push_xml_text_element(xml, "\t\t\t\t\t", "detailParameter", detail_parameter);
@@ -15152,10 +15615,10 @@ pub fn push_moxel_row_xml(
         if let Some(value) = &cell.value
             && value_is_reference
         {
-            push_moxel_cell_value_xml(xml, "v", value);
+            push_moxel_cell_value_xml(xml, "v", value)?;
         }
         if let Some(detail_value) = &cell.detail_value {
-            push_moxel_cell_value_xml(xml, "d", detail_value);
+            push_moxel_cell_value_xml(xml, "d", detail_value)?;
         }
         if let Some(picture_parameter) = &cell.picture_parameter {
             push_xml_text_element(xml, "\t\t\t\t\t", "pictureParameter", picture_parameter);
@@ -15171,6 +15634,7 @@ pub fn push_moxel_row_xml(
         expected_column = cell.column_index + 1;
     }
     xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
+    Ok(())
 }
 
 /// Publishes one typed cell member.
@@ -15178,8 +15642,12 @@ pub fn push_moxel_row_xml(
 /// A stored reference always publishes as `<r>`, whichever member carries it;
 /// every other spelling keeps the member's own element name and carries the
 /// XSD type the platform writes for it.
-fn push_moxel_cell_value_xml(xml: &mut String, element: &str, value: &MoxelCellValue) {
-    push_moxel_typed_value_xml(xml, element, value, 5);
+fn push_moxel_cell_value_xml(
+    xml: &mut String,
+    element: &str,
+    value: &MoxelCellValue,
+) -> Result<(), MxlDiagnostic> {
+    push_moxel_typed_value_xml(xml, element, value, 5)
 }
 
 /// The shared typed-value writer `push_moxel_cell_value_xml` calls at its
@@ -15194,7 +15662,10 @@ fn push_moxel_typed_value_xml(
     element: &str,
     value: &MoxelCellValue,
     depth: usize,
-) {
+) -> Result<(), MxlDiagnostic> {
+    if value.has_unmeasured_value_list() {
+        return Err(unmeasured_value_list_writer_error());
+    }
     let indent = "\t".repeat(depth);
     match value {
         MoxelCellValue::Nil => {
@@ -15247,7 +15718,7 @@ fn push_moxel_typed_value_xml(
                     "{property_indent}<v8:Property name=\"{}\">\r\n",
                     XmlText(key)
                 );
-                push_moxel_typed_value_xml(xml, "v8:Value", property_value, depth + 2);
+                push_moxel_typed_value_xml(xml, "v8:Value", property_value, depth + 2)?;
                 _ = write!(xml, "{property_indent}</v8:Property>\r\n");
             }
             _ = write!(xml, "{indent}</{element}>\r\n");
@@ -15255,11 +15726,24 @@ fn push_moxel_typed_value_xml(
         MoxelCellValue::Array(values) => {
             _ = write!(xml, "{indent}<{element} xsi:type=\"v8:Array\">\r\n");
             for value in values {
-                push_moxel_typed_value_xml(xml, "v8:Value", value, depth + 1);
+                push_moxel_typed_value_xml(xml, "v8:Value", value, depth + 1)?;
             }
             _ = write!(xml, "{indent}</{element}>\r\n");
         }
+        MoxelCellValue::EmptyValueList => {
+            let kind = ibcmd_schema::spreadsheet_value_list::XML_TYPE;
+            _ = write!(xml, "{indent}<{element} xsi:type=\"{kind}\">\r\n");
+            _ = write!(
+                xml,
+                "{indent}\t<v8:valueType/>\r\n{indent}\t<v8:lastId xsi:type=\"xs:decimal\">0</v8:lastId>\r\n"
+            );
+            _ = write!(xml, "{indent}</{element}>\r\n");
+        }
+        MoxelCellValue::UnmeasuredValueList => {
+            return Err(unmeasured_value_list_writer_error());
+        }
     }
+    Ok(())
 }
 
 /// Publishes an embedded control blob verbatim.
@@ -15351,6 +15835,49 @@ fn push_moxel_note_xml(
 mod moxel_exact_parity_tests {
     use super::*;
 
+    #[test]
+    fn legacy_absolute_font_uses_the_native_scale_without_a_scale_slot() {
+        let raw = r#"{6,0,0,83,0,0,0,700,0,0,0,204,0,0,0,34,"Arial",1}"#;
+        let refs = BTreeMap::new();
+        let font = parse_moxel_font(raw, &refs).unwrap();
+        assert_eq!(font.face_name.as_deref(), Some("Arial"));
+        assert_eq!(font.height.as_deref(), Some("8.3"));
+        assert_eq!(font.bold, Some(true));
+        assert_eq!(font.scale, Some(100));
+        assert!(parse_moxel_font(&raw.replace(",1}", ",1,100}"), &refs).is_none());
+    }
+
+    #[test]
+    fn group_and_header_colors_bind_the_native_document_namespace() {
+        for (tag, _) in MOXEL_GROUP_HEADER_COLOR_ROLES {
+            for (color, attributes, text) in [
+                (
+                    "d3p1:White",
+                    " xmlns:d2p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\"",
+                    "d2p1:White",
+                ),
+                (
+                    "windows:ButtonShadow",
+                    " xmlns:d2p1=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"",
+                    "d2p1:ButtonShadow",
+                ),
+                ("style:FieldBackColor", "", "style:FieldBackColor"),
+                ("#12AB34", "", "#12AB34"),
+                ("style:A&<\"", "", "style:A&amp;&lt;&quot;"),
+            ] {
+                let mut xml = String::new();
+                push_moxel_group_header_color_xml(&mut xml, tag, color);
+                assert_eq!(xml, format!("\t<{tag}{attributes}>{text}</{tag}>\r\n"));
+            }
+        }
+        let mut format = String::new();
+        push_moxel_format_color(&mut format, "backColor", Some("d3p1:White"));
+        assert_eq!(
+            format,
+            "\t\t<backColor xmlns:d3p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\">d3p1:White</backColor>\r\n"
+        );
+    }
+
     /// The built-in type table these tests decode with. None of their bodies
     /// carries a value-type `Pattern`, so the table is never asked.
     fn no_builtin_types(_type_id: &str) -> Option<&'static str> {
@@ -15437,7 +15964,7 @@ mod moxel_exact_parity_tests {
 
     #[test]
     fn member_forty_publishes_the_automatic_width_flag() {
-        let xml = format_moxel_spreadsheet_xml(&reconciliation_report_headers());
+        let xml = format_moxel_spreadsheet_xml(&reconciliation_report_headers()).unwrap();
 
         assert_eq!(
             xml.matches("<autoWidthCalculation>true</autoWidthCalculation>")
@@ -15593,6 +16120,7 @@ mod moxel_exact_parity_tests {
         assert!(spreadsheet.template_mode);
         assert!(
             format_moxel_spreadsheet_xml(&spreadsheet)
+                .unwrap()
                 .contains("<templateMode>true</templateMode>")
         );
 
@@ -15601,7 +16129,11 @@ mod moxel_exact_parity_tests {
         let spreadsheet =
             parse_moxel_spreadsheet_text(&cleared, &BTreeMap::new(), no_builtin_types).unwrap();
         assert!(!spreadsheet.template_mode);
-        assert!(!format_moxel_spreadsheet_xml(&spreadsheet).contains("<templateMode>"));
+        assert!(
+            !format_moxel_spreadsheet_xml(&spreadsheet)
+                .unwrap()
+                .contains("<templateMode>")
+        );
     }
 
     /// Fixture: `tests/fixtures/moxel_buyer_instruction_picture_parameter_raw.txt`,
@@ -15621,7 +16153,7 @@ mod moxel_exact_parity_tests {
         let spreadsheet =
             parse_moxel_spreadsheet_text(BUYER_INSTRUCTION_RAW, &BTreeMap::new(), no_builtin_types)
                 .unwrap();
-        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
         assert!(
             xml.contains("\t\t\t\t\t<pictureParameter>КартинкаИнструкции</pictureParameter>\r\n"),
@@ -15634,7 +16166,7 @@ mod moxel_exact_parity_tests {
         let spreadsheet =
             parse_moxel_spreadsheet_text(BUYER_INSTRUCTION_RAW, &BTreeMap::new(), no_builtin_types)
                 .unwrap();
-        let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+        let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
         assert_eq!(xml.matches("<format").count(), 2, "{xml}");
         assert!(
@@ -15771,7 +16303,7 @@ mod moxel_exact_parity_tests {
             cells: vec![cell],
         };
         let mut xml = String::new();
-        push_moxel_row_xml(&mut xml, &row, &BTreeMap::new(), false);
+        push_moxel_row_xml(&mut xml, &row, &BTreeMap::new(), false).unwrap();
         assert_eq!(xml.matches("<v8:item>").count(), 2);
         assert!(xml.contains(
             "<v8:lang>ru</v8:lang>\r\n\t\t\t\t\t\t\t<v8:content>Добавить страницу</v8:content>"
@@ -15786,16 +16318,17 @@ mod moxel_exact_parity_tests {
     #[test]
     fn typed_cell_members_publish_the_platform_spellings() {
         let mut xml = String::new();
-        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Number("0".to_string()));
-        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text(String::new()));
-        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text("5".to_string()));
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Number("0".to_string())).unwrap();
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text(String::new())).unwrap();
+        push_moxel_cell_value_xml(&mut xml, "v", &MoxelCellValue::Text("5".to_string())).unwrap();
         push_moxel_cell_value_xml(
             &mut xml,
             "v",
             &MoxelCellValue::DateTime("00010101000000".to_string()),
-        );
-        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Nil);
-        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Reference(15));
+        )
+        .unwrap();
+        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Nil).unwrap();
+        push_moxel_cell_value_xml(&mut xml, "d", &MoxelCellValue::Reference(15)).unwrap();
 
         assert_eq!(
             xml,
@@ -16016,6 +16549,7 @@ mod moxel_exact_parity_tests {
         let mut lines = vec![
             ResolvedMoxelLine {
                 line: MoxelLine {
+                    gap: false,
                     style: "Solid",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -16033,6 +16567,7 @@ mod moxel_exact_parity_tests {
             },
             ResolvedMoxelLine {
                 line: MoxelLine {
+                    gap: false,
                     style: "Dotted",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -16344,6 +16879,7 @@ mod moxel_exact_parity_tests {
 
         let line = ResolvedMoxelLine {
             line: MoxelLine {
+                gap: false,
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
                 width: 1,
@@ -16372,6 +16908,7 @@ mod moxel_exact_parity_tests {
                 line,
                 ResolvedMoxelLine {
                     line: MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,

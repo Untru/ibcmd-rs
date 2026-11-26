@@ -239,7 +239,7 @@ fn assert_moxel_template_matches_lab_baseline(
         &raw[body_start..]
     };
     let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     let baseline_path = baseline_relative_path.iter().fold(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("lab")

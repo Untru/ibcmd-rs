@@ -1,7 +1,15 @@
 {
   "equal": [
+    "CovSheetValueListDetail",
     "CovSheetVerticalPageBreak",
     "CovSpreadsheetFacetTemplate",
-    "configuration"
+    "configuration",
+    "CovSheetAppearanceCheckIcon",
+    "CovSheetAutoFontHeight",
+    "CovSheetOEMFixedFont",
+    "CovSheetSandyBrown",
+    "CovSheetPageSizeA4",
+    "CovSheetDashDotted",
+    "CovSheetGapLine"
   ]
 }

@@ -245,6 +245,7 @@
     "CommonTemplates/CovModernSheetBuiltinFont",
     "CommonTemplates/CovModernSheetEmbeddedTable",
     "CommonTemplates/CovModernSpreadsheetTemplate",
+    "CommonTemplates/CovObservedSheetGroupColours",
     "CommonTemplates/CovSheetVerticalPageBreak",
     "CommonTemplates/CovSpreadsheetFacetTemplate",
     "CommonTemplates/CovSpreadsheetMergedCells",
@@ -430,6 +431,7 @@
     "WebSocketClients/CovTemplate",
     "WebSocketClients/CovUseOSAuthentication_true",
     "WebSocketClients/CovUseOSProxy_true",
-    "XDTOPackages/CovTemplate"
+    "XDTOPackages/CovTemplate",
+    "CommonTemplates/CovSheetValueListDetail"
   ]
 }

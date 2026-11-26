@@ -18,6 +18,7 @@ pub mod external_data_source_children;
 pub mod external_named;
 pub mod form_source_defaults;
 pub mod interface;
+pub mod spreadsheet_value_list;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};

@@ -243,6 +243,9 @@ pub fn preserve_spreadsheet_language(base: &[u8], compiled: &[u8]) -> Result<Vec
 struct Node {
     /// Local name.
     name: String,
+    namespace: Option<String>,
+    type_namespace: Option<String>,
+    type_attribute_namespace: Option<String>,
     /// Qualified attribute names as written, with unescaped values.
     attributes: Vec<(String, String)>,
     children: Vec<Node>,
@@ -317,6 +320,13 @@ impl Node {
         }
         Ok(())
     }
+
+    fn value_list_attribute_count(&self) -> usize {
+        self.attributes
+            .iter()
+            .filter(|(key, _)| !ibcmd_schema::spreadsheet_value_list::is_namespace_declaration(key))
+            .count()
+    }
 }
 
 fn parse_dom(xml: &[u8]) -> Result<Node> {
@@ -334,12 +344,12 @@ fn parse_dom(xml: &[u8]) -> Result<Node> {
             .context("SpreadsheetDocument XML is not well-formed")?
         {
             Event::Start(start) => {
-                let mut node = start_node(&start)?;
+                let mut node = start_node(&start, &stack)?;
                 node.span.0 = before;
                 stack.push(node);
             }
             Event::Empty(start) => {
-                let mut node = start_node(&start)?;
+                let mut node = start_node(&start, &stack)?;
                 node.span = (before, reader.buffer_position() as usize);
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(node),
@@ -387,7 +397,7 @@ fn parse_dom(xml: &[u8]) -> Result<Node> {
     root.ok_or_else(|| anyhow!("SpreadsheetDocument XML has no root element"))
 }
 
-fn start_node(start: &BytesStart<'_>) -> Result<Node> {
+fn start_node(start: &BytesStart<'_>, ancestors: &[Node]) -> Result<Node> {
     let qualified = String::from_utf8_lossy(start.name().as_ref()).into_owned();
     let name = qualified
         .rsplit_once(':')
@@ -400,8 +410,37 @@ fn start_node(start: &BytesStart<'_>) -> Result<Node> {
         let value = attribute.unescape_value()?.into_owned();
         attributes.push((key, value));
     }
+    let resolve = |qualified: &str| {
+        let declaration = qualified.split_once(':').map_or_else(
+            || "xmlns".to_owned(),
+            |(prefix, _)| format!("xmlns:{prefix}"),
+        );
+        attributes
+            .iter()
+            .find(|(key, _)| key == &declaration)
+            .map(|(_, uri)| uri.clone())
+            .or_else(|| {
+                ancestors.iter().rev().find_map(|node| {
+                    node.attributes
+                        .iter()
+                        .find(|(key, _)| key == &declaration)
+                        .map(|(_, uri)| uri.clone())
+                })
+            })
+    };
+    let namespace = resolve(&qualified);
+    let type_attribute = attributes
+        .iter()
+        .find(|(key, _)| key.rsplit(':').next() == Some("type"));
+    let type_namespace = type_attribute.and_then(|(_, value)| resolve(value));
+    // A default XML namespace applies to elements, never to attributes.
+    let type_attribute_namespace =
+        type_attribute.and_then(|(key, _)| key.split_once(':').and_then(|_| resolve(key)));
     Ok(Node {
         name,
+        namespace,
+        type_namespace,
+        type_attribute_namespace,
         attributes,
         children: Vec::new(),
         text: String::new(),
@@ -591,6 +630,7 @@ struct Document<'a> {
     row_groups: Vec<&'a Node>,
     column_groups: Vec<&'a Node>,
     merges: Vec<&'a Node>,
+    vertical_page_breaks: Vec<i64>,
     vertical_unmerges: Vec<&'a Node>,
     horizontal_unmerges: Vec<&'a Node>,
     named_items: Vec<&'a Node>,
@@ -634,6 +674,14 @@ impl<'a> Document<'a> {
                 "vgLevels" => document.vg_levels = Some(parse_usize(&child.text, "<vgLevels>")?),
                 "vg" => document.row_groups.push(child),
                 "hg" => document.column_groups.push(child),
+                "verticalPageBreak" => {
+                    child.only_children(&["position"], "verticalPageBreak")?;
+                    document.vertical_page_breaks.push(required_i64(
+                        child,
+                        "position",
+                        "verticalPageBreak",
+                    )?);
+                }
                 "merge" => document.merges.push(child),
                 "verticalUnmerge" => document.vertical_unmerges.push(child),
                 "horizontalUnmerge" => document.horizontal_unmerges.push(child),
@@ -1624,7 +1672,13 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             out.record(record);
             out.raw(",-1");
         }
-        out.raw(",0,0");
+        out.comma();
+        out.raw(&document.vertical_page_breaks.len().to_string());
+        for position in &document.vertical_page_breaks {
+            out.comma();
+            out.raw(&position.to_string());
+        }
+        out.raw(",0"); // Horizontal page breaks.
         Ok(out.text)
     }
 
@@ -1768,6 +1822,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             let what = format!("<printSettings><{}>", member.name);
             let (key, stored) = match member.name.as_str() {
                 "paper" => (0, number(value, &what)?),
+                "pageSize" => (0, format!("{{\"S\",{}}}", quote(value))),
                 "pageOrientation" => (
                     1,
                     match value {
@@ -2481,10 +2536,20 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 ))
             }
             "AutoFont" => {
-                if !node.attributes.iter().all(|(key, _)| key == "kind") {
-                    bail!("an AutoFont <font> spells members");
+                for (key, _) in &node.attributes {
+                    if !["kind", "height", "xmlns"].contains(&key.as_str())
+                        && !key.starts_with("xmlns:")
+                    {
+                        bail!("attribute {key} of <AutoFont> has no writer");
+                    }
                 }
-                Ok("{7,3,0,1,100}".to_string())
+                Ok(match height {
+                    Some(height) => format!(
+                        "{{7,3,{},{height},1,100}}",
+                        ibcmd_moxel::MOXCEL_FONT_HEIGHT_MASK
+                    ),
+                    None => "{7,3,0,1,100}".to_string(),
+                })
             }
             "StyleItem" | "WindowsFont" => {
                 let reference = node
@@ -2493,6 +2558,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 let (code, reference) = if kind == "WindowsFont" {
                     let index = match reference {
                         "sys:DefaultGUIFont" => "0",
+                        "sys:OEMFixedFont" => "1",
                         "sys:ANSIFixedFont" => "2",
                         other => bail!("system font {other} has no stored code"),
                     };
@@ -2572,13 +2638,18 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             let node = self.document.lines[self.lines.order[position]];
             node.only_attributes(&["width", "gap"], "line")?;
             node.only_children(&["style"], "line")?;
-            if node.attribute("gap").is_some_and(|gap| gap != "false") {
-                bail!("a <line> with a gap has no writer");
-            }
+            let gap = u8::from(parse_bool(
+                node.attribute("gap").unwrap_or("false"),
+                "line gap",
+            )?);
             let width = parse_usize(node.attribute("width").unwrap_or("0"), "line width")?;
-            let style = node
-                .child("style")
-                .ok_or_else(|| anyhow!("a <line> has no style"))?;
+            let Some(style) = node.child("style") else {
+                if width != 0 || gap != 0 {
+                    bail!("an unstyled line requires width zero and no gap");
+                }
+                record.push_str(&format!(",1,{{4,0,{{0}},0,0,0,{NIL_UUID},0}},0"));
+                continue;
+            };
             let (kind, code) = match style.xsi_type() {
                 Some("v8ui:SpreadsheetDocumentCellLineType") => (
                     CELL_LINE_KIND,
@@ -2599,12 +2670,13 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                         "None" => 0,
                         "Solid" => 1,
                         "Dotted" => 3,
+                        "DashDotted" => 4,
                         other => bail!("drawing line style {other} has no stored code"),
                     },
                 ),
                 other => bail!("a line style of type {other:?} has no writer"),
             };
-            record.push_str(&format!(",1,{{4,0,{{0}},{code},{width},0,{kind},0}},0"));
+            record.push_str(&format!(",1,{{4,0,{{0}},{code},{width},0,{kind},{gap}}},0"));
         }
         record.push('}');
         let mut out = Out::default();
@@ -2683,10 +2755,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             "SaveFile" => return Ok("{0,818ab7d0-4654-4542-bd5e-fd9d1352b5a1}".to_string()),
             _ => {}
         }
-        let source = self
-            .source
-            .ok_or_else(|| anyhow!("picture ref {reference} needs the configuration"))?;
-        let uuid = source.resolve_common_picture_uuid(&format!("CommonPicture.{name}"))?;
+        let uuid = ibcmd_metadata_blob::resolve_mxl_picture_uuid(name, self.source)?;
         Ok(format!("{{0,{}}}", uuid.to_ascii_lowercase()))
     }
 }
@@ -2984,6 +3053,49 @@ fn typed_value(node: &Node) -> Result<String> {
             record.push_str("}}");
             Ok(record)
         }
+        value_list if value_list == ibcmd_schema::spreadsheet_value_list::XML_TYPE => {
+            use ibcmd_schema::spreadsheet_value_list as schema;
+            const CORE: &str = "http://v8.1c.ru/8.1/data/core";
+            const XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
+            const XSD: &str = "http://www.w3.org/2001/XMLSchema";
+            node.only_attributes(&["type"], "ValueListType")?;
+            ensure!(
+                schema::value_element_namespace_is_supported(&node.name, node.namespace.as_deref())
+                    && node.type_namespace.as_deref() == Some(CORE)
+                    && node.type_attribute_namespace.as_deref() == Some(XSI)
+                    && node.value_list_attribute_count() == 1,
+                "a ValueListType names an unknown namespace"
+            );
+            ensure!(node.text.trim().is_empty(), "a ValueListType carries text");
+            let [value_type, last_id] = node.children.as_slice() else {
+                bail!("only the measured empty ValueListType has a writer");
+            };
+            ensure!(
+                value_type.name == schema::VALUE_TYPE_ELEMENT
+                    && last_id.name == schema::LAST_ID_ELEMENT
+                    && value_type.namespace.as_deref() == Some(CORE)
+                    && last_id.namespace.as_deref() == Some(CORE),
+                "a ValueListType has unknown members or namespaces"
+            );
+            value_type.only_attributes(&[], "valueType")?;
+            last_id.only_attributes(&["type"], "lastId")?;
+            ensure!(
+                value_type.children.is_empty()
+                    && value_type.text.trim().is_empty()
+                    && value_type.value_list_attribute_count() == 0,
+                "a typed ValueListType has no measured writer"
+            );
+            ensure!(
+                last_id.children.is_empty()
+                    && last_id.text.trim() == schema::EMPTY_LAST_ID
+                    && last_id.xsi_type() == Some(schema::LAST_ID_TYPE)
+                    && last_id.type_namespace.as_deref() == Some(XSD)
+                    && last_id.type_attribute_namespace.as_deref() == Some(XSI)
+                    && last_id.value_list_attribute_count() == 1,
+                "a ValueListType lastId has no measured writer"
+            );
+            Ok(ibcmd_schema::spreadsheet_value_list::empty_stored_value())
+        }
         other => bail!("a value of type {other} has no writer"),
     }
 }
@@ -3121,6 +3233,7 @@ fn web_color_code(name: &str) -> Option<u32> {
         "RosyBrown" => 120,
         "RoyalBlue" => 121,
         "SaddleBrown" => 122,
+        "SandyBrown" => 124,
         "Silver" => 128,
         "SlateBlue" => 130,
         "SlateGray" => 131,
@@ -3150,6 +3263,93 @@ fn windows_color_code(name: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sandy_brown_native_xml(platform: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/1c-fixtures/coverage")
+                .join(platform)
+                .join("corpus-spreadsheet-facets/native/CommonTemplates/CovSheetSandyBrown/Ext/Template.xml"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sandy_brown_native_xml_compiles_to_the_measured_web_ordinal() {
+        // The body reader emits the 8.3 namespace profile. The export's 8.5
+        // adapter adds its palette namespace; coverage_corpus checks that CLI.
+        let expected = sandy_brown_native_xml("8.3.27.2214");
+        for platform in ["8.3.27.2214", "8.5.1.1150"] {
+            let native = sandy_brown_native_xml(platform);
+            let body = write_native_moxel_body(&native, None).unwrap();
+            let compact = body.replace(['\r', '\n'], "");
+            assert!(compact.contains("{3,2,{124}}"), "{body}");
+            let actual = ibcmd_moxel::extract_moxel_body_xml(
+                &body,
+                &Default::default(),
+                &Default::default(),
+                |_| None,
+                |_| None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(actual.as_bytes(), expected, "{platform}");
+        }
+    }
+
+    #[test]
+    fn sandy_brown_unknown_web_ordinal_is_refused_before_xml_publication() {
+        let native = String::from_utf8(sandy_brown_native_xml("8.3.27.2214")).unwrap();
+        let blue = native.replace("d3p1:SandyBrown", "d3p1:Blue");
+        let body = write_native_moxel_body(blue.as_bytes(), None).unwrap();
+        assert_eq!(body.matches("{10}").count(), 1);
+        let unknown = body.replace("{10}", "{4294967295}");
+        let error = ibcmd_moxel::extract_moxel_body_xml(
+            &unknown,
+            &Default::default(),
+            &Default::default(),
+            |_| None,
+            |_| None,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "mxl.decoder.canonical-ir");
+        let unknown_name = native.replace("d3p1:SandyBrown", "d3p1:UnknownCoverageColor");
+        assert!(
+            write_native_moxel_body(unknown_name.as_bytes(), None)
+                .unwrap_err()
+                .to_string()
+                .contains("web colour UnknownCoverageColor has no stored code")
+        );
+    }
+
+    #[test]
+    fn sandy_brown_palette_overrides_preserve_known_colours_and_refuse_unknown_ordinals() {
+        let native = sandy_brown_native_xml("8.3.27.2214");
+        let blue = String::from_utf8(native.clone())
+            .unwrap()
+            .replace("d3p1:SandyBrown", "d3p1:Blue");
+        let body = write_native_moxel_body(blue.as_bytes(), None).unwrap();
+        let with_override = |ordinal| {
+            let mut changed = body.strip_suffix('}').unwrap().to_owned();
+            changed.push_str(",{1,0,{3,2,{");
+            changed.push_str(ordinal);
+            changed.push_str("}}}}");
+            changed
+        };
+        let extract = |body: &str| {
+            ibcmd_moxel::extract_moxel_body_xml(
+                body,
+                &Default::default(),
+                &Default::default(),
+                |_| None,
+                |_| None,
+                None,
+            )
+        };
+        assert_eq!(extract(&with_override("124")).unwrap().as_bytes(), native);
+        assert!(extract(&with_override("4294967295")).is_err());
+    }
 
     fn patch_fixture(name: &str) -> Vec<u8> {
         std::fs::read(
@@ -3280,5 +3480,110 @@ mod tests {
         assert!(inflate_template_patch(&vec![0; 8 * 1024 * 1024 + 1]).is_err());
         let unknown = ibcmd_module_blob::deflate_raw(b"not a spreadsheet").unwrap();
         assert!(preserve_spreadsheet_language(&unknown, &complete).is_err());
+    }
+}
+
+#[cfg(test)]
+mod native_font_tests {
+    use super::*;
+
+    #[test]
+    fn auto_font_rejects_qualified_members_without_losing_them() {
+        let native = String::from_utf8(source("8.3.27.2214", "CovSheetAutoFontHeight")).unwrap();
+        for unsupported in [
+            "xmlns:x=\"urn:other\" x:height=\"9\" kind=\"AutoFont\"",
+            "height=\"9\" kind=\"AutoFont\" xmlns:other=\"urn:other\" other:height=\"10\"",
+            "height=\"9\" kind=\"AutoFont\" xmlnsUnsupported=\"lost\"",
+        ] {
+            let source = native.replace("height=\"9\" kind=\"AutoFont\"", unsupported);
+            assert_ne!(source, native);
+            assert!(
+                write_native_moxel_body(source.as_bytes(), None).is_err(),
+                "{unsupported}"
+            );
+        }
+        let declared = native.replace(
+            "kind=\"AutoFont\"",
+            "kind=\"AutoFont\" xmlns:x=\"urn:unused\"",
+        );
+        assert!(write_native_moxel_body(declared.as_bytes(), None).is_ok());
+    }
+
+    fn source(platform: &str, name: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/1c-fixtures/coverage")
+                .join(platform)
+                .join("corpus-spreadsheet-facets/native/CommonTemplates")
+                .join(name)
+                .join("Ext/Template.xml"),
+        )
+        .unwrap()
+    }
+
+    fn round_trip(name: &str, record: &str) {
+        let expected = source("8.3.27.2214", name);
+        for platform in ["8.3.27.2214", "8.5.1.1150"] {
+            let body = write_native_moxel_body(&source(platform, name), None).unwrap();
+            assert!(body.replace(['\r', '\n'], "").contains(record), "{body}");
+            let actual = ibcmd_moxel::extract_moxel_body_xml(
+                &body,
+                &Default::default(),
+                &Default::default(),
+                |_| None,
+                |_| None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(actual.as_bytes(), expected, "{platform}/{name}");
+        }
+    }
+
+    #[test]
+    fn auto_font_height_native_source_round_trips_completely() {
+        round_trip("CovSheetAutoFontHeight", "{7,3,2,90,1,100}");
+    }
+
+    #[test]
+    fn oem_fixed_font_native_source_round_trips_completely() {
+        round_trip("CovSheetOEMFixedFont", "{7,1,3,{1},120,\"Arial\",1,100}");
+    }
+
+    #[test]
+    fn font_writer_keeps_plain_auto_font_and_rejects_unmeasured_members() {
+        let native = String::from_utf8(source("8.3.27.2214", "CovSheetAutoFontHeight")).unwrap();
+        let plain = native.replace("height=\"9\" kind=\"AutoFont\"", "kind=\"AutoFont\"");
+        assert_ne!(plain, native);
+        let body = write_native_moxel_body(plain.as_bytes(), None).unwrap();
+        assert!(body.replace(['\r', '\n'], "").contains("{7,3,0,1,100}"));
+        let actual = ibcmd_moxel::extract_moxel_body_xml(
+            &body,
+            &Default::default(),
+            &Default::default(),
+            |_| None,
+            |_| None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(actual, plain);
+        for attribute in [
+            "bold=\"true\"",
+            "scale=\"100\"",
+            "ref=\"style:TextFont\"",
+            "faceName=\"Arial\"",
+        ] {
+            let unsupported = plain.replace(
+                "kind=\"AutoFont\"",
+                &format!("kind=\"AutoFont\" {attribute}"),
+            );
+            assert!(
+                write_native_moxel_body(unsupported.as_bytes(), None).is_err(),
+                "{attribute}"
+            );
+        }
+        let oem = String::from_utf8(source("8.3.27.2214", "CovSheetOEMFixedFont")).unwrap();
+        let unknown_namespace = oem.replace(SYSTEM_FONTS_NS, "https://invalid.example/fonts");
+        assert_ne!(unknown_namespace, oem);
+        assert!(write_native_moxel_body(unknown_namespace.as_bytes(), None).is_err());
     }
 }
