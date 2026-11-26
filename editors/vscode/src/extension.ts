@@ -6,6 +6,7 @@ import { runImport, ImportValidationError, importErrorMessage } from "./import";
 import { Database, editConfig, idOf, snapshot, saveConfig } from "./config";
 import { Base, Metadata, Generation, pendingText } from "./status";
 import { ConfigurationView } from "./configuration-view";
+import { DatabaseSource, type Node } from "./configuration-tree";
 import { registerDatabaseCommands } from "./database-commands";
 
 import { resolveExecutable } from "./executable";
@@ -426,7 +427,7 @@ export async function activate(context: vscode.ExtensionContext) {
   let exporting = false;
   async function runExport(
     changed: boolean,
-    node?: { object?: string },
+    node?: Node | { object?: string },
     selection?: { object?: string }[],
     group = false,
   ) {
@@ -444,8 +445,29 @@ export async function activate(context: vscode.ExtensionContext) {
       selected?.id === id;
     exporting = true;
     try {
-      let selectors =
-        changed || group ? [] : objects.exportSelection(node, selection);
+      const treeNode =
+        node && typeof node === "object" && "type" in node ? node : undefined;
+      let selectors: string[] = [];
+      if (!changed && !group) {
+        if (treeNode) {
+          const source = configuration.source(treeNode);
+          if (
+            treeNode.type !== "object" ||
+            !treeNode.fullName ||
+            !(source instanceof DatabaseSource) ||
+            source.rpc !== rpc ||
+            source.infobase !== id
+          ) {
+            throw new Error("Выберите объект текущего подключения");
+          }
+          selectors = [treeNode.fullName];
+        } else {
+          selectors = objects.exportSelection(
+            node && "object" in node ? node : undefined,
+            selection,
+          );
+        }
+      }
       if (group) {
         const response = await rpc.request("tree/children", {
           infobase: id,
@@ -474,8 +496,12 @@ export async function activate(context: vscode.ExtensionContext) {
       if (!changed && !selectors.length)
         throw new Error("Выберите объект или группу для выгрузки");
       const { exportObjects } = await import("./object-export");
-      if (await exportObjects(rpc, f, id, selectors, changed, current)) {
-        if (current()) await objects.refresh(rpc, f, id);
+      if (
+        (await exportObjects(rpc, f, id, selectors, changed, current)) &&
+        current()
+      ) {
+        if (treeNode) objects.clear();
+        else await objects.refresh(rpc, f, id);
       }
     } catch (error) {
       if (current())

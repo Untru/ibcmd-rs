@@ -230,9 +230,14 @@ export class ConfigurationView
         !!node.children?.length &&
         node.children.every((child) => child.type === "property"))
         ? "ibcmd.property"
-        : node.path
-          ? "ibcmd.source"
-          : "ibcmd.group";
+        : node.type === "object" &&
+            node.path &&
+            node.fullName &&
+            this.source(node)?.remote
+          ? "ibcmd.databaseObject"
+          : node.path
+            ? "ibcmd.source"
+            : "ibcmd.group";
     item.iconPath = new vscode.ThemeIcon(
       node.type === "group"
         ? "folder"
