@@ -533,6 +533,38 @@ fn apply_learned(rule: &Learned, items: Vec<Node>) -> Vec<Node> {
     items
 }
 
+/// The root-37 HTML field stores only the first six members of its options
+/// and leaves automatically generated service names empty.
+fn upgrade_html_field_32(items: &mut [Node]) {
+    if let Node::List(options) = &mut items[39]
+        && options.len() == 6
+        && options[0].is("2")
+    {
+        options[0] = Node::leaf("3");
+        options.extend(["1", "0", "0", "1", "0", "1", "1"].map(Node::leaf));
+        options[5] = upgrade_events(options[5].clone());
+    }
+    let Some(owner) = items[6]
+        .as_leaf()
+        .and_then(|name| name.strip_suffix('"'))
+        .filter(|name| name.starts_with('"') && name.len() > 1)
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    for (slot, revision, suffix) in [
+        (42, "19", "КонтекстноеМеню"),
+        (52, "8", "РасширеннаяПодсказка"),
+    ] {
+        if let Node::List(service) = &mut items[slot]
+            && service.first().is_some_and(|tag| tag.is(revision))
+            && service.get(6).is_some_and(|name| name.is(r#""""#))
+        {
+            service[6] = Node::Leaf(format!("{owner}{suffix}\""));
+        }
+    }
+}
+
 fn parse_str_or_leaf(value: &str) -> Node {
     if value.starts_with('{') {
         parse_str(value)
@@ -573,6 +605,26 @@ fn upgrade(
         items
     } else if depth == 1 && matches!(own.as_str(), "37" | "38" | "42" | "46" | "48") {
         upgrade_root(items)
+    } else if root == "37"
+        && depth == 2
+        && parent == Some("4")
+        && own == "9"
+        && items.len() >= 6
+        && items[1].as_list().is_some_and(|id| id.len() == 1)
+    {
+        let mut items = items;
+        // An empty language/text pair supplies no title. The legacy type
+        // tuple carries its element descriptors behind an empty marker.
+        if items[4] == parse_str(r#"{1,1,{"",""}}"#) {
+            items[4] = parse_str("{1,0}");
+        }
+        if let Node::List(pattern) = &mut items[5]
+            && pattern.len() > 1
+            && pattern[0].is(r#""""#)
+        {
+            pattern[0] = Node::leaf(r#""Pattern""#);
+        }
+        items
     } else if own == "21" && is_item {
         upgrade_item(items)
     } else if own == "49" && depth > 1 && items.len() > 90 && items[1].as_list().is_some() {
@@ -593,7 +645,11 @@ fn upgrade(
     {
         upgrade_item_slot_20(items)
     } else if let Some(rule) = learned_rule(root, parent, slot, &own, items.len()) {
-        apply_learned(rule, items)
+        let mut upgraded = apply_learned(rule, items);
+        if root == "37" && own == "32" && rule.new_tag == "37" && upgraded[5].is("15") {
+            upgrade_html_field_32(&mut upgraded);
+        }
+        upgraded
     } else {
         items
     };
