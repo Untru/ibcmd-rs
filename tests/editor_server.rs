@@ -1472,6 +1472,23 @@ fn sql_import_and_pending_through_stdio() {
     let read_params = json!({"infobase":"sql","path":module});
     let before = server.ok("source/read", read_params.clone());
     assert_eq!(server.ok("source/read", read_params.clone()), before);
+    let addressed = json!({
+        "infobase": "sql",
+        "path": module,
+        "objectId": "6d1c2a0e-1cd0-4f00-9a00-000000000001"
+    });
+    assert_eq!(server.ok("source/read", addressed.clone()), before);
+    assert_eq!(
+        server.error(
+            "source/read",
+            json!({
+                "infobase": "sql",
+                "path": module,
+                "objectId": "9a236262-c0b7-41e5-a4f6-48c9778f198e"
+            })
+        ),
+        -32014
+    );
     let language = "9a236262-c0b7-41e5-a4f6-48c9778f198e";
     let body_row = "6d1c2a0e-1cd0-4f00-9a00-000000000001.0";
     // The physical versions row can stay identical across an overlay transition.
@@ -1510,6 +1527,7 @@ fn sql_import_and_pending_through_stdio() {
         );
     }
     let overlaid = server.ok("source/read", read_params.clone());
+    assert_eq!(server.ok("source/read", addressed.clone()), overlaid);
     assert_eq!(overlaid["content"], aliased_text);
     assert_eq!(overlaid["version"], before["version"]);
     let delete_rows =
@@ -1573,6 +1591,7 @@ fn sql_import_and_pending_through_stdio() {
         1
     );
     let after = server.ok("source/read", read_params);
+    assert_eq!(server.ok("source/read", addressed), after);
     assert_ne!(after["version"], before["version"]);
     assert_eq!(after["content"], before["content"]);
     fs::write(

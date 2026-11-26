@@ -52,7 +52,7 @@ export function registerDatabaseCommands(
     if (!node?.path) throw new Error("Выберите файл или объект");
     await vscode.commands.executeCommand(
       "vscode.open",
-      files.uri(current, node.path),
+      files.uri(current, node.path, false, node.objectId),
     );
   });
   async function showDiff(

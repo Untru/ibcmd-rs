@@ -6,6 +6,7 @@ interface Entry {
   source: Source;
   file: string;
   empty: boolean;
+  objectId?: string;
 }
 
 export class DatabaseFiles
@@ -18,13 +19,20 @@ export class DatabaseFiles
   private session = randomUUID();
   private inflight = new Map<string, Promise<Uint8Array>>();
 
-  uri(source: Source, file: string, empty = false): vscode.Uri {
+  uri(
+    source: Source,
+    file: string,
+    empty = false,
+    objectId?: string,
+  ): vscode.Uri {
     relativePath(file);
     const base = source instanceof DatabaseSource ? source.infobase : "XML";
     const uri = vscode.Uri.from({
       scheme: "ibcmd-rs",
       path: `/${encodeURIComponent(base)}/${file}`,
-      query: `${this.session}${empty ? "-absent" : ""}`,
+      query: [this.session, empty ? "absent" : undefined, objectId]
+        .filter(Boolean)
+        .join("-"),
     });
     const key = uri.toString();
     const previous = this.entries.get(key);
@@ -32,10 +40,11 @@ export class DatabaseFiles
       if (
         previous.source !== source ||
         previous.file !== file ||
-        previous.empty !== empty
+        previous.empty !== empty ||
+        previous.objectId !== objectId
       )
         throw new Error("Источник виртуального файла изменился");
-    } else this.entries.set(key, { source, file, empty });
+    } else this.entries.set(key, { source, file, empty, objectId });
     return uri;
   }
   invalidate() {
@@ -77,7 +86,11 @@ export class DatabaseFiles
     if (!read) {
       read = (async () => {
         try {
-          const bytes = await entry.source.read(entry.file, signal);
+          const bytes = await entry.source.read(
+            entry.file,
+            signal,
+            entry.objectId,
+          );
           if (signal.aborted || this.entries.get(key) !== entry)
             throw vscode.FileSystemError.Unavailable(uri);
           if (bytes === undefined)

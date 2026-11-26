@@ -435,6 +435,7 @@ struct ImportParams {
 struct ReadParams {
     infobase: String,
     path: String,
+    object_id: Option<String>,
 }
 
 struct State {
@@ -729,10 +730,16 @@ impl State {
     }
 
     fn read(&mut self, params: ReadParams) -> Result<Value, RpcError> {
+        let object_id = params
+            .object_id
+            .as_deref()
+            .map(uuid::Uuid::parse_str)
+            .transpose()
+            .map_err(|_| RpcError::invalid_params("objectId must be a UUID"))?;
         let session = self.session(&params.infobase)?;
         let (exported, path) = session
             .configuration
-            .read_file(&params.path)
+            .read_file_addressed(&params.path, object_id)
             .map_err(|error| {
                 if error.chain().any(|cause| cause.is::<UnknownObject>()) {
                     failure(error)

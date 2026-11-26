@@ -2134,6 +2134,37 @@ impl<'a> ConfigTable<'a> {
         self.names_with_storage_view().map(|(names, _)| names)
     }
 
+    /// Stored rows belonging to one physical object in a plain active SQL view.
+    #[doc(hidden)]
+    pub fn active_names_under(&self, id: uuid::Uuid) -> Result<Option<BTreeSet<String>>> {
+        if self.main_configuration {
+            return Ok(None);
+        }
+        let crate::sql::SqlBackend::Client(client) = self.sql.backend() else {
+            return Ok(None);
+        };
+        let table = MssqlConfigurationTableRole::Current.sql_name();
+        let database = quote_ident(self.database);
+        let id = id.to_string();
+        let prefix = format!("{id}.");
+        let query = format!(
+            "SELECT DISTINCT FileName FROM {database}.dbo.{table} \
+             WHERE FileName = N'{id}' OR FileName LIKE N'{prefix}%'"
+        );
+        let names = client
+            .query_rows(&query, &[])?
+            .into_iter()
+            .map(|mut row| row.take_text(0))
+            .collect::<Result<BTreeSet<_>>>()?;
+        if names
+            .iter()
+            .any(|name| name != &id && !name.starts_with(&prefix))
+        {
+            return Ok(None);
+        }
+        Ok(Some(names))
+    }
+
     /// Published names and whether their inventory was read without a generation marker.
     #[doc(hidden)]
     pub fn names_with_storage_view(&self) -> Result<(BTreeSet<String>, bool)> {
@@ -5404,7 +5435,8 @@ fn dump_table_rows_streamed(
     // a run that fetched part of it stays legacy.
     let plan_started = Instant::now();
     let plan_cpu = process_cpu_ms();
-    let model_plan = ((model_export || selected_object_export || requested_descriptor.is_some())
+    let model_plan = (!inventory_only
+        && (model_export || selected_object_export || requested_descriptor.is_some())
         && extract_metadata_xml
         && broad_metadata_indexes)
         .then(|| {
@@ -5451,21 +5483,23 @@ fn dump_table_rows_streamed(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
-    let eds_export = extract_metadata_xml
+    let eds_export = (extract_metadata_xml && !inventory_only)
         .then(|| eds_export::build(&index_metadata_texts, source_version.as_str()))
         .flatten();
     let index_part_started = Instant::now();
     let index_part_cpu = process_cpu_ms();
-    let recalculation_refs = if extract_metadata_xml && !skip_recalculation_refs {
+    let recalculation_refs = if !inventory_only && extract_metadata_xml && !skip_recalculation_refs
+    {
         build_calculation_recalculation_reference_index(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let root_recalculation_refs = if extract_metadata_xml && !skip_root_recalculation_refs {
-        build_calculation_root_recalculation_reference_index(&index_metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
+    let root_recalculation_refs =
+        if !inventory_only && extract_metadata_xml && !skip_root_recalculation_refs {
+            build_calculation_root_recalculation_reference_index(&index_metadata_texts)
+        } else {
+            BTreeMap::new()
+        };
     timings.prepare_recalculation_refs_ms += elapsed_ms(index_part_started);
     cpu_add(&mut timings, "prepare.recalculation_refs", index_part_cpu);
 
@@ -5745,7 +5779,8 @@ fn dump_table_rows_streamed(
     cpu_add(&mut timings, "prepare.field_refs", index_part_cpu);
     let index_part_started = Instant::now();
     let index_part_cpu = process_cpu_ms();
-    let functional_option_refs = if extract_metadata_xml
+    let functional_option_refs = if !inventory_only
+        && extract_metadata_xml
         && source_reference_needs.functional_option_refs
         && !skip_functional_option_refs
     {
@@ -5906,6 +5941,115 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_standalone_refs_ms += elapsed_ms(index_part_started);
     cpu_add(&mut timings, "prepare.standalone_refs", index_part_cpu);
+    let mut configuration_module_groups = configuration_module_groups(&file_names);
+    // An extension keeps only the root modules it extends; its configuration
+    // row names the header they hang off (see `module_body_paths_from_texts`).
+    configuration_module_groups.extend(
+        index_metadata_texts
+            .iter()
+            .filter_map(|row| parse_configuration_header_uuid(&row.text)),
+    );
+    // A path claimed by two storage entries is a refusal about those entries,
+    // not about the export: both are withheld and named, and everything that
+    // claims its path alone is still produced.
+    let mut source_assets = source_assets;
+    let mut source_asset_diagnostics = source_asset_diagnostics;
+    if selected_object_export {
+        // Broad indexes supply references, not extra selected candidates.
+        source_assets.retain(|name, _| file_names.contains(name));
+        source_asset_diagnostics.retain(|name, _| {
+            file_names.contains(name)
+                && !name.strip_suffix(".0").is_some_and(|descriptor| {
+                    model_plan
+                        .as_ref()
+                        .is_some_and(|plan| plan.is_unowned_common_form(descriptor))
+                })
+        });
+    }
+
+    for (file_name, message) in
+        colliding_source_asset_paths(&source_assets, &source_asset_diagnostics)
+    {
+        source_assets.remove(&file_name);
+        source_asset_diagnostics.insert(file_name, message);
+    }
+    // See the identical comment in `dump_table_rows_with_options_mode`: forms,
+    // templates, subsystems, and canonical module bodies resolve their output
+    // path outside `source_assets`, so extend the same refusal to those
+    // routes here too.
+    let mut reference_collisions = colliding_reference_output_paths(
+        &source_assets,
+        &form_refs,
+        &template_refs,
+        &subsystem_refs,
+        &module_text_paths,
+    );
+    for (file_name, message) in std::mem::take(&mut reference_collisions.source_assets) {
+        if source_assets.remove(&file_name).is_some() {
+            source_asset_diagnostics.insert(file_name, message);
+        }
+    }
+    timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
+    cpu_add(
+        &mut timings,
+        "prepare.reference_indexes",
+        reference_indexes_cpu,
+    );
+    // Native export info/status need the same inventory and writer as a full
+    // export, but never fetch or convert the body batches below.
+    if inventory_only {
+        let blob = fetch_binary_rows(
+            sql,
+            database,
+            table,
+            &BTreeSet::from([STAGE_INVENTORY_ROW.to_owned()]),
+            false,
+        )?
+        .into_iter()
+        .find(|row| row.file_name == STAGE_INVENTORY_ROW && row.part_no == 0)
+        .ok_or_else(|| anyhow!("full Config export has no versions row"))?;
+        let output = OutputWriter::from_env_to_sink(sink.unwrap());
+        write_config_dump_info(
+            &output,
+            output_dir,
+            source_version,
+            &blob.binary,
+            VersionsBlobOrigin::MssqlConfigTable,
+            ConfigDumpInfoPartialInventoryPolicy::Fail,
+            ConfigDumpInfoInventory {
+                file_names: &file_names,
+                metadata_texts: &index_metadata_texts,
+                object_refs: &object_refs,
+                form_refs: &form_refs,
+                template_refs: &template_refs,
+                subsystem_refs: &subsystem_refs,
+                module_text_paths: &module_text_paths,
+                source_assets: &source_assets,
+                emitted_source_asset_paths: &BTreeMap::new(),
+                configuration_module_groups: &configuration_module_groups,
+            },
+        )?;
+        output.finish()?;
+        timings.prepare_indexes_ms = elapsed_ms(prepare_started);
+        return Ok(DumpedTable {
+            rows: Vec::new(),
+            failed_rows: Vec::new(),
+            binary_bytes: 0,
+            inflated_rows: 0,
+            module_text_rows: 0,
+            metadata_xml_rows: 0,
+            source_asset_rows: 0,
+            source_assets: SourceAssetCompletenessReport::default(),
+            metadata_root_inventory: RootMetadataInventoryReport::default(),
+            timings,
+            incremental: None,
+        });
+    }
+
+    // Predefined values are resolved for body writers. ConfigDumpInfo only
+    // needs their source paths, already collected above.
+    let body_indexes_started = Instant::now();
+    let body_indexes_cpu = process_cpu_ms();
     let index_part_started = Instant::now();
     let index_part_cpu = process_cpu_ms();
     let body_owners = if (extract_metadata_xml
@@ -6050,110 +6194,8 @@ fn dump_table_rows_streamed(
         &mut metadata_object_refs,
         &metadata_value_predefined_item_refs,
     )?;
-    let mut configuration_module_groups = configuration_module_groups(&file_names);
-    // An extension keeps only the root modules it extends; its configuration
-    // row names the header they hang off (see `module_body_paths_from_texts`).
-    configuration_module_groups.extend(
-        index_metadata_texts
-            .iter()
-            .filter_map(|row| parse_configuration_header_uuid(&row.text)),
-    );
-    // A path claimed by two storage entries is a refusal about those entries,
-    // not about the export: both are withheld and named, and everything that
-    // claims its path alone is still produced.
-    let mut source_assets = source_assets;
-    let mut source_asset_diagnostics = source_asset_diagnostics;
-    if selected_object_export {
-        // Broad indexes supply references, not extra selected candidates.
-        source_assets.retain(|name, _| file_names.contains(name));
-        source_asset_diagnostics.retain(|name, _| {
-            file_names.contains(name)
-                && !name.strip_suffix(".0").is_some_and(|descriptor| {
-                    model_plan
-                        .as_ref()
-                        .is_some_and(|plan| plan.is_unowned_common_form(descriptor))
-                })
-        });
-    }
-
-    for (file_name, message) in
-        colliding_source_asset_paths(&source_assets, &source_asset_diagnostics)
-    {
-        source_assets.remove(&file_name);
-        source_asset_diagnostics.insert(file_name, message);
-    }
-    // See the identical comment in `dump_table_rows_with_options_mode`: forms,
-    // templates, subsystems, and canonical module bodies resolve their output
-    // path outside `source_assets`, so extend the same refusal to those
-    // routes here too.
-    let mut reference_collisions = colliding_reference_output_paths(
-        &source_assets,
-        &form_refs,
-        &template_refs,
-        &subsystem_refs,
-        &module_text_paths,
-    );
-    for (file_name, message) in std::mem::take(&mut reference_collisions.source_assets) {
-        if source_assets.remove(&file_name).is_some() {
-            source_asset_diagnostics.insert(file_name, message);
-        }
-    }
-    timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
-    cpu_add(
-        &mut timings,
-        "prepare.reference_indexes",
-        reference_indexes_cpu,
-    );
-    // Native export info/status need the same inventory and writer as a full
-    // export, but never fetch or convert the body batches below.
-    if inventory_only {
-        let blob = fetch_binary_rows(
-            sql,
-            database,
-            table,
-            &BTreeSet::from([STAGE_INVENTORY_ROW.to_owned()]),
-            false,
-        )?
-        .into_iter()
-        .find(|row| row.file_name == STAGE_INVENTORY_ROW && row.part_no == 0)
-        .ok_or_else(|| anyhow!("full Config export has no versions row"))?;
-        let output = OutputWriter::from_env_to_sink(sink.unwrap());
-        write_config_dump_info(
-            &output,
-            output_dir,
-            source_version,
-            &blob.binary,
-            VersionsBlobOrigin::MssqlConfigTable,
-            ConfigDumpInfoPartialInventoryPolicy::Fail,
-            ConfigDumpInfoInventory {
-                file_names: &file_names,
-                metadata_texts: &index_metadata_texts,
-                object_refs: &object_refs,
-                form_refs: &form_refs,
-                template_refs: &template_refs,
-                subsystem_refs: &subsystem_refs,
-                module_text_paths: &module_text_paths,
-                source_assets: &source_assets,
-                emitted_source_asset_paths: &BTreeMap::new(),
-                configuration_module_groups: &configuration_module_groups,
-            },
-        )?;
-        output.finish()?;
-        timings.prepare_indexes_ms = elapsed_ms(prepare_started);
-        return Ok(DumpedTable {
-            rows: Vec::new(),
-            failed_rows: Vec::new(),
-            binary_bytes: 0,
-            inflated_rows: 0,
-            module_text_rows: 0,
-            metadata_xml_rows: 0,
-            source_asset_rows: 0,
-            source_assets: SourceAssetCompletenessReport::default(),
-            metadata_root_inventory: RootMetadataInventoryReport::default(),
-            timings,
-            incremental: None,
-        });
-    }
+    timings.prepare_reference_indexes_ms += elapsed_ms(body_indexes_started);
+    cpu_add(&mut timings, "prepare.reference_indexes", body_indexes_cpu);
 
     // `--model-export`: the descriptors of the modelled kinds are decoded
     // from their rows; names come from an index of the whole row set, so a

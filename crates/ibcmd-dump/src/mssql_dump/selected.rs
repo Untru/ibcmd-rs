@@ -5,7 +5,7 @@ use super::{
     command_interface_reference_entries_from_text, command_interface_standard_command,
     inflate_raw_deflate, is_form_metadata_text, is_template_metadata_text, is_uuid_text,
     metadata_kind_needs_form_template_reference_indexes, metadata_text_row_from_text,
-    nested_command_headers_from_text, parse_command_interface_common_flag,
+    module_owner_route, nested_command_headers_from_text, parse_command_interface_common_flag,
     parse_generated_type_entries_from_text, recalculation_object_fields, split_1c_braced_fields,
     template_template_type_from_metadata, uuid_like_values,
 };
@@ -578,6 +578,9 @@ fn selected_body_suffix_is_self_contained(
     suffix: &str,
     extract_module_text: bool,
 ) -> bool {
+    if extract_module_text && kind.is_some_and(|kind| module_owner_route(kind, suffix).is_some()) {
+        return true;
+    }
     matches!((kind, suffix), (Some("WSReference"), "0"))
         || (extract_module_text && matches!((kind, suffix), (Some("IntegrationService"), "0")))
 }

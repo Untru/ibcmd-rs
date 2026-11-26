@@ -68,6 +68,63 @@ function load() {
   return { ...module.exports, vscode };
 }
 
+test("tree common-module files preserve the UUID through virtual and path-only reads", async () => {
+  const { DatabaseFiles } = load();
+  const files = new DatabaseFiles();
+  const objectId = "6d1c2a0e-1cd0-4f00-9a00-000000000001";
+  const descriptor = "CommonModules/Test.xml";
+  const body = "CommonModules/Test/Ext/Module.bsl";
+  const calls = [];
+  const source = new core.DatabaseSource(
+    {
+      request: async (method, params) => {
+        if (method === "tree/children") {
+          return {
+            nodes: [
+              {
+                id: "CommonModule.Test",
+                kind: "CommonModule",
+                label: "Test",
+                nodeType: "object",
+                path: descriptor,
+                uuid: objectId,
+              },
+            ],
+          };
+        }
+        calls.push(params);
+        return {
+          path: params.path,
+          exists: true,
+          encoding: "utf-8",
+          files: [descriptor, body],
+          content:
+            params.path === descriptor
+              ? "<MetaDataObject><CommonModule><ChildObjects/></CommonModule></MetaDataObject>"
+              : "Module text",
+        };
+      },
+    },
+    "/work",
+    "demo",
+  );
+  const signal = new AbortController().signal;
+  const [owner] = await source.children(undefined, signal);
+  const [module] = await source.children(owner, signal);
+  assert.equal(module.objectId, objectId);
+  const addressed = files.uri(source, module.path, false, module.objectId);
+  const byPath = files.uri(source, module.path);
+  assert.notEqual(addressed.toString(), byPath.toString());
+  assert.equal((await files.readFile(addressed)).toString(), "Module text");
+  assert.equal((await files.readFile(byPath)).toString(), "Module text");
+  assert.deepEqual(calls, [
+    { infobase: "demo", path: descriptor },
+    { infobase: "demo", path: body, objectId },
+    { infobase: "demo", path: body },
+  ]);
+  files.dispose();
+});
+
 test("виртуальный файл сохраняет точные байты и отказывает во всех изменениях", async () => {
   const { DatabaseFiles, vscode } = load();
   const files = new DatabaseFiles();

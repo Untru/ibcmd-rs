@@ -938,6 +938,7 @@ pub struct StoredConfiguration {
     /// By full name, for the inventory's digest.
     exports: HashMap<String, CachedExport>,
     cached_bytes: usize,
+    addressed_export: Option<(String, Arc<ObjectFiles>)>,
     main_configuration: bool,
     main_view_cache: Option<Box<StoredConfiguration>>,
 }
@@ -960,6 +961,7 @@ impl StoredConfiguration {
             plain_active_inventory: false,
             exports: HashMap::new(),
             cached_bytes: 0,
+            addressed_export: None,
             main_configuration: false,
             main_view_cache: None,
         }
@@ -1231,6 +1233,12 @@ impl StoredConfiguration {
             if let Some(previous) = self.exports.remove(&object.full_name) {
                 self.cached_bytes -= previous.files.files.values().map(Vec::len).sum::<usize>();
             }
+            if self.addressed_export.as_ref().is_some_and(|(_, files)| {
+                self.cached_bytes + size + files.files.values().map(Vec::len).sum::<usize>()
+                    > CACHE_BYTES
+            }) {
+                self.addressed_export = None;
+            }
             if self.cached_bytes + size > CACHE_BYTES {
                 self.exports.clear();
                 self.cached_bytes = 0;
@@ -1416,15 +1424,132 @@ impl StoredConfiguration {
     /// on the same stored row bytes used to render it; independent files and
     /// unsupported/missing files retain the diagnostic conversion semantics.
     pub fn read_file(&mut self, path: &str) -> Result<(Arc<ObjectFiles>, String)> {
+        self.read_file_addressed(path, None)
+    }
+
+    pub(crate) fn read_file_addressed(
+        &mut self,
+        path: &str,
+        object_id: Option<uuid::Uuid>,
+    ) -> Result<(Arc<ObjectFiles>, String)> {
         let path =
             normalize_path(path).ok_or_else(|| anyhow!("{path:?} is not a relative path"))?;
         let name = object_of_path(&path)
             .ok_or_else(|| anyhow!("{path} is not a file of a configuration object"))?;
         let _engine = engine();
+        if let Some(id) = object_id
+            && name.starts_with("CommonModule.")
+            && path.ends_with("/Ext/Module.bsl")
+            && let Some(exported) = self.read_addressed_common_module(&name, id)?
+        {
+            return Ok((exported, path));
+        }
         let exported =
             self.export_with_descriptor_check_unlocked(&[name], &|_, _, _| {}, false, Some(&path))?;
         let exported = exported.into_iter().next().expect("one object asked for");
+        if let Some(id) = object_id
+            && uuid::Uuid::parse_str(&exported.object.uuid).ok() != Some(id)
+        {
+            bail!("source/read objectId no longer owns the requested path");
+        }
         Ok((exported, path))
+    }
+
+    fn read_addressed_common_module(
+        &mut self,
+        name: &str,
+        id: uuid::Uuid,
+    ) -> Result<Option<Arc<ObjectFiles>>> {
+        let ConfigSource::Database { sql, database } = &self.source else {
+            return Ok(None);
+        };
+        if self.main_configuration || self.rows_snapshot.is_some() {
+            return Ok(None);
+        }
+        let Some(before) =
+            with_database_table(sql, database, |table| table.plain_active_versions_digest())?
+        else {
+            self.addressed_export = None;
+            return Ok(None);
+        };
+        if let Some((cached_digest, files)) = &self.addressed_export
+            && cached_digest == &before
+            && uuid::Uuid::parse_str(&files.object.uuid).ok() == Some(id)
+            && files.object.full_name.to_lowercase() == name.to_lowercase()
+        {
+            return Ok(Some(files.clone()));
+        }
+        let selected = with_database_table(sql, database, |table| {
+            let Some(mut names) = table.active_names_under(id)? else {
+                return Ok(None);
+            };
+            names.insert("versions".to_owned());
+            let mut inventory = Inventory::read(table, names)?;
+            if inventory.digest != before {
+                bail!("stored configuration changed during source/read; retry the read");
+            }
+            let object = inventory.resolve(table, name).map_err(|error| {
+                if error.is::<UnknownObject>() {
+                    anyhow!("source/read objectId no longer owns the requested path")
+                } else {
+                    error
+                }
+            })?;
+            if uuid::Uuid::parse_str(&object.uuid).ok() != Some(id) {
+                bail!("source/read objectId no longer owns the requested path");
+            }
+            use ibcmd_compiler_families::compiler::families::assets::{
+                SourceAssetRegistry, SourceAssetRole,
+            };
+
+            let rows = inventory.rows_of(table, &object)?;
+            let Some(module) = SourceAssetRegistry.route(&object.kind, SourceAssetRole::Module)
+            else {
+                return Ok(None);
+            };
+            let module_row = format!("{}{}", object.uuid, module.suffix());
+            if rows
+                .iter()
+                .any(|row| row != &object.uuid && row != &module_row)
+            {
+                return Ok(None);
+            }
+            let version = inventory.version_of(&rows);
+            let snapshot = table.rows(&rows)?;
+            if snapshot.len() != rows.len() {
+                bail!("stored configuration changed during source/read; retry the read");
+            }
+            Ok(Some((object, rows, version, snapshot)))
+        })?;
+        let Some((object, rows, version, snapshot)) = selected else {
+            return Ok(None);
+        };
+        // The descriptor and its module have no external conversion inputs.
+        // Render only the captured rows with the ordinary export writer.
+        let snapshot = snapshot
+            .into_iter()
+            .map(|(name, bytes)| (name, Arc::new(bytes)))
+            .collect();
+        let files = Self::from_rows_snapshot(self.source.clone(), self.platform, snapshot)
+            .export_rows(rows, None, None)?
+            .into_iter()
+            .filter(|(path, _)| object.owns_path(path))
+            .collect();
+        if with_database_table(sql, database, |table| table.plain_active_versions_digest())?
+            .as_ref()
+            != Some(&before)
+        {
+            bail!("stored configuration changed during source/read; retry the read");
+        }
+        let files = Arc::new(ObjectFiles {
+            object,
+            version,
+            files,
+        });
+        if self.cached_bytes + files.files.values().map(Vec::len).sum::<usize>() <= CACHE_BYTES {
+            self.addressed_export = Some((before, files.clone()));
+        }
+        Ok(Some(files))
     }
 
     /// Compares the objects (`None`: the whole configuration) with a source
