@@ -2001,6 +2001,8 @@ struct MssqlDumpRowManifest {
     module_text_path: Option<String>,
     metadata_xml_path: Option<String>,
     source_asset_path: Option<String>,
+    #[serde(skip)]
+    emitted_help: bool,
 }
 
 /// The export with no hooks. It has no reader of the stored objects, so it
@@ -5826,7 +5828,7 @@ fn dump_table_rows_streamed(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
-    let source_asset_discovery_misses = source_asset_discovery_misses(
+    let mut source_asset_discovery_misses = source_asset_discovery_misses(
         if selected_object_export {
             selected_metadata_texts
         } else {
@@ -6477,6 +6479,43 @@ fn dump_table_rows_streamed(
             diagnostic.code
         );
     }
+    let mut metadata_discovery_misses = selected_metadata_audit.misses.clone();
+    let mut additional_help_assets = 0;
+    if selected_object_export {
+        // Streaming discovery has headers for bodies that will be fetched later.
+        // Only an emitted help asset at the resolved path can clear its probe miss.
+        validate_selected_output_paths(manifests.iter().flat_map(|row| {
+            [
+                row.source_asset_path.as_deref(),
+                row.metadata_xml_path.as_deref(),
+                row.module_text_path.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+        }))?;
+        for row in &manifests {
+            additional_help_assets +=
+                usize::from(row.emitted_help && !source_assets.contains_key(&row.file_name));
+            if matches!(
+                source_asset_discovery_misses
+                    .get(&row.file_name)
+                    .map(String::as_str),
+                Some(source_assets::FORM_HELP_DISCOVERY_MISS | source_assets::HELP_DISCOVERY_MISS)
+            ) && row.emitted_help
+            {
+                source_asset_discovery_misses.remove(&row.file_name);
+            }
+            // The owner graph names the template family. Require the descriptor
+            // writer to have published its exact path before clearing recognition.
+            if metadata_discovery_misses.get(&row.file_name)
+                == Some(&MetadataExtractionMissReason::Family)
+                && let Some(template) = template_refs.get(&row.file_name)
+                && row.metadata_xml_path.as_deref().map(Path::new) == Some(&template.relative_path)
+            {
+                metadata_discovery_misses.remove(&row.file_name);
+            }
+        }
+    }
     for (source_row_id, reason) in &source_asset_discovery_misses {
         source_asset_completeness.record_affected_reason(source_asset_audit_entry(
             table,
@@ -6486,7 +6525,7 @@ fn dump_table_rows_streamed(
             "source_asset_candidate_missing",
         ));
     }
-    for (source_row_id, reason) in &selected_metadata_audit.misses {
+    for (source_row_id, reason) in &metadata_discovery_misses {
         source_asset_completeness.record_affected_reason(source_asset_audit_entry(
             table,
             source_row_id,
@@ -6510,11 +6549,12 @@ fn dump_table_rows_streamed(
     source_asset_completeness.finish_inventory(
         source_asset_scope,
         source_asset_discovery_misses.is_empty()
-            && selected_metadata_audit.misses.is_empty()
+            && metadata_discovery_misses.is_empty()
             && source_asset_diagnostics.is_empty(),
         source_assets.len()
+            + additional_help_assets
             + source_asset_discovery_misses.len()
-            + selected_metadata_audit.misses.len(),
+            + metadata_discovery_misses.len(),
     );
 
     if generate_config_dump_info {
@@ -6737,6 +6777,27 @@ fn build_dump_file_name_batches(
         batches.push(current);
     }
     batches
+}
+
+fn validate_selected_output_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> Result<()> {
+    let mut written = BTreeSet::new();
+    for path in paths {
+        let normalized = path.replace('\\', "/");
+        anyhow::ensure!(
+            written.insert(normalized),
+            "selected export emitted a duplicate path: {path}"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn selected_output_rejects_two_help_rows_for_one_owner() {
+    let help = "Documents/Test/Forms/Test/Ext/Help.xml";
+    assert!(validate_selected_output_paths([help, "Documents/Test/Ext/Help.xml"]).is_ok());
+    let alias = help.replace('/', "\\");
+    assert!(validate_selected_output_paths([help, &alias]).is_err());
 }
 
 fn rows_for_source_indexes(
@@ -7527,6 +7588,7 @@ fn dump_table_row_bytes(
     };
 
     let mut source_asset_rows = 0;
+    let mut emitted_help = false;
     let mut source_assets = SourceAssetCompletenessReport::default();
     let source_asset_relative = if metadata_xml_relative.is_none() {
         let started = Instant::now();
@@ -7633,6 +7695,7 @@ fn dump_table_row_bytes(
                 if diagnostics.is_empty() {
                     debug_assert!(emitted);
                     source_assets.record_emitted();
+                    emitted_help = matches!(asset.kind, SourceAssetKind::Help);
                 } else {
                     source_assets.record_opaque(diagnostics);
                 }
@@ -7743,6 +7806,7 @@ fn dump_table_row_bytes(
             module_text_path: module_text_relative,
             metadata_xml_path: metadata_xml_relative,
             source_asset_path: source_asset_relative,
+            emitted_help,
         },
         binary_bytes: bytes.len(),
         inflated_rows,

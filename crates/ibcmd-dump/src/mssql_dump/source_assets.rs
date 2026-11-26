@@ -1152,6 +1152,9 @@ pub(super) fn source_asset_paths_with_indexes(
     paths
 }
 
+pub(super) const FORM_HELP_DISCOVERY_MISS: &str = "form_help_decoder_failed";
+pub(super) const HELP_DISCOVERY_MISS: &str = "help_decoder_failed";
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn source_asset_discovery_misses(
     metadata_texts: &[MetadataTextRow],
@@ -1251,7 +1254,7 @@ pub(super) fn source_asset_discovery_misses(
             .and_then(|row| row.binary_bytes().ok())
             .is_some_and(|bytes| parse_help_blob_pages(&bytes).is_some());
         if !parsed {
-            misses.insert(help_id, "form_help_decoder_failed".to_string());
+            misses.insert(help_id, FORM_HELP_DISCOVERY_MISS.to_owned());
         }
     }
     for (uuid, template_ref) in template_refs {
@@ -1871,7 +1874,7 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 }
             }
         } else if is_preferred_help {
-            misses.insert((*body_id).to_string(), "help_decoder_failed".to_string());
+            misses.insert((*body_id).to_string(), HELP_DISCOVERY_MISS.to_owned());
         }
     }
 
