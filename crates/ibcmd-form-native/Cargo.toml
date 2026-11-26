@@ -9,6 +9,7 @@ description = "Writer for the managed-form item records a native 8.3.27 form bod
 [dependencies]
 # The base64 and 1C string writers, shared with the root.
 ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-form-schema = { path = "../ibcmd-form-schema" }
 
 [lints.rust]
 unsafe_code = "forbid"
