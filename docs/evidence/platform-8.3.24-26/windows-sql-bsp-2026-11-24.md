@@ -88,3 +88,11 @@ The bytewise comparison below uses the same relative-path and file hashing proce
 | 2.19 | `bdeb24383414595f116e0b2139109e0060326b5db353053f3c6f19c44deab841` | `a73b8eecf44c0a2044eff11feac7b596e10a19c5174f0c57278a53e373e97b71` | 0 / 3 / 4 / 0 |
 
 A follow-up read-only SQL check found eight active source rows on each build and zero active target rows. Each target held four staged rows whose filename and part-number pairs were present in the corresponding source. On 8.3.24.1819 the first missing path was the managed form descriptor. The source `Configuration.xml` listed a language and a common form, while the immediate reexport listed only the language. The form UUID matched two source `Config` parts and two target `ConfigSave` parts. The staged rows account for the form storage observed after import. Verification of the activated XML tree still requires native apply and reexport.
+
+All three target databases subsequently completed native `config apply --force` and native reexport, both with exit code 0 on each build. Each reexport still had three files and omitted the same four paths, including the managed form. The three shared paths still differed from the source. On 8.3.25.1633 and 8.3.26.1656 the targets had four active rows and zero staged rows after this run. Applying the staged configuration therefore did not restore the missing output on this corpus.
+
+| Build | Activated tree SHA-256 | Identical / changed / missing / extra |
+| --- | --- | --- |
+| 8.3.24.1819 | `94784e88d3c2122088e7df51b4cf55c1caf9c5899b33d28fffc5ed8424e54914` | 0 / 3 / 4 / 0 |
+| 8.3.25.1633 | `a38761a08c08a358431342125661a88ed1143b188456feffb9a1429a41470022` | 0 / 3 / 4 / 0 |
+| 8.3.26.1656 | `4f9712318995b72137d354b22b0212068c2e4e7fa81770dd65e8dc6c49b9319d` | 0 / 3 / 4 / 0 |
