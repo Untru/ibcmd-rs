@@ -8,6 +8,8 @@ ibcmd infobase create --dbms=PostgreSQL --db-server=127.0.0.1 --db-name=<баз�
   --db-user=postgres --create-database --import=<XML> --apply --force
 ```
 
+Парные снимки четырёх таблиц после штатных команд на 8.3.27.2342 и 8.5.1.1529 приведены в [протоколе от 24.11.2026](../../openspec/changes/evidence-bound-platform-profiles/evidence/postgres-storage-20261124/README.md).
+
 ## Таблицы
 
 Конфигурация лежит в тех же таблицах, что и на SQL Server, только имена
