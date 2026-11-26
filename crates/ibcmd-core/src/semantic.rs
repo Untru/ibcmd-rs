@@ -6,6 +6,7 @@
 //! native `usize`, hash-map iteration, debug output, OS path, or line-ending
 //! normalization participates.
 
+use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 
 use serde::{Serialize, Serializer};
@@ -60,6 +61,48 @@ pub fn semantic_digest(configuration: &ValidatedConfiguration<'_>) -> SemanticDi
 /// Compares two validated models using their versioned semantic digests.
 pub fn semantic_eq(left: &ValidatedConfiguration<'_>, right: &ValidatedConfiguration<'_>) -> bool {
     semantic_digest(left) == semantic_digest(right)
+}
+
+/// An object-level difference between two validated configurations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObjectChange {
+    Added(ObjectUuid),
+    Removed(ObjectUuid),
+    Modified(ObjectUuid),
+}
+
+/// Reports semantic differences in UUID order, matching objects by UUID.
+///
+/// A path change for the same UUID is a modification. Opaque facets are
+/// compared by the same encoding used for whole-configuration equality.
+pub fn compare_objects(
+    left: &ValidatedConfiguration<'_>,
+    right: &ValidatedConfiguration<'_>,
+) -> Vec<ObjectChange> {
+    let mut pairs = BTreeMap::new();
+    for object in left.configuration().objects() {
+        pairs.insert(object.identity().uuid(), (Some(object), None));
+    }
+    for object in right.configuration().objects() {
+        pairs.entry(object.identity().uuid()).or_default().1 = Some(object);
+    }
+    pairs
+        .into_iter()
+        .filter_map(|(uuid, pair)| match pair {
+            (None, Some(_)) => Some(ObjectChange::Added(uuid)),
+            (Some(_), None) => Some(ObjectChange::Removed(uuid)),
+            (Some(left), Some(right)) if object_digest(left) != object_digest(right) => {
+                Some(ObjectChange::Modified(uuid))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn object_digest(object: &CanonicalObject) -> SemanticDigest {
+    let mut encoder = SemanticEncoder::new();
+    encode_object(object, &mut encoder);
+    encoder.finish()
 }
 
 impl ValidatedConfiguration<'_> {
@@ -481,6 +524,26 @@ mod tests {
         let left = validate_configuration(&left_configuration).unwrap();
         let right = validate_configuration(&right_configuration).unwrap();
         assert!(semantic_eq(&left, &right));
+    }
+
+    #[test]
+    fn compares_validated_objects_by_uuid_and_opaque_content() {
+        let original = golden_objects("profile:one", "text", b"opaque");
+        let mut changed = golden_objects("profile:one", "text", b"changed");
+        changed.pop();
+        let original = CanonicalConfiguration::new(original).unwrap();
+        let changed = CanonicalConfiguration::new(changed).unwrap();
+        let original = validate_configuration(&original).unwrap();
+        let changed = validate_configuration(&changed).unwrap();
+        assert!(compare_objects(&original, &original).is_empty());
+        assert_eq!(
+            compare_objects(&original, &changed),
+            [ObjectChange::Modified(uuid(1)), ObjectChange::Removed(uuid(2))]
+        );
+        assert_eq!(
+            compare_objects(&changed, &original),
+            [ObjectChange::Modified(uuid(1)), ObjectChange::Added(uuid(2))]
+        );
     }
 
     #[test]
