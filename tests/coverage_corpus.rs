@@ -864,3 +864,140 @@ fn coverage_extension_restructuring_matches_native_schema_and_names() {
         }
     }
 }
+
+#[test]
+fn deep_composer_binding_matches_the_complete_native_form() {
+    for (platform, version) in [("8.3.27.2214", "2.20"), ("8.5.1.1150", "2.21")] {
+        let set = coverage_paths::root()
+            .join("coverage")
+            .join(platform)
+            .join("corpus-form-deep-bindings");
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("set.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let exported = cf_export(&cf, &temp.0.join("export"), version).unwrap();
+        let path = "CommonForms/CovDeepComposerBinding/Ext/Form.xml";
+        assert_eq!(
+            exported.files.get(path),
+            Some(&fs::read(set.join("native").join(path)).unwrap()),
+            "{platform}: complete deep-composer form"
+        );
+    }
+}
+
+#[test]
+fn deep_binding_native_forms_compile() {
+    let mut refusals = Vec::new();
+    for platform in ["8.3.27.2214", "8.5.1.1150"] {
+        for set_name in ["corpus-form-deep-bindings", "corpus-owned-catalog-forms"] {
+            let native = coverage_paths::root()
+                .join("coverage")
+                .join(platform)
+                .join(set_name)
+                .join("native");
+            let source = ibcmd_rs::module_blob::MetadataSourceContext::new(native.clone());
+            let forms = read_tree(&native)
+                .into_iter()
+                .filter(|(path, _)| {
+                    path.ends_with("/Ext/Form.xml")
+                        && ((path.contains("CovDeepComposerBinding/")
+                            || path.contains("CovDeepProductBinding/"))
+                            || path.contains("/DeepForm/")
+                            || path.contains("/DeepInputForm/"))
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                forms.len(),
+                if set_name == "corpus-form-deep-bindings" {
+                    2
+                } else {
+                    3
+                },
+                "{platform}/{set_name}"
+            );
+            for (path, xml) in forms {
+                let module = native.join(path.replace("/Ext/Form.xml", "/Ext/Form/Module.bsl"));
+                let module = module.is_file().then(|| fs::read(module).unwrap());
+                let items_root = native.join(path.replace("/Ext/Form.xml", "/Ext/Form"));
+                if let Err(error) = ibcmd_rs::module_blob::compile_native_form_body(
+                    &xml,
+                    module.as_deref(),
+                    Some(&source),
+                    Some(&items_root),
+                ) {
+                    refusals.push(format!("{platform}/{set_name}/{path}: {error:#}"));
+                }
+            }
+        }
+    }
+    assert!(refusals.is_empty(), "{}", refusals.join("\n"));
+}
+
+#[test]
+fn deep_binding_paths_survive_all_public_storage_profiles() {
+    let paths = |bytes: &[u8]| {
+        String::from_utf8(bytes.to_vec())
+            .unwrap()
+            .split("<DataPath>")
+            .skip(1)
+            .map(|tail| tail.split_once("</DataPath>").unwrap().0.to_owned())
+            .collect::<Vec<_>>()
+    };
+    let mut compared = 0;
+    for set in coverage_sets() {
+        if !set.join("configuration.cf.b64").is_file() {
+            continue;
+        }
+        let targets = read_tree(&set.join("native"))
+            .into_iter()
+            .filter(|(path, bytes)| {
+                path.ends_with("/Ext/Form.xml")
+                    && paths(bytes).iter().any(|value| {
+                        matches!(
+                            value.as_str(),
+                            "Report.SettingsComposer.Settings.Selection.Use"
+                                | "Object.Goods.Product.UnitOfMeasure"
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        if targets.is_empty() {
+            continue;
+        }
+        let temp = TempDirectory::new();
+        let cf = temp.0.join("set.cf");
+        fs::write(
+            &cf,
+            decode_base64(&fs::read(set.join("configuration.cf.b64")).unwrap()),
+        )
+        .unwrap();
+        let version = if set
+            .components()
+            .any(|part| part.as_os_str() == "8.3.27.2214")
+        {
+            "2.20"
+        } else {
+            "2.21"
+        };
+        let exported = cf_export(&cf, &temp.0.join("export"), version).unwrap();
+        for (path, native) in targets {
+            let actual = exported
+                .files
+                .get(&path)
+                .unwrap_or_else(|| panic!("{}/{}: target form missing", set.display(), path));
+            assert_eq!(
+                paths(actual),
+                paths(&native),
+                "{}/{}: complete DataPath values",
+                set.display(),
+                path
+            );
+            compared += 1;
+        }
+    }
+    assert_eq!(compared, 49, "all native-proven deep binding form profiles");
+}

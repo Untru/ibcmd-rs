@@ -20,6 +20,10 @@
 /// *malformed*.
 pub const FORM_ABSENT_MEMBER: &str = "\u{1}absent";
 
+/// Selection's boolean Use member in a settings-composer binding. Both
+/// public deep-binding native records store this member after Settings/Selection.
+pub const FORM_SETTINGS_SELECTION_USE_MEMBER: (&str, &str) = ("Use", "10000");
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormChildItemKind {
     UsualGroup,
