@@ -719,6 +719,7 @@ fn run_import(mut request: ImportRequest) -> i32 {
                 {
                     return Ok(None);
                 }
+                read_requested_password(&mut request.common).map_err(anyhow::Error::msg)?;
                 crate::file_infobase::import_edt(&import_args(&request), &tree, &profile).map(Some)
             });
         return match result {
