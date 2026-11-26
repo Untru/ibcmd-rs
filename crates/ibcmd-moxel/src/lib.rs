@@ -2173,11 +2173,18 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         fields,
         object_refs,
         generated_types,
-        builtin_type_reference,
-        standard_picture_name,
+        MoxelVocabularyLookups {
+            builtin_type_reference,
+            standard_picture_name,
+        },
         trace_sink,
         palette,
     ))
+}
+
+struct MoxelVocabularyLookups {
+    builtin_type_reference: BuiltinTypeReference,
+    standard_picture_name: fn(&str) -> Option<&'static str>,
 }
 
 fn parse_moxel_spreadsheet_fields(
@@ -2185,11 +2192,14 @@ fn parse_moxel_spreadsheet_fields(
     fields: Vec<&str>,
     object_refs: &BTreeMap<String, String>,
     generated_types: &BTreeMap<String, String>,
-    builtin_type_reference: BuiltinTypeReference,
-    standard_picture_name: fn(&str) -> Option<&'static str>,
+    lookups: MoxelVocabularyLookups,
     trace_sink: Option<&dyn MoxelLineTraceSink>,
     palette: Option<&mut Option<MxlPaletteProvenance>>,
 ) -> Option<MoxelSpreadsheet> {
+    let MoxelVocabularyLookups {
+        builtin_type_reference,
+        standard_picture_name,
+    } = lookups;
     let raw_declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
     let mut rows = parse_moxel_rows(&fields);
     // Keep an unmeasured list in its row until admission: returning None for
