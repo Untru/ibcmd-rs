@@ -1521,6 +1521,25 @@ fn sql_import_and_pending_through_stdio() {
         2
     );
     assert_eq!(server.ok("source/read", read_params.clone()), before);
+
+    // A cached read and a fresh inventory must both reject a malformed part.
+    for (change, restore) in [
+        ("FileName=N'Versions'", "FileName=N'versions'"),
+        ("DataSize=DataSize+1", "DataSize=DataSize-1"),
+    ] {
+        let update = |assignment: &str| {
+            let query = format!(
+                "UPDATE [{db}].dbo.Config SET {assignment} WHERE FileName IN (N'versions', N'Versions') AND PartNo=0"
+            );
+            assert_eq!(client.execute(&query, &[]).unwrap(), 1);
+        };
+        update(change);
+        let error = server.error("source/read", read_params.clone());
+        update(restore);
+        assert_eq!(error, -32014);
+        assert_eq!(server.ok("source/read", read_params.clone()), before);
+    }
+
     let patch = ibcmd_module_blob::patch_versions_blob_bytes(
         &versions("Config"),
         &[language.into(), body_row.into()],

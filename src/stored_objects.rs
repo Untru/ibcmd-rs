@@ -1029,8 +1029,8 @@ impl StoredConfiguration {
             if plain_active_sql
                 && *plain_active_inventory
                 && let Some(known) = inventory.as_mut()
-                && let Some(versions) = table.plain_active_versions()?
-                && known.digest == sha256_hex(&versions)
+                && let Some(digest) = table.plain_active_versions_digest()?
+                && known.digest == digest
             {
                 return body(known, table);
             }

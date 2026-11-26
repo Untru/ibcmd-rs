@@ -2089,10 +2089,31 @@ impl<'a> ConfigTable<'a> {
         }
     }
 
-    /// Read the active versions row without building an inventory when there is
-    /// no dynamic update overlay. The marker and versions share one SQL query.
+    /// Fingerprint the active versions row without enumerating Config.
+    /// For a single part, SQL Server can hash the bytes without sending them.
+    /// Multipart rows and servers with a limited HASHBYTES use the row reader.
     #[doc(hidden)]
-    pub fn plain_active_versions(&self) -> Result<Option<Vec<u8>>> {
+    pub fn plain_active_versions_digest(&self) -> Result<Option<String>> {
+        use crate::sql::{SqlBackend, SqlValue};
+        use sha2::{Digest, Sha256};
+
+        if let SqlBackend::Client(client) = self.sql.backend() {
+            let table = MssqlConfigurationTableRole::Current.sql_name();
+            let database = quote_ident(self.database);
+            let query = format!(
+                "SELECT CASE WHEN COUNT_BIG(*) = 1 AND MIN(PartNo) = 0 \
+                 AND DATALENGTH(MIN(FileName)) = DATALENGTH(N'versions') \
+                 AND CONVERT(varbinary(max), MIN(FileName)) = CONVERT(varbinary(max), N'versions') \
+                 AND MIN(DataSize) = MIN(DATALENGTH(BinaryData)) \
+                 THEN MIN(CONVERT(varchar(64), HASHBYTES('SHA2_256', BinaryData), 2)) END \
+                 FROM {database}.dbo.{table} \
+                 WHERE FileName IN (N'versions', N'{DYNAMIC_UPDATE_MARKER_ROW}')"
+            );
+            if let Ok(Some(SqlValue::Text(hash))) = client.query_scalar(&query, &[]) {
+                return Ok(Some(hash.to_ascii_lowercase()));
+            }
+        }
+
         let mut rows = self.rows(&BTreeSet::from([
             "versions".to_owned(),
             DYNAMIC_UPDATE_MARKER_ROW.to_owned(),
@@ -2100,7 +2121,9 @@ impl<'a> ConfigTable<'a> {
         if rows.contains_key(DYNAMIC_UPDATE_MARKER_ROW) {
             return Ok(None);
         }
-        Ok(rows.remove("versions"))
+        Ok(rows
+            .remove("versions")
+            .map(|bytes| format!("{:x}", Sha256::digest(bytes))))
     }
 
     /// Every published row name. Installs the table's view for the reads
