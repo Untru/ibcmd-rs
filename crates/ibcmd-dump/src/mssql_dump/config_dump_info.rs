@@ -285,6 +285,13 @@ pub(super) fn canonical_reference_names(
         inventory.metadata_texts,
         inventory.object_refs,
     );
+    if let Some(eds) = inventory.eds_export {
+        for row in inventory.metadata_texts {
+            if let Some(name) = eds.reference_name(&row.file_name) {
+                canonical_refs.insert(row.file_name.clone(), name.to_owned());
+            }
+        }
+    }
     Ok(canonical_refs)
 }
 
@@ -989,22 +996,23 @@ fn build_config_dump_children(
             {
                 continue;
             }
-            let child_name = if let Some(child_name) = object_refs.get(&header.uuid) {
-                child_name.clone()
-            } else if let Some(name) = eds_export.and_then(|eds| eds.reference_name(&header.uuid)) {
-                name.to_owned()
-            } else if row.kind.as_deref() == Some("DocumentJournal") {
-                format!("{owner_name}.Column.{}", header.name)
-            } else {
-                unresolved_child_roles.insert(format!(
-                    "{} {}: {} ({})",
-                    row.kind.as_deref().unwrap_or("<unknown>"),
-                    row.file_name,
-                    header.uuid,
-                    header.name
-                ));
-                continue;
-            };
+            let child_name =
+                if let Some(name) = eds_export.and_then(|eds| eds.reference_name(&header.uuid)) {
+                    name.to_owned()
+                } else if let Some(child_name) = object_refs.get(&header.uuid) {
+                    child_name.clone()
+                } else if row.kind.as_deref() == Some("DocumentJournal") {
+                    format!("{owner_name}.Column.{}", header.name)
+                } else {
+                    unresolved_child_roles.insert(format!(
+                        "{} {}: {} ({})",
+                        row.kind.as_deref().unwrap_or("<unknown>"),
+                        row.file_name,
+                        header.uuid,
+                        header.name
+                    ));
+                    continue;
+                };
             if !child_name
                 .strip_prefix(owner_name)
                 .is_some_and(|suffix| suffix.starts_with('.'))
