@@ -837,7 +837,11 @@ fn load_table(
     item: &mut ItemFacts,
     layout: FormLayout,
 ) -> Result<()> {
-    let hierarchy = take(edits, element, ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION)?;
+    let hierarchy = take(
+        edits,
+        element,
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION,
+    )?;
     if hierarchy.is_some() && layout != FormLayout::V8_5_1 {
         bail!("HierarchyPanelLocation requires the measured 8.5 table layout");
     }
