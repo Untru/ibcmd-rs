@@ -1,5 +1,6 @@
 {
   "equal": [
-    "CommonTemplates/CovObservedSheetGroupColours"
+    "CommonTemplates/CovObservedSheetGroupColours",
+    "CommonTemplates/CovSheetValueListDetail"
   ]
 }

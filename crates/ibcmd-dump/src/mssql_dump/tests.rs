@@ -14210,7 +14210,7 @@ fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         &object_refs,
     )
     .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("<size>3</size>"));
     assert!(
@@ -14287,7 +14287,7 @@ fn formats_moxel_single_column_empty_row_without_prefix() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("<size>1</size>"));
     assert_eq!(xml.matches("<columnsItem>").count(), 1);
@@ -14310,7 +14310,7 @@ fn formats_moxel_simple_template_empty_row_range_and_style_formats() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains(
         "<index>1</index>\r\n\t\t<indexTo>3</indexTo>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>"
@@ -14659,7 +14659,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         height: 15,
     };
 
-    let extracted = format_moxel_spreadsheet_xml(&spreadsheet);
+    let extracted = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(extracted.contains(
             "<merge>\r\n\t\t<r>-1</r>\r\n\t\t<c>5</c>\r\n\t\t<w>1</w>\r\n\t\t<columnsID>e3f5122b-a98a-459d-a9ef-d9b6788c0769</columnsID>\r\n\t</merge>"
@@ -14807,7 +14807,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
         height: 0,
     };
 
-    let extracted = format_moxel_spreadsheet_xml(&spreadsheet);
+    let extracted = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(!extracted.contains("<printSettings>"));
 }
@@ -15132,7 +15132,7 @@ fn formats_moxel_receipt_columns_headers_style_font_and_default_format() {
             &object_refs,
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("\t<columns>\r\n\t\t<size>2</size>"));
     assert!(
@@ -15294,7 +15294,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
         height: 1,
     };
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(
         moxel_output_format_indices(&spreadsheet),
@@ -15564,7 +15564,7 @@ fn formats_moxel_trims_trailing_empty_rows_outside_named_areas() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("<height>5</height>"));
     assert!(xml.contains("<vgRows>5</vgRows>"));
@@ -15691,7 +15691,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         mask_refs: Vec::new(),
         height: 6,
     };
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("<vgLevels>3</vgLevels>"));
     assert!(xml.contains("<vgRows>6</vgRows>"));
@@ -15767,7 +15767,7 @@ fn formats_moxel_additional_column_sets_and_columns_id() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("\t<columns>\r\n\t\t<size>2</size>"));
     assert!(xml.contains(
@@ -15794,7 +15794,7 @@ fn formats_moxel_print_area_preserves_columns_id() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     let print_area = xml
         .split("<printArea>")
         .nth(1)
@@ -15874,7 +15874,7 @@ fn formats_moxel_scanning_does_not_treat_column_mapping_as_empty_row() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(xml.matches("<rowsItem>").count(), 1);
     assert!(xml.contains("<index>0</index>"));
@@ -16400,7 +16400,8 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         control_types: Vec::new(),
         mask_refs: Vec::new(),
         height: 0,
-    });
+    })
+    .unwrap();
 
     assert!(xml.contains(
         "<rowsItem>\r\n\t\t<index>0</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>1</formatIndex>\r\n"
@@ -16512,7 +16513,7 @@ fn moxel_palette_index_control_keeps_column_and_cell_references() {
         mask_refs: Vec::new(),
         height: 1,
     };
-    let extracted = format_moxel_spreadsheet_xml(&spreadsheet);
+    let extracted = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(extracted.contains("<formatIndex>1</formatIndex>"));
     assert!(extracted.contains("<formatIndex>2</formatIndex>"));
@@ -16581,7 +16582,7 @@ fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
         height: 1,
     };
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("<height>1</height>"));
     assert!(xml.contains("<vgRows>1</vgRows>"));
@@ -16597,7 +16598,7 @@ fn moxel_raw_zero_column_with_declared_height_is_not_width_only_empty() {
         "{0,1,00000000-0000-0000-0000-000000000000,0},1,0,0}"
     );
     let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(spreadsheet.column_count, 1);
     assert_eq!(spreadsheet.height, 1);
@@ -16634,7 +16635,8 @@ fn formats_moxel_non_zero_column_slots_suppress_row_output_index_one() {
         },
         &BTreeMap::from([(19usize, 1usize), (25usize, 25usize)]),
         false,
-    );
+    )
+    .unwrap();
 
     assert!(!xml.contains("<formatIndex>1</formatIndex>"));
     assert!(xml.contains("<f>25</f>"));
@@ -16669,7 +16671,8 @@ fn formats_moxel_leading_shared_default_suppresses_shifted_row_output_index_two(
         },
         &BTreeMap::from([(19usize, 1usize), (1usize, 2usize), (20usize, 20usize)]),
         false,
-    );
+    )
+    .unwrap();
 
     assert!(!xml.contains("<formatIndex>2</formatIndex>"));
     assert!(xml.contains("<f>20</f>"));
@@ -16690,7 +16693,8 @@ fn formats_moxel_row_columns_id_precedes_format_index() {
         },
         &BTreeMap::new(),
         false,
-    );
+    )
+    .unwrap();
 
     assert!(xml.contains(
             "\t\t<row>\r\n\t\t\t<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>\r\n\t\t\t<formatIndex>19</formatIndex>\r\n"
@@ -16712,7 +16716,8 @@ fn formats_moxel_remapped_explicit_row_format_one_is_preserved() {
         },
         &BTreeMap::from([(19usize, 1usize)]),
         false,
-    );
+    )
+    .unwrap();
 
     assert!(xml.contains("<formatIndex>1</formatIndex>"));
 }
@@ -16755,7 +16760,8 @@ fn formats_moxel_cell_value_precedes_detail_parameter_and_control() {
         },
         &BTreeMap::new(),
         false,
-    );
+    )
+    .unwrap();
 
     assert!(xml.contains(concat!(
         "\t\t\t\t\t<f>0</f>\r\n",
@@ -16807,7 +16813,8 @@ fn formats_moxel_cell_referenced_value_follows_detail_parameter() {
         },
         &BTreeMap::new(),
         false,
-    );
+    )
+    .unwrap();
 
     assert!(xml.contains(concat!(
         "\t\t\t\t\t<f>0</f>\r\n",
@@ -16853,7 +16860,8 @@ fn formats_moxel_cell_detail_value_follows_detail_parameter() {
         },
         &BTreeMap::new(),
         false,
-    );
+    )
+    .unwrap();
 
     assert!(xml.contains(concat!(
         "\t\t\t\t\t<f>0</f>\r\n",
@@ -16874,7 +16882,7 @@ fn formats_moxel_decodes_bottom_vertical_alignment() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains(
         "\t<format>\r\n\t\t<verticalAlignment>Bottom</verticalAlignment>\r\n\t</format>"
@@ -16892,7 +16900,7 @@ fn formats_moxel_decodes_cut_text_placement() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("\t<format>\r\n\t\t<textPlacement>Cut</textPlacement>\r\n\t</format>"));
 }
@@ -17019,7 +17027,7 @@ fn formats_moxel_table_with_unknown_format_bits_preserves_known_format_indexes()
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("<f>2</f>"));
     assert!(xml.contains(
@@ -17034,7 +17042,7 @@ fn formats_moxel_number_format_string_table() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains(
             "\t<format>\r\n\t\t<format>\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t<v8:content>БЛ=; БИ=√</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</format>\r\n\t</format>"
@@ -17048,7 +17056,7 @@ fn formats_moxel_edit_format_string_table() {
             &BTreeMap::new(),
         )
         .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains(
             "\t<format>\r\n\t\t<format>\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t<v8:content>ЧДЦ=2</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</format>\r\n\t\t<editFormat>\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t<v8:content>ЧДЦ=2</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</editFormat>\r\n\t</format>"
@@ -18449,7 +18457,7 @@ fn formats_moxel_detail_parameters_and_row_format_offsets() {
         &BTreeMap::new(),
     )
     .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("<index>2</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>5</formatIndex>"));
     assert!(xml.contains(
@@ -18472,7 +18480,7 @@ fn formats_moxel_source_slot_refs_with_default_width_do_not_create_empty_formats
         &BTreeMap::new(),
     )
     .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(
         xml.matches("\t<format>\r\n").count() + xml.matches("\t<format/>\r\n").count(),
@@ -18498,7 +18506,7 @@ fn formats_moxel_source_slot_refs_preserve_high_tail_indices() {
         &BTreeMap::new(),
     )
     .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert!(xml.contains("<index>97</index>"));
     assert!(xml.contains("<f>81</f>"));
@@ -18527,7 +18535,7 @@ fn formats_moxel_request_offer_preserves_native_default_and_report_header_styles
         &BTreeMap::new(),
     )
     .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(spreadsheet.default_format_index, Some(15));
     assert_eq!(spreadsheet.column_formats.len(), 9);
@@ -18576,7 +18584,7 @@ fn formats_moxel_clientbank_db_tail_preserves_default_details_lines_and_font_ten
         &BTreeMap::new(),
     )
     .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(spreadsheet.default_format_index, Some(48));
     assert_eq!(spreadsheet.default_format_width, Some(72));
@@ -18617,7 +18625,7 @@ fn formats_moxel_settlement_db_tail_preserves_form_text_auto_and_group_styles() 
         &BTreeMap::new(),
     )
     .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(
         moxel_format_for_index(&spreadsheet, 6)
@@ -18668,7 +18676,7 @@ fn formats_moxel_source_slot_refs_preserve_native_load_goods_order_and_default()
     let body_start = inflated.find("{8,").unwrap();
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     let top_level_format_count =
         xml.matches("\r\n\t<format>\r\n").count() + xml.matches("\r\n\t<format/>\r\n").count();
 
@@ -18720,7 +18728,7 @@ fn formats_moxel_zero_offset_sparse_source_refs_preserve_required_fields_order()
         &BTreeMap::new(),
     )
     .unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(spreadsheet.default_format_index, Some(7));
     assert_eq!(spreadsheet.column_formats.len(), 3);
@@ -18759,7 +18767,7 @@ fn formats_moxel_invoice_1096_sparse_column_sets_promote_shared_default_without_
     let fields = split_1c_braced_fields(raw, 0).unwrap();
     let (_, _, declared_sheet_height) = parse_moxel_column_sets(&fields);
     let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
 
     assert_eq!(spreadsheet.column_sets.len(), 4);
     // 36, not 35: the slot the column sets' own default reference names is part
@@ -19826,7 +19834,7 @@ fn moxel_line_table_carries_the_widths_the_colour_palette_cannot() {
         ]
     );
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     assert!(xml.contains(
         "\t<line width=\"2\" gap=\"false\">\r\n\t\t<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentCellLineType\">Solid</v8ui:style>\r\n\t</line>\r\n\t<line width=\"1\" gap=\"false\">"
     ));
@@ -19861,7 +19869,7 @@ fn moxel_font_table_is_published_in_first_reference_order() {
         ]
     );
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     let arial = xml.find("<font faceName=\"Arial\"").unwrap();
     let system = xml.find("ref=\"sys:DefaultGUIFont\"").unwrap();
     let empty_face = xml.find("<font faceName=\"\"").unwrap();
@@ -19887,7 +19895,7 @@ fn moxel_sheet_height_is_the_declared_row_count() {
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     assert!(xml.contains("\t<height>5</height>\r\n"), "{xml}");
     assert!(xml.contains("\t<vgRows>5</vgRows>\r\n"), "{xml}");
 }
@@ -19909,7 +19917,7 @@ fn moxel_drawing_z_order_is_the_sequence_position() {
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     assert!(
         xml.contains(
             "\t\t<zOrder>1</zOrder>\r\n\t\t<pictureIndex>1</pictureIndex>\r\n\t</drawing>\r\n"
@@ -19940,7 +19948,7 @@ fn moxel_drawing_line_style_uses_its_own_enumeration() {
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     assert!(
         xml.contains(
             "<v8ui:style xsi:type=\"v8ui:SpreadsheetDocumentDrawingLineType\">Dotted</v8ui:style>"
@@ -20005,7 +20013,7 @@ fn moxel_style_overrides_and_mask_come_from_their_own_tables() {
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     assert!(
         xml.contains("\t\t<borderColor>style:ReportLineColor</borderColor>\r\n"),
         "{xml}"
@@ -20042,7 +20050,7 @@ fn moxel_value_and_control_types_come_from_their_document_tables() {
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     assert!(
         xml.contains(
             "\t\t<containsValue>true</containsValue>\r\n\t\t<valueType>\r\n\
@@ -20154,7 +20162,7 @@ fn moxel_font_members_follow_the_descriptor_mask() {
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
 
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     assert!(
         xml.contains("\t<font ref=\"style:NormalTextFont\" kind=\"StyleItem\"/>\r\n"),
         "{xml}"
@@ -20234,7 +20242,7 @@ fn moxel_default_format_publishes_the_font_beside_its_width() {
 
     let spreadsheet =
         parse_moxel_spreadsheet_text(&inflated[body_start..], &BTreeMap::new()).unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     assert!(
         xml.contains("\t<format>\r\n\t\t<font>0</font>\r\n\t\t<width>72</width>\r\n\t</format>"),
         "{xml}"
@@ -20273,7 +20281,7 @@ fn moxel_header_footer_block_publishes_the_plain_text_child() {
     }
 
     let spreadsheet = parse_moxel_spreadsheet_text(body, &BTreeMap::new()).unwrap();
-    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet).unwrap();
     for tag in [
         "leftHeader",
         "centerHeader",

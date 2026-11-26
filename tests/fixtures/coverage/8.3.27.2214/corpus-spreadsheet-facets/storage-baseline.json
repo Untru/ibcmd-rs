@@ -8,6 +8,7 @@
     "CommonTemplates/CovSheetPageSizeA4.xml",
     "CommonTemplates/CovSheetSandyBrown.xml",
     "CommonTemplates/CovSheetValueListDetail.xml",
+    "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
     "CommonTemplates/CovSheetVerticalPageBreak.xml",
     "CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml",
     "CommonTemplates/CovSpreadsheetFacetTemplate.xml",

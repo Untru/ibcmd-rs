@@ -380,6 +380,7 @@
     "WebSocketClients/CovTemplate",
     "WebSocketClients/CovUseOSAuthentication_true",
     "WebSocketClients/CovUseOSProxy_true",
-    "XDTOPackages/CovTemplate"
+    "XDTOPackages/CovTemplate",
+    "CommonTemplates/CovSheetValueListDetail"
   ]
 }

@@ -9286,7 +9286,7 @@ pub(super) fn parse_form_spreadsheet_document_settings(
     // standalone decoder intact and apply the distinction at this contextual
     // boundary.
     spreadsheet.group_header_colors = [None, None, None, None];
-    let document_xml = format_moxel_spreadsheet_xml(&spreadsheet);
+    let document_xml = format_moxel_spreadsheet_xml(&spreadsheet).ok()?;
     extract_moxel_document_inner_xml(&document_xml)
 }
 
