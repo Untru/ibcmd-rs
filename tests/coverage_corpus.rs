@@ -671,6 +671,7 @@ fn value_list_detail_public_xml_compiles_without_loss() {
             &BTreeMap::new(),
             &BTreeMap::new(),
             |_| None,
+            |_| None,
             None,
         )
         .unwrap();
@@ -772,6 +773,7 @@ fn value_list_detail_refuses_unmeasured_storage_before_xml() {
                 &BTreeMap::new(),
                 &BTreeMap::new(),
                 |_| None,
+                |_| None,
                 None
             )
             .is_err(),
@@ -864,6 +866,7 @@ fn value_list_detail_declaration_is_not_mistaken_for_a_stored_value() {
             id.eq_ignore_ascii_case(ibcmd_schema::spreadsheet_value_list::TYPE_ID)
                 .then_some("v8:ValueListType")
         },
+        |_| None,
         None,
     )
     .unwrap();
