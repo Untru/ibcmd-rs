@@ -9,7 +9,7 @@
 #[doc(hidden)]
 pub mod export;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 
 use super::attribute::{attribute_body, bool_prop, localized_prop, typed_header};
 use super::brace::{Brace, NIL_UUID};
@@ -17,6 +17,7 @@ use super::types::{form_uuid, metadata_ref, object_uuid, type_pattern};
 use super::xml::Element;
 use super::{DescriptorContext, ObjectXml, md_base, native_text, not_yet};
 use ibcmd_restructure::brace_list;
+use ibcmd_schema::descriptor_values::{DATA_HISTORY, DATA_LOCK_CONTROL_MODE};
 
 pub fn compile(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Brace> {
     match object.kind {
@@ -143,7 +144,7 @@ pub fn data_lock_control_mode(value: Option<&str>) -> Result<Brace> {
     enumerated(
         Some(value.unwrap_or("Automatic")),
         "DataLockControlMode",
-        &[("Automatic", 0), ("Managed", 1)],
+        DATA_LOCK_CONTROL_MODE,
     )
 }
 
@@ -152,7 +153,7 @@ pub fn data_history(value: Option<&str>) -> Result<Brace> {
     enumerated(
         Some(value.unwrap_or("DontUse")),
         "DataHistory",
-        &[("DontUse", 0), ("Use", 1)],
+        DATA_HISTORY,
     )
 }
 
@@ -322,33 +323,12 @@ fn functional_options_parameter(
 }
 
 /// The stored spelling of a subscription event: `<name>_<Russian name>`.
-fn event_name(event: &str) -> Result<String> {
-    let russian = match event {
-        "BeforeWrite" => "ПередЗаписью",
-        "OnWrite" => "ПриЗаписи",
-        "BeforeDelete" => "ПередУдалением",
-        "Filling" => "ОбработкаЗаполнения",
-        "FillCheckProcessing" => "ОбработкаПроверкиЗаполнения",
-        "OnCopy" => "ПриКопировании",
-        "OnSetNewCode" => "ПриУстановкеНовогоКода",
-        "OnSetNewNumber" => "ПриУстановкеНовогоНомера",
-        "Posting" => "ОбработкаПроведения",
-        "UndoPosting" => "ОбработкаУдаленияПроведения",
-        "FormGetProcessing" => "ОбработкаПолученияФормы",
-        "ChoiceDataGetProcessing" => "ОбработкаПолученияДанныхВыбора",
-        "PresentationFieldsGetProcessing" => "ОбработкаПолученияПолейПредставления",
-        "PresentationGetProcessing" => "ОбработкаПолученияПредставления",
-        "OnReceiveDataFromMaster" => "ПриПолученииДанныхОтГлавного",
-        "OnReceiveDataFromSlave" => "ПриПолученииДанныхОтПодчиненного",
-        "OnSendDataToMaster" => "ПриОтправкеДанныхГлавному",
-        "OnSendDataToSlave" => "ПриОтправкеДанныхПодчиненному",
-        "OnSendNodeDataToSlave" => "ПриОтправкеДанныхУзлаПодчиненному",
-        // Документооборот 3.0 `EventSubscriptions/ЗадачаКомплексногоПроцессаПриВыполнении`.
-        "OnExecute" => "ПриВыполнении",
-        "" => return Ok(String::new()),
-        other => bail!("unknown subscription event {other}"),
-    };
-    Ok(format!("{event}_{russian}"))
+fn event_name(event: &str) -> Result<&'static str> {
+    if event.is_empty() {
+        return Ok("");
+    }
+    ibcmd_schema::event_subscription::descriptor_native_event_name(event)
+        .ok_or_else(|| anyhow!("unknown subscription event {event}"))
 }
 
 /// `{1,{1,<md base>,<source pattern>,"<event>",<handler module>,"<method>"},0}`
@@ -578,6 +558,13 @@ mod tests {
                 r##"{{1,{{2,{{3,{{1,0,{JOB}}},"Загрузка",{{0}},"",0,0,{NIL_UUID},0}},"1","Описание",0,1,{MODULE},"ПриЗагрузке",10,600}},0}}"##
             )
         );
+    }
+
+    #[test]
+    fn descriptor_event_names_extend_the_boot_vocabulary() {
+        assert_eq!(event_name("OnExecute").unwrap(), "OnExecute_ПриВыполнении");
+        assert_eq!(event_name("").unwrap(), "");
+        assert!(event_name("Unknown").is_err());
     }
 
     #[test]
