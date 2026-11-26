@@ -191,11 +191,11 @@ fn decode_binary(bytes: &[u8]) -> Result<Vec<u8>> {
             Some(high @ b'0'..=b'3') => {
                 let middle = input
                     .next()
-                    .filter(|b| matches!(b, b'0'..=b'7'))
+                    .filter(|b| (b'0'..=b'7').contains(b))
                     .context("invalid bytea escape")?;
                 let low = input
                     .next()
-                    .filter(|b| matches!(b, b'0'..=b'7'))
+                    .filter(|b| (b'0'..=b'7').contains(b))
                     .context("invalid bytea escape")?;
                 decoded.push((high - b'0') * 64 + (middle - b'0') * 8 + (low - b'0'));
             }
