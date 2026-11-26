@@ -6923,7 +6923,10 @@ fn is_direct_code14_form_metadata_text(text: &str, uuid: &str) -> bool {
         && information_register_bool(fields[2]).is_some()
         && information_register_bool(fields[3]).is_some()
         && direct_form_application_purposes_are_valid(fields[4])
-        && (fields.len() == 5 || information_register_bool(fields[5]).is_some())
+        && ibcmd_schema::metadata_child_storage_facts::FormMetadataRecordLayout::interface_mode(
+            &fields,
+        )
+        .is_some()
 }
 
 fn direct_form_application_purposes_are_valid(value: &str) -> bool {
@@ -13839,7 +13842,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
                     .unwrap_or("CommonForm"),
             )
         };
-        let properties = parse_form_metadata_properties_from_text(text, kind, uuid);
+        let properties = parse_form_metadata_properties_from_text(text, kind, uuid)?;
         // Fail-closed: a form whose record declares no form type this reader
         // can name gets no declaration file at all, never an assumed
         // `<FormType>Managed</FormType>`.

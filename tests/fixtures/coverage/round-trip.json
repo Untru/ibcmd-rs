@@ -65,7 +65,6 @@
     },
     "8.3.27.2214/corpus-client-application-interface": {
       "refused": {
-        "Configuration.xml": "#678: the base-free writer refuses Configuration ClientApplicationInterface Ext/ClientApplicationInterface.xml: <panel> has <height>, which the writer cannot encode"
       }
     },
     "8.3.27.2214/corpus-defined-type-resource": {
@@ -328,7 +327,6 @@
     },
     "8.5.1.1150/corpus-client-application-interface": {
       "refused": {
-        "Configuration.xml": "#678: the base-free writer refuses Configuration ClientApplicationInterface Ext/ClientApplicationInterface.xml: <panel> has <height>, which the writer cannot encode"
       }
     },
     "8.5.1.1150/corpus-defined-type-resource": {
@@ -530,7 +528,6 @@
     "8.5.1.1529/combined": {
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
-        "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
@@ -584,8 +581,6 @@
         "CommonForms/CovHybridLabelFieldTextColorPalette.xml": "#599: base-free stage has no base Config row 7df34171-c473-5add-ae92-30222b19b3d2.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
         "CommonForms/CovHybridLabelFieldTitleLevel4.xml": "#599: base-free stage has no base Config row cda1fb84-ae13-5581-b1f5-904f1bdedc41.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
         "CommonForms/CovHybridLabelFieldUseCopy.xml": "#680: base-free stage has no base Config row 48144cec-5533-581d-aeab-28cd631041b1.0: the native form writer refuses it: 2.21 form item <LabelField> Probe (id 1): UseCopy: the 2.21 value Some(\"false\") has no 8.5 code",
-        "CommonForms/CovHybridModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "CommonForms/CovHybridModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "CommonForms/CovHybridParentButton.xml": "#680: base-free stage has no base Config row 0888ae8d-9e12-512b-822f-f758b5ee9871.0: the native form writer refuses it: 2.21 form item <UsualGroup> Probe (id 2): ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
         "CommonForms/CovHybridPdfGray.xml": "#680: base-free stage has no base Config row 8b531cb2-0637-5d77-9a0e-aa9dc1ae67d2.0: the native form writer refuses it: <PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid",
         "CommonForms/CovHybridPictureAppearanceUpArrowGray.xml": "#598: base-free stage has no base Config row 2e4d3367-84fb-53b1-8d7d-e550d5425fee.0: the native form writer refuses it: no measured value for StdPicture.AppearanceUpArrowGray",
@@ -629,8 +624,6 @@
         "CommonForms/CovModernLabelFieldTextColorPalette.xml": "#599: base-free stage has no base Config row 82c0b2bf-5acc-594d-aa58-d2750d2bc3c4.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
         "CommonForms/CovModernLabelFieldTitleLevel4.xml": "#599: base-free stage has no base Config row c4fe30c2-1907-5a06-86c1-fe949da3890f.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
         "CommonForms/CovModernLabelFieldUseCopy.xml": "#680: base-free stage has no base Config row 09a3097e-5fd6-5db5-88fd-db554ecb061b.0: the native form writer refuses it: 2.21 form item <LabelField> Probe (id 1): UseCopy: the 2.21 value Some(\"false\") has no 8.5 code",
-        "CommonForms/CovModernModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "CommonForms/CovModernModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "CommonForms/CovModernParentButton.xml": "#680: base-free stage has no base Config row eed99e18-73f4-5860-b5cc-efd90c0f9ca2.0: the native form writer refuses it: 2.21 form item <UsualGroup> Probe (id 2): ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
         "CommonForms/CovModernPdfGray.xml": "#680: base-free stage has no base Config row c1e128e5-9251-585a-aaad-e380dbf1888a.0: the native form writer refuses it: <PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid",
         "CommonForms/CovModernPictureAppearanceUpArrowGray.xml": "#598: base-free stage has no base Config row fb7af139-d7ff-59a9-862d-d01c9c9931a6.0: the native form writer refuses it: no measured value for StdPicture.AppearanceUpArrowGray",
@@ -644,8 +637,6 @@
         "CommonForms/CovModernSheetFormattedString.xml": "#680: base-free stage has no base Config row 17cda721-b4b7-5892-bd48-aa586d931b6e.0: the native form writer refuses it: <SpreadSheetDocumentField> excludes FormattedString, which has no measured uuid",
         "CommonForms/CovModernTrackBarFieldMarkingAppearance.xml": "#680: base-free stage has no base Config row c786903b-4014-5edf-b5ae-3fa6eb346ed4.0: the native form writer refuses it: a track bar's marking appearance is not measured",
         "CommonForms/CovModernUsualGroupBackColorPalette.xml": "#599: base-free stage has no base Config row eb862cd3-8d62-577c-be46-fee8e8107902.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonForms/CovNavigationAccountingRegister.xml": "#678: base-free stage has no base Config row 1289184c-c2ae-5157-980e-7246acafa53e.0: the native form writer refuses it: no measured ordinal for AccountingRegister.StandardCommand.OpenList",
-        "CommonForms/CovNavigationChartOfAccounts.xml": "#678: base-free stage has no base Config row ef0d272a-c208-522f-a1f8-d9c9009a0954.0: the native form writer refuses it: no measured ordinal for ChartOfAccounts.StandardCommand.OpenList",
         "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovPlannerBackCommand.xml": "#600: base-free stage has no base Config row ac5f54ce-3f53-57c3-9269-c79e883c0ea7.0: the native form writer refuses it: no measured uuid for Form.Item.Planner.StandardCommand.Back on <PlannerField>",
@@ -685,13 +676,10 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml": "#622: base-free stage has no base Config row f3219db8-eb25-5d7c-a93a-286ef76838d5.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "Enums/CovPaletteEnum.xml": "#599: unsupported enum value colour pal:Violet",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\"",
-        "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
     },
@@ -733,8 +721,6 @@
         "CommonForms/CovHybridLabelFieldTextColorPalette.xml": "#599: base-free stage has no base Config row 679a1f1a-2319-5fe9-a4ee-a663f1e3e233.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
         "CommonForms/CovHybridLabelFieldTitleLevel4.xml": "#599: base-free stage has no base Config row e4b021cf-bb47-59f0-8705-f9ce73f26951.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
         "CommonForms/CovHybridLabelFieldUseCopy.xml": "#680: base-free stage has no base Config row f2fb6691-8b96-54ef-aed2-5a20098d2360.0: the native form writer refuses it: 2.21 form item <LabelField> Probe (id 1): UseCopy: the 2.21 value Some(\"false\") has no 8.5 code",
-        "CommonForms/CovHybridModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "CommonForms/CovHybridModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "CommonForms/CovHybridParentButton.xml": "#680: base-free stage has no base Config row d97879b4-07fa-51de-9ec3-a202c2dec9b9.0: the native form writer refuses it: 2.21 form item <UsualGroup> Probe (id 2): ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
         "CommonForms/CovHybridPdfGray.xml": "#680: base-free stage has no base Config row acb904be-c708-5598-b780-a3eecc4a505c.0: the native form writer refuses it: <PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid",
         "CommonForms/CovHybridPictureAppearanceUpArrowGray.xml": "#598: base-free stage has no base Config row 33ce35b0-3871-5b46-970c-2a481ebb5f3a.0: the native form writer refuses it: no measured value for StdPicture.AppearanceUpArrowGray",
@@ -747,8 +733,7 @@
         "CommonForms/CovHybridReducedText.xml": "#680: base-free stage has no base Config row d9d9a398-d1d2-596f-a646-da8445dc75bc.0: the native form writer refuses it: 2.21 form item <InputField> Probe (id 1): TextSize: the 2.21 value Some(\"Reduced\") has no 8.5 code",
         "CommonForms/CovHybridSheetFormattedString.xml": "#680: base-free stage has no base Config row cd447c3d-41fa-5c91-aa38-2e0d2d5911b6.0: the native form writer refuses it: <SpreadSheetDocumentField> excludes FormattedString, which has no measured uuid",
         "CommonForms/CovHybridTrackBarFieldMarkingAppearance.xml": "#680: base-free stage has no base Config row c7878488-4cfd-55dd-af13-4b57142f367b.0: the native form writer refuses it: a track bar's marking appearance is not measured",
-        "CommonForms/CovHybridUsualGroupBackColorPalette.xml": "#599: base-free stage has no base Config row 6a8c0211-2b48-56ee-a67b-039d4b973f34.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "Configuration.xml": "#678: Configuration <InterfaceCompatibilityMode> \"TaxiEnableVersion8_5\" has no known V76 pair"
+        "CommonForms/CovHybridUsualGroupBackColorPalette.xml": "#599: base-free stage has no base Config row 6a8c0211-2b48-56ee-a67b-039d4b973f34.0: the native form writer refuses it: a group names a background colour it cannot place"
       }
     },
     "8.5.1.1529/corpus-legacy-form-properties": {
@@ -800,8 +785,6 @@
         "CommonForms/CovModernBrokenTilt.xml": "#680: base-free stage has no base Config row a5fe8544-a591-594c-ad42-930a00e6ac83.0: the native form writer refuses it: a progress bar's <Representation>BrokenTilt is not measured",
         "CommonForms/CovModernLabelDecorationFont.xml": "#599: base-free stage has no base Config row 935ddd4d-3991-5688-bb5f-7181418cdcbf.0: the native form writer refuses it: <LabelDecoration> names a font the writer cannot place",
         "CommonForms/CovModernLabelFieldFont.xml": "#599: base-free stage has no base Config row d6d87a1f-e5dd-50f2-b30a-0aa12d894042.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
-        "CommonForms/CovModernModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "CommonForms/CovModernModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "CommonForms/CovModernParentButton.xml": "#680: base-free stage has no base Config row 05f44b1c-f831-5cf3-8606-e6812360a30a.0: the native form writer refuses it: 2.21 form item <UsualGroup> Probe (id 2): ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
         "CommonForms/CovModernPictureChar.xml": "#598: base-free stage has no base Config row 3911dd86-45e0-5055-9c3e-10c5648bab3c.0: the native form writer refuses it: no measured value for StdPicture.Char",
         "CommonForms/CovModernReducedText.xml": "#680: base-free stage has no base Config row adeae5e4-862f-5b41-8276-1a4950b37af3.0: the native form writer refuses it: 2.21 form item <InputField> Probe (id 1): TextSize: the 2.21 value Some(\"Reduced\") has no 8.5 code",
@@ -810,8 +793,6 @@
     },
     "8.5.1.1529/corpus-modern-owned-interface": {
       "refused": {
-        "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml": "#622: base-free stage has no base Config row f3219db8-eb25-5d7c-a93a-286ef76838d5.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid"
       }
     },
@@ -828,14 +809,11 @@
     "8.5.1.1529/corpus-navigation-commands": {
       "refused": {
         "CommonForms/CovExchangePlanHistory.xml": "#680: failed to compile base-free Form body CommonForms/CovExchangePlanHistory/Ext/Form.xml: no measured uuid for <ExcludedCommand>ChangeHistory</ExcludedCommand> on cfg:ExchangePlanObject",
-        "CommonForms/CovNavigationAccountingRegister.xml": "#678: base-free stage has no base Config row af75e180-1cd6-5ede-8261-58b10c15efd7.0: the native form writer refuses it: no measured ordinal for AccountingRegister.StandardCommand.OpenList",
-        "CommonForms/CovNavigationChartOfAccounts.xml": "#678: base-free stage has no base Config row 9a38eb8e-34b4-53ea-ad0a-7fe8e287f933.0: the native form writer refuses it: no measured ordinal for ChartOfAccounts.StandardCommand.OpenList",
         "CommonForms/CovPlannerBackCommand.xml": "#600: base-free stage has no base Config row fd71317f-b45d-5c41-b4e2-79ea2b4acb86.0: the native form writer refuses it: no measured uuid for Form.Item.Planner.StandardCommand.Back on <PlannerField>",
         "CommonForms/CovRecordSetRowPicture.xml": "#680: base-free stage has no base Config row 239e3bb1-eca6-50c7-be2c-aa1552e0065b.0: the native form writer refuses it: a table's <RowPictureDataPath> names Rows.Active, which the writer cannot place",
         "CommonForms/CovReportExcludePreview.xml": "#680: unsupported Form ExcludedCommand: Preview",
         "CommonForms/CovTableOnlyDeselectAll.xml": "#622: base-free stage has no base Config row a09a3b31-b8f7-5291-8ac1-5ad446f44a59.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
-        "CommonForms/CovTableOnlySelectAll.xml": "#622: base-free stage has no base Config row b0113895-33e0-56ae-806c-5adda9345a0f.0: the native form writer refuses it: <Table> excludes SelectAll, which has no measured uuid",
-        "Configuration.xml": "#678: Configuration <InterfaceCompatibilityMode> \"TaxiEnableVersion8_5\" has no known V76 pair"
+        "CommonForms/CovTableOnlySelectAll.xml": "#622: base-free stage has no base Config row b0113895-33e0-56ae-806c-5adda9345a0f.0: the native form writer refuses it: <Table> excludes SelectAll, which has no measured uuid"
       }
     },
     "8.5.1.1529/corpus-owned-observed-scalars": {
@@ -846,10 +824,8 @@
     },
     "8.5.1.1529/corpus-palette-help-and-interface": {
       "refused": {
-        "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
         "Enums/CovPaletteEnum.xml": "#599: unsupported enum value colour pal:Violet",
-        "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\"",
-        "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`"
+        "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\""
       }
     }
   },
@@ -998,7 +974,6 @@
     "8.5.1.1529/combined": {
       "refused": {
         "Catalogs/CovCatalogPictureTemplate.xml": "#598: no stored value for StdPicture.GotoURL",
-        "Catalogs/CovHelpCatalog.xml": "#678: failed to store Help page Catalogs/CovHelpCatalog/Ext/Help/ru.html: the exporter would not read the stored page back into this file: at byte 132 it reads `f-8\"></meta></head><body><a href=\"about:Catalog.CovHelpTarget/Help\">Coverage</a><a href=\"Catalog.Cov` where the file has `f-8\"></meta></head><body><a href=\"about:../id1df91ec4-38ee-5d7d-89f6-54571cddf878/038b5c85-fb1c-4082`",
         "Catalogs/CovIndexedCatalog.xml": "#625: unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
         "Catalogs/CovObservedOwnerModern/Forms/CovOwnedScalarChartFieldMaxWidth_65.xml": "#600: base-free stage has no base Config row e90558e8-8c92-5e91-a639-dba158d4ce5e.0: the native form writer refuses it: a <ChartField> names a property whose slot is not measured",
         "Catalogs/CovOrphanCatalogTemplate.xml": "#598: unsupported picture reference 0",
@@ -1052,8 +1027,6 @@
         "CommonForms/CovHybridLabelFieldTextColorPalette.xml": "#599: base-free stage has no base Config row 7df34171-c473-5add-ae92-30222b19b3d2.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
         "CommonForms/CovHybridLabelFieldTitleLevel4.xml": "#599: base-free stage has no base Config row cda1fb84-ae13-5581-b1f5-904f1bdedc41.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
         "CommonForms/CovHybridLabelFieldUseCopy.xml": "#680: base-free stage has no base Config row 48144cec-5533-581d-aeab-28cd631041b1.0: the native form writer refuses it: 2.21 form item <LabelField> Probe (id 1): UseCopy: the 2.21 value Some(\"false\") has no 8.5 code",
-        "CommonForms/CovHybridModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "CommonForms/CovHybridModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "CommonForms/CovHybridParentButton.xml": "#680: base-free stage has no base Config row 0888ae8d-9e12-512b-822f-f758b5ee9871.0: the native form writer refuses it: 2.21 form item <UsualGroup> Probe (id 2): ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
         "CommonForms/CovHybridPdfGray.xml": "#680: base-free stage has no base Config row 8b531cb2-0637-5d77-9a0e-aa9dc1ae67d2.0: the native form writer refuses it: <PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid",
         "CommonForms/CovHybridPictureAppearanceUpArrowGray.xml": "#598: base-free stage has no base Config row 2e4d3367-84fb-53b1-8d7d-e550d5425fee.0: the native form writer refuses it: no measured value for StdPicture.AppearanceUpArrowGray",
@@ -1097,8 +1070,6 @@
         "CommonForms/CovModernLabelFieldTextColorPalette.xml": "#599: base-free stage has no base Config row 82c0b2bf-5acc-594d-aa58-d2750d2bc3c4.0: the native form writer refuses it: <LabelField> names a colour the writer cannot place",
         "CommonForms/CovModernLabelFieldTitleLevel4.xml": "#599: base-free stage has no base Config row c4fe30c2-1907-5a06-86c1-fe949da3890f.0: the native form writer refuses it: <LabelField> names a font the writer cannot place",
         "CommonForms/CovModernLabelFieldUseCopy.xml": "#680: base-free stage has no base Config row 09a3097e-5fd6-5db5-88fd-db554ecb061b.0: the native form writer refuses it: 2.21 form item <LabelField> Probe (id 1): UseCopy: the 2.21 value Some(\"false\") has no 8.5 code",
-        "CommonForms/CovModernModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "CommonForms/CovModernModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "CommonForms/CovModernParentButton.xml": "#680: base-free stage has no base Config row eed99e18-73f4-5860-b5cc-efd90c0f9ca2.0: the native form writer refuses it: 2.21 form item <UsualGroup> Probe (id 2): ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
         "CommonForms/CovModernPdfGray.xml": "#680: base-free stage has no base Config row c1e128e5-9251-585a-aaad-e380dbf1888a.0: the native form writer refuses it: <PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid",
         "CommonForms/CovModernPictureAppearanceUpArrowGray.xml": "#598: base-free stage has no base Config row fb7af139-d7ff-59a9-862d-d01c9c9931a6.0: the native form writer refuses it: no measured value for StdPicture.AppearanceUpArrowGray",
@@ -1112,8 +1083,6 @@
         "CommonForms/CovModernSheetFormattedString.xml": "#680: base-free stage has no base Config row 17cda721-b4b7-5892-bd48-aa586d931b6e.0: the native form writer refuses it: <SpreadSheetDocumentField> excludes FormattedString, which has no measured uuid",
         "CommonForms/CovModernTrackBarFieldMarkingAppearance.xml": "#680: base-free stage has no base Config row c786903b-4014-5edf-b5ae-3fa6eb346ed4.0: the native form writer refuses it: a track bar's marking appearance is not measured",
         "CommonForms/CovModernUsualGroupBackColorPalette.xml": "#599: base-free stage has no base Config row eb862cd3-8d62-577c-be46-fee8e8107902.0: the native form writer refuses it: a group names a background colour it cannot place",
-        "CommonForms/CovNavigationAccountingRegister.xml": "#678: base-free stage has no base Config row 1289184c-c2ae-5157-980e-7246acafa53e.0: the native form writer refuses it: no measured ordinal for AccountingRegister.StandardCommand.OpenList",
-        "CommonForms/CovNavigationChartOfAccounts.xml": "#678: base-free stage has no base Config row ef0d272a-c208-522f-a1f8-d9c9009a0954.0: the native form writer refuses it: no measured ordinal for ChartOfAccounts.StandardCommand.OpenList",
         "CommonForms/CovPeriodField.xml": "#617: base-free stage has no base Config row 42b50447-0ada-5ca5-ae1e-54f2fdbc14a4.0: the native form writer refuses it: <PeriodField> has no writer yet",
         "CommonForms/CovPictureTitleFontEnterOnInput.xml": "#624: base-free stage has no base Config row c0bcaa93-9b69-59a5-ac03-cadf67ad00a1.0: the native form writer refuses it: Form Attribute type is not supported yet: xs:base64Binary",
         "CommonForms/CovPlannerBackCommand.xml": "#600: base-free stage has no base Config row ac5f54ce-3f53-57c3-9269-c79e883c0ea7.0: the native form writer refuses it: no measured uuid for Form.Item.Planner.StandardCommand.Back on <PlannerField>",
@@ -1153,13 +1122,10 @@
         "CommonTemplates/CovSpreadsheetStandardPicture.xml": "#612: failed to pack SpreadsheetDocument Template body CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml: MXL Template codec rejected data: MXL source cannot be compiled: failed to read CommonPicture XML CommonPictures/ShowData.xml",
         "CommonTemplates/CovVerticalBrackets.xml": "#615: no flowchart code for Shape \"VerticalBrackets\"",
         "Configuration.xml": "#621: InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
-        "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Taxi\"",
-        "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml": "#678: no code for UseInInterfaceCompatibilityMode \"Version85\"",
         "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml": "#622: base-free stage has no base Config row f3219db8-eb25-5d7c-a93a-286ef76838d5.0: the native form writer refuses it: <Table> excludes DeselectAll, which has no measured uuid",
         "Enums/CovPaletteEnum.xml": "#599: unsupported enum value colour pal:Violet",
         "InformationRegisters/CovNetworkOptions.xml": "#598: command ProbeCommand: unknown standard picture StdPicture.QueryWizardTempTableDescription",
         "StyleItems/CovPaletteViolet.xml": "#599: unsupported colour \"pal:Violet\"",
-        "Subsystems/CovCommandSubsystem.xml": "#678: base-free stage has no base Config row 426cc91d-49de-5d00-b0a4-dd457b62c8db.1: the base-free command interface writer refuses it: the exporter names no `ExchangePlan` standard command `Create`",
         "Tasks/CovEventTask/Forms/EventsForm.xml": "#623: base-free stage has no base Config row 9aa168e4-e1b6-5ebb-8b72-5b9f51ebff4e.0: the native form writer refuses it: the form names an event the writer cannot place"
       }
     }

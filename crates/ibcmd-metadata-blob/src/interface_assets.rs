@@ -1068,8 +1068,18 @@ fn client_application_panel(panel: &Node) -> Result<ClientApplicationNode> {
     let text = uuid.leaf()?.trim();
     let uuid =
         parse_raw_uuid(text).ok_or_else(|| anyhow!("<panel> uuid `{text}` is not a uuid"))?;
+    let height = if let Some(height) = children.optional("height") {
+        height.only_attributes(&[])?;
+        height
+            .leaf()?
+            .trim()
+            .parse::<u32>()
+            .context("invalid client application panel height")?
+    } else {
+        0
+    };
     children.finish()?;
-    Ok(ClientApplicationNode::Panel { id, uuid })
+    Ok(ClientApplicationNode::Panel { id, uuid, height })
 }
 
 // ---------------------------------------------------------------------------

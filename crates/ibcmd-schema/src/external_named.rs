@@ -18,8 +18,11 @@ pub const USE_PURPOSES: &[(&str, i64)] =
 pub const FORM_TYPES: &[(&str, i64)] = &[("Ordinary", 0), ("Managed", 1)];
 
 pub const FORM_INTERFACE_COMPATIBILITY_DEFAULT: &str = "Any";
-pub const INTERFACE_COMPATIBILITY_MODES: &[(&str, i64)] =
-    &[(FORM_INTERFACE_COMPATIBILITY_DEFAULT, 0)];
+pub const INTERFACE_COMPATIBILITY_MODES: &[(&str, i64)] = &[
+    (FORM_INTERFACE_COMPATIBILITY_DEFAULT, 0),
+    ("Taxi", 1),
+    ("Version85", 2),
+];
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExternalNamedKind {
     Form,
