@@ -80,7 +80,7 @@ test(
         protocolVersion: "1.1",
         workspaceFolder: dir,
       });
-      assert.equal(init.protocolVersion, "1.4");
+      assert.equal(init.protocolVersion, "1.5");
       const listed = await rpc.request("infobases/list");
       assert.ok(listed.infobases.some((b) => b.id === "local-test/Редактор"));
       await assert.rejects(

@@ -9,6 +9,7 @@ export interface Node {
   type: "object" | "group" | "file" | "property";
   path?: string;
   fullName?: string;
+  objectId?: string;
   synonym?: string;
   children?: Node[];
   parent?: Node;
@@ -18,7 +19,11 @@ export interface Source {
   directory: string;
   remote: boolean;
   children(node: Node | undefined, signal: AbortSignal): Promise<Node[]>;
-  read(file: string, signal: AbortSignal): Promise<Buffer | undefined>;
+  read(
+    file: string,
+    signal: AbortSignal,
+    objectId?: string,
+  ): Promise<Buffer | undefined>;
 }
 export interface Rpc {
   request(
@@ -368,6 +373,11 @@ export function descriptor(
       kind: "file",
       type: "file",
       path: file,
+      ...(owner.objectId &&
+      owner.kind === "CommonModule" &&
+      file === prefix + "Module.bsl"
+        ? { objectId: owner.objectId }
+        : {}),
     });
   }
   return arrange(owner, result);
@@ -490,12 +500,20 @@ export class DatabaseSource implements Source {
   ) {
     this.key = JSON.stringify([directory, infobase]);
   }
-  async read(file: string, signal: AbortSignal): Promise<Buffer | undefined> {
+  async read(
+    file: string,
+    signal: AbortSignal,
+    objectId?: string,
+  ): Promise<Buffer | undefined> {
     relativePath(file);
     return readResult(
       await this.rpc.request(
         "source/read",
-        { infobase: this.infobase, path: file },
+        {
+          infobase: this.infobase,
+          path: file,
+          ...(objectId ? { objectId } : {}),
+        },
         signal,
         SOURCE_OPERATION_TIMEOUT,
       ),
@@ -556,12 +574,18 @@ export class DatabaseSource implements Source {
         !["group", "configuration", "object"].includes(n.nodeType)
       )
         throw new Error("Неверный узел дерева");
+      const objectId =
+        typeof n.uuid === "string" &&
+        /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(n.uuid)
+          ? n.uuid
+          : undefined;
       return {
         id: n.id,
         label: n.nodeType === "group" ? (labels[n.kind] ?? n.label) : n.label,
         kind: n.kind,
         type: n.nodeType === "group" ? "group" : "object",
         fullName: n.fullName,
+        ...(objectId ? { objectId } : {}),
         path: typeof n.path === "string" ? relativePath(n.path) : undefined,
       };
     });

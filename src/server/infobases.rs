@@ -395,6 +395,22 @@ pub struct Session {
     pub configuration: StoredConfiguration,
 }
 
+pub(super) fn editor_sql(
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+) -> Result<SqlExec> {
+    SqlExec::from_options(SqlOptions {
+        sqlcmd: None,
+        bcp: None,
+        server,
+        user,
+        password,
+        password_env: ENV_DB_PASSWORD,
+        trust_server_certificate: false,
+    })
+}
+
 impl Session {
     /// Opens `entry` (`database` names one database of a mask). Nothing is
     /// read yet; a SQL Server handle connects on its first query.
@@ -509,15 +525,11 @@ impl Session {
                 ConfigSource::RowsDir(dir.clone())
             }
             None => ConfigSource::Database {
-                sql: SqlExec::from_options(SqlOptions {
-                    sqlcmd: None,
-                    bcp: None,
-                    server: &server,
-                    user: login.user.as_deref(),
-                    password: login.password.as_ref().map(Secret::expose),
-                    password_env: ENV_DB_PASSWORD,
-                    trust_server_certificate: false,
-                })?,
+                sql: editor_sql(
+                    &server,
+                    login.user.as_deref(),
+                    login.password.as_ref().map(Secret::expose),
+                )?,
                 database: database.clone(),
             },
         };

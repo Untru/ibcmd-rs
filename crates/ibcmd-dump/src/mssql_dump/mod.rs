@@ -1030,7 +1030,10 @@ pub mod cas;
 mod command_interface;
 pub use config_dump_info::read_config_dump_info;
 #[doc(hidden)]
-pub use config_dump_info::read_config_dump_info_with_sql;
+pub use config_dump_info::{
+    NativeInventoryAttempt, NativeInventoryReuse, read_config_dump_info_reusing,
+    read_config_dump_info_with_sql,
+};
 mod config_dump_info;
 mod config_rows;
 pub mod config_save;
@@ -2001,6 +2004,8 @@ struct MssqlDumpRowManifest {
     module_text_path: Option<String>,
     metadata_xml_path: Option<String>,
     source_asset_path: Option<String>,
+    #[serde(skip)]
+    emitted_help: bool,
 }
 
 /// The export with no hooks. It has no reader of the stored objects, so it
@@ -2089,11 +2094,89 @@ impl<'a> ConfigTable<'a> {
         }
     }
 
+    /// Fingerprint the active versions row without enumerating Config.
+    /// For a single part, SQL Server can hash the bytes without sending them.
+    /// Multipart rows and servers with a limited HASHBYTES use the row reader.
+    #[doc(hidden)]
+    pub fn plain_active_versions_digest(&self) -> Result<Option<String>> {
+        use crate::sql::{SqlBackend, SqlValue};
+        use sha2::{Digest, Sha256};
+
+        if let SqlBackend::Client(client) = self.sql.backend() {
+            let table = MssqlConfigurationTableRole::Current.sql_name();
+            let database = quote_ident(self.database);
+            let query = format!(
+                "SELECT CASE WHEN COUNT_BIG(*) = 1 AND MIN(PartNo) = 0 \
+                 AND DATALENGTH(MIN(FileName)) = DATALENGTH(N'versions') \
+                 AND CONVERT(varbinary(max), MIN(FileName)) = CONVERT(varbinary(max), N'versions') \
+                 AND MIN(DataSize) = MIN(DATALENGTH(BinaryData)) \
+                 THEN MIN(CONVERT(varchar(64), HASHBYTES('SHA2_256', BinaryData), 2)) END \
+                 FROM {database}.dbo.{table} \
+                 WHERE FileName IN (N'versions', N'{DYNAMIC_UPDATE_MARKER_ROW}')"
+            );
+            if let Ok(Some(SqlValue::Text(hash))) = client.query_scalar(&query, &[]) {
+                return Ok(Some(hash.to_ascii_lowercase()));
+            }
+        }
+
+        let mut rows = self.rows(&BTreeSet::from([
+            "versions".to_owned(),
+            DYNAMIC_UPDATE_MARKER_ROW.to_owned(),
+        ]))?;
+        if rows.contains_key(DYNAMIC_UPDATE_MARKER_ROW) {
+            return Ok(None);
+        }
+        Ok(rows
+            .remove("versions")
+            .map(|bytes| format!("{:x}", Sha256::digest(bytes))))
+    }
+
     /// Every published row name. Installs the table's view for the reads
     /// that follow in the scope (see [`with_rows_dir_table`]).
     pub fn names(&self) -> Result<BTreeSet<String>> {
+        self.names_with_storage_view().map(|(names, _)| names)
+    }
+
+    /// Stored rows belonging to one physical object in a plain active SQL view.
+    #[doc(hidden)]
+    pub fn active_names_under(&self, id: uuid::Uuid) -> Result<Option<BTreeSet<String>>> {
+        if self.main_configuration {
+            return Ok(None);
+        }
+        let crate::sql::SqlBackend::Client(client) = self.sql.backend() else {
+            return Ok(None);
+        };
+        let table = MssqlConfigurationTableRole::Current.sql_name();
+        let database = quote_ident(self.database);
+        let id = id.to_string();
+        let prefix = format!("{id}.");
+        let query = format!(
+            "SELECT DISTINCT FileName FROM {database}.dbo.{table} \
+             WHERE FileName = N'{id}' OR FileName LIKE N'{prefix}%'"
+        );
+        let names = client
+            .query_rows(&query, &[])?
+            .into_iter()
+            .map(|mut row| row.take_text(0))
+            .collect::<Result<BTreeSet<_>>>()?;
+        if names
+            .iter()
+            .any(|name| name != &id && !name.starts_with(&prefix))
+        {
+            return Ok(None);
+        }
+        Ok(Some(names))
+    }
+
+    /// Published names and whether their inventory was read without a generation marker.
+    #[doc(hidden)]
+    pub fn names_with_storage_view(&self) -> Result<(BTreeSet<String>, bool)> {
         let table = MssqlConfigurationTableRole::Current.sql_name();
         let headers = fetch_row_headers(self.sql, self.database, table, &BTreeSet::new())?;
+        let plain_active = !self.main_configuration
+            && !headers
+                .iter()
+                .any(|row| row.file_name == DYNAMIC_UPDATE_MARKER_ROW);
         let headers = install_storage_overlay(
             self.sql,
             self.database,
@@ -2102,7 +2185,10 @@ impl<'a> ConfigTable<'a> {
             headers,
             self.main_configuration,
         )?;
-        Ok(headers.into_iter().map(|header| header.file_name).collect())
+        Ok((
+            headers.into_iter().map(|header| header.file_name).collect(),
+            plain_active,
+        ))
     }
 
     /// The named rows as stored (raw deflate for most), each assembled from
@@ -4797,6 +4883,39 @@ fn dump_table_rows_with_options_mode(
     })
 }
 
+fn read_native_inventory_versions(
+    sql: &crate::sql::SqlExec,
+    database: &str,
+    table: &str,
+) -> Result<BinaryConfigRow> {
+    fetch_binary_rows(
+        sql,
+        database,
+        table,
+        &BTreeSet::from([STAGE_INVENTORY_ROW.to_owned()]),
+        false,
+    )?
+    .into_iter()
+    .find(|row| row.file_name == STAGE_INVENTORY_ROW && row.part_no == 0)
+    .ok_or_else(|| anyhow!("full Config export has no versions row"))
+}
+
+fn native_inventory_table_report(timings: MssqlDumpTimingReport) -> DumpedTable {
+    DumpedTable {
+        rows: Vec::new(),
+        failed_rows: Vec::new(),
+        binary_bytes: 0,
+        inflated_rows: 0,
+        module_text_rows: 0,
+        metadata_xml_rows: 0,
+        source_asset_rows: 0,
+        source_assets: SourceAssetCompletenessReport::default(),
+        metadata_root_inventory: RootMetadataInventoryReport::default(),
+        timings,
+        incremental: None,
+    }
+}
+
 #[expect(
     clippy::drop_non_drop,
     clippy::if_same_then_else,
@@ -4825,6 +4944,7 @@ fn dump_table_rows_streamed(
     requested_descriptor: Option<&str>,
 ) -> Result<DumpedTable> {
     let table = inventory_plan.role().sql_name();
+    let inventory_only = sink.as_ref().is_some_and(|sink| sink.inventory_only());
     let generate_config_dump_info = inventory_plan.config_dump_info_eligible();
     if incremental.is_some() && (!generate_config_dump_info || sink.is_some()) {
         bail!(
@@ -4985,6 +5105,42 @@ fn dump_table_rows_streamed(
     cpu_add(&mut timings, "prepare.metadata_fetch", metadata_fetch_cpu);
     if metadata_fetch_used_bcp {
         timings.prepare_metadata_fetch_bcp_ms += elapsed;
+    }
+    let inventory_reuse = sink.as_deref().and_then(FileSink::inventory_reuse);
+    let inventory_input_hashes = inventory_reuse.map(|_| {
+        let start = PartClock::start();
+        let hashes = (
+            native_headers_digest(&headers),
+            native_rows_digest(&metadata_rows),
+        );
+        detail_ms(&mut timings, "inventory.input_hashes", start);
+        hashes
+    });
+    if let Some((headers, metadata)) = inventory_input_hashes
+        && let Some((verified, xml)) = inventory_reuse.and_then(NativeInventoryAttempt::cached)
+        && (verified.format, verified.headers, verified.metadata)
+            == (source_version, headers, metadata)
+    {
+        // Re-read the effective main view. The metadata and exact header
+        // sequence determine the routes and the parent-list selection.
+        let start = PartClock::start();
+        let versions = read_native_inventory_versions(sql, database, table)?;
+        let parents = if verified.parent_files.is_empty() {
+            Vec::new()
+        } else {
+            fetch_config_rows(sql, database, table, &verified.parent_files)?
+        };
+        detail_ms(&mut timings, "inventory.verification_reads", start);
+        if native_versions_digest(&versions) == verified.versions
+            && native_rows_digest(&parents) == verified.parents
+        {
+            sink.as_ref().unwrap().accept(
+                &output_dir.join(ibcmd_xml::config_dump_info::FILE_NAME),
+                &xml,
+            )?;
+            timings.prepare_indexes_ms = elapsed_ms(prepare_started);
+            return Ok(native_inventory_table_report(timings));
+        }
     }
     let standalone_body_rows = if !standalone_body_file_names.is_empty() {
         let metadata_fetch_started = Instant::now();
@@ -5331,7 +5487,10 @@ fn dump_table_rows_streamed(
         || needs_standalone_refs
         || needs_source_layout_refs
     {
-        if broad_metadata_indexes {
+        if inventory_only && selected_metadata_rows.len() == metadata_rows.len() {
+            // The per-selection audit decoded this exact sequence already.
+            selected_metadata_texts.to_vec()
+        } else if broad_metadata_indexes {
             build_metadata_text_rows(&metadata_rows)
         } else if selected_configuration_index_needs.is_some() && !metadata_rows.is_empty() {
             build_metadata_text_rows(&metadata_rows)
@@ -5351,7 +5510,8 @@ fn dump_table_rows_streamed(
     // a run that fetched part of it stays legacy.
     let plan_started = Instant::now();
     let plan_cpu = process_cpu_ms();
-    let model_plan = ((model_export || selected_object_export || requested_descriptor.is_some())
+    let model_plan = (!inventory_only
+        && (model_export || selected_object_export || requested_descriptor.is_some())
         && extract_metadata_xml
         && broad_metadata_indexes)
         .then(|| {
@@ -5398,21 +5558,23 @@ fn dump_table_rows_streamed(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
-    let eds_export = extract_metadata_xml
+    let eds_export = (extract_metadata_xml && !inventory_only)
         .then(|| eds_export::build(&index_metadata_texts, source_version.as_str()))
         .flatten();
     let index_part_started = Instant::now();
     let index_part_cpu = process_cpu_ms();
-    let recalculation_refs = if extract_metadata_xml && !skip_recalculation_refs {
+    let recalculation_refs = if !inventory_only && extract_metadata_xml && !skip_recalculation_refs
+    {
         build_calculation_recalculation_reference_index(&index_metadata_texts)
     } else {
         BTreeMap::new()
     };
-    let root_recalculation_refs = if extract_metadata_xml && !skip_root_recalculation_refs {
-        build_calculation_root_recalculation_reference_index(&index_metadata_texts)
-    } else {
-        BTreeMap::new()
-    };
+    let root_recalculation_refs =
+        if !inventory_only && extract_metadata_xml && !skip_root_recalculation_refs {
+            build_calculation_root_recalculation_reference_index(&index_metadata_texts)
+        } else {
+            BTreeMap::new()
+        };
     timings.prepare_recalculation_refs_ms += elapsed_ms(index_part_started);
     cpu_add(&mut timings, "prepare.recalculation_refs", index_part_cpu);
 
@@ -5599,13 +5761,16 @@ fn dump_table_rows_streamed(
     );
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
-    let field_type_refs = Arc::new(
-        if extract_metadata_xml && source_reference_needs.field_refs {
-            build_metadata_field_type_reference_index_from_texts(&index_metadata_texts, &type_index)
-        } else {
-            BTreeMap::new()
-        },
-    );
+    // Source asset routing needs field names even for ConfigDumpInfo.
+    // Field types and declarations are used only by body conversion, after
+    // the inventory-only return.
+    let build_field_conversion_indexes =
+        !inventory_only && extract_metadata_xml && source_reference_needs.field_refs;
+    let field_type_refs = Arc::new(if build_field_conversion_indexes {
+        build_metadata_field_type_reference_index_from_texts(&index_metadata_texts, &type_index)
+    } else {
+        BTreeMap::new()
+    });
     timings.prepare_field_types_ms += elapsed_ms(field_part_started);
     cpu_add(
         &mut timings,
@@ -5615,7 +5780,7 @@ fn dump_table_rows_streamed(
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
     // One index, two readers -- see the sibling construction site.
-    let type_set_leaves = if extract_metadata_xml {
+    let type_set_leaves = if extract_metadata_xml && !inventory_only {
         build_metadata_type_set_leaf_index_from_texts(&index_metadata_texts, &type_index)
     } else {
         MetadataTypeSetLeafIndex::new()
@@ -5628,16 +5793,15 @@ fn dump_table_rows_streamed(
     );
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
-    let information_register_field_refs =
-        if extract_metadata_xml && source_reference_needs.field_refs {
-            build_information_register_field_reference_index_from_texts(
-                &index_metadata_texts,
-                &type_index,
-                &type_set_leaves,
-            )
-        } else {
-            BTreeMap::new()
-        };
+    let information_register_field_refs = if build_field_conversion_indexes {
+        build_information_register_field_reference_index_from_texts(
+            &index_metadata_texts,
+            &type_index,
+            &type_set_leaves,
+        )
+    } else {
+        BTreeMap::new()
+    };
     timings.prepare_register_fields_ms += elapsed_ms(field_part_started);
     cpu_add(
         &mut timings,
@@ -5646,20 +5810,18 @@ fn dump_table_rows_streamed(
     );
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
-    let information_register_master_dimensions = Arc::new(
-        if extract_metadata_xml && source_reference_needs.field_refs {
-            build_information_register_master_dimension_index_from_texts(
-                &index_metadata_texts,
-                &type_index,
-                &object_refs,
-                &form_refs,
-                XML_2_21_PRESERVES_RAW_REGISTER_DATA_PATHS
-                    && source_version == InfobaseConfigSourceVersion::V2_21,
-            )
-        } else {
-            InformationRegisterMasterDimensionIndex::new()
-        },
-    );
+    let information_register_master_dimensions = Arc::new(if build_field_conversion_indexes {
+        build_information_register_master_dimension_index_from_texts(
+            &index_metadata_texts,
+            &type_index,
+            &object_refs,
+            &form_refs,
+            XML_2_21_PRESERVES_RAW_REGISTER_DATA_PATHS
+                && source_version == InfobaseConfigSourceVersion::V2_21,
+        )
+    } else {
+        InformationRegisterMasterDimensionIndex::new()
+    });
     timings.prepare_master_dimensions_ms += elapsed_ms(field_part_started);
     cpu_add(
         &mut timings,
@@ -5668,7 +5830,7 @@ fn dump_table_rows_streamed(
     );
     let field_part_started = Instant::now();
     let field_part_cpu = process_cpu_ms();
-    let metadata_field_declarations = if extract_metadata_xml && source_reference_needs.field_refs {
+    let metadata_field_declarations = if build_field_conversion_indexes {
         build_metadata_field_declaration_index_from_texts(
             &index_metadata_texts,
             &object_refs,
@@ -5692,7 +5854,8 @@ fn dump_table_rows_streamed(
     cpu_add(&mut timings, "prepare.field_refs", index_part_cpu);
     let index_part_started = Instant::now();
     let index_part_cpu = process_cpu_ms();
-    let functional_option_refs = if extract_metadata_xml
+    let functional_option_refs = if !inventory_only
+        && extract_metadata_xml
         && source_reference_needs.functional_option_refs
         && !skip_functional_option_refs
     {
@@ -5735,8 +5898,12 @@ fn dump_table_rows_streamed(
     let parent_list_ids = source_assets::parent_configuration_list_ids(&source_assets)
         .into_iter()
         .collect::<BTreeSet<_>>();
+    let mut inventory_parents_digest = native_rows_digest(&[]);
     if !parent_list_ids.is_empty() {
         let list_rows = fetch_config_rows(sql, database, table, &parent_list_ids)?;
+        if inventory_reuse.is_some() {
+            inventory_parents_digest = native_rows_digest(&list_rows);
+        }
         let list_texts = list_rows
             .iter()
             .filter(|row| row.part_no == 0)
@@ -5776,7 +5943,7 @@ fn dump_table_rows_streamed(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
-    let source_asset_discovery_misses = source_asset_discovery_misses(
+    let mut source_asset_discovery_misses = source_asset_discovery_misses(
         if selected_object_export {
             selected_metadata_texts
         } else {
@@ -5853,6 +6020,108 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_standalone_refs_ms += elapsed_ms(index_part_started);
     cpu_add(&mut timings, "prepare.standalone_refs", index_part_cpu);
+    let mut configuration_module_groups = configuration_module_groups(&file_names);
+    // An extension keeps only the root modules it extends; its configuration
+    // row names the header they hang off (see `module_body_paths_from_texts`).
+    configuration_module_groups.extend(
+        index_metadata_texts
+            .iter()
+            .filter_map(|row| parse_configuration_header_uuid(&row.text)),
+    );
+    // A path claimed by two storage entries is a refusal about those entries,
+    // not about the export: both are withheld and named, and everything that
+    // claims its path alone is still produced.
+    let mut source_assets = source_assets;
+    let mut source_asset_diagnostics = source_asset_diagnostics;
+    if selected_object_export {
+        // Broad indexes supply references, not extra selected candidates.
+        source_assets.retain(|name, _| file_names.contains(name));
+        source_asset_diagnostics.retain(|name, _| {
+            file_names.contains(name)
+                && !name.strip_suffix(".0").is_some_and(|descriptor| {
+                    model_plan
+                        .as_ref()
+                        .is_some_and(|plan| plan.is_unowned_common_form(descriptor))
+                })
+        });
+    }
+
+    for (file_name, message) in
+        colliding_source_asset_paths(&source_assets, &source_asset_diagnostics)
+    {
+        source_assets.remove(&file_name);
+        source_asset_diagnostics.insert(file_name, message);
+    }
+    // See the identical comment in `dump_table_rows_with_options_mode`: forms,
+    // templates, subsystems, and canonical module bodies resolve their output
+    // path outside `source_assets`, so extend the same refusal to those
+    // routes here too.
+    let mut reference_collisions = colliding_reference_output_paths(
+        &source_assets,
+        &form_refs,
+        &template_refs,
+        &subsystem_refs,
+        &module_text_paths,
+    );
+    for (file_name, message) in std::mem::take(&mut reference_collisions.source_assets) {
+        if source_assets.remove(&file_name).is_some() {
+            source_asset_diagnostics.insert(file_name, message);
+        }
+    }
+    timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
+    cpu_add(
+        &mut timings,
+        "prepare.reference_indexes",
+        reference_indexes_cpu,
+    );
+    // Native export info/status need the same inventory and writer as a full
+    // export, but never fetch or convert the body batches below.
+    if inventory_only {
+        let blob = read_native_inventory_versions(sql, database, table)?;
+        let output = OutputWriter::from_env_to_sink(sink.clone().unwrap());
+        let write_started = PartClock::start();
+        write_config_dump_info(
+            &output,
+            output_dir,
+            source_version,
+            &blob.binary,
+            VersionsBlobOrigin::MssqlConfigTable,
+            ConfigDumpInfoPartialInventoryPolicy::Fail,
+            ConfigDumpInfoInventory {
+                file_names: &file_names,
+                metadata_texts: &index_metadata_texts,
+                object_refs: &object_refs,
+                form_refs: &form_refs,
+                template_refs: &template_refs,
+                subsystem_refs: &subsystem_refs,
+                module_text_paths: &module_text_paths,
+                source_assets: &source_assets,
+                emitted_source_asset_paths: &BTreeMap::new(),
+                configuration_module_groups: &configuration_module_groups,
+            },
+        )?;
+        output.finish()?;
+        detail_ms(&mut timings, "inventory.render", write_started);
+        if let Some(reuse) = inventory_reuse
+            && let Some((headers, metadata)) = inventory_input_hashes
+        {
+            reuse.record(NativeInventoryInputs {
+                format: source_version,
+                headers,
+                metadata,
+                versions: native_versions_digest(&blob),
+                parent_files: parent_list_ids,
+                parents: inventory_parents_digest,
+            });
+        }
+        timings.prepare_indexes_ms = elapsed_ms(prepare_started);
+        return Ok(native_inventory_table_report(timings));
+    }
+
+    // Predefined values are resolved for body writers. ConfigDumpInfo only
+    // needs their source paths, already collected above.
+    let body_indexes_started = Instant::now();
+    let body_indexes_cpu = process_cpu_ms();
     let index_part_started = Instant::now();
     let index_part_cpu = process_cpu_ms();
     let body_owners = if (extract_metadata_xml
@@ -5997,110 +6266,8 @@ fn dump_table_rows_streamed(
         &mut metadata_object_refs,
         &metadata_value_predefined_item_refs,
     )?;
-    let mut configuration_module_groups = configuration_module_groups(&file_names);
-    // An extension keeps only the root modules it extends; its configuration
-    // row names the header they hang off (see `module_body_paths_from_texts`).
-    configuration_module_groups.extend(
-        index_metadata_texts
-            .iter()
-            .filter_map(|row| parse_configuration_header_uuid(&row.text)),
-    );
-    // A path claimed by two storage entries is a refusal about those entries,
-    // not about the export: both are withheld and named, and everything that
-    // claims its path alone is still produced.
-    let mut source_assets = source_assets;
-    let mut source_asset_diagnostics = source_asset_diagnostics;
-    if selected_object_export {
-        // Broad indexes supply references, not extra selected candidates.
-        source_assets.retain(|name, _| file_names.contains(name));
-        source_asset_diagnostics.retain(|name, _| {
-            file_names.contains(name)
-                && !name.strip_suffix(".0").is_some_and(|descriptor| {
-                    model_plan
-                        .as_ref()
-                        .is_some_and(|plan| plan.is_unowned_common_form(descriptor))
-                })
-        });
-    }
-
-    for (file_name, message) in
-        colliding_source_asset_paths(&source_assets, &source_asset_diagnostics)
-    {
-        source_assets.remove(&file_name);
-        source_asset_diagnostics.insert(file_name, message);
-    }
-    // See the identical comment in `dump_table_rows_with_options_mode`: forms,
-    // templates, subsystems, and canonical module bodies resolve their output
-    // path outside `source_assets`, so extend the same refusal to those
-    // routes here too.
-    let mut reference_collisions = colliding_reference_output_paths(
-        &source_assets,
-        &form_refs,
-        &template_refs,
-        &subsystem_refs,
-        &module_text_paths,
-    );
-    for (file_name, message) in std::mem::take(&mut reference_collisions.source_assets) {
-        if source_assets.remove(&file_name).is_some() {
-            source_asset_diagnostics.insert(file_name, message);
-        }
-    }
-    timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
-    cpu_add(
-        &mut timings,
-        "prepare.reference_indexes",
-        reference_indexes_cpu,
-    );
-    // Native export info/status need the same inventory and writer as a full
-    // export, but never fetch or convert the body batches below.
-    if sink.as_ref().is_some_and(|sink| sink.inventory_only()) {
-        let blob = fetch_binary_rows(
-            sql,
-            database,
-            table,
-            &BTreeSet::from([STAGE_INVENTORY_ROW.to_owned()]),
-            false,
-        )?
-        .into_iter()
-        .find(|row| row.file_name == STAGE_INVENTORY_ROW && row.part_no == 0)
-        .ok_or_else(|| anyhow!("full Config export has no versions row"))?;
-        let output = OutputWriter::from_env_to_sink(sink.unwrap());
-        write_config_dump_info(
-            &output,
-            output_dir,
-            source_version,
-            &blob.binary,
-            VersionsBlobOrigin::MssqlConfigTable,
-            ConfigDumpInfoPartialInventoryPolicy::Fail,
-            ConfigDumpInfoInventory {
-                file_names: &file_names,
-                metadata_texts: &index_metadata_texts,
-                object_refs: &object_refs,
-                form_refs: &form_refs,
-                template_refs: &template_refs,
-                subsystem_refs: &subsystem_refs,
-                module_text_paths: &module_text_paths,
-                source_assets: &source_assets,
-                emitted_source_asset_paths: &BTreeMap::new(),
-                configuration_module_groups: &configuration_module_groups,
-            },
-        )?;
-        output.finish()?;
-        timings.prepare_indexes_ms = elapsed_ms(prepare_started);
-        return Ok(DumpedTable {
-            rows: Vec::new(),
-            failed_rows: Vec::new(),
-            binary_bytes: 0,
-            inflated_rows: 0,
-            module_text_rows: 0,
-            metadata_xml_rows: 0,
-            source_asset_rows: 0,
-            source_assets: SourceAssetCompletenessReport::default(),
-            metadata_root_inventory: RootMetadataInventoryReport::default(),
-            timings,
-            incremental: None,
-        });
-    }
+    timings.prepare_reference_indexes_ms += elapsed_ms(body_indexes_started);
+    cpu_add(&mut timings, "prepare.reference_indexes", body_indexes_cpu);
 
     // `--model-export`: the descriptors of the modelled kinds are decoded
     // from their rows; names come from an index of the whole row set, so a
@@ -6427,6 +6594,43 @@ fn dump_table_rows_streamed(
             diagnostic.code
         );
     }
+    let mut metadata_discovery_misses = selected_metadata_audit.misses.clone();
+    let mut additional_help_assets = 0;
+    if selected_object_export {
+        // Streaming discovery has headers for bodies that will be fetched later.
+        // Only an emitted help asset at the resolved path can clear its probe miss.
+        validate_selected_output_paths(manifests.iter().flat_map(|row| {
+            [
+                row.source_asset_path.as_deref(),
+                row.metadata_xml_path.as_deref(),
+                row.module_text_path.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+        }))?;
+        for row in &manifests {
+            additional_help_assets +=
+                usize::from(row.emitted_help && !source_assets.contains_key(&row.file_name));
+            if matches!(
+                source_asset_discovery_misses
+                    .get(&row.file_name)
+                    .map(String::as_str),
+                Some(source_assets::FORM_HELP_DISCOVERY_MISS | source_assets::HELP_DISCOVERY_MISS)
+            ) && row.emitted_help
+            {
+                source_asset_discovery_misses.remove(&row.file_name);
+            }
+            // The owner graph names the template family. Require the descriptor
+            // writer to have published its exact path before clearing recognition.
+            if metadata_discovery_misses.get(&row.file_name)
+                == Some(&MetadataExtractionMissReason::Family)
+                && let Some(template) = template_refs.get(&row.file_name)
+                && row.metadata_xml_path.as_deref().map(Path::new) == Some(&template.relative_path)
+            {
+                metadata_discovery_misses.remove(&row.file_name);
+            }
+        }
+    }
     for (source_row_id, reason) in &source_asset_discovery_misses {
         source_asset_completeness.record_affected_reason(source_asset_audit_entry(
             table,
@@ -6436,7 +6640,7 @@ fn dump_table_rows_streamed(
             "source_asset_candidate_missing",
         ));
     }
-    for (source_row_id, reason) in &selected_metadata_audit.misses {
+    for (source_row_id, reason) in &metadata_discovery_misses {
         source_asset_completeness.record_affected_reason(source_asset_audit_entry(
             table,
             source_row_id,
@@ -6460,11 +6664,12 @@ fn dump_table_rows_streamed(
     source_asset_completeness.finish_inventory(
         source_asset_scope,
         source_asset_discovery_misses.is_empty()
-            && selected_metadata_audit.misses.is_empty()
+            && metadata_discovery_misses.is_empty()
             && source_asset_diagnostics.is_empty(),
         source_assets.len()
+            + additional_help_assets
             + source_asset_discovery_misses.len()
-            + selected_metadata_audit.misses.len(),
+            + metadata_discovery_misses.len(),
     );
 
     if generate_config_dump_info {
@@ -6687,6 +6892,27 @@ fn build_dump_file_name_batches(
         batches.push(current);
     }
     batches
+}
+
+fn validate_selected_output_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> Result<()> {
+    let mut written = BTreeSet::new();
+    for path in paths {
+        let normalized = path.replace('\\', "/");
+        anyhow::ensure!(
+            written.insert(normalized),
+            "selected export emitted a duplicate path: {path}"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn selected_output_rejects_two_help_rows_for_one_owner() {
+    let help = "Documents/Test/Forms/Test/Ext/Help.xml";
+    assert!(validate_selected_output_paths([help, "Documents/Test/Ext/Help.xml"]).is_ok());
+    let alias = help.replace('/', "\\");
+    assert!(validate_selected_output_paths([help, &alias]).is_err());
 }
 
 fn rows_for_source_indexes(
@@ -7477,6 +7703,7 @@ fn dump_table_row_bytes(
     };
 
     let mut source_asset_rows = 0;
+    let mut emitted_help = false;
     let mut source_assets = SourceAssetCompletenessReport::default();
     let source_asset_relative = if metadata_xml_relative.is_none() {
         let started = Instant::now();
@@ -7583,6 +7810,7 @@ fn dump_table_row_bytes(
                 if diagnostics.is_empty() {
                     debug_assert!(emitted);
                     source_assets.record_emitted();
+                    emitted_help = matches!(asset.kind, SourceAssetKind::Help);
                 } else {
                     source_assets.record_opaque(diagnostics);
                 }
@@ -7693,6 +7921,7 @@ fn dump_table_row_bytes(
             module_text_path: module_text_relative,
             metadata_xml_path: metadata_xml_relative,
             source_asset_path: source_asset_relative,
+            emitted_help,
         },
         binary_bytes: bytes.len(),
         inflated_rows,

@@ -35422,6 +35422,11 @@ fn selected_export_skips_broad_indexes_only_for_self_contained_metadata() {
         kind: Some("DocumentNumerator".to_string()),
         folder: Some("DocumentNumerators"),
     }];
+    let common_module = vec![MetadataTextRow {
+        kind: Some("CommonModule".to_string()),
+        folder: Some("CommonModules"),
+        ..self_contained[0].clone()
+    }];
     let referencing = vec![MetadataTextRow {
         file_name: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".to_string(),
         text: String::new(),
@@ -35461,6 +35466,14 @@ fn selected_export_skips_broad_indexes_only_for_self_contained_metadata() {
         false,
         &BTreeSet::from(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0".to_string()]),
         &self_contained,
+    ));
+    assert!(!selected_export_needs_broad_metadata_indexes(
+        true,
+        &BTreeSet::from([
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0".to_string(),
+        ]),
+        &common_module,
     ));
     assert!(!selected_export_needs_broad_metadata_indexes(
         false,

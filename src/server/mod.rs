@@ -21,6 +21,8 @@
 //! carries the protocol only; the engine's own diagnostics go to stderr.
 
 mod apply;
+mod sql_stage;
+pub use sql_stage::run_worker as run_sql_stage_worker;
 pub mod infobases;
 pub mod rpc;
 
@@ -35,7 +37,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::settings::{ENV_CONFIG, ENV_DB_PASSWORD, Settings, SettingsSources};
+use crate::settings::{ENV_CONFIG, Settings, SettingsSources};
 use crate::stored_objects::{self as objects, ConfigSource, UnknownObject};
 use infobases::{Entry, EntryParams, Login, Secret, Session};
 use rpc::{RpcError, codes};
@@ -44,7 +46,7 @@ use rpc::{RpcError, codes};
 /// served when its major is this one and its minor is not above this one
 /// (see `initialize`); the editor extension and the executable are released
 /// together, so the check catches a mismatched pair.
-pub const PROTOCOL_VERSION: (u32, u32) = (1, 4);
+pub const PROTOCOL_VERSION: (u32, u32) = (1, 5);
 
 /// The methods a client may call.
 pub const METHODS: &[&str] = &[
@@ -367,6 +369,14 @@ struct InfobaseParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct PendingParams {
+    infobase: String,
+    #[serde(default)]
+    presence_only: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ChildrenParams {
     infobase: String,
     node: Option<String>,
@@ -425,6 +435,7 @@ struct ImportParams {
 struct ReadParams {
     infobase: String,
     path: String,
+    object_id: Option<String>,
 }
 
 struct State {
@@ -719,10 +730,16 @@ impl State {
     }
 
     fn read(&mut self, params: ReadParams) -> Result<Value, RpcError> {
+        let object_id = params
+            .object_id
+            .as_deref()
+            .map(uuid::Uuid::parse_str)
+            .transpose()
+            .map_err(|_| RpcError::invalid_params("objectId must be a UUID"))?;
         let session = self.session(&params.infobase)?;
         let (exported, path) = session
             .configuration
-            .read_file(&params.path)
+            .read_file_addressed(&params.path, object_id)
             .map_err(|error| {
                 if error.chain().any(|cause| cause.is::<UnknownObject>()) {
                     failure(error)
@@ -831,60 +848,20 @@ impl State {
             })?);
         }
         let session = self.session(&params.infobase)?;
-        if let ConfigSource::RowsDir(_) = session.configuration.source() {
+        let ConfigSource::Database { .. } = session.configuration.source() else {
             return Err(offline("objects/import", session));
-        }
-        if matches!(session.configuration.source(), ConfigSource::FileDb(_)) {
-            return Err(offline("objects/import", session));
-        }
+        };
         if !params.confirm {
             return Err(RpcError::new(
                 codes::CONFIRMATION_REQUIRED,
                 "objects/import replaces the infobase's ConfigSave: pass confirm: true",
             ));
         }
-        let platform = session.configuration.platform();
-        let args = crate::cli::MssqlStageSourceObjectsArgs {
-            server: session.server.clone(),
-            sql_user: session.login.user.clone(),
-            sql_pwd: session
-                .login
-                .password
-                .as_ref()
-                .map(|password| password.expose().to_string()),
-            sql_pwd_env: ENV_DB_PASSWORD.to_string(),
-            database: session.database.clone(),
-            source_root: params.source_dir.clone(),
-            sqlcmd: None,
-            replace_config_save: true,
-            allow_non_lab: true,
-            batch_size: None,
-            platform: Some(platform),
-            source_version: Some(platform.xml_version()),
-            path_prefix: prefixes,
-            files: Vec::new(),
-            native_files: None,
-            script_output: Some(
-                std::env::temp_dir()
-                    .join("ibcmd-rs-serve")
-                    .join(format!("{}_import.sql", session.database)),
-            ),
-            script_only: false,
-            bulk: false,
-            per_row: false,
-            bcp_executable: None,
-            base_free: false,
-            verify: params.verify.unwrap_or(true),
-        };
-        let report = objects::exclusive(|| {
-            crate::settings::commands::check_tree(platform, &args.source_root, &args.database)?;
-            crate::mssql::stage_source_objects(&args)
-        })
-        .map_err(failure)?;
+        let report = sql_stage::stage(session, params, prefixes).map_err(failure)?;
         Ok(json!({ "report": report }))
     }
 
-    fn pending(&mut self, params: InfobaseParams) -> Result<Value, RpcError> {
+    fn pending(&mut self, params: PendingParams) -> Result<Value, RpcError> {
         let session = self.session(&params.infobase)?;
         if let ConfigSource::FileDb(path) = session.configuration.source() {
             let mut db = ibcmd_filedb::FileDb::open(path).map_err(|e| failure(e.into()))?;
@@ -899,6 +876,11 @@ impl State {
         let ConfigSource::Database { sql, database } = session.configuration.source() else {
             return Err(offline("config/pending", session));
         };
+        if params.presence_only {
+            let count = crate::apply_check::staged_row_count(sql, database).map_err(failure)?;
+            return Ok(json!({"pending": count > 0, "stagedRows": count,
+                "conclusive": true, "needsRestructuring": null}));
+        }
         let xml = session.configuration.platform().xml_version();
         let verdict = objects::exclusive(|| {
             crate::apply_check::check_staged(sql, database, Some(xml.as_str()))

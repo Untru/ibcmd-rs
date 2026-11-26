@@ -304,6 +304,8 @@ ERP УХ до двух секунд и сверка её полного сост
 Set `ibcmd.exportCacheDirectory` to an absolute staging folder outside
 `ibcmd.sourceDirectory` (use the external laboratory disk). Select object rows
 with Ctrl/Cmd or Shift, then **Выгрузить из базы** in the context menu.
+For one object, the same command is available on the object's node in the
+connected database configuration tree.
 **Выгрузить группу из базы** opens a group picker; **Выгрузить изменённые из базы**
 uses the source's `ConfigDumpInfo.xml` as its native version reference. Local byte
 changes alone do not select a database object for changed export. A database

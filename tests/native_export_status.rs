@@ -61,6 +61,42 @@ fn rename_or_deleted_reference_requires_full_export() {
     assert_eq!(status.text(true), "M: all\n");
 }
 #[test]
+fn rename_under_second_owner_of_shared_part_requires_full_export() {
+    let xml = r#"<ConfigDumpInfo><ConfigVersions>
+        <Metadata name="AccumulationRegister.A" id="a" configVersion="v1">
+            <Metadata name="AccumulationRegister.A.Attribute.First" id="p"/>
+        </Metadata>
+        <Metadata name="AccumulationRegister.B" id="b" configVersion="v2">
+            <Metadata name="AccumulationRegister.B.Attribute.Second" id="p"/>
+        </Metadata>
+        </ConfigVersions></ConfigDumpInfo>"#;
+    let original = ConfigDumpInfoSnapshot::parse(xml.as_bytes()).unwrap();
+    let encoded = serde_json::to_value(&original).unwrap();
+    assert_eq!(
+        encoded["parts"]["a/p"],
+        "AccumulationRegister.A.Attribute.First"
+    );
+    assert_eq!(
+        encoded["parts"]["b/p"],
+        "AccumulationRegister.B.Attribute.Second"
+    );
+    assert_eq!(
+        serde_json::from_value::<ConfigDumpInfoSnapshot>(encoded).unwrap(),
+        original
+    );
+    let mut legacy = original.clone();
+    legacy.parts.clear();
+    legacy
+        .parts
+        .insert("p".into(), "AccumulationRegister.B.Attribute.Second".into());
+    assert!(!original.compare(&legacy).full_required);
+    assert!(legacy.compare(&original).full_required);
+    let renamed = xml.replace("Attribute.Second", "Attribute.Renamed");
+    let current = ConfigDumpInfoSnapshot::parse(renamed.as_bytes()).unwrap();
+    assert!(!original.compare(&original).full_required);
+    assert!(current.compare(&original).full_required);
+}
+#[test]
 fn malformed_inventory_is_rejected() {
     assert!(ConfigDumpInfoSnapshot::parse(b"<ConfigDumpInfo/>").is_err());
     assert!(

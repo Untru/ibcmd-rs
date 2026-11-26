@@ -53,6 +53,9 @@ pub trait FileSink: Send + Sync {
     fn inventory_only(&self) -> bool {
         false
     }
+    fn inventory_reuse(&self) -> Option<&super::NativeInventoryAttempt> {
+        None
+    }
     fn accept(&self, path: &Path, bytes: &[u8]) -> Result<()>;
 }
 

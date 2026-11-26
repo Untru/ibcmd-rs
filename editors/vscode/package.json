@@ -257,11 +257,11 @@
         },
         {
           "command": "ibcmd.tree.openLocal",
-          "when": "view == ibcmd.configuration && viewItem == ibcmd.source"
+          "when": "view == ibcmd.configuration && (viewItem == ibcmd.source || viewItem == ibcmd.databaseObject)"
         },
         {
           "command": "ibcmd.source.open",
-          "when": "view == ibcmd.configuration && viewItem == ibcmd.source"
+          "when": "view == ibcmd.configuration && (viewItem == ibcmd.source || viewItem == ibcmd.databaseObject)"
         },
         {
           "command": "ibcmd.source.compare",
@@ -270,6 +270,11 @@
         {
           "command": "ibcmd.objects.export",
           "when": "view == ibcmd.objects && viewItem == ibcmd.object",
+          "group": "ibcmd@1"
+        },
+        {
+          "command": "ibcmd.objects.export",
+          "when": "view == ibcmd.configuration && viewItem == ibcmd.databaseObject",
           "group": "ibcmd@1"
         },
         {
