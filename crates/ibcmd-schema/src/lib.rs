@@ -36,6 +36,38 @@ use uuid::Uuid;
 pub const DCS_PICTURE_PNG_FILE: &str = "value.png";
 pub const DCS_INLINE_PICTURE_NS: &str = "http://v8.1c.ru/8.1/data/ui";
 pub const DCS_PICTURE_PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+pub const DCS_NONTRANSPARENT_ATTRIBUTE: &str = " t=\"false\"";
+
+pub fn dcs_readable_picture_xml(
+    tag: &str,
+    prefix: &str,
+    namespace: &str,
+    reference: &str,
+    transparent: bool,
+) -> String {
+    format!(
+        "<{tag} xmlns:{prefix}=\"{namespace}\" xsi:type=\"{prefix}:Picture\">\r\n\
+         \t<{prefix}:Ref>{reference}</{prefix}:Ref>\r\n\
+         \t<{prefix}:LoadTransparent>{transparent}</{prefix}:LoadTransparent>\r\n\
+         </{tag}>\r\n"
+    )
+}
+
+pub fn dcs_readable_picture_members<'a>(
+    prefix: &str,
+    reference: &'a str,
+    transparency: &str,
+) -> Option<(&'a str, bool)> {
+    let reference = reference
+        .strip_prefix(&format!("<{prefix}:Ref>"))?
+        .strip_suffix(&format!("</{prefix}:Ref>"))?;
+    let transparent = transparency
+        .strip_prefix(&format!("<{prefix}:LoadTransparent>"))?
+        .strip_suffix(&format!("</{prefix}:LoadTransparent>"))?
+        .parse()
+        .ok()?;
+    Some((reference, transparent))
+}
 
 pub fn dcs_picture_ends_line(closing_tag_and_tail: &str, tag: &str) -> bool {
     closing_tag_and_tail
@@ -45,6 +77,10 @@ pub fn dcs_picture_ends_line(closing_tag_and_tail: &str, tag: &str) -> bool {
 
 pub fn dcs_inline_picture_xml(tag: &str, base64: &str) -> String {
     format!("<{tag} xsi:type=\"v8ui:Picture\">{base64}</{tag}>\r\n")
+}
+
+pub fn dcs_nontransparent_picture_xml(tag: &str, reference: &str) -> String {
+    format!("<{tag} xsi:type=\"v8ui:Picture\" t=\"false\" ref=\"{reference}\"/>\r\n")
 }
 
 pub fn dcs_absolute_picture_xml(tag: &str, prefix: &str, namespace: &str) -> String {

@@ -29,7 +29,7 @@ const VALUE_TAG: &str = "dcscor:value";
 const PICTURE_TYPE: &str = "xsi:type=\"v8ui:Picture\"";
 const REF_ATTRIBUTE: &str = " ref=\"v8ui:";
 const READABLE_NS: &str = "http://v8.1c.ru/8.3/xcf/readable";
-const COMMON_PICTURE: &str = "CommonPicture.";
+pub(crate) const COMMON_PICTURE: &str = "CommonPicture.";
 const STD_PICTURE: &str = "StdPicture.";
 
 fn require_known_attributes(open: &str, expected: &[(&str, &str)]) -> Result<()> {
@@ -113,23 +113,27 @@ pub fn with_8_5_picture_values(
         if name.is_empty() {
             bail!("a picture value has an empty picture reference");
         }
-        require_known_attributes(
-            open,
-            &[
-                ("xsi:type", "v8ui:Picture"),
-                ("ref", &format!("v8ui:{name}")),
-            ],
-        )?;
+        let reference_attribute = format!("v8ui:{name}");
+        let mut attributes = vec![
+            ("xsi:type", "v8ui:Picture"),
+            ("ref", reference_attribute.as_str()),
+        ];
+        let transparent = !open.contains(ibcmd_schema::DCS_NONTRANSPARENT_ATTRIBUTE);
+        if !transparent {
+            attributes.push(("t", "false"));
+        }
+        require_known_attributes(open, &attributes)?;
         require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
         let reference = picture_reference(name, object_refs);
         let prefix = value_namespace_prefix(&edits, element);
         edits.replace(
             element,
-            &format!(
-                "<{VALUE_TAG} xmlns:{prefix}=\"{READABLE_NS}\" xsi:type=\"{prefix}:Picture\">\r\n\
-                 \t<{prefix}:Ref>{reference}</{prefix}:Ref>\r\n\
-                 \t<{prefix}:LoadTransparent>true</{prefix}:LoadTransparent>\r\n\
-                 </{VALUE_TAG}>\r\n"
+            &ibcmd_schema::dcs_readable_picture_xml(
+                VALUE_TAG,
+                &prefix,
+                READABLE_NS,
+                &reference,
+                transparent,
             ),
         );
         changed = true;
@@ -196,22 +200,18 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
             .map(str::trim)
             .filter(|line| !line.is_empty())
             .collect();
-        let reference = match lines.as_slice() {
-            [reference, transparent]
-                if *transparent
-                    == format!("<{prefix}:LoadTransparent>true</{prefix}:LoadTransparent>") =>
-            {
-                reference
-                    .strip_prefix(&format!("<{prefix}:Ref>"))
-                    .and_then(|rest| rest.strip_suffix(&format!("</{prefix}:Ref>")))
-            }
-            _ => None,
+        let [reference, transparency] = lines.as_slice() else {
+            continue;
         };
-        let Some((kind, name)) = reference.and_then(|reference| {
-            [COMMON_PICTURE, STD_PICTURE]
-                .into_iter()
-                .find_map(|kind| reference.strip_prefix(kind).map(|name| (kind, name)))
-        }) else {
+        let Some((reference, transparent)) =
+            ibcmd_schema::dcs_readable_picture_members(prefix, reference, transparency)
+        else {
+            continue;
+        };
+        let Some((kind, name)) = [COMMON_PICTURE, STD_PICTURE]
+            .into_iter()
+            .find_map(|kind| reference.strip_prefix(kind).map(|name| (kind, name)))
+        else {
             continue;
         };
         if name.is_empty() {
@@ -223,16 +223,59 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
         {
             bail!("picture kinds with the same stored name are not reversible");
         }
-        edits.replace(
-            element,
-            &format!("<{VALUE_TAG} {PICTURE_TYPE}{REF_ATTRIBUTE}{name}\"/>\r\n"),
-        );
+        let replacement = if transparent {
+            format!("<{VALUE_TAG} {PICTURE_TYPE}{REF_ATTRIBUTE}{name}\"/>\r\n")
+        } else {
+            ibcmd_schema::dcs_nontransparent_picture_xml(VALUE_TAG, &format!("v8ui:{name}"))
+        };
+        edits.replace(element, &replacement);
         changed = true;
     }
     if !changed {
         return Ok(None);
     }
     edits.finish().map(Some)
+}
+
+pub(crate) fn resolve_nontransparent_picture_refs(
+    xml: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<String> {
+    if !xml.contains(ibcmd_schema::DCS_NONTRANSPARENT_ATTRIBUTE) {
+        return Ok(xml.to_owned());
+    }
+    let mut edits = XmlEdits::new(xml)?;
+    for element in 0..edits.elements.len() {
+        let item = &edits.elements[element];
+        if item.tag != VALUE_TAG || !item.self_closing {
+            continue;
+        }
+        let open = xml[item.open_start..].split_once('>').unwrap().0;
+        if !open.contains(PICTURE_TYPE)
+            || !open.contains(ibcmd_schema::DCS_NONTRANSPARENT_ATTRIBUTE)
+        {
+            continue;
+        }
+        let Some(name) = open
+            .split_once(REF_ATTRIBUTE)
+            .and_then(|(_, tail)| tail.split_once('"'))
+            .map(|(name, _)| name)
+        else {
+            continue;
+        };
+        let reference = picture_reference(name, object_refs);
+        let uuid = object_refs
+            .iter()
+            .find_map(|(uuid, known)| (known == &reference).then_some(uuid.as_str()))
+            .or_else(|| ibcmd_1c_vocab::standard_picture_uuid(&reference))
+            .ok_or_else(|| anyhow::anyhow!("no storage UUID for DCS picture {reference}"))?;
+        require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+        edits.replace(
+            element,
+            &ibcmd_schema::dcs_nontransparent_picture_xml(VALUE_TAG, &format!("0:{uuid}")),
+        );
+    }
+    edits.finish()
 }
 
 /// The prefix of `open` (a value's start tag) when it declares the readable
@@ -419,6 +462,27 @@ mod tests {
             Some(stored)
         );
         assert_eq!(with_stored_picture_values(stored).unwrap(), None);
+    }
+
+    #[test]
+    fn nontransparent_references_keep_the_flag_and_use_native_ids() {
+        let refs = BTreeMap::from([(
+            "00000000-0000-0000-0000-000000000001".to_owned(),
+            "CommonPicture.Своя".to_owned(),
+        )]);
+        let stored = "<a>\r\n\
+                      \t<dcscor:value xsi:type=\"v8ui:Picture\" t=\"false\" ref=\"v8ui:Своя\"/>\r\n\
+                      \t<dcscor:value xsi:type=\"v8ui:Picture\" t=\"false\" ref=\"v8ui:Change\"/>\r\n\
+                      </a>";
+        let written = with_8_5_picture_values(stored, &refs).unwrap();
+        assert_eq!(written.matches("LoadTransparent>false").count(), 2);
+        assert_eq!(
+            with_stored_picture_values(&written).unwrap().as_deref(),
+            Some(stored),
+        );
+        let physical = resolve_nontransparent_picture_refs(stored, &refs).unwrap();
+        assert!(physical.contains("t=\"false\" ref=\"0:00000000-0000-0000-0000-000000000001\""));
+        assert!(physical.contains("t=\"false\" ref=\"0:97b2cc97-d5c6-45fb-9824-9d6d73db21fe\""));
     }
 
     #[test]
