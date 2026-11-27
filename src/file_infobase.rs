@@ -91,6 +91,40 @@ pub(crate) fn import_edt(
         let stage = plan_edt_stage(&source, version, tree)?;
         return crate::postgres_infobase::import_edt(&config, source, version, stage);
     }
+    if config.file_infobase.is_none() {
+        crate::infobase::ensure_mssql(&config.dbms)?;
+        let (entries, verification) = compile_verified_edt(&source, version, tree)?;
+        let sql = crate::sql::SqlExec::from_options(crate::sql::SqlOptions {
+            sqlcmd: args.sqlcmd.as_deref(),
+            bcp: None,
+            server: &config.db_server,
+            user: config.db_user.as_deref(),
+            password: config.db_pwd.as_deref(),
+            password_env: &args.db_pwd_env,
+            trust_server_certificate: true,
+        })?;
+        let written = crate::mssql::cf_load_stage::stage_empty_edt(&sql, &config.db_name, entries)?;
+        let stage = Stage {
+            rows: Vec::new(),
+            base_free: true,
+            reason: "verified retained Designer XML for empty CONFIG".into(),
+            target_rows: 0,
+            verification: Some(verification),
+        };
+        let mut report = stage.report(
+            &config,
+            source,
+            Some(version),
+            "mssql-configsave-stage",
+            (
+                written.config_save_rows_before as usize,
+                written.config_save_rows_after as usize,
+            ),
+            None,
+        );
+        report.format = "edt";
+        return Ok(report);
+    }
     let data_file = config
         .file_infobase
         .as_deref()
@@ -125,6 +159,21 @@ fn plan_edt_stage(
     version: InfobaseConfigSourceVersion,
     tree: &ibcmd_xml::source_tree::SourceTree,
 ) -> Result<Stage> {
+    let (entries, verification) = compile_verified_edt(source, version, tree)?;
+    Ok(Stage {
+        rows: stage_rows(&entries, &[])?,
+        base_free: true,
+        reason: "verified retained Designer XML for empty CONFIG".into(),
+        target_rows: 0,
+        verification: Some(verification),
+    })
+}
+
+fn compile_verified_edt(
+    source: &Path,
+    version: InfobaseConfigSourceVersion,
+    tree: &ibcmd_xml::source_tree::SourceTree,
+) -> Result<(BTreeMap<String, Vec<u8>>, crate::mssql::StageVerification)> {
     use crate::mssql::{GuardRequest, StageKind, TreeFiles, verify_staged_state};
     use crate::mssql_dump::{StagedRow, StateBase};
 
@@ -153,13 +202,7 @@ fn plan_edt_stage(
         StateBase::Nothing,
         &staged,
     )?;
-    Ok(Stage {
-        rows: stage_rows(&entries, &[])?,
-        base_free: true,
-        reason: "verified retained Designer XML for empty CONFIG".into(),
-        target_rows: 0,
-        verification: Some(verification),
-    })
+    Ok((entries, verification))
 }
 
 /// The tree an import reads and the XML version it reads it in.

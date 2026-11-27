@@ -1875,6 +1875,25 @@ pub(super) fn build_base_free_bulk_stage_apply_sql(
     table: &str,
     staged_rows: usize,
 ) -> String {
+    build_guarded_base_free_bulk_stage_apply_sql(database, table, staged_rows, false)
+}
+
+pub(super) fn build_guarded_base_free_bulk_stage_apply_sql(
+    database: &str,
+    table: &str,
+    staged_rows: usize,
+    require_empty_config: bool,
+) -> String {
+    let guard = if require_empty_config {
+        concat!(
+            "IF EXISTS (SELECT 1 FROM dbo.Config WITH (TABLOCKX, HOLDLOCK))
+",
+            "    THROW 55006, 'EDT staging currently requires empty CONFIG', 1;
+",
+        )
+    } else {
+        ""
+    };
     let stage = format!("tempdb.dbo.{}", quote_ident(table));
     format!(
         "SET NOCOUNT ON;\n\
@@ -1889,7 +1908,7 @@ pub(super) fn build_base_free_bulk_stage_apply_sql(
          IF (SELECT COUNT_BIG(*) FROM {stage} WHERE FileName IN (N'root', N'version', N'versions')) <> 3\n\
              THROW 55005, 'A base-free stage must carry root, version and versions', 1;\n\
          BEGIN TRAN;\n\
-         DELETE FROM dbo.ConfigSave;\n\
+         {guard}DELETE FROM dbo.ConfigSave{save_lock};\n\
          INSERT INTO dbo.ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
          SELECT s.FileName, DATEADD(year, 2000, SYSUTCDATETIME()), DATEADD(year, 2000, SYSUTCDATETIME()), 0, s.DataSize, s.BinaryData, s.PartNo\n\
          FROM {stage} s;\n\
@@ -1898,6 +1917,11 @@ pub(super) fn build_base_free_bulk_stage_apply_sql(
          COMMIT;\n\
          DROP TABLE {stage};\n",
         db = quote_ident(database),
+        save_lock = if require_empty_config {
+            " WITH (TABLOCKX)"
+        } else {
+            ""
+        },
     )
 }
 

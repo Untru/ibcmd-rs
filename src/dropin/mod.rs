@@ -712,11 +712,7 @@ fn run_import(mut request: ImportRequest) -> i32 {
                 let Some(tree) = tree else {
                     return Ok(None);
                 };
-                if (request.common.db_path.is_none()
-                    && request.common.dbms.as_deref() != Some("PostgreSQL"))
-                    || request.common.extension.is_some()
-                    || request.no_verify
-                {
+                if request.common.extension.is_some() || request.no_verify {
                     return Ok(None);
                 }
                 read_requested_password(&mut request.common).map_err(anyhow::Error::msg)?;
@@ -728,7 +724,7 @@ fn run_import(mut request: ImportRequest) -> i32 {
                 IMPORT.fail_with(&format!("{}: {error:#}", path.display()), report.as_deref())
             }
             Ok(None) => IMPORT.refuse_with(
-                &format!("{}: запись EDT в ConfigSave требует сохранённого Designer XML, файловой базы или PostgreSQL и включённой проверки", path.display()),
+                &format!("{}: запись EDT в ConfigSave требует сохранённого Designer XML, пустой базы и включённой проверки", path.display()),
                 report.as_deref(),
             ),
         };
