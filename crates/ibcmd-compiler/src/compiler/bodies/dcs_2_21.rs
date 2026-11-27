@@ -106,6 +106,17 @@ pub fn with_8_5_picture_values(
             continue;
         }
         let Some(at) = open.find(REF_ATTRIBUTE) else {
+            if open.contains(ibcmd_schema::DCS_NONTRANSPARENT_ATTRIBUTE) {
+                require_known_attributes(open, &[("xsi:type", "v8ui:Picture"), ("t", "false")])?;
+                require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+                let prefix = value_namespace_prefix(&edits, element);
+                edits.replace(
+                    element,
+                    &ibcmd_schema::dcs_empty_picture_xml(VALUE_TAG, Some((&prefix, READABLE_NS))),
+                );
+                changed = true;
+                continue;
+            }
             bail!("a picture value without a picture reference: {open}");
         };
         let name = &open[at + REF_ATTRIBUTE.len()..];
@@ -175,7 +186,7 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
     let mut stored_kinds = BTreeMap::new();
     for element in 0..edits.elements.len() {
         let item = &edits.elements[element];
-        if item.tag != VALUE_TAG || item.self_closing {
+        if item.tag != VALUE_TAG {
             continue;
         }
         let open = &xml[item.open_start..];
@@ -191,6 +202,14 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
             ],
         )?;
         require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+        if item.self_closing {
+            edits.replace(
+                element,
+                &ibcmd_schema::dcs_empty_picture_xml(VALUE_TAG, None),
+            );
+            changed = true;
+            continue;
+        }
         // Include content before the first child as well: inner_lines starts
         // at that child and would silently drop preceding text or comments.
         let open_end = item.open_start + xml[item.open_start..].find('>').unwrap() + 1;
@@ -483,6 +502,21 @@ mod tests {
         let physical = resolve_nontransparent_picture_refs(stored, &refs).unwrap();
         assert!(physical.contains("t=\"false\" ref=\"0:00000000-0000-0000-0000-000000000001\""));
         assert!(physical.contains("t=\"false\" ref=\"0:97b2cc97-d5c6-45fb-9824-9d6d73db21fe\""));
+    }
+
+    #[test]
+    fn an_empty_8_5_picture_uses_the_nontransparent_native_value() {
+        let stored = "<a>\r\n\t<dcscor:value xsi:type=\"v8ui:Picture\" t=\"false\"/>\r\n</a>";
+        let written = with_8_5_picture_values(stored, &BTreeMap::new()).unwrap();
+        assert!(written.contains("xsi:type=\"d2p1:Picture\"/>"));
+        assert_eq!(
+            with_stored_picture_values(&written).unwrap().as_deref(),
+            Some(stored)
+        );
+        assert_eq!(
+            resolve_nontransparent_picture_refs(stored, &BTreeMap::new()).unwrap(),
+            stored
+        );
     }
 
     #[test]

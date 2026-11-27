@@ -83,6 +83,15 @@ pub fn dcs_nontransparent_picture_xml(tag: &str, reference: &str) -> String {
     format!("<{tag} xsi:type=\"v8ui:Picture\" t=\"false\" ref=\"{reference}\"/>\r\n")
 }
 
+pub fn dcs_empty_picture_xml(tag: &str, namespace: Option<(&str, &str)>) -> String {
+    match namespace {
+        Some((prefix, uri)) => {
+            format!("<{tag} xmlns:{prefix}=\"{uri}\" xsi:type=\"{prefix}:Picture\"/>\r\n")
+        }
+        None => format!("<{tag} xsi:type=\"v8ui:Picture\" t=\"false\"/>\r\n"),
+    }
+}
+
 pub fn dcs_absolute_picture_xml(tag: &str, prefix: &str, namespace: &str) -> String {
     let [absolute, transparent] = dcs_absolute_picture_members(prefix);
     format!(
