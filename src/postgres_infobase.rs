@@ -117,19 +117,27 @@ fn read_rows(connection: &mut PgConnection, table: &str) -> Result<Vec<ConfigRow
 /// held before.
 fn write_stage(connection: &mut PgConnection, rows: &[ConfigRow]) -> Result<usize> {
     let written = (|| -> Result<usize> {
-        let mut before = 0;
-        connection.query("SELECT count(*) FROM configsave", &mut |row| {
-            before = row
-                .first()
-                .and_then(Option::as_deref)
-                .and_then(|value| std::str::from_utf8(value).ok()?.parse().ok())
-                .unwrap_or(0);
-            Ok(())
-        })?;
+        let mut metadata = None;
+        connection.query(
+            "SELECT count(*), LOCALTIMESTAMP(0)::text FROM configsave",
+            &mut |row| {
+                let text = |i: usize| -> Result<&str> {
+                    Ok(std::str::from_utf8(
+                        row.get(i)
+                            .and_then(Option::as_deref)
+                            .context("missing stage metadata")?,
+                    )?)
+                };
+                metadata = Some((text(0)?.parse::<usize>()?, text(1)?.to_owned()));
+                Ok(())
+            },
+        )?;
+        let (before, timestamp) = metadata.context("missing stage metadata row")?;
         connection.query("DELETE FROM configsave", &mut |_| Ok(()))?;
-        for row in rows {
-            connection.query(&insert_statement(row), &mut |_| Ok(()))?;
-        }
+        connection.copy_in(
+            "COPY configsave (filename, creation, modified, attributes, datasize, binarydata, partno) FROM STDIN WITH (FORMAT csv)",
+            rows.iter().map(|row| copy_row(row, &timestamp)),
+        )?;
         Ok(before)
     })();
     match written {
@@ -144,24 +152,38 @@ fn write_stage(connection: &mut PgConnection, rows: &[ConfigRow]) -> Result<usiz
     }
 }
 
-fn insert_statement(row: &ConfigRow) -> String {
-    let name = row.file_name.replace('\\', "\\\\").replace('\'', "''");
-    let mut hex = String::with_capacity(row.binary.len() * 2);
-    for byte in &row.binary {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    format!(
-        "INSERT INTO configsave (filename, creation, modified, attributes, datasize, binarydata, partno) \
-         VALUES (CAST(E'{}' AS mvarchar), LOCALTIMESTAMP(0), LOCALTIMESTAMP(0), {}, {}, decode('{hex}', 'hex'), {})",
-        name, row.attributes, row.data_size, row.part_no
+fn copy_row(row: &ConfigRow, timestamp: &str) -> Vec<u8> {
+    use std::io::Write;
+
+    let mut bytes = Vec::new();
+    let name = row.file_name.replace('"', "\"\"");
+    write!(
+        bytes,
+        "\"{name}\",{timestamp},{timestamp},{},{},\\x",
+        row.attributes, row.data_size
     )
+    .unwrap();
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in &row.binary {
+        bytes.extend_from_slice(&[HEX[(byte >> 4) as usize], HEX[(byte & 15) as usize]]);
+    }
+    writeln!(bytes, ",{}", row.part_no).unwrap();
+    bytes
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[derive(Clone, Copy)]
+    enum CopyReply {
+        Complete,
+        Error,
+        Short,
+    }
+
     fn wire_queries(
+        reply: CopyReply,
         run: impl FnOnce(&ConnectionConfig) -> Result<InfobaseConfigImportReport>,
     ) -> Vec<String> {
         use std::io::{Read, Write};
@@ -187,6 +209,7 @@ mod tests {
             send(&mut stream, b'R', &0u32.to_be_bytes());
             send(&mut stream, b'Z', b"I");
             let mut queries = Vec::new();
+            let mut row_count = 0;
             loop {
                 let mut header = [0; 5];
                 stream.read_exact(&mut header).unwrap();
@@ -196,9 +219,42 @@ mod tests {
                 if header[0] == b'X' {
                     break;
                 }
-                assert_eq!(header[0], b'Q');
-                queries.push(String::from_utf8(body[..body.len() - 1].to_vec()).unwrap());
-                send(&mut stream, b'C', b"OK\0");
+                if header[0] == b'd' {
+                    // The tiny fixtures have no line breaks in their file names.
+                    row_count += body.iter().filter(|&&byte| byte == b'\n').count();
+                    continue;
+                }
+                if header[0] == b'c' {
+                    match reply {
+                        CopyReply::Error => {
+                            send(&mut stream, b'E', b"SERROR\0Msynthetic COPY failure\0\0")
+                        }
+                        CopyReply::Short => send(&mut stream, b'C', b"COPY 1\0"),
+                        CopyReply::Complete => {
+                            send(&mut stream, b'C', format!("COPY {row_count}\0").as_bytes())
+                        }
+                    }
+                } else {
+                    assert_eq!(header[0], b'Q');
+                    let query = String::from_utf8(body[..body.len() - 1].to_vec()).unwrap();
+                    queries.push(query.clone());
+                    if query.starts_with("COPY ") {
+                        send(
+                            &mut stream,
+                            b'G',
+                            &[0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                        );
+                        continue;
+                    }
+                    if query.starts_with("SELECT count(*)") {
+                        send(
+                            &mut stream,
+                            b'D',
+                            b"\0\x02\0\0\0\x01\x30\0\0\0\x132026-01-01 00:00:00",
+                        );
+                    }
+                    send(&mut stream, b'C', b"OK\0");
+                }
                 send(&mut stream, b'Z', b"I");
             }
             queries
@@ -222,7 +278,15 @@ mod tests {
         };
         let result = run(&config);
         let queries = worker.join().unwrap();
-        assert!(result.is_ok(), "{result:?}");
+        match reply {
+            CopyReply::Complete => assert!(result.is_ok(), "{result:?}"),
+            CopyReply::Error => {
+                assert!(format!("{:#}", result.unwrap_err()).contains("synthetic COPY failure"))
+            }
+            CopyReply::Short => {
+                assert!(format!("{:#}", result.unwrap_err()).contains("COPY acknowledged 1 of"))
+            }
+        }
         queries
     }
 
@@ -233,6 +297,18 @@ mod tests {
             Some("LOCK TABLE config, configsave IN SHARE ROW EXCLUSIVE MODE")
         );
         assert!(queries[2].ends_with("FROM config"));
+        assert_eq!(
+            queries
+                .iter()
+                .filter(|sql| sql.starts_with("COPY configsave "))
+                .count(),
+            1
+        );
+        assert!(
+            !queries
+                .iter()
+                .any(|sql| sql.starts_with("INSERT INTO configsave"))
+        );
         assert_eq!(queries.last().map(String::as_str), Some("COMMIT"));
     }
 
@@ -272,14 +348,16 @@ mod tests {
             source_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/file-infobase/tiny-source"),
         };
-        assert_locked_stage(&wire_queries(|config| import(config, &args)));
+        assert_locked_stage(&wire_queries(CopyReply::Complete, |config| {
+            import(config, &args)
+        }));
     }
 
     #[test]
     fn a_cf_load_locks_both_tables_before_reading_its_base() {
         let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/file-infobase/tiny.cf");
-        let queries = wire_queries(|config| {
+        let queries = wire_queries(CopyReply::Complete, |config| {
             let report = load_cf(config, &input)?;
             assert_eq!(report.operation, "infobase config load");
             assert_eq!(report.format, "cf");
@@ -289,23 +367,21 @@ mod tests {
     }
 
     #[test]
-    fn row_names_quote_backslashes_independently_of_the_server_setting() {
-        let row = ConfigRow {
-            file_name: r"a\'b".into(),
-            part_no: 0,
-            creation: Timestamp::now_utc(),
-            modified: Timestamp::now_utc(),
-            attributes: 0,
-            data_size: 0,
-            binary: vec![],
-        };
-        assert!(insert_statement(&row).contains(r"CAST(E'a\\''b' AS mvarchar)"));
+    fn a_rejected_copy_rolls_back_the_stage_replacement() {
+        let input = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/file-infobase/tiny.cf");
+        for reply in [CopyReply::Error, CopyReply::Short] {
+            let queries = wire_queries(reply, |config| load_cf(config, &input));
+            assert!(queries.iter().any(|sql| sql == "DELETE FROM configsave"));
+            assert_eq!(queries.last().map(String::as_str), Some("ROLLBACK"));
+            assert!(!queries.iter().any(|sql| sql == "COMMIT"));
+        }
     }
 
     #[test]
-    fn a_row_is_inserted_with_its_name_quoted_and_bytes_in_hex() {
+    fn copy_csv_preserves_a_quoted_multiline_name_and_bytea() {
         let row = ConfigRow {
-            file_name: "a'b".to_string(),
+            file_name: "a,\"'\\b\nc".into(),
             part_no: 1,
             creation: Timestamp::now_utc(),
             modified: Timestamp::now_utc(),
@@ -314,9 +390,8 @@ mod tests {
             binary: vec![0, 0xab],
         };
         assert_eq!(
-            insert_statement(&row),
-            "INSERT INTO configsave (filename, creation, modified, attributes, datasize, binarydata, partno) \
-             VALUES (CAST(E'a''b' AS mvarchar), LOCALTIMESTAMP(0), LOCALTIMESTAMP(0), 0, 20, decode('00ab', 'hex'), 1)"
+            copy_row(&row, "2026-01-01 00:00:00"),
+            b"\"a,\"\"'\\b\nc\",2026-01-01 00:00:00,2026-01-01 00:00:00,0,20,\\x00ab,1\n"
         );
     }
 }

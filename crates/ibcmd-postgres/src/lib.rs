@@ -2,7 +2,7 @@
 //! over TCP, enough to read the configuration tables of an infobase -- the
 //! startup, the password logins a server asks for (none, cleartext, MD5,
 //! SCRAM-SHA-256) and the simple query protocol, its rows streamed as they
-//! arrive. No TLS: a server that requires it refuses the login.
+//! arrive, and COPY FROM STDIN for bulk writes. No TLS: a server that requires it refuses the login.
 //!
 //! The protocol is PostgreSQL's documented one ("Frontend/Backend Protocol",
 //! chapter 53 of the PostgreSQL 17 manual); SCRAM-SHA-256 is RFC 5802/7677.
@@ -263,12 +263,67 @@ impl PgConnection {
         }
     }
 
+    /// Streams preformatted rows for a single COPY FROM STDIN statement.
+    pub fn copy_in(&mut self, sql: &str, rows: impl Iterator<Item = Vec<u8>>) -> Result<()> {
+        let mut command = Vec::new();
+        put_cstr(&mut command, sql);
+        self.send(b'Q', &command)?;
+        let mut rows = Some(rows);
+        let mut failure = None;
+        let mut sent = 0usize;
+        let mut completion = None;
+        loop {
+            let message = self.read_message()?;
+            match message.tag {
+                b'G' => {
+                    for row in rows.take().context("repeated PostgreSQL COPY response")? {
+                        for chunk in row.chunks(64 * 1024) {
+                            self.write_message(b'd', chunk)?;
+                        }
+                        sent += 1;
+                    }
+                    self.send(b'c', &[])?;
+                }
+                b'C' => completion = Some(message.body),
+                b'E' => {
+                    failure = Some(anyhow!(
+                        "PostgreSQL COPY failed: {}",
+                        error_text(&message.body)
+                    ))
+                }
+                b'Z' => {
+                    if let Some(error) = failure {
+                        return Err(error);
+                    }
+                    if rows.is_some() {
+                        bail!("PostgreSQL did not complete COPY FROM STDIN");
+                    }
+                    let count = completion
+                        .as_deref()
+                        .and_then(|body| body.strip_prefix(b"COPY ")?.strip_suffix(b"\0"))
+                        .and_then(|digits| std::str::from_utf8(digits).ok()?.parse::<usize>().ok())
+                        .context("invalid PostgreSQL COPY completion count")?;
+                    if count != sent {
+                        bail!("PostgreSQL COPY acknowledged {count} of {sent} rows");
+                    }
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn send(&mut self, tag: u8, body: &[u8]) -> Result<()> {
+        self.write_message(tag, body)?;
+        self.writer.flush()?;
+        Ok(())
+    }
+
+    fn write_message(&mut self, tag: u8, body: &[u8]) -> Result<()> {
         self.writer.write_all(&[tag])?;
         self.writer
             .write_all(&((body.len() + 4) as u32).to_be_bytes())?;
         self.writer.write_all(body)?;
-        self.writer.flush()?;
         Ok(())
     }
 

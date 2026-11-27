@@ -7,6 +7,27 @@ const STYLE_NAMESPACE_DECLARATION: &str = " xmlns:style=\"http://v8.1c.ru/8.1/da
 const PALETTE_NAMESPACE_DECLARATION: &str =
     " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";
 
+pub const PALETTE_COLORS_NS: &str = "http://v8.1c.ru/8.1/data/ui/colors/palette";
+
+/// The platform 8.5 palette, by the index a colour tuple stores.
+pub const PALETTE_COLORS_8_5_1: &[(&str, u8)] = &[
+    ("FirstBrand", 0),
+    ("SecondBrand", 1),
+    ("Red", 2),
+    ("Orange", 3),
+    ("Yellow", 4),
+    ("Green", 5),
+    ("LightBlue", 6),
+    ("Blue", 7),
+    ("Gray", 15),
+];
+
+pub fn encode_palette_color_8_5_1(name: &str) -> Option<String> {
+    PALETTE_COLORS_8_5_1.iter().find_map(|(candidate, index)| {
+        (*candidate == name).then(|| format!("{{4,4,{{{index}}},5}}"))
+    })
+}
+
 /// Dialect 2.21 declares the palette colour namespace on exactly the elements
 /// that declare the style namespace, and nowhere else.
 ///

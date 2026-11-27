@@ -2768,8 +2768,12 @@ fn write_source_asset_inner(
             // of one 8.3.27 corpus, `ExchangePlans/ОбменССайтом/Templates/
             // СхемаВыгрузкиЗаказов` among them). Dropped only while nothing
             // in the document uses the `pal:` prefix.
-            let content = if context.source_version == InfobaseConfigSourceVersion::V2_20 {
-                ibcmd_xml::palette::strip_unused_palette_namespace(content)
+            let (content, picture) = if context.source_version == InfobaseConfigSourceVersion::V2_20
+            {
+                (
+                    ibcmd_xml::palette::strip_unused_palette_namespace(content),
+                    None,
+                )
             } else {
                 // 8.5 names the kind of a settings picture
                 // (`dcs_2_21::with_8_5_picture_values`).
@@ -2779,14 +2783,17 @@ fn write_source_asset_inner(
                         asset.primary_path.display()
                     )
                 })?;
-                super::dcs_2_21::with_8_5_picture_values(&text, context.object_refs)
+                let text = super::dcs_2_21::with_8_5_picture_values(&text, context.object_refs)
                     .with_context(|| {
                         format!(
                             "failed to write the 8.5 picture values of source asset {}",
                             asset.primary_path.display()
                         )
-                    })?
-                    .into_bytes()
+                    })?;
+                match super::dcs_2_21::extract_absolute_png_values(&text)? {
+                    Some((xml, png)) => (xml.into_bytes(), Some(png)),
+                    None => (text.into_bytes(), None),
+                }
             };
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
@@ -2798,6 +2805,13 @@ fn write_source_asset_inner(
             context
                 .output
                 .write_xml(&path, content, context.source_version)?;
+            if let Some(png) = picture {
+                let directory = path.with_extension("");
+                context.output.create_dir_all(&directory)?;
+                context
+                    .output
+                    .write(directory.join(ibcmd_schema::DCS_PICTURE_PNG_FILE), png)?;
+            }
         }
         SourceAssetKind::WsDefinition => {
             let inflated = inflate_raw_deflate(bytes).with_context(|| {

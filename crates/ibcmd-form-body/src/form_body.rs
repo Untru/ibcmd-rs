@@ -1740,6 +1740,7 @@ pub struct FormCommand {
     pub(super) shortcut: Option<String>,
     pub(super) use_rights: Option<FormRightsSetting>,
     pub(super) action: String,
+    pub(super) extra_actions: Vec<String>,
     pub(super) representation: Option<&'static str>,
     pub(super) functional_options: Vec<String>,
     pub(super) modifies_saved_data: Option<bool>,
@@ -1786,6 +1787,7 @@ pub(super) struct FormExtendedTooltipTitle {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(super) struct FormExtendedTooltip {
+    pub(super) border: Option<FormControlBorder>,
     pub(super) id: String,
     pub(super) name: String,
     pub(super) display_importance: Option<&'static str>,
@@ -1837,6 +1839,7 @@ impl FormExtendedTooltip {
             || self.text_color.is_some()
             || self.back_color.is_some()
             || self.border_color.is_some()
+            || self.border.is_some()
             || self.font_xml.is_some()
             || self.title.is_some()
             || self.title_height.is_some()
@@ -8391,7 +8394,8 @@ pub fn form_dynamic_list_main_table_auto_fields(
     } else {
         "Ссылка"
     };
-    if let Some(alias) = &main_table_alias
+    if ibcmd_form_schema::form_dynamic_list_aliased_reference_suppresses_auto_fields(kind)
+        && let Some(alias) = &main_table_alias
         && form_dynamic_list_reference_alias_loses_key(selection, alias, reference_name)
     {
         return Some(BTreeSet::new());
@@ -10452,24 +10456,22 @@ fn parse_form_command_with_items(
         .get(1)
         .and_then(|value| parse_non_zero_uuid(value.trim()))?;
     let name = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?.0;
-    let mut action = parse_1c_quoted_string_with_len(fields.get(8)?.trim())?.0;
-    // A command whose own action slot is empty is bound only by its later
-    // bindings, and the platform writes the first of those as the `<Action>`.
-    if action.is_empty() {
-        let (start, count) = schema.extra_action_slots();
-        for index in 0..count {
-            let Some(extra) = fields
-                .get(start + index * 2)
-                .and_then(|field| parse_1c_quoted_string_with_len(field.trim()))
-                .map(|(handler, _)| handler)
-                .filter(|handler| !handler.is_empty())
-            else {
-                continue;
-            };
-            action = extra;
-            break;
-        }
-    }
+    let action = parse_1c_quoted_string_with_len(fields.get(8)?.trim())?.0;
+    let (start, count) = schema.extra_action_slots();
+    let mut extra_actions = (0..count)
+        .filter_map(|index| fields.get(start + index * 2))
+        .filter_map(|field| parse_1c_quoted_string_with_len(field.trim()))
+        .map(|(handler, _)| handler)
+        .filter(|handler| !handler.is_empty())
+        .collect::<Vec<_>>();
+    // The platform publishes the first extra binding when the primary slot is empty.
+    let action = if action.is_empty() {
+        let first = extra_actions.first().cloned().unwrap_or_default();
+        extra_actions.clear();
+        first
+    } else {
+        action
+    };
     if id.is_empty() || name.is_empty() {
         return None;
     }
@@ -10529,6 +10531,7 @@ fn parse_form_command_with_items(
             .and_then(|field| parse_form_rights_setting(field, object_refs))
             .flatten(),
         action,
+        extra_actions,
         call_type: None,
         representation: parse_form_command_representation(fields.get(9).copied()),
         functional_options: fields
@@ -16076,19 +16079,21 @@ fn parse_form_child_item_with_metadata_owners(
         },
         addition_source_item: if tag.ends_with("Addition") {
             fields.get(19).and_then(|field| {
-                parse_form_search_addition_source_item(field, table_name_by_id).or_else(|| {
-                    // A view-status addition owned by a PDF viewer field names
-                    // that field, not a table, so the table-only index cannot
-                    // answer it. Slot 19 holds `{<owner id>,1}` on all five such
-                    // additions of UT 11.5.27.75 and the id is the owning
-                    // `PDFDocumentField`'s own, which is what the platform
-                    // writes in `<AdditionSource><Item>`. The wider item index is
-                    // consulted only under that owner, so no addition that the
-                    // table index already answers changes hands.
-                    (parent_tag == Some("PDFDocumentField"))
-                        .then(|| parse_form_search_addition_source_item(field, item_name_by_id))
-                        .flatten()
-                })
+                parse_form_search_addition_source_item(field, table_name_by_id)
+                    .or_else(|| {
+                        // A view-status addition owned by a PDF viewer field names
+                        // that field, not a table, so the table-only index cannot
+                        // answer it. Slot 19 holds `{<owner id>,1}` on all five such
+                        // additions of UT 11.5.27.75 and the id is the owning
+                        // `PDFDocumentField`'s own, which is what the platform
+                        // writes in `<AdditionSource><Item>`. The wider item index is
+                        // consulted only under that owner, so no addition that the
+                        // table index already answers changes hands.
+                        (parent_tag == Some("PDFDocumentField"))
+                            .then(|| parse_form_search_addition_source_item(field, item_name_by_id))
+                            .flatten()
+                    })
+                    .or_else(|| parse_form_search_string_non_table_source(field, item_name_by_id))
             })
         } else {
             None
@@ -21041,6 +21046,23 @@ pub(super) fn parse_form_search_addition_source_item(
     table_name_by_id.get(table_id).cloned()
 }
 
+// The native search-string source can name a non-table item, including another
+// search string's context menu. The stored pair identifies its item and source type.
+fn parse_form_search_string_non_table_source(
+    field: &str,
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let [id, source_type] = fields.as_slice() else {
+        return None;
+    };
+    let id = id.trim();
+    if source_type.trim().parse::<u32>().ok()? != 0 || id.parse::<u64>().ok()? == 0 {
+        return None;
+    }
+    item_name_by_id.get(id).cloned()
+}
+
 /// FORM-TABLE-REPRESENTATION-01 (probe FE1, ninth lab session, two
 /// deterministic rounds, wrapper-55 `Table` items): raw `"1"` is the
 /// platform's own "Representation not set" sentinel -- native XML omits
@@ -22918,6 +22940,13 @@ pub(super) fn parse_form_child_item_extended_tooltip(
         tooltip.border_color = options
             .get(FormExtendedTooltipSchema::BORDER_COLOR_OPTION_SLOT)
             .and_then(|field| parse_form_control_color(field.trim(), object_refs));
+        tooltip.border = parse_form_control_border(
+            nested.first()?.trim(),
+            nested,
+            "ExtendedTooltip",
+            0,
+            nested.get(2).map(|value| value.trim()),
+        );
         tooltip.width = extract_form_dimension(nested, schema.width_slot());
         tooltip.auto_max_width = match nested
             .get(schema.auto_max_width_slot())
@@ -26706,6 +26735,11 @@ pub fn form_settings_composer_member(
         // `{3,{286,…},{10009},{10002}}` -> `…CurrentData.ItemGroupFields.Field`).
         Selection => &[
             ("0", "SelectionAvailableFields", Some(AvailableFields)),
+            (
+                ibcmd_form_schema::FORM_SETTINGS_SELECTION_USE_MEMBER.1,
+                ibcmd_form_schema::FORM_SETTINGS_SELECTION_USE_MEMBER.0,
+                None,
+            ),
             ("10001", "TitlePicture", None),
             ("10002", "Title", None),
             ("10003", "Placement", None),
@@ -30273,6 +30307,7 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         "62ff963c-9426-43af-bb23-1d2ef3a9a0c1" => Some("AddOrderItem"),
         "4a817da0-5797-4e16-906f-02fb869e1873" => Some("GroupFilterItems"),
         "51c99108-107c-43e1-8918-e48835bf2495" => Some("SelectAll"),
+        ibcmd_form_schema::TABLE_DESELECT_ALL_COMMAND_UUID => Some("DeselectAll"),
         "c0519548-2a9a-44de-a25e-faf01e089d4d" => Some("Find"),
         "44ad3ec9-f3c2-4913-9224-5f9fb6418743" => Some("CancelSearch"),
         "49602716-fea6-497f-8047-726404038857" => Some("OutputList"),
@@ -32172,11 +32207,18 @@ fn format_form_body_open_xml_with_dcs_profiles(
                 xml.push_str("\t\t\t</Picture>\r\n");
             }
             if !command.action.is_empty() {
-                xml.push_str(&format!(
-                    "\t\t\t<Action{}>{}</Action>\r\n",
-                    format_form_call_type_attribute(command.call_type),
-                    escape_xml_text(&command.action)
-                ));
+                ibcmd_form_schema::append_form_command_action_xml(
+                    &mut xml,
+                    &format_form_call_type_attribute(command.call_type),
+                    &escape_xml_text(&command.action),
+                );
+            }
+            for action in &command.extra_actions {
+                ibcmd_form_schema::append_form_command_action_xml(
+                    &mut xml,
+                    "",
+                    &escape_xml_text(action),
+                );
             }
             if !command.functional_options.is_empty() {
                 xml.push_str("\t\t\t<FunctionalOptions>\r\n");
@@ -33179,7 +33221,11 @@ fn format_form_control_colors_xml(item: &FormChildItem, indent: usize) -> String
 }
 
 fn format_form_control_border_xml(item: &FormChildItem, indent: usize) -> String {
-    let Some(border) = item.control_border else {
+    format_form_control_border(item.control_border, indent)
+}
+
+fn format_form_control_border(border: Option<FormControlBorder>, indent: usize) -> String {
+    let Some(border) = border else {
         return String::new();
     };
     let tab = "\t".repeat(indent);
@@ -37202,6 +37248,9 @@ fn format_form_extended_tooltip_property_xml(
             .as_ref()
             .map(|value| format!("{tab}<BackColor>{}</BackColor>\r\n", escape_xml_text(value)))
             .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::Border => {
+            format_form_control_border(tooltip.border, indent)
+        }
         FormExtendedTooltipXmlProperty::BorderColor => tooltip
             .border_color
             .as_ref()

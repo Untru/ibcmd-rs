@@ -721,6 +721,7 @@ dependencies = [
  "anyhow",
  "flate2",
  "ibcmd-1c-text",
+ "ibcmd-1c-vocab",
  "ibcmd-cf",
  "ibcmd-compiler-families",
  "ibcmd-compiler-readiness",
@@ -915,6 +916,7 @@ name = "ibcmd-form-native"
 version = "0.1.0"
 dependencies = [
  "ibcmd-1c-text",
+ "ibcmd-form-schema",
 ]
 
 [[package]]

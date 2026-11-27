@@ -837,6 +837,27 @@ fn load_table(
     item: &mut ItemFacts,
     layout: FormLayout,
 ) -> Result<()> {
+    let hierarchy = take(
+        edits,
+        element,
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION,
+    )?;
+    if hierarchy.is_some() && layout != FormLayout::V8_5_1 {
+        bail!("HierarchyPanelLocation requires the measured 8.5 table layout");
+    }
+    let hierarchy_code = code_of(
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATIONS,
+        hierarchy.as_deref(),
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION,
+    )?;
+    item.record.insert(
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_SLOT,
+        hierarchy_code.clone(),
+    );
+    item.tail.insert(
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_TAIL,
+        hierarchy_code,
+    );
     // The line and alternation flags: 8.5 reads the `...BWA` members and keeps
     // the 8.3.27 slot true only when the member says true. A body kept in the
     // 8.3.27 layout has only the slot: its export writes a member for a false
@@ -1744,9 +1765,14 @@ impl UpConversion<'_> {
             return self.convert_item(members, &id);
         }
         if let Some(id) = command_identity(members) {
-            if leaf(&members[0]) != Some("9") || members.len() != 19 {
+            let member_count = members
+                .get(15)
+                .and_then(leaf)
+                .and_then(|bindings| bindings.parse().ok())
+                .and_then(ibcmd_form_schema::FormCommandSchema::member_count_8_3_27);
+            if leaf(&members[0]) != Some("9") || member_count != Some(members.len()) {
                 bail!(
-                    "form command {id} is not the 8.3.27 `{{9,...}}` of 19 members ({} members)",
+                    "form command {id} has an invalid 8.3.27 layout ({} members)",
                     members.len()
                 );
             }
@@ -2118,6 +2144,49 @@ pub fn compile_xml_2_21_form_body_in_layout_8_3(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn two_command_actions_survive_the_8_5_layout() {
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.21">
+	<AutoCommandBar name="FormCommandBar" id="-1"/>
+	<Commands>
+		<Command name="Run" id="2">
+			<Action>RunHandler</Action>
+			<Action>AfterHandler</Action>
+		</Command>
+	</Commands>
+</Form>"#;
+        let native = compile_native_form_body_8_5_1(xml, None, None, None).unwrap();
+        let parsed = ibcmd_form_body::parse_form_body_plain(&native).unwrap();
+        let (legacy, facts) =
+            ibcmd_form_body::layout_8_5_1::down_convert_form_body_8_5_1(&parsed).unwrap();
+        assert_eq!(facts.commands["2"].len(), 2);
+        let serialized = legacy.trailing.concat();
+        assert!(serialized.contains("\"RunHandler\""), "{serialized}");
+        assert!(serialized.contains("\"AfterHandler\",1"), "{serialized}");
+    }
+
+    #[test]
+    fn a_hidden_hierarchy_panel_is_distinct_from_the_absent_property() {
+        let slot = ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_SLOT;
+        for (element, expected) in [
+            ("", "0"),
+            (
+                "<HierarchyPanelLocation>None</HierarchyPanelLocation>\r\n",
+                "1",
+            ),
+        ] {
+            let xml = format!("<Form>\r\n<Table id=\"1\">\r\n{element}</Table>\r\n</Form>");
+            let mut edits = XmlEdits::new(&xml).unwrap();
+            let mut item = ItemFacts::default();
+            load_table(&mut edits, 1, &mut item, FormLayout::V8_5_1).unwrap();
+            assert_eq!(item.record[&slot], expected);
+            assert_eq!(
+                item.tail[&ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_TAIL],
+                expected
+            );
+        }
+    }
 
     #[test]
     fn an_unset_table_line_member_is_a_true_slot_only_in_the_8_3_layout() {

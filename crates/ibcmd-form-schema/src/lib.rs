@@ -20,6 +20,10 @@
 /// *malformed*.
 pub const FORM_ABSENT_MEMBER: &str = "\u{1}absent";
 
+/// Selection's boolean Use member in a settings-composer binding. Both
+/// public deep-binding native records store this member after Settings/Selection.
+pub const FORM_SETTINGS_SELECTION_USE_MEMBER: (&str, &str) = ("Use", "10000");
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormChildItemKind {
     UsualGroup,
@@ -1895,6 +1899,19 @@ impl FormCommandCurrentRowUse {
     }
 }
 
+/// Document main tables keep their implicit standard list fields when the
+/// query renames the reference. The aliased reference itself is still filtered
+/// as a selected column by the dynamic-list query resolver.
+pub fn form_dynamic_list_aliased_reference_suppresses_auto_fields(owner_kind: &str) -> bool {
+    owner_kind != "Document"
+}
+
+/// Appends a command action whose name and attributes are already XML-escaped.
+pub fn append_form_command_action_xml(xml: &mut String, attributes: &str, action: &str) {
+    use std::fmt::Write as _;
+    let _ = write!(xml, "\t\t\t<Action{attributes}>{action}</Action>\r\n");
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FormCommandSchema<'a> {
     picture: FormPictureValueSchema,
@@ -1903,7 +1920,35 @@ pub struct FormCommandSchema<'a> {
     extra_action_slots: (usize, usize),
 }
 
+/// The plain table command observed in native 8.5.1.1529 ERP УХ exclusions.
+pub const TABLE_DESELECT_ALL_COMMAND_UUID: &str = "03022d03-1986-4dc4-93c2-03d995332357";
+
+/// The 8.5 ERP УХ 3.3.5.1 table head stores an explicit hidden hierarchy
+/// panel as 1. A table with no location in its source stores 0.
+pub const TABLE_HIERARCHY_PANEL_LOCATION_SLOT: usize = 36;
+pub const TABLE_HIERARCHY_PANEL_LOCATION_TAIL: usize = 2;
+pub const TABLE_HIERARCHY_PANEL_LOCATION: &str = "HierarchyPanelLocation";
+
+/// 2.21 serializes the hierarchy panel immediately before CurrentRowUse.
+pub fn form_child_rank(parent: &str, order: &[&str], name: &str) -> Option<usize> {
+    let position = |name| order.iter().position(|known| *known == name);
+    let hierarchy_rank = (parent == "Table")
+        .then(|| position("CurrentRowUse"))
+        .flatten();
+    if name == TABLE_HIERARCHY_PANEL_LOCATION {
+        return hierarchy_rank;
+    }
+    position(name).map(|rank| rank + usize::from(hierarchy_rank.is_some_and(|at| at <= rank)))
+}
+pub const TABLE_HIERARCHY_PANEL_LOCATIONS: &[(&str, Option<&str>)] =
+    &[("0", None), ("1", Some("None"))];
+
 impl<'a> FormCommandSchema<'a> {
+    /// Number of members in an 8.3.27 command with the given action-binding count.
+    pub fn member_count_8_3_27(bindings: usize) -> Option<usize> {
+        19usize.checked_add(bindings.checked_sub(1)?.checked_mul(2)?)
+    }
+
     /// Slot 15 is the command's action-binding count, and each binding past
     /// the first inserts a `<handler>,1` pair behind slot 16, moving the two
     /// members that close the record along with it.
@@ -1930,8 +1975,8 @@ impl<'a> FormCommandSchema<'a> {
             .get(15)
             .and_then(|field| field.trim().parse::<usize>().ok())
             .filter(|bindings| *bindings >= 1)?;
-        let extra = bindings.checked_sub(1)?.checked_mul(2)?;
-        if fields.len() != 19usize.checked_add(extra)? {
+        let member_count = Self::member_count_8_3_27(bindings)?;
+        if fields.len() != member_count {
             return None;
         }
         for index in 0..bindings.checked_sub(1)? {
@@ -1968,7 +2013,7 @@ impl<'a> FormCommandSchema<'a> {
             return None;
         }
 
-        let current_row_use = match fields.get(18 + extra).map(|field| field.trim()) {
+        let current_row_use = match fields.last().map(|field| field.trim()) {
             Some("0") => Some(FormCommandCurrentRowUse::Use),
             Some("1") => Some(FormCommandCurrentRowUse::DontUse),
             Some("2") => None,
@@ -2250,6 +2295,7 @@ pub const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProperty] =
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum FormExtendedTooltipXmlProperty {
+    Border,
     Width,
     AutoMaxWidth,
     MaxWidth,
@@ -2316,6 +2362,7 @@ pub const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProperty] = &
     // it co-occurs with no later property, so it closes the alignment/title
     // run immediately before the already-evidenced BackColor/Events tail.
     FormExtendedTooltipXmlProperty::BorderColor,
+    FormExtendedTooltipXmlProperty::Border,
     // A tooltip's `BackColor` closes its property block, immediately ahead of
     // `Events`.  Both native tooltips that carry one pin it from a different
     // side and neither is contradicted: one reads `TextColor`, `Title`,
@@ -2687,13 +2734,21 @@ pub struct FormControlBorderSchema {
 }
 
 impl FormControlBorderSchema {
+    pub fn supports_item(item_tag: &str) -> bool {
+        Self::options_slot(item_tag, 0).is_some()
+    }
+
     pub fn options_slot(item_tag: &str, top_level_offset: usize) -> Option<usize> {
         match item_tag {
             "LabelField" | "PictureField" if top_level_offset <= 1 => {
                 Some(FormFieldSchema::OPTIONS_BASE_SLOT + top_level_offset)
             }
             "CalendarField" if top_level_offset == 0 => Some(FormFieldSchema::OPTIONS_BASE_SLOT),
-            "LabelDecoration" | "PictureDecoration" if top_level_offset == 0 => Some(18),
+            "LabelDecoration" | "PictureDecoration" | "ExtendedTooltip"
+                if top_level_offset == 0 =>
+            {
+                Some(18)
+            }
             _ => None,
         }
     }
@@ -2723,7 +2778,8 @@ impl FormControlBorderSchema {
             | ("37", 60, "PictureField", 1, Some("4"), 24, Some("10")) => {
                 (13, FormControlBorderStyle::Single)
             }
-            ("12", 36, "LabelDecoration", 0, Some("0"), 9, Some("5")) => {
+            ("12", 36, "LabelDecoration", 0, Some("0"), 9, Some("5"))
+            | ("12", 34, "ExtendedTooltip", 0, Some("0"), 9, Some("5")) => {
                 (8, FormControlBorderStyle::WithoutBorder)
             }
             ("12", 36, "PictureDecoration", 0, Some("1"), 13, Some("4")) => {
@@ -2807,6 +2863,30 @@ impl FormControlBorderSchema {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct FormPictureDecorationSchema;
+
+#[cfg(test)]
+#[test]
+fn extended_tooltip_round_trip_reads_its_native_double_border() {
+    let mut options = [""; 9];
+    options[0] = "5";
+    let schema = FormControlBorderSchema::from_raw_layout(
+        "12",
+        34,
+        "ExtendedTooltip",
+        0,
+        Some("0"),
+        &options,
+    )
+    .expect("native tooltip layout");
+    assert_eq!(schema.border_option_slot(), 8);
+    let identity = uuid::Uuid::nil().to_string();
+    let tuple = ["3", "0", "{0}", "200", "1", "0", identity.as_str()];
+    let border = schema
+        .non_default_tuple_border(&tuple)
+        .expect("explicit border");
+    assert_eq!(border.style.xml_value(), "Double");
+    assert_eq!(border.width, 1);
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FormPictureDecorationProperties {

@@ -29,7 +29,7 @@ const VALUE_TAG: &str = "dcscor:value";
 const PICTURE_TYPE: &str = "xsi:type=\"v8ui:Picture\"";
 const REF_ATTRIBUTE: &str = " ref=\"v8ui:";
 const READABLE_NS: &str = "http://v8.1c.ru/8.3/xcf/readable";
-const COMMON_PICTURE: &str = "CommonPicture.";
+pub(crate) const COMMON_PICTURE: &str = "CommonPicture.";
 const STD_PICTURE: &str = "StdPicture.";
 
 fn require_known_attributes(open: &str, expected: &[(&str, &str)]) -> Result<()> {
@@ -106,6 +106,17 @@ pub fn with_8_5_picture_values(
             continue;
         }
         let Some(at) = open.find(REF_ATTRIBUTE) else {
+            if open.contains(ibcmd_schema::DCS_NONTRANSPARENT_ATTRIBUTE) {
+                require_known_attributes(open, &[("xsi:type", "v8ui:Picture"), ("t", "false")])?;
+                require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+                let prefix = value_namespace_prefix(&edits, element);
+                edits.replace(
+                    element,
+                    &ibcmd_schema::dcs_empty_picture_xml(VALUE_TAG, Some((&prefix, READABLE_NS))),
+                );
+                changed = true;
+                continue;
+            }
             bail!("a picture value without a picture reference: {open}");
         };
         let name = &open[at + REF_ATTRIBUTE.len()..];
@@ -113,29 +124,27 @@ pub fn with_8_5_picture_values(
         if name.is_empty() {
             bail!("a picture value has an empty picture reference");
         }
-        require_known_attributes(
-            open,
-            &[
-                ("xsi:type", "v8ui:Picture"),
-                ("ref", &format!("v8ui:{name}")),
-            ],
-        )?;
+        let reference_attribute = format!("v8ui:{name}");
+        let mut attributes = vec![
+            ("xsi:type", "v8ui:Picture"),
+            ("ref", reference_attribute.as_str()),
+        ];
+        let transparent = !open.contains(ibcmd_schema::DCS_NONTRANSPARENT_ATTRIBUTE);
+        if !transparent {
+            attributes.push(("t", "false"));
+        }
+        require_known_attributes(open, &attributes)?;
         require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
         let reference = picture_reference(name, object_refs);
-        let mut depth = 1;
-        let mut parent = item.parent;
-        while let Some(index) = parent {
-            depth += 1;
-            parent = edits.elements[index].parent;
-        }
-        let prefix = format!("d{depth}p1");
+        let prefix = value_namespace_prefix(&edits, element);
         edits.replace(
             element,
-            &format!(
-                "<{VALUE_TAG} xmlns:{prefix}=\"{READABLE_NS}\" xsi:type=\"{prefix}:Picture\">\r\n\
-                 \t<{prefix}:Ref>{reference}</{prefix}:Ref>\r\n\
-                 \t<{prefix}:LoadTransparent>true</{prefix}:LoadTransparent>\r\n\
-                 </{VALUE_TAG}>\r\n"
+            &ibcmd_schema::dcs_readable_picture_xml(
+                VALUE_TAG,
+                &prefix,
+                READABLE_NS,
+                &reference,
+                transparent,
             ),
         );
         changed = true;
@@ -177,7 +186,7 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
     let mut stored_kinds = BTreeMap::new();
     for element in 0..edits.elements.len() {
         let item = &edits.elements[element];
-        if item.tag != VALUE_TAG || item.self_closing {
+        if item.tag != VALUE_TAG {
             continue;
         }
         let open = &xml[item.open_start..];
@@ -193,6 +202,14 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
             ],
         )?;
         require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+        if item.self_closing {
+            edits.replace(
+                element,
+                &ibcmd_schema::dcs_empty_picture_xml(VALUE_TAG, None),
+            );
+            changed = true;
+            continue;
+        }
         // Include content before the first child as well: inner_lines starts
         // at that child and would silently drop preceding text or comments.
         let open_end = item.open_start + xml[item.open_start..].find('>').unwrap() + 1;
@@ -202,22 +219,18 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
             .map(str::trim)
             .filter(|line| !line.is_empty())
             .collect();
-        let reference = match lines.as_slice() {
-            [reference, transparent]
-                if *transparent
-                    == format!("<{prefix}:LoadTransparent>true</{prefix}:LoadTransparent>") =>
-            {
-                reference
-                    .strip_prefix(&format!("<{prefix}:Ref>"))
-                    .and_then(|rest| rest.strip_suffix(&format!("</{prefix}:Ref>")))
-            }
-            _ => None,
+        let [reference, transparency] = lines.as_slice() else {
+            continue;
         };
-        let Some((kind, name)) = reference.and_then(|reference| {
-            [COMMON_PICTURE, STD_PICTURE]
-                .into_iter()
-                .find_map(|kind| reference.strip_prefix(kind).map(|name| (kind, name)))
-        }) else {
+        let Some((reference, transparent)) =
+            ibcmd_schema::dcs_readable_picture_members(prefix, reference, transparency)
+        else {
+            continue;
+        };
+        let Some((kind, name)) = [COMMON_PICTURE, STD_PICTURE]
+            .into_iter()
+            .find_map(|kind| reference.strip_prefix(kind).map(|name| (kind, name)))
+        else {
             continue;
         };
         if name.is_empty() {
@@ -229,10 +242,12 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
         {
             bail!("picture kinds with the same stored name are not reversible");
         }
-        edits.replace(
-            element,
-            &format!("<{VALUE_TAG} {PICTURE_TYPE}{REF_ATTRIBUTE}{name}\"/>\r\n"),
-        );
+        let replacement = if transparent {
+            format!("<{VALUE_TAG} {PICTURE_TYPE}{REF_ATTRIBUTE}{name}\"/>\r\n")
+        } else {
+            ibcmd_schema::dcs_nontransparent_picture_xml(VALUE_TAG, &format!("v8ui:{name}"))
+        };
+        edits.replace(element, &replacement);
         changed = true;
     }
     if !changed {
@@ -241,19 +256,212 @@ pub(crate) fn with_stored_picture_values(xml: &str) -> Result<Option<String>> {
     edits.finish().map(Some)
 }
 
+pub(crate) fn resolve_nontransparent_picture_refs(
+    xml: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<String> {
+    if !xml.contains(ibcmd_schema::DCS_NONTRANSPARENT_ATTRIBUTE) {
+        return Ok(xml.to_owned());
+    }
+    let mut edits = XmlEdits::new(xml)?;
+    for element in 0..edits.elements.len() {
+        let item = &edits.elements[element];
+        if item.tag != VALUE_TAG || !item.self_closing {
+            continue;
+        }
+        let open = xml[item.open_start..].split_once('>').unwrap().0;
+        if !open.contains(PICTURE_TYPE)
+            || !open.contains(ibcmd_schema::DCS_NONTRANSPARENT_ATTRIBUTE)
+        {
+            continue;
+        }
+        let Some(name) = open
+            .split_once(REF_ATTRIBUTE)
+            .and_then(|(_, tail)| tail.split_once('"'))
+            .map(|(name, _)| name)
+        else {
+            continue;
+        };
+        let reference = picture_reference(name, object_refs);
+        let uuid = object_refs
+            .iter()
+            .find_map(|(uuid, known)| (known == &reference).then_some(uuid.as_str()))
+            .or_else(|| ibcmd_1c_vocab::standard_picture_uuid(&reference))
+            .ok_or_else(|| anyhow::anyhow!("no storage UUID for DCS picture {reference}"))?;
+        require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+        edits.replace(
+            element,
+            &ibcmd_schema::dcs_nontransparent_picture_xml(VALUE_TAG, &format!("0:{uuid}")),
+        );
+    }
+    edits.finish()
+}
+
 /// The prefix of `open` (a value's start tag) when it declares the readable
 /// namespace under a generated prefix and types the value as its `Picture`.
 fn readable_picture_prefix(open: &str) -> Option<&str> {
-    let declaration = format!("=\"{READABLE_NS}\"");
+    picture_prefix(open, READABLE_NS)
+}
+
+fn value_namespace_prefix(edits: &XmlEdits<'_>, element: usize) -> String {
+    let mut depth = 1;
+    let mut parent = edits.elements[element].parent;
+    while let Some(index) = parent {
+        depth += 1;
+        parent = edits.elements[index].parent;
+    }
+    format!("d{depth}p1")
+}
+
+fn picture_prefix<'a>(open: &'a str, namespace: &str) -> Option<&'a str> {
+    let declaration = format!("=\"{namespace}\"");
     let at = open.find(&declaration)?;
     let prefix = open[..at].rsplit_once("xmlns:")?.1;
     open.contains(&format!("xsi:type=\"{prefix}:Picture\""))
         .then_some(prefix)
 }
 
+/// Loads the measured 2.21 absolute PNG companion into the native DCS value.
+pub fn store_absolute_png_values(
+    xml: &str,
+    read_png: impl FnOnce() -> Result<Vec<u8>>,
+) -> Result<Option<String>> {
+    use ibcmd_schema::{
+        DCS_PICTURE_PNG_FILE, DCS_PICTURE_PNG_SIGNATURE, dcs_absolute_picture_members,
+        dcs_inline_picture_xml,
+    };
+    if !xml.contains(DCS_PICTURE_PNG_FILE) {
+        return Ok(None);
+    }
+    let mut edits = XmlEdits::new(xml)?;
+    let mut reader = Some(read_png);
+    let mut base64 = String::new();
+    for element in 0..edits.elements.len() {
+        let item = &edits.elements[element];
+        if item.tag != VALUE_TAG || item.self_closing {
+            continue;
+        }
+        let open_end = item.open_start + xml[item.open_start..].find('>').unwrap() + 1;
+        let open = &xml[item.open_start..open_end - 1];
+        let Some(prefix) = readable_picture_prefix(open) else {
+            continue;
+        };
+        let close = xml[..item.line_end].rfind('<').unwrap();
+        let lines: Vec<_> = xml[open_end..close]
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        let [absolute, transparent] = dcs_absolute_picture_members(prefix);
+        if !lines.contains(&absolute.as_str()) {
+            continue;
+        }
+        if lines != [absolute.as_str(), transparent.as_str()] {
+            bail!("a DCS PNG value has unsupported members");
+        }
+        require_known_attributes(
+            open,
+            &[
+                (&format!("xmlns:{prefix}"), READABLE_NS),
+                ("xsi:type", &format!("{prefix}:Picture")),
+            ],
+        )?;
+        require_picture_lines(xml, item.open_start, item.line_end, item.self_closing)?;
+        if let Some(reader) = reader.take() {
+            let png = reader()?;
+            if !png.starts_with(DCS_PICTURE_PNG_SIGNATURE) {
+                bail!("the DCS picture companion is not a PNG");
+            }
+            base64 = ibcmd_1c_text::encode_base64(&png);
+        }
+        edits.replace(element, &dcs_inline_picture_xml(VALUE_TAG, &base64));
+    }
+    if reader.is_some() {
+        return Ok(None);
+    }
+    edits.finish().map(Some)
+}
+
+/// Publishes native inline DCS PNG values and their one deduplicated sidecar.
+pub fn extract_absolute_png_values(xml: &str) -> Result<Option<(String, Vec<u8>)>> {
+    use ibcmd_schema::{
+        DCS_INLINE_PICTURE_NS, DCS_PICTURE_PNG_SIGNATURE, dcs_absolute_picture_xml,
+        dcs_picture_ends_line,
+    };
+    if !xml.contains(DCS_INLINE_PICTURE_NS) {
+        return Ok(None);
+    }
+    let mut edits = XmlEdits::new(xml)?;
+    let mut png = None;
+    for element in 0..edits.elements.len() {
+        let item = &edits.elements[element];
+        if item.tag != VALUE_TAG || item.self_closing || !item.children.is_empty() {
+            continue;
+        }
+        let open_end = item.open_start + xml[item.open_start..].find('>').unwrap() + 1;
+        let open = &xml[item.open_start..open_end - 1];
+        let inline_prefix = picture_prefix(open, DCS_INLINE_PICTURE_NS);
+        if inline_prefix.is_none() && !open.contains(PICTURE_TYPE) {
+            continue;
+        }
+        let close = xml[..item.line_end].rfind('<').unwrap();
+        let Some(bytes) = ibcmd_1c_text::decode_base64_mime(&xml[open_end..close])
+            .filter(|bytes| bytes.starts_with(DCS_PICTURE_PNG_SIGNATURE))
+        else {
+            continue;
+        };
+        require_picture_lines(xml, item.open_start, item.line_end, true)?;
+        if !dcs_picture_ends_line(&xml[close..item.line_end], VALUE_TAG) {
+            bail!("inline DCS picture has unmodeled trailing text");
+        }
+        if let Some(prefix) = inline_prefix {
+            require_known_attributes(
+                open,
+                &[
+                    (&format!("xmlns:{prefix}"), DCS_INLINE_PICTURE_NS),
+                    ("xsi:type", &format!("{prefix}:Picture")),
+                ],
+            )?;
+        } else {
+            require_known_attributes(open, &[("xsi:type", "v8ui:Picture")])?;
+        }
+        if png.as_ref().is_some_and(|known| known != &bytes) {
+            bail!("the DCS template contains different PNG values for one companion path");
+        }
+        png = Some(bytes);
+        let prefix = value_namespace_prefix(&edits, element);
+        edits.replace(
+            element,
+            &dcs_absolute_picture_xml(VALUE_TAG, &prefix, READABLE_NS),
+        );
+    }
+    png.map(|png| Ok((edits.finish()?, png))).transpose()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_absolute_png_references_round_trip_in_one_companion() {
+        let png = ibcmd_1c_text::decode_base64_mime(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5tUAAAAASUVORK5CYII=",
+        )
+        .unwrap();
+        let absolute = ibcmd_schema::dcs_absolute_picture_xml(VALUE_TAG, "d2p1", READABLE_NS);
+        let xml = format!(
+            "<document xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"{}\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n{absolute}{absolute}</document>",
+            ibcmd_schema::DCS_INLINE_PICTURE_NS
+        );
+        let stored = store_absolute_png_values(&xml, || Ok(png.clone()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.matches("iVBOR").count(), 2);
+        let (published, companion) = extract_absolute_png_values(&stored).unwrap().unwrap();
+        assert_eq!(published, xml);
+        assert_eq!(companion, png);
+        assert!(store_absolute_png_values(&xml, || Ok(b"not png".to_vec())).is_err());
+    }
 
     #[test]
     fn the_8_5_spelling_is_stored_the_platforms_way() {
@@ -273,6 +481,42 @@ mod tests {
             Some(stored)
         );
         assert_eq!(with_stored_picture_values(stored).unwrap(), None);
+    }
+
+    #[test]
+    fn nontransparent_references_keep_the_flag_and_use_native_ids() {
+        let refs = BTreeMap::from([(
+            "00000000-0000-0000-0000-000000000001".to_owned(),
+            "CommonPicture.Своя".to_owned(),
+        )]);
+        let stored = "<a>\r\n\
+                      \t<dcscor:value xsi:type=\"v8ui:Picture\" t=\"false\" ref=\"v8ui:Своя\"/>\r\n\
+                      \t<dcscor:value xsi:type=\"v8ui:Picture\" t=\"false\" ref=\"v8ui:Change\"/>\r\n\
+                      </a>";
+        let written = with_8_5_picture_values(stored, &refs).unwrap();
+        assert_eq!(written.matches("LoadTransparent>false").count(), 2);
+        assert_eq!(
+            with_stored_picture_values(&written).unwrap().as_deref(),
+            Some(stored),
+        );
+        let physical = resolve_nontransparent_picture_refs(stored, &refs).unwrap();
+        assert!(physical.contains("t=\"false\" ref=\"0:00000000-0000-0000-0000-000000000001\""));
+        assert!(physical.contains("t=\"false\" ref=\"0:97b2cc97-d5c6-45fb-9824-9d6d73db21fe\""));
+    }
+
+    #[test]
+    fn an_empty_8_5_picture_uses_the_nontransparent_native_value() {
+        let stored = "<a>\r\n\t<dcscor:value xsi:type=\"v8ui:Picture\" t=\"false\"/>\r\n</a>";
+        let written = with_8_5_picture_values(stored, &BTreeMap::new()).unwrap();
+        assert!(written.contains("xsi:type=\"d2p1:Picture\"/>"));
+        assert_eq!(
+            with_stored_picture_values(&written).unwrap().as_deref(),
+            Some(stored)
+        );
+        assert_eq!(
+            resolve_nontransparent_picture_refs(stored, &BTreeMap::new()).unwrap(),
+            stored
+        );
     }
 
     #[test]

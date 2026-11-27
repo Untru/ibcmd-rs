@@ -50,7 +50,10 @@ pub use fields::{
     parse_non_zero_uuid, parse_uuid_field, platform_base64_token, uuid_like_values,
     uuid_like_values_in_text_order,
 };
-pub use namespaces::declare_palette_namespace_beside_style;
+pub use namespaces::{
+    PALETTE_COLORS_8_5_1, PALETTE_COLORS_NS, declare_palette_namespace_beside_style,
+    encode_palette_color_8_5_1,
+};
 pub use paths::sanitize_source_path_segment;
 pub use strings::{
     crlf_line_breaks, format_1c_string, parse_1c_quoted_string, parse_1c_quoted_string_with_len,

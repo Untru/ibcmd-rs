@@ -287,7 +287,7 @@ impl<'a> XmlEdits<'a> {
             None if self.lenient => &[],
             None => bail!("no 2.21 child order is known for <{parent_tag}>"),
         };
-        let rank = |name: &str| order.iter().position(|known| *known == name);
+        let rank = |name: &str| ibcmd_form_schema::form_child_rank(&parent_tag, order, name);
         let mut before = None;
         let mut new_rank = usize::MAX - 1;
         match rank(tag) {
@@ -724,6 +724,16 @@ const FACT_RULES: &[FactRule] = &[
         element: "Orientation",
         replaces: &[],
         values: &[("1", None), ("2", Some("HorizontalIfPossible"))],
+    },
+    FactRule {
+        tags: &["Table"],
+        source: FactSource::ItemMember(
+            "73",
+            ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_SLOT,
+        ),
+        element: ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION,
+        replaces: &[],
+        values: ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATIONS,
     },
     // Tables: members the `73` record appends. The line and alternation
     // flags moved: 2.21 names them `...BWA` and reads them here, while the

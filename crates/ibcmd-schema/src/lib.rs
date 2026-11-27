@@ -31,6 +31,150 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Settings pictures in a 2.21 DCS template use one companion file per
+/// observed PNG. Multiple references to the same picture share that file.
+pub const DCS_PICTURE_PNG_FILE: &str = "value.png";
+pub const DCS_INLINE_PICTURE_NS: &str = "http://v8.1c.ru/8.1/data/ui";
+pub const DCS_PICTURE_PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+pub const DCS_NONTRANSPARENT_ATTRIBUTE: &str = " t=\"false\"";
+
+pub fn dcs_readable_picture_xml(
+    tag: &str,
+    prefix: &str,
+    namespace: &str,
+    reference: &str,
+    transparent: bool,
+) -> String {
+    format!(
+        "<{tag} xmlns:{prefix}=\"{namespace}\" xsi:type=\"{prefix}:Picture\">\r\n\
+         \t<{prefix}:Ref>{reference}</{prefix}:Ref>\r\n\
+         \t<{prefix}:LoadTransparent>{transparent}</{prefix}:LoadTransparent>\r\n\
+         </{tag}>\r\n"
+    )
+}
+
+pub fn dcs_readable_picture_members<'a>(
+    prefix: &str,
+    reference: &'a str,
+    transparency: &str,
+) -> Option<(&'a str, bool)> {
+    let reference = reference
+        .strip_prefix(&format!("<{prefix}:Ref>"))?
+        .strip_suffix(&format!("</{prefix}:Ref>"))?;
+    let transparent = transparency
+        .strip_prefix(&format!("<{prefix}:LoadTransparent>"))?
+        .strip_suffix(&format!("</{prefix}:LoadTransparent>"))?
+        .parse()
+        .ok()?;
+    Some((reference, transparent))
+}
+
+pub fn dcs_picture_ends_line(closing_tag_and_tail: &str, tag: &str) -> bool {
+    closing_tag_and_tail
+        .strip_prefix(&format!("</{tag}>"))
+        .is_some_and(|trailing| trailing.trim().is_empty())
+}
+
+pub fn dcs_inline_picture_xml(tag: &str, base64: &str) -> String {
+    format!("<{tag} xsi:type=\"v8ui:Picture\">{base64}</{tag}>\r\n")
+}
+
+pub fn dcs_nontransparent_picture_xml(tag: &str, reference: &str) -> String {
+    format!("<{tag} xsi:type=\"v8ui:Picture\" t=\"false\" ref=\"{reference}\"/>\r\n")
+}
+
+pub fn dcs_empty_picture_xml(tag: &str, namespace: Option<(&str, &str)>) -> String {
+    match namespace {
+        Some((prefix, uri)) => {
+            format!("<{tag} xmlns:{prefix}=\"{uri}\" xsi:type=\"{prefix}:Picture\"/>\r\n")
+        }
+        None => format!("<{tag} xsi:type=\"v8ui:Picture\" t=\"false\"/>\r\n"),
+    }
+}
+
+pub fn dcs_absolute_picture_xml(tag: &str, prefix: &str, namespace: &str) -> String {
+    let [absolute, transparent] = dcs_absolute_picture_members(prefix);
+    format!(
+        "<{tag} xmlns:{prefix}=\"{namespace}\" xsi:type=\"{prefix}:Picture\">\r\n\
+         \t{absolute}\r\n\
+         \t{transparent}\r\n\
+         </{tag}>\r\n"
+    )
+}
+
+pub fn dcs_absolute_picture_members(prefix: &str) -> [String; 2] {
+    [
+        format!("<{prefix}:Abs>{DCS_PICTURE_PNG_FILE}</{prefix}:Abs>"),
+        format!("<{prefix}:LoadTransparent>true</{prefix}:LoadTransparent>"),
+    ]
+}
+
+/// Empty action panels generated in the appended field and table tails by 8.5.
+#[derive(Clone, Copy)]
+pub struct FormGeneratedActionPanel {
+    owner_revision: &'static str,
+    tail_offset: usize,
+    owner_name_slot: usize,
+    kind: u8,
+    suffix: &'static str,
+}
+
+const FORM_GENERATED_ACTION_PANELS: [FormGeneratedActionPanel; 3] = [
+    FormGeneratedActionPanel {
+        owner_revision: "48",
+        tail_offset: 11,
+        owner_name_slot: 6,
+        kind: 10,
+        suffix: "ПанельДействийВыделенныхСтрок",
+    },
+    FormGeneratedActionPanel {
+        owner_revision: "73",
+        tail_offset: 20,
+        owner_name_slot: 5,
+        kind: 10,
+        suffix: "ПанельДействийВыделенныхСтрок",
+    },
+    FormGeneratedActionPanel {
+        owner_revision: "73",
+        tail_offset: 14,
+        owner_name_slot: 5,
+        kind: 11,
+        suffix: "ДействияСтроки",
+    },
+];
+
+impl FormGeneratedActionPanel {
+    pub const RECORD_REVISION: &str = "22";
+    pub const PAYLOAD_SLOT: usize = 2;
+
+    pub fn slots(
+        owner_revision: &str,
+        owner_len: usize,
+        has_common_prefix: bool,
+    ) -> impl Iterator<Item = (usize, usize, Self)> + '_ {
+        FORM_GENERATED_ACTION_PANELS
+            .into_iter()
+            .filter_map(move |panel| {
+                if panel.owner_revision != owner_revision {
+                    return None;
+                }
+                let slot = owner_len.checked_sub(panel.tail_offset)?;
+                let name = panel.owner_name_slot + usize::from(has_common_prefix);
+                Some((slot, name, panel))
+            })
+    }
+
+    /// The record after color and font tuples have been normalized to 8.3.
+    /// The owner name retains its wire quoting and any escaped quotes.
+    pub fn default_payload(self, owner_name: &str) -> Option<String> {
+        let name = owner_name.strip_suffix('"')?;
+        Some(format!(
+            "{{1,0,0,{},{name}{}\",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{0,1,0,1}},0,1,0,0,0,3,3,0}}",
+            self.kind, self.suffix
+        ))
+    }
+}
+
 /// The optional direct `ContextMenu` owned exclusively by a serialized
 /// `TextDocumentField`.  The physical adapter supplies the decoded payload so
 /// this schema rule owns the wire contract without depending on form parsing.
@@ -18769,6 +18913,16 @@ pub mod metadata_storage_facts {
 /// Shared metadata child record shapes and standard-field registries.
 /// The SQL adapter owns byte parsing; these facts also serve metadata writers.
 pub mod metadata_child_storage_facts {
+    /// Exact owner-family storage elements measured in native CF archives.
+    pub fn additional_indexes_body_suffix(owner_kind: &str) -> Option<&'static str> {
+        match owner_kind {
+            "Catalog" => Some("1d"),
+            "Document" => Some("3"),
+            "AccumulationRegister" => Some("4"),
+            _ => None,
+        }
+    }
+
     /// Catalog root standard attributes, shared by row encoding and index decoding.
     pub const CATALOG_STANDARD_FIELDS: &[(&str, i64)] = &[
         ("PredefinedDataName", -13),

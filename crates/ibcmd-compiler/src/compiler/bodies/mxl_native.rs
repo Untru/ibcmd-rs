@@ -247,6 +247,7 @@ struct Node {
     attributes: Vec<(String, String)>,
     children: Vec<Node>,
     text: String,
+    text_namespace: Option<String>,
     /// The element's byte span in the source, start tag to end tag.
     span: (usize, usize),
 }
@@ -350,6 +351,12 @@ fn parse_dom(xml: &[u8]) -> Result<Node> {
                 let mut node = stack
                     .pop()
                     .ok_or_else(|| anyhow!("SpreadsheetDocument XML closes an unopened element"))?;
+                if let Some((prefix, _)) = node.text.trim().split_once(':') {
+                    node.text_namespace = std::iter::once(&node)
+                        .chain(stack.iter().rev())
+                        .find_map(|ancestor| ancestor.own_namespace(prefix))
+                        .map(str::to_owned);
+                }
                 node.span.1 = reader.buffer_position() as usize;
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(node),
@@ -405,6 +412,7 @@ fn start_node(start: &BytesStart<'_>) -> Result<Node> {
         attributes,
         children: Vec::new(),
         text: String::new(),
+        text_namespace: None,
         span: (0, 0),
     })
 }
@@ -2290,8 +2298,9 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
         let spelled = text.trim();
         let namespace = spelled
             .split_once(':')
-            .and_then(|(prefix, _)| node.own_namespace(prefix).map(str::to_string));
-        self.palette_slot_for_spelling(spelled, namespace.as_deref())
+            .and_then(|(prefix, _)| node.own_namespace(prefix))
+            .or(node.text_namespace.as_deref());
+        self.palette_slot_for_spelling(spelled, namespace)
     }
 
     /// A report colour's slot stores the same value an explicit colour of that
@@ -2361,7 +2370,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
         };
         match namespace {
             Some(WEB_COLORS_NS) => {
-                let code = web_color_code(name)
+                let code = ibcmd_moxel::moxel_web_color_code(name)
                     .ok_or_else(|| anyhow!("web colour {name} has no stored code"))?;
                 Ok((format!("{{3,2,{{{code}}}}}"), None))
             }
@@ -2369,6 +2378,11 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 let code = windows_color_code(name)
                     .ok_or_else(|| anyhow!("windows colour {name} has no stored code"))?;
                 Ok((format!("{{3,1,{{{code}}}}}"), None))
+            }
+            Some(ibcmd_1c_text::PALETTE_COLORS_NS) => {
+                let record = ibcmd_1c_text::encode_palette_color_8_5_1(name)
+                    .ok_or_else(|| anyhow!("palette colour {name} has no stored code"))?;
+                Ok((record, None))
             }
             _ => bail!("colour {spelled} names an unknown namespace"),
         }
@@ -3071,70 +3085,6 @@ fn report_style_color(name: &str) -> Option<(i32, u32)> {
     })
 }
 
-fn web_color_code(name: &str) -> Option<u32> {
-    Some(match name {
-        "AliceBlue" => 1,
-        "AntiqueWhite" => 2,
-        "Azure" => 5,
-        "Beige" => 6,
-        "Black" => 8,
-        "Blue" => 10,
-        "Cream" => 20,
-        "Crimson" => 21,
-        "DarkBlue" => 23,
-        "DarkGray" => 26,
-        "DarkGreen" => 27,
-        "DarkRed" => 33,
-        "DarkSlateGray" => 37,
-        "DimGray" => 42,
-        "FireBrick" => 44,
-        "FloralWhite" => 45,
-        "ForestGreen" => 46,
-        "Gainsboro" => 48,
-        "GhostWhite" => 49,
-        "Gray" => 52,
-        "Green" => 53,
-        "GreenYellow" => 54,
-        "HoneyDew" => 55,
-        "Ivory" => 59,
-        "Lavender" => 61,
-        "LemonChiffon" => 64,
-        "LightCyan" => 67,
-        "LightGoldenRod" => 68,
-        "LightGoldenRodYellow" => 69,
-        "LightGreen" => 70,
-        "LightGray" => 71,
-        "LightPink" => 72,
-        "LightSalmon" => 73,
-        "LightSkyBlue" => 75,
-        "LightSlateGray" => 77,
-        "LightYellow" => 79,
-        "Maroon" => 84,
-        "MediumBlue" => 86,
-        "MediumGray" => 87,
-        "MediumGreen" => 88,
-        "MediumSpringGreen" => 93,
-        "MintCream" => 97,
-        "MistyRose" => 98,
-        "PaleGoldenrod" => 108,
-        "Red" => 119,
-        "RosyBrown" => 120,
-        "RoyalBlue" => 121,
-        "SaddleBrown" => 122,
-        "Silver" => 128,
-        "SlateBlue" => 130,
-        "SlateGray" => 131,
-        "SteelBlue" => 134,
-        "Tomato" => 138,
-        "Violet" => 140,
-        "VioletRed" => 141,
-        "White" => 143,
-        "WhiteSmoke" => 144,
-        "Yellow" => 145,
-        _ => return None,
-    })
-}
-
 fn windows_color_code(name: &str) -> Option<u32> {
     Some(match name {
         "ActiveTitleBar" => 2,
@@ -3150,6 +3100,25 @@ fn windows_color_code(name: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sky_blue_maps_to_native_web_color_code() {
+        assert_eq!(ibcmd_moxel::moxel_web_color_code("SkyBlue"), Some(129));
+    }
+
+    #[test]
+    fn spreadsheet_palette_colour_resolves_its_inherited_namespace() {
+        let xml = format!(
+            "<document xmlns:palette=\"{}\"><format><backColor>palette:Gray</backColor></format></document>",
+            ibcmd_1c_text::PALETTE_COLORS_NS
+        );
+        let root = parse_dom(xml.as_bytes()).unwrap();
+        let color = root.child("format").unwrap().child("backColor").unwrap();
+        assert_eq!(
+            color.text_namespace.as_deref(),
+            Some(ibcmd_1c_text::PALETTE_COLORS_NS)
+        );
+    }
 
     fn patch_fixture(name: &str) -> Vec<u8> {
         std::fs::read(

@@ -97,10 +97,7 @@ pub fn format_native_color(
     // `pal:<name>`, a platform 8.5 palette colour: space 4 with kind 5, the
     // index the 2.21 exporter names (`layout_8_5_1::palette_color_name_8_5_1`).
     if let Some(name) = value.strip_prefix("pal:") {
-        let index = PALETTE_COLORS_8_5_1
-            .iter()
-            .find_map(|(candidate, index)| (*candidate == name).then_some(*index))?;
-        return Some(format!("{{4,4,{{{index}}},5}}"));
+        return ibcmd_1c_text::encode_palette_color_8_5_1(name);
     }
     if let Some(name) = value.strip_prefix("win:") {
         let code = WINDOWS_COLOR_CODES
@@ -118,18 +115,7 @@ pub fn format_native_color(
     style_item_uuid(name).map(|uuid| format!("{{3,3,{{0,{uuid}}}}}"))
 }
 
-/// The platform 8.5 palette, by the index a colour tuple stores.
-pub const PALETTE_COLORS_8_5_1: &[(&str, u8)] = &[
-    ("FirstBrand", 0),
-    ("SecondBrand", 1),
-    ("Red", 2),
-    ("Orange", 3),
-    ("Yellow", 4),
-    ("Green", 5),
-    ("LightBlue", 6),
-    ("Blue", 7),
-    ("Gray", 15),
-];
+pub use ibcmd_1c_text::PALETTE_COLORS_8_5_1;
 
 /// The codes the platform's own style colours carry, as the corpus spells
 /// them.
@@ -4085,6 +4071,12 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     (
         "Table",
         false,
+        "DeselectAll",
+        ibcmd_form_schema::TABLE_DESELECT_ALL_COMMAND_UUID,
+    ),
+    (
+        "Table",
+        false,
         "SetPresentation",
         "7d4db5ed-0981-4020-b3b8-886b7165ba05",
     ),
@@ -7498,6 +7490,7 @@ pub struct NativeFormCommand<'a> {
     pub picture: &'a str,
     /// `<Action>`: the procedure the command runs.
     pub action: &'a str,
+    pub extra_actions: &'a [String],
     /// `<Representation>`: `Text`, `Picture`, `TextPicture` or `Auto`.
     pub representation: Option<&'a str>,
     pub modifies_saved_data: bool,
@@ -7520,6 +7513,7 @@ impl Default for NativeFormCommand<'_> {
             picture_index: "{0,0,0}",
             picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
             action: "",
+            extra_actions: &[],
             representation: None,
             modifies_saved_data: false,
             functional_options: "{0,0}",
@@ -7551,9 +7545,15 @@ pub fn format_form_command(command: &NativeFormCommand<'_>) -> Option<String> {
         &[("Use", "0"), ("DontUse", "1"), ("Auto", "2")],
         "2",
     )?;
+    let extra_actions: String = command
+        .extra_actions
+        .iter()
+        .map(|handler| format!(",{},1", quoted(handler)))
+        .collect();
+    let bindings = command.extra_actions.len() + 1;
     Some(format!(
         "{{9,{{{id},{ns}}},{name},{title},{tooltip},{use_always},{picture_index},{picture},\
-         {action},{representation},{modifies},0,{options},{row_use_early},{fourteenth},1,0,0,\
+         {action},{representation},{modifies},0,{options},{row_use_early},{fourteenth},{bindings},0{extra_actions},0,\
          {row_use_late}}}",
         id = command.id,
         ns = FORM_COMMAND_NAMESPACE_UUID,
@@ -7568,6 +7568,19 @@ pub fn format_form_command(command: &NativeFormCommand<'_>) -> Option<String> {
         options = command.functional_options,
         fourteenth = command.fourteenth,
     ))
+}
+
+#[cfg(test)]
+#[test]
+fn writes_the_primary_and_later_form_command_actions() {
+    let record = format_form_command(&NativeFormCommand {
+        action: "RunHandler",
+        extra_actions: &["AfterHandler".to_owned()],
+        ..NativeFormCommand::default()
+    })
+    .expect("primary and later action bindings");
+    assert!(record.contains(r#""RunHandler",3,0,0,"#));
+    assert!(record.ends_with(r#",2,0,"AfterHandler",1,0,2}"#));
 }
 
 /// The `{0,…}` record of a form parameter.
@@ -9062,7 +9075,8 @@ const DATA_PATH_DCS_SETTINGS: &[(&str, &str)] = &[
     ("ItemUserFields", "10014"),
     ("ReportStructurePicture", "10015"),
 ];
-const DATA_PATH_DCS_SELECTION: &[(&str, &str)] = &[("SelectionAvailableFields", "0")];
+const DATA_PATH_DCS_SELECTION: &[(&str, &str)] =
+    &[("SelectionAvailableFields", "0"), ("Use", "10000")];
 const DATA_PATH_DCS_GROUP_FIELDS: &[(&str, &str)] = &[("GroupFieldsAvailableFields", "0")];
 const DATA_PATH_DCS_FILTER: &[(&str, &str)] = &[
     ("FilterAvailableFields", "0"),
@@ -10009,7 +10023,7 @@ fn resolve_metadata_data_path_part(
                 section: Some(name.to_string()),
             }
         } else {
-            data_path_context_for_types(&pick.types)
+            data_path_context_expanding(Some(configuration), &pick.types)
         };
         return Some((format!("{{0,{}}}", pick.uuid), context));
     }
@@ -12342,6 +12356,113 @@ mod tests {
                 .collect(),
             items: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn composer_selection_use_has_a_complete_native_chain() {
+        let form = form_with(vec![("Report", attribute("1", &["cfg:ReportObject"]))]);
+        assert_eq!(
+            resolve_form_data_path(
+                &form,
+                None,
+                "Report.SettingsComposer.Settings.Selection.Use"
+            )
+            .as_deref(),
+            Some("{5,{1},{0,b9754f01-29e9-11d6-a3c7-0050bae0a776},{0},{2},{10000}}")
+        );
+        assert_eq!(
+            resolve_form_data_path(
+                &form,
+                None,
+                "Report.SettingsComposer.Settings.Selection.Unknown"
+            ),
+            None
+        );
+        assert_eq!(
+            resolve_form_data_path(
+                &form,
+                None,
+                "Report.SettingsComposer.Settings.Selection.Use.More"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn tabular_reference_defined_type_opens_its_declared_object() {
+        let form = form_with(vec![(
+            "Object",
+            attribute("1", &["cfg:CatalogObject.Owner"]),
+        )]);
+        let configuration = TestConfiguration::new(vec![
+            (
+                "Catalog.Owner",
+                ConfigurationObject {
+                    class: "Catalog".into(),
+                    fields: BTreeMap::from([(
+                        "Goods".into(),
+                        field(
+                            "11111111-1111-4111-8111-111111111111",
+                            "TabularSection",
+                            &[],
+                        ),
+                    )]),
+                    sections: BTreeMap::from([(
+                        "Goods".into(),
+                        BTreeMap::from([(
+                            "Product".into(),
+                            field(
+                                "22222222-2222-4222-8222-222222222222",
+                                "Attribute",
+                                &["cfg:DefinedType.ProductType"],
+                            ),
+                        )]),
+                    )]),
+                    ..Default::default()
+                },
+            ),
+            (
+                "DefinedType.ProductType",
+                ConfigurationObject {
+                    types: strings(&["cfg:CatalogRef.Product"]),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Catalog.Product",
+                ConfigurationObject {
+                    class: "Catalog".into(),
+                    fields: BTreeMap::from([(
+                        "UnitOfMeasure".into(),
+                        field(
+                            "33333333-3333-4333-8333-333333333333",
+                            "Attribute",
+                            &["xs:string"],
+                        ),
+                    )]),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        assert_eq!(
+            resolve_form_data_path(
+                &form,
+                Some(&configuration),
+                "Object.Goods.Product.UnitOfMeasure"
+            )
+            .as_deref(),
+            Some(
+                "{4,{1},{0,11111111-1111-4111-8111-111111111111},{0,22222222-2222-4222-8222-222222222222},{0,33333333-3333-4333-8333-333333333333}}"
+            )
+        );
+        assert_eq!(
+            resolve_form_data_path(&form, None, "Object.Goods.Product.UnitOfMeasure"),
+            None
+        );
+        assert_eq!(
+            resolve_form_data_path(&form, Some(&configuration), "Object.Goods.Product.Unknown"),
+            None
+        );
     }
 
     /// `Catalogs/КлассификаторПолномочийМЧД003/Forms/ФормаПодбораСоставныхПолномочий`

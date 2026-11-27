@@ -13,6 +13,7 @@ anyhow = "1.0"
 flate2 = "1.1"
 # The template codec's base64 payloads, the DCS read-back's palette namespace.
 ibcmd-1c-text = { path = "../ibcmd-1c-text" }
+ibcmd-1c-vocab = { path = "../ibcmd-1c-vocab" }
 ibcmd-compiler-families = { path = "../ibcmd-compiler-families" }
 # The bootstrap-readiness manifest, re-exported as `compiler::readiness`.
 ibcmd-compiler-readiness = { path = "../ibcmd-compiler-readiness" }

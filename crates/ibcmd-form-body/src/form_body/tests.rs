@@ -4409,6 +4409,7 @@ fn formatter_spells_the_call_type_the_model_carries() {
         picture_transparent_pixel: None,
         shortcut: None,
         action: "КомандаВыполнить".to_string(),
+        extra_actions: Vec::new(),
         representation: None,
         functional_options: Vec::new(),
         modifies_saved_data: None,
@@ -4469,6 +4470,7 @@ fn formatter_emits_form_command_children_in_native_order() {
         picture_transparent_pixel: None,
         shortcut: None,
         action: "ЗаписатьИЗакрытьВыполнить".to_string(),
+        extra_actions: Vec::new(),
         representation: Some("TextPicture"),
         functional_options: vec!["FunctionalOption.ИспользоватьФункцию".to_string()],
         modifies_saved_data: Some(true),
@@ -9284,6 +9286,26 @@ fn extracts_a_form_command_whose_only_action_is_a_later_binding() {
     assert!(command.picture_ref.is_none());
 }
 
+#[test]
+fn extracts_primary_and_later_form_command_actions() {
+    let command = parse_form_command(
+        r#"{9,{5,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"Run",{1,0},{1,0},{0,{0,{"B",1},0}},{0,0,0},{4,0,{0},"",-1,-1,1,0,""},"RunHandler",3,0,0,{0,0},1,0,2,0,"AfterHandler",1,0,2}"#,
+        &BTreeMap::new(),
+    )
+    .expect("primary and later action bindings");
+    assert_eq!(command.action, "RunHandler");
+    assert_eq!(command.extra_actions, ["AfterHandler"]);
+}
+
+#[test]
+fn extracts_deselect_all_from_a_native_table_exclusion() {
+    let fields = ["{2,03022d03-1986-4dc4-93c2-03d995332357,51c99108-107c-43e1-8918-e48835bf2495}"];
+    assert_eq!(
+        parse_form_table_command_set_excluded_commands(&fields),
+        ["DeselectAll", "SelectAll"]
+    );
+}
+
 /// One event of one item can be bound more than once, and every binding is
 /// written, each behind the head binding of its own event.
 ///
@@ -12319,6 +12341,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
         picture_transparent_pixel: None,
         shortcut: None,
         action: String::new(),
+        extra_actions: Vec::new(),
         representation: None,
         functional_options: Vec::new(),
         modifies_saved_data: None,
@@ -26425,4 +26448,41 @@ fn form_body_empty_auto_command_bar_rule_has_no_corpus_owner_literals() {
     ] {
         assert!(!production.contains(owner_literal), "{owner_literal}");
     }
+}
+
+#[test]
+fn search_string_source_can_name_a_context_menu() {
+    let items = BTreeMap::from([("1672".to_owned(), "SearchContextMenu".to_owned())]);
+    assert_eq!(
+        parse_form_search_string_non_table_source("{1672,0}", &items).as_deref(),
+        Some("SearchContextMenu")
+    );
+    assert_eq!(
+        parse_form_search_string_non_table_source("{1672,1}", &items),
+        None
+    );
+    assert_eq!(
+        parse_form_search_string_non_table_source("{-1,-1}", &items),
+        None
+    );
+}
+
+#[test]
+fn document_list_keeps_standard_fields_after_renaming_the_reference() {
+    let selected = parse_form_dynamic_list_query_selection(
+        "ВЫБРАТЬ Rows.Ссылка КАК RowReference ИЗ Документ.Rows КАК Rows",
+    )
+    .unwrap();
+    let fields = form_dynamic_list_main_table_auto_fields(
+        "Document.Rows",
+        &selected,
+        &BTreeMap::new(),
+        None,
+        None,
+    )
+    .unwrap();
+    for name in ["ПометкаУдаления", "Проведен", "Дата"] {
+        assert!(fields.contains(name), "{name}");
+    }
+    assert!(!fields.contains("Ссылка"));
 }

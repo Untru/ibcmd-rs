@@ -209,8 +209,12 @@ pub(crate) fn compile_evidenced_dcs_with_resolvers(
                 }
             }
             let xml = stored.as_deref().map_or(xml, str::as_bytes);
-            let (plain, type_index, object_refs) =
-                compile_schema_plain(xml, style_reference_types, types)?;
+            let (plain, type_index, object_refs) = compile_schema_plain(
+                xml,
+                style_reference_types,
+                types,
+                picture_object_refs.filter(|_| stored.is_some()),
+            )?;
             let blob = deflate_bytes(&plain)?;
             let body = decode_strict_with_references(kind, &blob, style_reference_types)?;
             verify_schema_round_trip(xml, &body, &type_index, &object_refs)?;
@@ -413,6 +417,7 @@ fn compile_schema_plain(
     xml: &[u8],
     style_reference_types: &BTreeMap<String, String>,
     types: &dyn DcsStorageTypeResolver,
+    picture_object_refs: Option<&BTreeMap<String, String>>,
 ) -> Result<CompiledSchemaPlain, DcsCodecError> {
     validate_xml_document(xml, "DataCompositionSchema", Some(SCHEMA_NS))?;
 
@@ -422,7 +427,14 @@ fn compile_schema_plain(
         .collect::<BTreeMap<_, _>>();
     let compiled = compile_dcs_schema_storage_documents(xml, &style_items, types)
         .map_err(map_template_error)?;
-    let (type_index, object_refs) = read_back_indexes(&compiled);
+    let (type_index, mut object_refs) = read_back_indexes(&compiled);
+    if let Some(refs) = picture_object_refs {
+        object_refs.extend(
+            refs.iter()
+                .filter(|(_, name)| name.starts_with(super::dcs_2_21::COMMON_PICTURE))
+                .map(|(uuid, name)| (uuid.clone(), name.clone())),
+        );
+    }
     let documents = compiled.into_documents();
     let borrowed = std::iter::once(documents.primary_schema_file())
         .chain(documents.settings().iter().map(Vec::as_slice))
@@ -431,12 +443,26 @@ fn compile_schema_plain(
     analyze_dcs_schema_template_documents_with_references(&borrowed, style_reference_types)
         .map_err(map_template_error)?;
     let first = documents.primary_schema_file();
-    let settings = documents.settings();
+    let settings = documents
+        .settings()
+        .iter()
+        .map(|document| {
+            let Some(refs) = picture_object_refs else {
+                return Ok(std::borrow::Cow::Borrowed(document.as_slice()));
+            };
+            let text = std::str::from_utf8(document)
+                .map_err(|error| DcsCodecError::RoundTrip(error.to_string()))?;
+            super::dcs_2_21::resolve_nontransparent_picture_refs(text, refs)
+                .map(|xml| std::borrow::Cow::Owned(xml.into_bytes()))
+                .map_err(|error| DcsCodecError::RoundTrip(format!("{error:#}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let third = documents.terminal_schema_file();
 
     let settings_count = u32::try_from(settings.len())
         .map_err(|_| DcsCodecError::LimitExceeded("DCS settings document count"))?;
-    let stored_documents = std::iter::once(first).chain(settings.iter().map(Vec::as_slice));
+    let stored_documents =
+        std::iter::once(first).chain(settings.iter().map(|document| document.as_ref()));
     let lengths = stored_documents
         .clone()
         .map(|document| {
@@ -467,7 +493,7 @@ fn compile_schema_plain(
     }
     plain.extend_from_slice(first);
     for document in settings {
-        plain.extend_from_slice(document);
+        plain.extend_from_slice(&document);
     }
     plain.extend_from_slice(third);
     Ok((plain, type_index, object_refs))

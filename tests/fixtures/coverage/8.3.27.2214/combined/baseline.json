@@ -153,6 +153,7 @@
     "CommonCommands/CovToolTip_Cov",
     "CommonForms/CovChartField",
     "CommonForms/CovDeepBindingTemplate",
+    "CommonForms/CovDeepComposerBinding",
     "CommonForms/CovDeepProductBinding",
     "CommonForms/CovEmbeddedSpreadsheetCells",
     "CommonForms/CovExplanation_Cov",
