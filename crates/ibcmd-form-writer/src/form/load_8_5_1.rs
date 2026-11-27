@@ -845,13 +845,18 @@ fn load_table(
     if hierarchy.is_some() && layout != FormLayout::V8_5_1 {
         bail!("HierarchyPanelLocation requires the measured 8.5 table layout");
     }
+    let hierarchy_code = code_of(
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATIONS,
+        hierarchy.as_deref(),
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION,
+    )?;
     item.record.insert(
         ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_SLOT,
-        code_of(
-            ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATIONS,
-            hierarchy.as_deref(),
-            ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION,
-        )?,
+        hierarchy_code.clone(),
+    );
+    item.tail.insert(
+        ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_TAIL,
+        hierarchy_code,
     );
     // The line and alternation flags: 8.5 reads the `...BWA` members and keeps
     // the 8.3.27 slot true only when the member says true. A body kept in the
@@ -2176,6 +2181,10 @@ mod tests {
             let mut item = ItemFacts::default();
             load_table(&mut edits, 1, &mut item, FormLayout::V8_5_1).unwrap();
             assert_eq!(item.record[&slot], expected);
+            assert_eq!(
+                item.tail[&ibcmd_form_schema::TABLE_HIERARCHY_PANEL_LOCATION_TAIL],
+                expected
+            );
         }
     }
 

@@ -1926,6 +1926,7 @@ pub const TABLE_DESELECT_ALL_COMMAND_UUID: &str = "03022d03-1986-4dc4-93c2-03d99
 /// The 8.5 ERP УХ 3.3.5.1 table head stores an explicit hidden hierarchy
 /// panel as 1. A table with no location in its source stores 0.
 pub const TABLE_HIERARCHY_PANEL_LOCATION_SLOT: usize = 36;
+pub const TABLE_HIERARCHY_PANEL_LOCATION_TAIL: usize = 2;
 pub const TABLE_HIERARCHY_PANEL_LOCATION: &str = "HierarchyPanelLocation";
 
 /// 2.21 serializes the hierarchy panel immediately before CurrentRowUse.
