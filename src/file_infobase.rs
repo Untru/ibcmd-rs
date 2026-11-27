@@ -68,6 +68,143 @@ pub(crate) fn import(
     ))
 }
 
+/// Stage a verified retained Designer tree in an empty file infobase.
+pub(crate) fn import_edt(
+    args: &InfobaseConfigImportArgs,
+    tree: &ibcmd_xml::source_tree::SourceTree,
+    profile: &ibcmd_core::profile::EffectiveProfile,
+) -> Result<InfobaseConfigImportReport> {
+    let source = absolute_path(&args.source_dir)?;
+    let dialect = &profile
+        .xml_dialect
+        .as_ref()
+        .context("missing EDT XML dialect")?
+        .value;
+    let version =
+        <InfobaseConfigSourceVersion as clap::ValueEnum>::from_str(&dialect.to_string(), false)
+            .map_err(anyhow::Error::msg)?;
+    let config = crate::infobase::resolve_connection(args.connection())?;
+    if config.xml_version_given && config.legacy_source_version()? != version {
+        bail!("the target XML dialect disagrees with the EDT profile");
+    }
+    if config.postgres()?.is_some() {
+        let stage = plan_edt_stage(&source, version, tree)?;
+        return crate::postgres_infobase::import_edt(&config, source, version, stage);
+    }
+    if config.file_infobase.is_none() {
+        crate::infobase::ensure_mssql(&config.dbms)?;
+        let (entries, verification) = compile_verified_edt(&source, version, tree)?;
+        let sql = crate::sql::SqlExec::from_options(crate::sql::SqlOptions {
+            sqlcmd: args.sqlcmd.as_deref(),
+            bcp: None,
+            server: &config.db_server,
+            user: config.db_user.as_deref(),
+            password: config.db_pwd.as_deref(),
+            password_env: &args.db_pwd_env,
+            trust_server_certificate: true,
+        })?;
+        let written = crate::mssql::cf_load_stage::stage_empty_edt(&sql, &config.db_name, entries)?;
+        let stage = Stage {
+            rows: Vec::new(),
+            base_free: true,
+            reason: "verified retained Designer XML for empty CONFIG".into(),
+            target_rows: 0,
+            verification: Some(verification),
+        };
+        let mut report = stage.report(
+            &config,
+            source,
+            Some(version),
+            "mssql-configsave-stage",
+            (
+                written.config_save_rows_before as usize,
+                written.config_save_rows_after as usize,
+            ),
+            None,
+        );
+        report.format = "edt";
+        return Ok(report);
+    }
+    let data_file = config
+        .file_infobase
+        .as_deref()
+        .context("EDT staging requires a file infobase")?;
+    let stage = plan_edt_stage(&source, version, tree)?;
+    let mut session =
+        ibcmd_filedb::open_for_write(data_file).map_err(|error| anyhow!("{error}"))?;
+    if !session
+        .config_rows("CONFIG")
+        .map_err(|error| anyhow!("{error}"))?
+        .is_empty()
+    {
+        bail!("EDT staging currently requires empty CONFIG");
+    }
+    let written = session
+        .replace("CONFIGSAVE", &stage.rows)
+        .map_err(|error| anyhow!("{error}"))?;
+    let mut report = stage.report(
+        &config,
+        source,
+        Some(version),
+        "file-infobase-configsave-stage",
+        (written.rows_before, written.rows_after),
+        Some(written.backup),
+    );
+    report.format = "edt";
+    Ok(report)
+}
+
+fn plan_edt_stage(
+    source: &Path,
+    version: InfobaseConfigSourceVersion,
+    tree: &ibcmd_xml::source_tree::SourceTree,
+) -> Result<Stage> {
+    let (entries, verification) = compile_verified_edt(source, version, tree)?;
+    Ok(Stage {
+        rows: stage_rows(&entries, &[])?,
+        base_free: true,
+        reason: "verified retained Designer XML for empty CONFIG".into(),
+        target_rows: 0,
+        verification: Some(verification),
+    })
+}
+
+fn compile_verified_edt(
+    source: &Path,
+    version: InfobaseConfigSourceVersion,
+    tree: &ibcmd_xml::source_tree::SourceTree,
+) -> Result<(BTreeMap<String, Vec<u8>>, crate::mssql::StageVerification)> {
+    use crate::mssql::{GuardRequest, StageKind, TreeFiles, verify_staged_state};
+    use crate::mssql_dump::{StagedRow, StateBase};
+
+    // The existing compiler reads the Designer files already inside the project.
+    // Compare its output against the independently validated in-memory snapshot.
+    let entries = crate::mssql::base_free_cf::base_free_entries(
+        &source.join(".ibcmd-provenance/xml"),
+        version,
+    )?;
+    let staged = entries
+        .iter()
+        .map(|(name, bytes)| StagedRow {
+            file_name: name,
+            bytes,
+        })
+        .collect::<Vec<_>>();
+    let verification = verify_staged_state(
+        &GuardRequest {
+            kind: StageKind::BaseFree,
+            source_root: source,
+            tree: TreeFiles::Memory(tree),
+            removed: &[],
+            path_prefix: &[],
+            source_version: Some(version),
+        },
+        StateBase::Nothing,
+        &staged,
+    )?;
+    Ok((entries, verification))
+}
+
 /// The tree an import reads and the XML version it reads it in.
 pub(crate) fn import_source(
     config: &ConnectionConfig,

@@ -45,6 +45,33 @@ pub(crate) fn import(
     ))
 }
 
+pub(crate) fn import_edt(
+    config: &ConnectionConfig,
+    source: std::path::PathBuf,
+    version: crate::legacy_version::InfobaseConfigSourceVersion,
+    stage: crate::file_infobase::Stage,
+) -> Result<InfobaseConfigImportReport> {
+    let target = config.postgres()?.context("no PostgreSQL database")?;
+    let mut connection = PgConnection::connect(&target)?;
+    begin_stage(&mut connection)?;
+    if !read_rows(&mut connection, "config")?.is_empty() {
+        anyhow::bail!("EDT staging currently requires empty CONFIG");
+    }
+    let before = write_stage(&mut connection, &stage.rows)
+        .with_context(|| format!("не удалось записать configsave базы {}", target.database))?;
+    let after = stage.rows.len();
+    let mut report = stage.report(
+        config,
+        source,
+        Some(version),
+        "postgres-configsave-stage",
+        (before, after),
+        None,
+    );
+    report.format = "edt";
+    Ok(report)
+}
+
 /// `infobase config load <file.cf>` into a PostgreSQL infobase (#353).
 pub(crate) fn load_cf(
     config: &ConnectionConfig,

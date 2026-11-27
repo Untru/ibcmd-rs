@@ -2,6 +2,38 @@
 use super::*;
 use ibcmd_edt::{ConversionOptions, Disposition, read_directory_project, read_directory_source};
 
+pub(crate) fn read_edt_import(
+    path: &Path,
+    profile: &str,
+) -> Result<(Option<SourceTree>, EffectiveProfile)> {
+    let profiles = load_profile_registry(BUNDLED_PROFILES, None, ProfileRegistryLimits::default())?;
+    let id = ProfileId::parse(profile)?;
+    let source = profiles
+        .get(&id)
+        .with_context(|| format!("unknown EDT source profile {profile}"))?;
+    let constant = |key: &str| {
+        source
+            .constants
+            .get(key)
+            .map(|entry| entry.value.clone())
+            .with_context(|| format!("source profile {profile} is missing {key}"))
+    };
+    let options = ConversionOptions {
+        edt_version: constant("edt.tool-version")?,
+        xml_dialect: source
+            .xml_dialect
+            .as_ref()
+            .context("EDT profile has no XML dialect")?
+            .value
+            .to_string(),
+        runtime_version: Some(constant("edt.runtime-version")?),
+    };
+    Ok((
+        ibcmd_edt::read_retained_xml(path, &options)?,
+        source.clone(),
+    ))
+}
+
 pub(super) fn convert(
     args: &ConvertArgs,
     profiles: &ProfileRegistry,

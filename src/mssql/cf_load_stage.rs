@@ -226,7 +226,29 @@ pub fn load_into_database(
         .into_iter()
         .filter(|name| !staged.contains(name.as_str()))
         .collect::<Vec<_>>();
-    let deleted_blob = super::stage_deleted_row(&deleted)?;
+    publish_database_rows(sql, database, &rows, &deleted, false)
+}
+
+pub(crate) fn stage_empty_edt(
+    sql: &SqlExec,
+    database: &str,
+    entries: std::collections::BTreeMap<String, Vec<u8>>,
+) -> Result<DatabaseLoadReport> {
+    let rows = entries
+        .into_iter()
+        .map(|(file_name, blob)| CfStageRow { file_name, blob })
+        .collect::<Vec<_>>();
+    publish_database_rows(sql, database, &rows, &[], true)
+}
+
+fn publish_database_rows(
+    sql: &SqlExec,
+    database: &str,
+    rows: &[CfStageRow],
+    deleted: &[String],
+    require_empty_config: bool,
+) -> Result<DatabaseLoadReport> {
+    let deleted_blob = super::stage_deleted_row(deleted)?;
     let mut bulk = rows
         .iter()
         .map(|row| BulkStageRow {
@@ -240,7 +262,13 @@ pub fn load_into_database(
         requires_config_row: false,
         blob: &deleted_blob,
     });
-    let (rows_path, prepare_path, apply_path) = bulk_stage_paths(None, database);
+    let table = bulk_stage_table_name(database);
+    let script_base = require_empty_config.then(|| {
+        std::env::temp_dir()
+            .join("ibcmd-rs")
+            .join(format!("{table}.sql"))
+    });
+    let (rows_path, prepare_path, apply_path) = bulk_stage_paths(script_base.as_ref(), database);
     if let Some(parent) = rows_path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -251,12 +279,16 @@ pub fn load_into_database(
     if super::bulk_stage_rows_file_needed(sql, false) {
         write_bulk_stage_rows(&rows_path, &bulk)?;
     }
-    let table = bulk_stage_table_name(database);
     fs::write(&prepare_path, build_bulk_stage_prepare_sql(&table))
         .with_context(|| format!("failed to write {}", prepare_path.display()))?;
     fs::write(
         &apply_path,
-        build_base_free_bulk_stage_apply_sql(database, &table, bulk_stage_part_count(&bulk)),
+        super::empty_stage::build_guarded_base_free_bulk_stage_apply_sql(
+            database,
+            &table,
+            bulk_stage_part_count(&bulk),
+            require_empty_config,
+        ),
     )
     .with_context(|| format!("failed to write {}", apply_path.display()))?;
     let before = super::storage_table_stats(sql, database, "ConfigSave")?;

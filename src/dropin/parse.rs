@@ -84,6 +84,8 @@ pub enum Opt {
     Sqlcmd,
     Settings,
     SourceVersion,
+    SourceFormat,
+    SourceProfile,
     DbPwdEnv,
     BaseFree,
     Exclusivity,
@@ -201,6 +203,8 @@ const EXPORT_OBJECTS_OPTIONS: &[OptSpec] = &[
 ];
 
 const IMPORT_OPTIONS: &[OptSpec] = &[
+    valued(Opt::SourceFormat, &["source-format"], None),
+    valued(Opt::SourceProfile, &["source-profile"], None),
     valued(Opt::Out, &["out"], Some('o')),
     valued(Opt::Extension, &["extension"], Some('e')),
     flag(Opt::BaseFree, &["base-free"], None),
@@ -563,6 +567,7 @@ pub enum ExportQueryKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportRequest {
+    pub edt_profile: Option<String>,
     pub common: Common,
     pub base_free: bool,
     /// `--verify`: check the staged state against the tree (the default).
@@ -1073,7 +1078,25 @@ pub fn parse_infobase(args: &[OsString]) -> Result<Invocation, Refusal> {
                     second: "--no-verify".to_string(),
                 });
             }
+            let edt_profile = match (
+                scan.value(Opt::SourceFormat),
+                scan.value(Opt::SourceProfile),
+            ) {
+                (None, None) => None,
+                (Some("edt"), Some(profile)) => Some(profile.to_owned()),
+                (Some("edt"), None) => {
+                    return Err(Refusal::MissingValue("--source-profile".into()));
+                }
+                (None, Some(_)) => return Err(Refusal::MissingValue("--source-format".into())),
+                (Some(format), _) => {
+                    return Err(Refusal::InvalidValue {
+                        option: "--source-format".into(),
+                        value: format.to_owned(),
+                    });
+                }
+            };
             Invocation::Import(ImportRequest {
+                edt_profile,
                 common,
                 base_free: scan.has(Opt::BaseFree),
                 verify: scan.has(Opt::Verify),
@@ -1172,7 +1195,12 @@ fn parse_import_files(scan: &Scan) -> Result<Invocation, Refusal> {
         }
     }
     let command = scan.command();
-    for opt in [Opt::Out, Opt::Extension] {
+    for opt in [
+        Opt::Out,
+        Opt::Extension,
+        Opt::SourceFormat,
+        Opt::SourceProfile,
+    ] {
         if let Some(spelled) = scan.spelled(opt) {
             return Err(Refusal::UnsupportedOption {
                 option: spelled.to_string(),

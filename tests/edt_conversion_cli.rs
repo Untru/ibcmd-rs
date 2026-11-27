@@ -342,3 +342,125 @@ fn edt_xml_profile_checks_descriptors_and_accepts_unversioned_interface_bodies()
     assert!(!output.exists());
     assert_eq!(fs::read_to_string(body).unwrap(), interface);
 }
+
+#[test]
+fn edt_import_checks_project_before_accessing_configsave() {
+    use std::io::Read;
+
+    let temp = Temp::new("import");
+    let project = temp.0.join("project");
+    success(run(&fixture(), &project, "xml", "edt", &[]));
+    let db = temp.0.join("db");
+    fs::create_dir(&db).unwrap();
+    let data_file = db.join("1Cv8.1CD");
+    let mut original = Vec::new();
+    let empty =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file-infobase/empty.1CD.gz");
+    flate2::read::GzDecoder::new(fs::File::open(empty).unwrap())
+        .read_to_end(&mut original)
+        .unwrap();
+    fs::write(&data_file, &original).unwrap();
+
+    let check = |profile: &str, target: &[&str], error: &str| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args([
+                "infobase",
+                "config",
+                "import",
+                "--source-format",
+                "edt",
+                "--source-profile",
+                profile,
+            ])
+            .args(target)
+            .arg(&project)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(stderr.contains(error), "{stderr}");
+        assert!(stderr.contains(project.to_str().unwrap()), "{stderr}");
+        assert!(fs::read(&data_file).unwrap() == original);
+    };
+    let db_arg = format!("--db-path={}", db.display());
+    let profile = "edt-2025.2.3-xml-2.21";
+    check("missing", &[&db_arg], "missing");
+    check("edt-2025.2.3-xml-2.20", &[&db_arg], "DT-INF/PROJECT.PMF");
+    check(profile, &[&db_arg, "--no-verify"], "ConfigSave");
+    let extra = project.join(".ibcmd-provenance/extra");
+    fs::write(&extra, b"?").unwrap();
+    check(profile, &[&db_arg], ".ibcmd-provenance/extra");
+    fs::remove_file(extra).unwrap();
+    fs::write(project.join("unmapped.option"), b"?").unwrap();
+    for target in [
+        vec![db_arg.as_str()],
+        vec!["--dbms=MSSQLServer"],
+        vec!["--dbms=PostgreSQL"],
+        vec!["--extension=Example"],
+    ] {
+        check(profile, &target, "unmapped.option");
+    }
+}
+
+#[test]
+fn retained_edt_import_stages_a_small_configuration_in_a_file_infobase() {
+    use std::io::Read;
+
+    let temp = Temp::new("stage-edt");
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file-infobase");
+    let project = temp.0.join("project");
+    success(run(
+        &fixture.join("tiny-source"),
+        &project,
+        "xml",
+        "edt",
+        &[],
+    ));
+    let db = temp.0.join("db");
+    fs::create_dir(&db).unwrap();
+    let data_file = db.join("1Cv8.1CD");
+    let mut original = Vec::new();
+    flate2::read::GzDecoder::new(fs::File::open(fixture.join("empty.1CD.gz")).unwrap())
+        .read_to_end(&mut original)
+        .unwrap();
+    fs::write(&data_file, &original).unwrap();
+    let report = temp.0.join("import.json");
+    let exe = env!("CARGO_BIN_EXE_ibcmd-rs");
+    let output = Command::new(exe)
+        .args([
+            "infobase",
+            "config",
+            "import",
+            "--source-format",
+            "edt",
+            "--source-profile",
+            "edt-2025.2.3-xml-2.21",
+        ])
+        .arg(format!("--db-path={}", db.display()))
+        .arg("--report")
+        .arg(&report)
+        .arg(&project)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+    assert_eq!(report["format"], "edt");
+    assert!(report["verification"]["checked_files"].as_u64().unwrap() >= 4);
+    let mut base = ibcmd_filedb::open_for_write(&data_file).unwrap();
+    assert!(base.config_rows("CONFIG").unwrap().is_empty());
+    let staged = base.config_rows("CONFIGSAVE").unwrap();
+    assert!(
+        staged
+            .iter()
+            .any(|row| row.file_name.eq_ignore_ascii_case("root"))
+    );
+    assert!(
+        staged
+            .iter()
+            .any(|row| row.file_name.eq_ignore_ascii_case("deleted"))
+    );
+}

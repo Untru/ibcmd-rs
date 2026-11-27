@@ -436,6 +436,7 @@ pub fn import_args(request: &ImportRequest) -> InfobaseConfigImportArgs {
 /// to the rows of the listed files.
 pub fn import_files_args(request: &ImportFilesRequest) -> InfobaseConfigImportArgs {
     let mut args = import_args(&ImportRequest {
+        edt_profile: None,
         common: request.common.clone(),
         base_free: false,
         verify: request.verify,
@@ -703,6 +704,31 @@ fn full_export_required_message(sync: bool) -> String {
 
 fn run_import(mut request: ImportRequest) -> i32 {
     let report = request.common.report.clone();
+    if let Some(profile) = &request.edt_profile {
+        IMPORT.start();
+        let path = PathBuf::from(&request.path);
+        let result =
+            crate::conversion::read_edt_import(&path, profile).and_then(|(tree, profile)| {
+                let Some(tree) = tree else {
+                    return Ok(None);
+                };
+                if request.common.extension.is_some() || request.no_verify {
+                    return Ok(None);
+                }
+                read_requested_password(&mut request.common).map_err(anyhow::Error::msg)?;
+                crate::file_infobase::import_edt(&import_args(&request), &tree, &profile).map(Some)
+            });
+        return match result {
+            Ok(Some(value)) => IMPORT.succeed(report.as_deref(), &value),
+            Err(error) => {
+                IMPORT.fail_with(&format!("{}: {error:#}", path.display()), report.as_deref())
+            }
+            Ok(None) => IMPORT.refuse_with(
+                &format!("{}: запись EDT в ConfigSave требует сохранённого Designer XML, пустой базы и включённой проверки", path.display()),
+                report.as_deref(),
+            ),
+        };
+    }
     if let Err(message) = read_requested_password(&mut request.common) {
         IMPORT.start();
         return IMPORT.fail_with(&message, report.as_deref());
@@ -943,6 +969,7 @@ mod tests {
         assert_eq!(args.output_dir, PathBuf::from("out"));
 
         let import = ImportRequest {
+            edt_profile: None,
             common: Common {
                 data: Some(PathBuf::from(r"F:\run\ibdata")),
                 ..common()
